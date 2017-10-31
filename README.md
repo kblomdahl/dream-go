@@ -14,6 +14,19 @@ If you want to run the supervised or reinforcement learning programs to improve 
 * [Python 3.6](https://www.python.org/) with [PyTorch](http://pytorch.org/)
 * [Rust](https://www.rust-lang.org) (nightly)
 
+## Training
+To bootstrap the network from pre-generated data you will need a "big" SGF file, where each line contains a full game-tree. These moves then needs to be pre-processed to a more appropriate format for training, this can be accomplished with the `--dataset` command which takes the path to an SGF file and writes a binary representation of the features and the correct policy and winner for a random sub-set of the moves in the given SGF file.
+
+```
+$ cargo run --release -- --dataset kgs_big.sgf > kgs_big.bin
+```
+
+This binary file can then be feed into the bootstrap script which will tune the network weights to more accurately predict the moves from the original SGF file. This script will run forever, so feel free to cancel it when you feel happy with the accuracy.
+
+```
+$ python tools/bootstrap.py kgs_big.bin
+```
+
 ## Roadmap
 * 1.0.0 - _Public Release_
 * 0.4.0 - _Awakening_

@@ -1,0 +1,15 @@
+[package]
+name = "dream_go"
+version = "0.0.0"
+authors = ["Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>"]
+license = "Apache-2.0"
+publish = false
+
+[profile.dev]
+opt-level = 2
+debug = true
+
+[dependencies]
+lazy_static = "0.2"
+rand = "0.3"
+regex = "0.2"
