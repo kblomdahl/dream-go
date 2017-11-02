@@ -19,7 +19,9 @@ use rand::{self, Rng};
 use std::fs::File;
 use std::mem::transmute;
 use std::io::prelude::*;
-use std::io::{self, BufReader};
+use std::io::{self, BufReader, Cursor};
+use std::thread::{self, JoinHandle};
+use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
 
 /// The probability that any single position should be included in the
 /// data-set.
@@ -28,16 +30,16 @@ const KEEP_PROB: f32 = 0.05;
 #[derive(Clone)]
 pub struct Entry {
     /// The current board state.
-    pub features: Box<[f32]>,
+    pub features: Box<[u8]>,
 
     /// The winner for the given features, `1.0` if the current player won
     /// and `-1.0` if the current player lost.
-    pub winner: f32,
+    pub winner: Box<[u8]>,
 
     /// The probabilities that each move should be played for the given
     /// features, encoded in HW format with one additional element at the
     /// end for the `pass` move.
-    pub policy: Box<[f32]>
+    pub policy: Box<[u8]>
 }
 
 impl Entry {
@@ -49,7 +51,7 @@ impl Entry {
     ///
     /// * `src` - the SGF game
     ///
-    fn new(src: &String) -> Option<Vec<Entry>> {
+    fn all(src: &String) -> Option<Vec<Entry>> {
         lazy_static! {
             static ref LETTERS: [char; 26] = [
                 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
@@ -95,22 +97,22 @@ impl Entry {
                     let mut policy = vec! [0.0f32; size*size+1];
                     policy[size*size] = 1.0f32;
 
-                    entries.push(Entry {
-                        features: board.get_features(current_color),
-                        winner: if is_winner { 1.0 } else { -1.0 },
-                        policy: policy.into_boxed_slice()
-                    });
+                    entries.push(Entry::new(
+                        &board.get_features(current_color),
+                        if is_winner { 1.0 } else { -1.0 },
+                        &policy.into_boxed_slice()
+                    ));
                 }
             } else if board.is_valid(current_color, x, y) {
                 if rand::thread_rng().next_f32() < KEEP_PROB {
                     let mut policy = vec! [0.0f32; size*size+1];
                     policy[size*y + x] = 1.0f32;
 
-                    entries.push(Entry {
-                        features: board.get_features(current_color),
-                        winner: if is_winner { 1.0 } else { -1.0 },
-                        policy: policy.into_boxed_slice()
-                    });
+                    entries.push(Entry::new(
+                        &board.get_features(current_color),
+                        if is_winner { 1.0 } else { -1.0 },
+                        &policy.into_boxed_slice()
+                    ));
                 }
 
                 board.place(current_color, x, y);
@@ -122,6 +124,23 @@ impl Entry {
         Some(entries)
     }
 
+    /// Returns an entry with the given values stored as compressed FP16
+    /// buffers.
+    ///
+    /// # Arguments
+    ///
+    /// * `features` - the features of the board state
+    /// * `winner` - the winner
+    /// * `policy` - the policy vector
+    ///
+    fn new(features: &[f32], winner: f32, policy: &[f32]) -> Entry {
+        Entry {
+            features: f32_to_f16(features),
+            winner: f32_to_f16(&[winner]),
+            policy: f32_to_f16(policy)
+        }
+    }
+
     /// Write a binary representation of this entry to the given formatter.
     ///
     /// # Arguments
@@ -131,17 +150,9 @@ impl Entry {
     pub fn write_into<T>(&self, f: &mut T) -> io::Result<()>
         where T: io::Write
     {
-        for &value in self.features.into_iter() {
-            write_f32(f, value)?;
-        }
-
-        write_f32(f, self.winner)?;
-
-        for &value in self.policy.into_iter() {
-            write_f32(f, value)?;
-        }
-
-        Ok(())
+        f.write_all(&self.features)?;
+        f.write_all(&self.winner)?;
+        f.write_all(&self.policy)
     }
 }
 
@@ -170,14 +181,28 @@ fn write_f32<T>(f: &mut T, value: f32) -> io::Result<()>
     }
 }
 
+/// Returns an array of floating point serialized (and compressed) as FP16.
+///
+/// # Arguments
+///
+/// * `array` - the array of 32-bit floating point numbers to compress
+///
+fn f32_to_f16(array: &[f32]) -> Box<[u8]> {
+    let mut cursor = Cursor::new(vec! [0u8; 10834]);
+
+    for &value in array {
+        write_f32(&mut cursor, value).unwrap();
+    }
+
+    cursor.into_inner().into_boxed_slice()
+}
+
 /// Iterator over all positions within a single SGF collection, the SGF
 /// collection should contain exactly one full game tree per line.
 pub struct Dataset {
-    /// A buffered reader of the physical SGF file.
-    reader: BufReader<File>,
-
-    /// Iterator over the moves of the current line.
-    current: Option<::std::vec::IntoIter<Entry>>
+    /// The channel where finish entries are delivered by the worker
+    /// threads.
+    receiver: Receiver<Entry>
 }
 
 impl Dataset {
@@ -190,9 +215,50 @@ impl Dataset {
     pub fn new(src: &str) -> Result<Dataset, io::Error> {
         let handle = File::open(src)?;
 
+        // spawn the worker threads
+        const NUM_THREADS: usize = 32;
+
+        let (t_entry, r_entry) = sync_channel(NUM_THREADS);
+        let workers = (0..NUM_THREADS).map(|_| {
+            let (t_line, r_line) = sync_channel(NUM_THREADS);
+            let t_entry = t_entry.clone();
+            let worker = thread::spawn(move || {
+                for line in r_line.iter() {
+                    if let Some(entries) = Entry::all(&line) {
+                        for entry in entries {
+                            t_entry.send(entry).unwrap();
+                        }
+                    }
+                }
+
+                drop(t_entry);
+            });
+
+            (worker, t_line)
+        }).collect::<Vec<(JoinHandle<()>, SyncSender<String>)>>();
+
+        // spawn the thread that is responsible for distributing the work
+        // over to all of the worker threads
+        thread::spawn(move || {
+            let reader = BufReader::new(handle);
+
+            for (i, result) in reader.lines().enumerate() {
+                if let Ok(line) = result {
+                    let tx = &workers[i % workers.len()].1;
+
+                    tx.send(line).unwrap();
+                }
+            }
+
+            // terminate all worker threads
+            for (worker, tx) in workers.into_iter() {
+                drop(tx);
+                worker.join().unwrap();
+            }
+        });
+
         Ok(Dataset {
-            reader: BufReader::new(handle),
-            current: None
+            receiver: r_entry
         })
     }
 }
@@ -201,26 +267,7 @@ impl Iterator for Dataset {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Entry> {
-        if self.current.is_some() {
-            let entry = self.current.as_mut().and_then(|iter| iter.next());
-
-            if entry.is_some() {
-                entry
-            } else {
-                self.current = None;
-                self.next()
-            }
-        } else {
-            let mut line = String::new();
-            let result = self.reader.read_line(&mut line);
-
-            if result.is_err() || result.unwrap() == 0 {
-                None
-            } else {
-                self.current = Entry::new(&line).map(|v| v.into_iter());
-                self.next()
-            }
-        }
+        self.receiver.recv().ok()
     }
 }
 
