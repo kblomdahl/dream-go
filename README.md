@@ -11,7 +11,7 @@ Dream Go is an independent implementation of the algorithms and concepts present
 ## Dev Dependencies
 If you want to run the supervised or reinforcement learning programs to improve the quality of the weights or help development of the agent then you will need the following:
 
-* [Python 3.6](https://www.python.org/) with [PyTorch](http://pytorch.org/)
+* [Python 3.6](https://www.python.org/) with [Tensorflow](https://tensorflow.org/)
 * [Rust](https://www.rust-lang.org) (nightly)
 
 ## Training
@@ -21,10 +21,11 @@ To bootstrap the network from pre-generated data you will need a "big" SGF file,
 $ cargo run --release -- --dataset kgs_big.sgf > kgs_big.bin
 ```
 
-This binary file can then be feed into the bootstrap script which will tune the network weights to more accurately predict the moves from the original SGF file. This script will run forever, so feel free to cancel it when you feel happy with the accuracy.
+This binary file can then be feed into the bootstrap script which will tune the network weights to more accurately predict the moves from the original SGF file. This script will run forever, so feel free to cancel it when you feel happy with the accuracy. You can monitor the accuracy (and a bunch of other stuff) using Tensorboard, whose logs are stored in the `logs/` directory.
 
 ```
 $ python tools/bootstrap.py kgs_big.bin
+$ tensorboard --logdir logs/
 ```
 
 ## Roadmap
