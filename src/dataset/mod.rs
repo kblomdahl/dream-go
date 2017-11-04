@@ -188,7 +188,7 @@ fn write_f32<T>(f: &mut T, value: f32) -> io::Result<()>
 /// * `array` - the array of 32-bit floating point numbers to compress
 ///
 fn f32_to_f16(array: &[f32]) -> Box<[u8]> {
-    let mut cursor = Cursor::new(vec! [0u8; 10834]);
+    let mut cursor = Cursor::new(vec! [0u8; 2 * array.len()]);
 
     for &value in array {
         write_f32(&mut cursor, value).unwrap();
