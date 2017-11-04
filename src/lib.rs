@@ -19,3 +19,4 @@ extern crate regex;
 
 pub mod dataset;
 pub mod go;
+pub mod nn;
