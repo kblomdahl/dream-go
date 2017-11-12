@@ -23,10 +23,6 @@ use std::io::{self, BufReader, Cursor};
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
 
-/// The probability that any single position should be included in the
-/// data-set.
-const KEEP_PROB: f32 = 0.05;
-
 #[derive(Clone)]
 pub struct Entry {
     /// The current board state.
@@ -74,7 +70,7 @@ impl Entry {
             }
         };
 
-        let mut entries: Vec<Entry> = vec! [];
+        let mut entries: Vec<(Board, Color, usize)> = vec! [];
         let mut board = Board::new();
         let size = board.size();
 
@@ -84,7 +80,6 @@ impl Entry {
                 "W" => Color::White,
                 _   => unreachable!()
             };
-            let is_winner = current_color == winner;
             let x = moves[2].chars().nth(0)
                 .and_then(|x| LETTERS.binary_search(&x).ok())
                 .unwrap_or(board.size());
@@ -93,35 +88,27 @@ impl Entry {
                 .unwrap_or(board.size());
 
             if x >= board.size() || y >= board.size() {
-                if rand::thread_rng().next_f32() < KEEP_PROB {
-                    let mut policy = vec! [0.0f32; size*size+1];
-                    policy[size*size] = 1.0f32;
-
-                    entries.push(Entry::new(
-                        &board.get_features(current_color),
-                        if is_winner { 1.0 } else { -1.0 },
-                        &policy.into_boxed_slice()
-                    ));
-                }
+                entries.push((board.clone(), current_color, size*size));
             } else if board.is_valid(current_color, x, y) {
-                if rand::thread_rng().next_f32() < KEEP_PROB {
-                    let mut policy = vec! [0.0f32; size*size+1];
-                    policy[size*y + x] = 1.0f32;
-
-                    entries.push(Entry::new(
-                        &board.get_features(current_color),
-                        if is_winner { 1.0 } else { -1.0 },
-                        &policy.into_boxed_slice()
-                    ));
-                }
-
+                entries.push((board.clone(), current_color, size*y + x));
                 board.place(current_color, x, y);
             } else {
                 return None;  // invalid game
             }
         }
 
-        Some(entries)
+        // pick exactly one entry from each game
+        rand::thread_rng().choose(&entries)
+                .map(|&(ref board, current_color, correct_index)| {
+                    let mut policy = vec! [0.0f32; 362];
+                    policy[correct_index] = 1.0;
+
+                    vec! [Entry::new(
+                        &board.get_features(current_color),
+                        if current_color == winner { 1.0 } else { -1.0 },
+                        &policy
+                    )]
+                })
     }
 
     /// Returns an entry with the given values stored as compressed FP16
@@ -257,7 +244,7 @@ impl Dataset {
             }
         });
 
-        Ok(Dataset {
+	Ok(Dataset {
             receiver: r_entry
         })
     }

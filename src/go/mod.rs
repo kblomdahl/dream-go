@@ -115,6 +115,18 @@ pub struct Board {
     zobrist_hash: u64
 }
 
+impl Clone for Board {
+    fn clone(&self) -> Board {
+        Board {
+            vertices: self.vertices,
+            next_vertex: self.next_vertex,
+            last_played: self.last_played,
+            count: self.count,
+            zobrist_hash: self.zobrist_hash
+        }
+    }
+}
+
 impl Board {
     /// Returns an empty board state.
     pub fn new() -> Board {
