@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pylint: disable=C0103, C0301
+
 """
 Train the network weights to better predict the played moves and winner
 in the given dataset.
@@ -20,16 +22,12 @@ Usage: ./bootstrap.py <dataset...>
 """
 
 from datetime import datetime
-
-import tensorflow as tf
-import numpy as np
-
 import sys
 
+import tensorflow as tf
+
 class BatchNorm:
-    """
-    Batch normalization layer.
-    """
+    """ Batch normalization layer. """
 
     def __init__(self, num_features, suffix=None):
         if suffix is None:
@@ -38,17 +36,17 @@ class BatchNorm:
         ones_op = tf.ones_initializer()
         zeros_op = tf.zeros_initializer()
 
-        self._scale = tf.get_variable('scale'+suffix, (num_features,), tf.float32, ones_op)
-        self._offset = tf.get_variable('offset'+suffix, (num_features,), tf.float32, zeros_op)
+        self._scale = tf.get_variable('scale'+suffix, (num_features,), tf.float32, ones_op, trainable=False)
+        self._offset = tf.get_variable('offset'+suffix, (num_features,), tf.float32, zeros_op, trainable=False)
         self._mean = tf.get_variable('mean'+suffix, (num_features,), tf.float32, zeros_op, trainable=False)
         self._variance = tf.get_variable('variance'+suffix, (num_features,), tf.float32, ones_op, trainable=False)
 
-        tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._scale)
-        tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._offset)
+        #tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._scale)
+        #tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._offset)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._mean)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._variance)
 
-    def forward(self, x, is_training=True):
+    def __call__(self, x, is_training=True):
         if is_training:
             y, b_mean, b_variance = tf.nn.fused_batch_norm(
                 x,
@@ -70,8 +68,8 @@ class BatchNorm:
                 x,
                 self._scale,
                 self._offset,
-                None,
-                None,
+                self._mean,
+                self._variance,
                 data_format='NCHW',
                 is_training=False
             )
@@ -92,7 +90,7 @@ class ResidualBlock:
     """
 
     def __init__(self, num_features):
-        glorot_op = tf.glorot_uniform_initializer()
+        glorot_op = tf.glorot_normal_initializer()
 
         self._conv_1 = tf.get_variable('weights_1', (3, 3, num_features, num_features), tf.float32, glorot_op)
         self._bn_1 = BatchNorm(num_features, '_1')
@@ -102,13 +100,12 @@ class ResidualBlock:
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._conv_1)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._conv_2)
 
-
-    def forward(self, x, is_training=True):
+    def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._conv_1, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = self._bn_1.forward(y, is_training)
+        y = self._bn_1(y, is_training)
         y = tf.nn.relu(y)
         y = tf.nn.conv2d(y, self._conv_2, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = self._bn_2.forward(y, is_training)
+        y = self._bn_2(y, is_training)
 
         return tf.nn.relu(y + x)
 
@@ -126,25 +123,30 @@ class ValueHead:
     """
 
     def __init__(self, num_features):
-        glorot_op = tf.glorot_uniform_initializer()
+        glorot_op = tf.glorot_normal_initializer()
+        zeros_op = tf.random_uniform_initializer(-1e-2, 1e-2)
 
         self._downsample = tf.get_variable('downsample', (1, 1, num_features, 1), tf.float32, glorot_op)
         self._bn = BatchNorm(1)
         self._weights_1 = tf.get_variable('weights_1', (361, 256), tf.float32, glorot_op)
         self._weights_2 = tf.get_variable('weights_2', (256, 1), tf.float32, glorot_op)
+        self._bias_1 = tf.get_variable('bias_1', (256,), tf.float32, zeros_op)
+        self._bias_2 = tf.get_variable('bias_2', (1,), tf.float32, zeros_op)
 
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._downsample)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._weights_1)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._weights_2)
+        tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias_1)
+        tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias_2)
 
-    def forward(self, x, is_training=True):
+    def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = self._bn.forward(y, is_training)
+        y = self._bn(y, is_training)
         y = tf.nn.relu(y)
         y = tf.reshape(y, (-1, 361))
-        y = tf.matmul(y, self._weights_1)
+        y = tf.matmul(y, self._weights_1) + self._bias_1
         y = tf.nn.relu(y)
-        y = tf.matmul(y, self._weights_2)
+        y = tf.matmul(y, self._weights_2) + self._bias_2
         y = tf.reshape(y, (-1,))
 
         return tf.nn.tanh(y)
@@ -156,36 +158,40 @@ class PolicyHead:
     1. A convolution of 2 filters of kernel size 1 × 1 with stride 1
     2. Batch normalisation
     3. A rectifier non-linearity
-    4. A fully connected linear layer that outputs a vector of size 192 + 1 = 362 corresponding to
+    4. A fully connected linear layer that outputs a vector of size 19**2 + 1 = 362 corresponding to
        logit probabilities for all intersections and the pass move
     """
 
     def __init__(self, num_features):
-        glorot_op = tf.glorot_uniform_initializer()
+        glorot_op = tf.glorot_normal_initializer()
+        zeros_op = tf.random_uniform_initializer(-1e-2, 1e-2)
 
         self._downsample = tf.get_variable('downsample', (1, 1, num_features, 2), tf.float32, glorot_op)
         self._bn = BatchNorm(2)
         self._weights = tf.get_variable('weights', (722, 362), tf.float32, glorot_op)
+        self._bias = tf.get_variable('bias', (362,), tf.float32, zeros_op)
 
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._downsample)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._weights)
+        tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias)
 
-    def forward(self, x, is_training=True):
+    def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = self._bn.forward(y, is_training)
+        y = self._bn(y, is_training)
         y = tf.nn.relu(y)
         y = tf.reshape(y, (-1, 722))
-        y = tf.matmul(y, self._weights)
+        y = tf.matmul(y, self._weights) + self._bias
 
         return y
 
 class Tower:
     """
-    The full neural network used to predict the value and policy tensors for a mini-batch of board positions.
+    The full neural network used to predict the value and policy tensors for a mini-batch of board
+    positions.
     """
 
     def __init__(self, num_features=256):
-        glorot_op = tf.glorot_uniform_initializer()
+        glorot_op = tf.glorot_normal_initializer()
 
         with tf.variable_scope('01_upsample'):
             self._upsample = tf.get_variable('weights', (3, 3, 14, num_features), tf.float32, glorot_op)
@@ -208,25 +214,23 @@ class Tower:
         with tf.variable_scope('21v_value'):
             self._value = ValueHead(num_features)
 
-    def forward(self, x, is_training=True):
+    def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._upsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = self._bn.forward(y, is_training)
+        y = self._bn(y, is_training)
         y = tf.nn.relu(y)
 
         for resb in self._residuals:
-            y = resb.forward(y)
+            y = resb(y, is_training)
 
-        p = self._policy.forward(y)
-        v = self._value.forward(y)
+        p = self._policy(y, is_training)
+        v = self._value(y, is_training)
 
         return v, p
 
-if __name__ == '__main__':
-    if len(sys.argv) >= 1:
-        print('Usage: bootstrap.py <data...>')
-        quit()
+def main(args):
+    """ Main function """
 
-    dataset = tf.data.FixedLengthRecordDataset(sys.argv[1:], 10834)
+    dataset = tf.data.FixedLengthRecordDataset(args, 10834)
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
     dataset = dataset.map(lambda x: tf.split(x, (5054, 1, 362)))
     dataset = dataset.shuffle(2048)
@@ -244,20 +248,25 @@ if __name__ == '__main__':
 
     features, value, policy = iterator.get_next()
     features = tf.reshape(features, (-1, 14, 19, 19))
-    value_hat, policy_hat = tower.forward(features)
+    value_hat, policy_hat = tower(features)
 
     #
     policy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=policy, logits=policy_hat))
     value_loss = tf.reduce_mean(tf.squared_difference(value, value_hat))
     reg_loss = tf.reduce_sum([tf.nn.l2_loss(var) for var in tf.trainable_variables()])
-    loss = policy_loss + 1e-2 * value_loss + 1e-4 * reg_loss
+    loss = policy_loss + value_loss + 1e-4 * reg_loss
 
     tf.summary.scalar('loss/policy', policy_loss)
     tf.summary.scalar('loss/value', value_loss)
     tf.summary.scalar('loss/regularization', reg_loss)
     tf.summary.scalar('loss', loss)
 
-    optimizer = tf.train.MomentumOptimizer(1e-2, 0.9)
+    learning_rate = tf.train.piecewise_constant(
+        global_step,
+        [2000, 4000, 6000, 8000, 10000],
+        [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
+    )
+    optimizer = tf.train.MomentumOptimizer(learning_rate, momentum=0.9, use_nesterov=True)
     optimizer_op = optimizer.minimize(loss, global_step=global_step)
 
     # summaries
@@ -273,6 +282,11 @@ if __name__ == '__main__':
 
     for var in tf.model_variables():
         tf.summary.histogram(var.name, var)
+
+    tf.summary.histogram('value', value)
+    tf.summary.histogram('value_hat', value_hat)
+    tf.summary.histogram('policy', policy)
+    tf.summary.histogram('policy_hat', policy_hat)
 
     tf.summary.scalar('global_step', global_step)
     tf.summary.scalar('epoch', epoch)
@@ -293,7 +307,6 @@ if __name__ == '__main__':
 
         while True:
             sess.run(iterator.initializer)
-            epoch_hat = sess.run(epoch)
 
             try:
                 while True:
@@ -312,3 +325,9 @@ if __name__ == '__main__':
         # save the model
         sess.run(save_op)
 
+if __name__ == '__main__':
+    if len(sys.argv) <= 1:
+        print('Usage: bootstrap.py <data...>')
+        quit()
+
+    main(sys.argv[1:])
