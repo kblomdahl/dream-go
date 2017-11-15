@@ -15,13 +15,19 @@ If you want to run the supervised or reinforcement learning programs to improve 
 * [Rust](https://www.rust-lang.org) (nightly)
 
 ## Training
-To bootstrap the network from pre-generated data you will need a "big" SGF file, where each line contains a full game-tree. These moves then needs to be pre-processed to a more appropriate format for training, this can be accomplished with the `--dataset` command which takes the path to an SGF file and writes a binary representation of the features and the correct policy and winner for a random sub-set of the moves in the given SGF file.
+To bootstrap the network from pre-generated data you will need an SGF file where each line contains a full game-tree, henceforth called *big SGF files*. If you do not have access to such a file you can use the `tools/sgf2big.py` tool to merge all SGF files contained within a directory to a single big SGF file.
+
+```
+$ python tools/sgf2big.py data/kgs/ > kgs_big.sgf
+```
+
+The moves contained within the file then needs to be pre-processed to a more appropriate format for training, this can be accomplished with the `--dataset` command which takes the path to an SGF file and writes a binary representation of the features and the correct policy and winner for a random sub-set of the moves in the given big SGF file.
 
 ```
 $ cargo run --release -- --dataset kgs_big.sgf > kgs_big.bin
 ```
 
-This binary file can then be feed into the bootstrap script which will tune the network weights to more accurately predict the moves from the original SGF file. This script will run forever, so feel free to cancel it when you feel happy with the accuracy. You can monitor the accuracy (and a bunch of other stuff) using Tensorboard, whose logs are stored in the `logs/` directory.
+This binary file can then be feed into the bootstrap script which will tune the network weights to more accurately predict the moves played in the original SGF files. This script will run forever, so feel free to cancel it when you feel happy with the accuracy. You can monitor the accuracy (and a bunch of other stuff) using Tensorboard, whose logs are stored in the `logs/` directory. The final output will be stored in the `models/` directory.
 
 ```
 $ python tools/bootstrap.py kgs_big.bin
