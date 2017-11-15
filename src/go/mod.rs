@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod circular_buf;
 mod zobrist;
 
-use std::cmp::min;
+use self::circular_buf::CircularBuf;
 use std::fmt;
 
 #[repr(u8)]
@@ -104,9 +105,8 @@ pub struct Board {
     /// a cycle.
     next_vertex: [u16; 361],
 
-    /// The number of moves the preceded the stone that is currently
-    /// occupying each vertex.
-    last_played: [u16; 361],
+    /// Stack containing the six most recent `vertices`.
+    history: CircularBuf,
 
     /// The total number of moves that has been played on this board.
     count: u16,
@@ -120,7 +120,7 @@ impl Clone for Board {
         Board {
             vertices: self.vertices,
             next_vertex: self.next_vertex,
-            last_played: self.last_played,
+            history: self.history.clone(),
             count: self.count,
             zobrist_hash: self.zobrist_hash
         }
@@ -133,7 +133,7 @@ impl Board {
         let mut board = Board {
             vertices: [0; 368],
             next_vertex: [0; 361],
-            last_played: [0; 361],
+            history: CircularBuf::new(),
             count: 0,
             zobrist_hash: 0
         };
@@ -260,6 +260,26 @@ impl Board {
         }
     }
 
+    /// Remove all stones strongly connected to the given index from the given array
+    /// using the group definition from this board.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - the index of a stone in the group to capture
+    ///
+    fn capture_other(&self, vertices: &mut [u8], index: usize) {
+        let mut current = index;
+
+        loop {
+            vertices[current] = 0;
+
+            current = self.next_vertex[current] as usize;
+            if current == index {
+                break
+            }
+        }
+    }
+
     /// Connects the chains of the two vertices into one chain. This method
     /// should not be called with the same group twice as that will result
     /// in a corrupted chain.
@@ -369,7 +389,6 @@ impl Board {
         // or not.
         self.vertices[index] = color as u8;
         self.next_vertex[index] = index as u16;
-        self.last_played[index] = self.count;
         self.count += 1;
         self.zobrist_hash ^= zobrist::TABLE[color as usize][index];
 
@@ -388,6 +407,39 @@ impl Board {
         if E!(self.vertices, index) == opponent && !self.has_one_liberty(index + 1) { self.capture(index + 1); }
         if S!(self.vertices, index) == opponent && !self.has_one_liberty(index - 19) { self.capture(index - 19); }
         if W!(self.vertices, index) == opponent && !self.has_one_liberty(index - 1) { self.capture(index - 1); }
+
+        // add the current board state to the history *after* we have updated it because:
+        //
+        // 1. that way we do not need a special case to retrieve the current board when
+        //    generating features.
+        // 2. the circular stack starts with all buffers as zero, so there is no need to
+        //    keep track of the initial board state.
+        self.history.push(&self.vertices);
+    }
+
+    /// Fills the given array with all liberties of in the provided array of vertices
+    /// for the group.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `vertices` - the array to fill liberties from
+    /// * `index` - the group to fill liberties for
+    /// * `liberties` - output array containing the liberties of this group
+    /// 
+    fn fill_liberties(&self, vertices: &[u8], index: usize, liberties: &mut [u8]) {
+        let mut current = index;
+
+        loop {
+            liberties[_N[current]] = N!(vertices, current);
+            liberties[_E[current]] = E!(vertices, current);
+            liberties[_S[current]] = S!(vertices, current);
+            liberties[_W[current]] = W!(vertices, current);
+
+            current = self.next_vertex[current] as usize;
+            if current == index {
+                break
+            }
+        }
     }
 
     /// Returns the number of liberties of the given group using any recorded
@@ -404,20 +456,9 @@ impl Board {
         if memoize[index] != 0 {
             memoize[index]
         } else {
-            let mut current = index;
             let mut liberties = [0xff; 368];
 
-            loop {
-                liberties[_N[current]] = N!(self.vertices, current);
-                liberties[_E[current]] = E!(self.vertices, current);
-                liberties[_S[current]] = S!(self.vertices, current);
-                liberties[_W[current]] = W!(self.vertices, current);
-
-                current = self.next_vertex[current] as usize;
-                if current == index {
-                    break
-                }
-            }
+            self.fill_liberties(&self.vertices, index, &mut liberties);
 
             // count the number of liberties, maybe in the future using a SIMD
             // implementation which would be a lot faster than this
@@ -425,6 +466,8 @@ impl Board {
 
             // update the cached value in the memoize array for all stones
             // that are strongly connected to the given index
+            let mut current = index;
+
             loop {
                 memoize[current] = num_liberties;
 
@@ -438,60 +481,192 @@ impl Board {
         }
     }
 
+    /// Returns the number of liberties of the group connected to the given stone
+    /// *if* it was played, will panic if the vertex is not empty.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the stone to pretend place
+    /// * `index` - the index of the stone to pretend place
+    ///
+    fn get_num_liberties_if(&self, color: Color, index: usize) -> usize {
+        debug_assert!(self.vertices[index] == 0);
+
+        let mut vertices = self.vertices.clone();
+
+        vertices[index] = color as u8;
+
+        // capture of opponent stones 
+        let current = color as u8;
+        let opponent = color.opposite() as u8;
+
+        if N!(vertices, index) == opponent && !self.has_two_liberties(index + 19) { self.capture_other(&mut vertices, index + 19); }
+        if E!(vertices, index) == opponent && !self.has_two_liberties(index + 1) { self.capture_other(&mut vertices, index + 1); }
+        if S!(vertices, index) == opponent && !self.has_two_liberties(index - 19) { self.capture_other(&mut vertices, index - 19); }
+        if W!(vertices, index) == opponent && !self.has_two_liberties(index - 1) { self.capture_other(&mut vertices, index - 1); }
+
+        // add liberties based on the liberties of the friendly neighbouring
+        // groups
+        let mut liberties = [0xff; 368];
+
+        if N!(vertices, index) == current { self.fill_liberties(&vertices, index + 19, &mut liberties); }
+        if E!(vertices, index) == current { self.fill_liberties(&vertices, index + 1, &mut liberties); }
+        if S!(vertices, index) == current { self.fill_liberties(&vertices, index - 19, &mut liberties); }
+        if W!(vertices, index) == current { self.fill_liberties(&vertices, index - 1, &mut liberties); }
+
+        // add direct liberties of the new stone
+        liberties[_N[index]] = N!(vertices, index);
+        liberties[_E[index]] = E!(vertices, index);
+        liberties[_S[index]] = S!(vertices, index);
+        liberties[_W[index]] = W!(vertices, index);
+
+        (0..361).filter(|i| liberties[*i] == 0).count()
+    }
+
+    /// Returns an array containing the (manhattan) distance to the closest stone
+    /// of the given color for each point on the board.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `color` - the color to get the distance from
+    /// 
+    fn get_territory_distance(&self, color: Color) -> [u8; 368] {
+        let current = color as u8;
+
+        // find all of our stones and mark them as starting points
+        let mut territory = [0xff; 368];
+        let mut probes = vec! [];
+
+        for index in 0..361 {
+            if self.vertices[index] == current as u8 {
+                territory[index] = 0;
+                probes.push(index);
+            }
+        }
+
+        // x
+        while probes.len() > 0 {
+            let index = probes.pop().unwrap();
+            let t = territory[index] + 1;
+
+            if N!(self.vertices, index) == 0 && N!(territory, index) > t { probes.push(_N[index]); territory[_N[index]] = t; }
+            if E!(self.vertices, index) == 0 && E!(territory, index) > t { probes.push(_E[index]); territory[_E[index]] = t; }
+            if S!(self.vertices, index) == 0 && S!(territory, index) > t { probes.push(_S[index]); territory[_S[index]] = t; }
+            if W!(self.vertices, index) == 0 && W!(territory, index) > t { probes.push(_W[index]); territory[_W[index]] = t; }
+        }
+
+        territory
+    }
+
     /// Returns the features of the current board state for the given color,
     /// it returns the following features:
     ///
     /// 1. A constant plane filled with ones
-    /// 2. Empty vertices
-    /// 3. Our vertices
-    /// 4. Our liberties (1)
-    /// 5. Our liberties (2)
-    /// 6. Our liberties (3)
-    /// 7. Our history (exp(-0.1 * t))
-    /// 8. Opponent vertices
-    /// 9. Opponent liberties (1)
-    /// 10. Opponent liberties (2)
-    /// 11. Opponent liberties (3)
-    /// 12. Opponent history (exp(-0.1 * t))
-    /// 13. If move is valid
-    /// 14. A constant plane filled with ones if we are black
+    /// 2. A constant plane filled with ones if we are black
+    /// 3. Our liberties (1)
+    /// 4. Our liberties (2)
+    /// 5. Our liberties (3)
+    /// 6. Our liberties (4)
+    /// 7. Our liberties (5)
+    /// 8. Our liberties (6+)
+    /// 9. Our liberties after move (1)
+    /// 10. Our liberties after move (2)
+    /// 11. Our liberties after move (3)
+    /// 12. Our liberties after move (4)
+    /// 13. Our liberties after move (5)
+    /// 14. Our liberties after move (6+)
+    /// 15. Our territory (closest to our vertex)
+    /// 16. Our vertices (now)
+    /// 17. Our vertices (now-1)
+    /// 18. Our vertices (now-2)
+    /// 19. Our vertices (now-3)
+    /// 20. Our vertices (now-4)
+    /// 21. Our vertices (now-5)
+    /// 22. Opponent liberties (1)
+    /// 23. Opponent liberties (2)
+    /// 24. Opponent liberties (3)
+    /// 25. Opponent liberties (4)
+    /// 26. Opponent liberties (5)
+    /// 27. Opponent liberties (6+)
+    /// 28. Opponent territory (closest to opponent vertex)
+    /// 29. Opponent vertices (now)
+    /// 30. Opponent vertices (now-1)
+    /// 31. Opponent vertices (now-2)
+    /// 32. Opponent vertices (now-3)
+    /// 33. Opponent vertices (now-4)
+    /// 34. Opponent vertices (now-5)
     ///
     /// # Arguments
     ///
     /// * `color` - the color of the current player
     ///
     pub fn get_features(&self, color: Color) -> Box<[f32]> {
-        let mut features = vec! [ 0.0f32; 14 * 361 ];
-        let mut liberties = [0; 361];
+        let mut features = vec! [ 0.0f32; 34 * 361 ];
         let is_black = if color == Color::Black { 1.0 } else { 0.0 };
         let current = color as u8;
 
+        // set the two constant planes and the liberties
+        let mut liberties = [0; 368];
+
         for index in 0..361 {
-            features[ 0 * 361 + index] = 1.0;
-            features[13 * 361 + index] = is_black;
+            features[0 * 361 + index] = 1.0;
+            features[1 * 361 + index] = is_black;
 
             if self.vertices[index] != 0 {
-                let liberties = self.get_num_liberties(index, &mut liberties);
-                let age = (self.count - self.last_played[index] - 1) as f32;
+                let num_liberties = ::std::cmp::min(
+                    self.get_num_liberties(index, &mut liberties),
+                    6
+                );
+                let l = {
+                    debug_assert!(num_liberties > 0);
 
-                if self.vertices[index] == current {
-                    let l = 2 + min(3, liberties);
+                    if self.vertices[index] == current {
+                        1 + num_liberties
+                    } else {
+                        20 + num_liberties
+                    }
+                };
 
-                    features[ 2 * 361 + index] = 1.0;
-                    features[ l * 361 + index] = 1.0;
-                    features[ 6 * 361 + index] = (-0.1 * age).exp();
-                } else {
-                    let l = 7 + min(3, liberties);
+                features[l * 361 + index] = 1.0;
+            } else if self._is_valid(color, index) {
+                let num_liberties = ::std::cmp::min(
+                    self.get_num_liberties_if(color, index),
+                    6
+                );
+                let l = 7 + num_liberties;
 
-                    features[ 7 * 361 + index] = 1.0;
-                    features[ l * 361 + index] = 1.0;
-                    features[11 * 361 + index] = (-0.1 * age).exp();
+                features[l * 361 + index] = 1.0;
+            }
+        }
+
+        // set the territory planes
+        let our_territory = self.get_territory_distance(color);
+        let opponent_territory = self.get_territory_distance(color.opposite());
+
+        for index in 0..361 {
+            if self.vertices[index] != 0 {
+                // pass
+            } else if our_territory[index] < opponent_territory[index] {
+                features[14 * 361 + index] = 1.0;
+            } else if opponent_territory[index] < our_territory[index] {
+                features[27 * 361 + index] = 1.0;
+            }
+        }
+
+        // set the 12 planes that denotes our and the opponents stones
+        for (i, vertices) in self.history.iter().enumerate() {
+            for index in 0..361 {
+                if vertices[index] == 0 {
+                    // pass
+                } else if vertices[index] == current {
+                    let p = 15 + i;
+
+                    features[p * 361 + index] = 1.0;
+                } else { // opponent
+                    let p = 28 + i;
+
+                    features[p * 361 + index] = 1.0;
                 }
-            } else {
-                let is_valid = self._is_valid(color, index);
-
-                features[ 1 * 361 + index] = 1.0;
-                features[12 * 361 + index] = if is_valid { 1.0 } else { 0.0 };
             }
         }
 
@@ -622,5 +797,17 @@ mod tests {
         assert_eq!(board.at(9, 9), None);
         assert!(!board.is_valid(Color::Black, 9, 9));
         assert!(board.is_valid(Color::White, 9, 9));
+    }
+
+    /// Test so that the correct number of pretend liberties are correct.
+    #[test]
+    fn liberties_if() {
+        let mut board = Board::new();
+
+        board.place(Color::White, 0, 0);
+        board.place(Color::Black, 0, 1);
+        board.place(Color::Black, 1, 1);
+
+        assert_eq!(board.get_num_liberties_if(Color::Black, 1), 5);
     }
 }

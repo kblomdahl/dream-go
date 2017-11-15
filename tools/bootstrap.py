@@ -124,7 +124,7 @@ class ValueHead:
 
     def __init__(self, num_features):
         glorot_op = tf.glorot_normal_initializer()
-        zeros_op = tf.random_uniform_initializer(-1e-2, 1e-2)
+        zeros_op = tf.zeros_initializer()
 
         self._downsample = tf.get_variable('downsample', (1, 1, num_features, 1), tf.float32, glorot_op)
         self._bn = BatchNorm(1)
@@ -147,7 +147,6 @@ class ValueHead:
         y = tf.matmul(y, self._weights_1) + self._bias_1
         y = tf.nn.relu(y)
         y = tf.matmul(y, self._weights_2) + self._bias_2
-        y = tf.reshape(y, (-1,))
 
         return tf.nn.tanh(y)
 
@@ -164,7 +163,7 @@ class PolicyHead:
 
     def __init__(self, num_features):
         glorot_op = tf.glorot_normal_initializer()
-        zeros_op = tf.random_uniform_initializer(-1e-2, 1e-2)
+        zeros_op = tf.zeros_initializer()
 
         self._downsample = tf.get_variable('downsample', (1, 1, num_features, 2), tf.float32, glorot_op)
         self._bn = BatchNorm(2)
@@ -194,7 +193,7 @@ class Tower:
         glorot_op = tf.glorot_normal_initializer()
 
         with tf.variable_scope('01_upsample'):
-            self._upsample = tf.get_variable('weights', (3, 3, 14, num_features), tf.float32, glorot_op)
+            self._upsample = tf.get_variable('weights', (3, 3, 34, num_features), tf.float32, glorot_op)
             self._bn = BatchNorm(num_features)
 
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._upsample)
@@ -202,7 +201,7 @@ class Tower:
         # residual blocks
         self._residuals = []
 
-        for i in range(19):
+        for i in range(6):
             with tf.variable_scope('{:02d}_residual'.format(2 + i)):
                 self._residuals += [ResidualBlock(num_features)]
 
@@ -230,11 +229,11 @@ class Tower:
 def main(args):
     """ Main function """
 
-    dataset = tf.data.FixedLengthRecordDataset(args, 10834)
+    dataset = tf.data.FixedLengthRecordDataset(args, 25274)
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
-    dataset = dataset.map(lambda x: tf.split(x, (5054, 1, 362)))
+    dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
     dataset = dataset.shuffle(2048)
-    dataset = dataset.batch(256)
+    dataset = dataset.batch(464)
 
     iterator = dataset.make_initializable_iterator()
 
@@ -247,14 +246,14 @@ def main(args):
         epoch_op = tf.assign_add(epoch, 1)
 
     features, value, policy = iterator.get_next()
-    features = tf.reshape(features, (-1, 14, 19, 19))
+    features = tf.reshape(features, (-1, 34, 19, 19))
     value_hat, policy_hat = tower(features)
 
     #
     policy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=policy, logits=policy_hat))
     value_loss = tf.reduce_mean(tf.squared_difference(value, value_hat))
     reg_loss = tf.reduce_sum([tf.nn.l2_loss(var) for var in tf.trainable_variables()])
-    loss = policy_loss + value_loss + 1e-4 * reg_loss
+    loss = policy_loss + 1e-2 * value_loss + 1e-4 * reg_loss
 
     tf.summary.scalar('loss/policy', policy_loss)
     tf.summary.scalar('loss/value', value_loss)
@@ -263,10 +262,10 @@ def main(args):
 
     learning_rate = tf.train.piecewise_constant(
         global_step,
-        [2000, 4000, 6000, 8000, 10000],
-        [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
+        [8000, 16000, 32000, 64000],
+        [1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
     )
-    optimizer = tf.train.MomentumOptimizer(learning_rate, momentum=0.9, use_nesterov=True)
+    optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
     optimizer_op = optimizer.minimize(loss, global_step=global_step)
 
     # summaries
@@ -288,22 +287,26 @@ def main(args):
     tf.summary.histogram('policy', policy)
     tf.summary.histogram('policy_hat', policy_hat)
 
+    tf.summary.scalar('learning_rate', learning_rate)
     tf.summary.scalar('global_step', global_step)
     tf.summary.scalar('epoch', epoch)
 
     # operations
-    summary_writer = tf.summary.FileWriter('logs/' + datetime.now().strftime('%Y%m%d.%H%M') + '/')
+    summary_writer = tf.summary.FileWriter('logs/' + datetime.now().strftime('%Y%m%d.%H%M') + '/', graph=tf.get_default_graph())
     summary_op = tf.summary.merge_all()
     update_op = tf.group(*tf.get_collection(tf.GraphKeys.UPDATE_OPS))
-    restore_op = tf.no_op()  # fixme
-    save_op = tf.no_op()  # fixme
+    saver = tf.train.Saver(tf.model_variables() + [global_step, epoch], keep_checkpoint_every_n_hours=2)
 
     with tf.Session() as sess:
         sess.run([tf.local_variables_initializer(), tf.global_variables_initializer()])
         sess.graph.finalize()
 
         # restore model from checkpoint
-        sess.run(restore_op)
+        latest_checkpoint = tf.train.latest_checkpoint('models/')
+        if latest_checkpoint is not None:
+            print('Restoring from ' + latest_checkpoint)
+
+            saver.restore(sess, latest_checkpoint)
 
         while True:
             sess.run(iterator.initializer)
@@ -316,14 +319,15 @@ def main(args):
                         summary_hat = sess.run(summary_op)
                         summary_writer.add_summary(summary_hat, global_step_hat)
                     if global_step_hat > 0 and global_step_hat % 1000 == 0:
-                        sess.run(save_op)
+                        saver.save(sess, 'models/dream-go', global_step=global_step_hat)
             except KeyboardInterrupt:
                 break  # quit
             except:
-                sess.run([epoch_op, save_op])
+                sess.run([epoch_op])
+                saver.save(sess, 'models/dream-go', global_step=global_step_hat)
 
         # save the model
-        sess.run(save_op)
+        saver.save(sess, 'models/dream-go', global_step=global_step_hat)
 
 if __name__ == '__main__':
     if len(sys.argv) <= 1:
