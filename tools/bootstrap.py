@@ -201,7 +201,7 @@ class Tower:
         # residual blocks
         self._residuals = []
 
-        for i in range(6):
+        for i in range(19):
             with tf.variable_scope('{:02d}_residual'.format(2 + i)):
                 self._residuals += [ResidualBlock(num_features)]
 
@@ -233,7 +233,7 @@ def main(args):
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
     dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
     dataset = dataset.shuffle(2048)
-    dataset = dataset.batch(464)
+    dataset = dataset.batch(272)
 
     iterator = dataset.make_initializable_iterator()
 
@@ -253,7 +253,7 @@ def main(args):
     policy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=policy, logits=policy_hat))
     value_loss = tf.reduce_mean(tf.squared_difference(value, value_hat))
     reg_loss = tf.reduce_sum([tf.nn.l2_loss(var) for var in tf.trainable_variables()])
-    loss = policy_loss + 1e-2 * value_loss + 1e-4 * reg_loss
+    loss = policy_loss + value_loss + 1e-4 * reg_loss
 
     tf.summary.scalar('loss/policy', policy_loss)
     tf.summary.scalar('loss/value', value_loss)
@@ -262,7 +262,7 @@ def main(args):
 
     learning_rate = tf.train.piecewise_constant(
         global_step,
-        [8000, 16000, 32000, 64000],
+        [20000, 50000, 100000, 300000],
         [1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
     )
     optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
@@ -319,15 +319,15 @@ def main(args):
                         summary_hat = sess.run(summary_op)
                         summary_writer.add_summary(summary_hat, global_step_hat)
                     if global_step_hat > 0 and global_step_hat % 1000 == 0:
-                        saver.save(sess, 'models/dream-go', global_step=global_step_hat)
+                        saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
             except KeyboardInterrupt:
                 break  # quit
             except:
                 sess.run([epoch_op])
-                saver.save(sess, 'models/dream-go', global_step=global_step_hat)
+                saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
 
         # save the model
-        saver.save(sess, 'models/dream-go', global_step=global_step_hat)
+        saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
 
 if __name__ == '__main__':
     if len(sys.argv) <= 1:
