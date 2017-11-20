@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod circular_buf;
+pub mod symmetry;
 mod zobrist;
 
 use self::circular_buf::CircularBuf;
@@ -27,7 +28,7 @@ pub enum Color {
 
 impl Color {
     /// Returns the opposite of this color.
-    fn opposite(&self) -> Color {
+    pub fn opposite(&self) -> Color {
         match *self {
             Color::Black => Color::White,
             Color::White => Color::Black

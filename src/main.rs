@@ -14,8 +14,9 @@
 
 extern crate dream_go;
 
-use dream_go::dataset;
+use dream_go::{dataset, nn, mcts};
 use std::env;
+use std::path::Path;
 
 /// 
 fn main() {
@@ -48,14 +49,32 @@ fn main() {
             }
         }
     } else if args.iter().any(|arg| arg == "--self-play") {
-        unimplemented!();
+        let network = nn::Network::new(Path::new("models/dream-go.json"))
+            .expect("no model found");
+        let mut workspace = network.get_workspace();
+        let n = if remaining.len() > 0 {
+            remaining[0].parse::<usize>().unwrap()
+        } else {
+            1
+        };
+
+        for _ in 0..n {
+            match mcts::self_play(&mut workspace) {
+                mcts::GameResult::Resign(sgf, _, winner, _) => {
+                    println!("(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]RE[{}+Resign]{})", winner, sgf);
+                }
+                mcts::GameResult::Ended(sgf, _) => {
+                    println!("(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]RE[?]{})", sgf);
+                }
+            }
+        }
     } else if args.iter().any(|arg| arg == "--gtp") {
         unimplemented!();
     } else {
-        println!("Usage: ./dream-go [options] <files...>");
+        println!("Usage: ./dream-go [options]");
         println!("");
-        println!("  --dataset    Extract a dataset for training from the given SGF files");
-        println!("  --self-play  Extract a dataset from self-play");
-        println!("  --gtp        Run GTP client");
+        println!("  --dataset <files...>  Extract a dataset for training from the given SGF files");
+        println!("  --self-play <n>       Extract a dataset from self-play containing n examples");
+        println!("  --gtp                 Run GTP client");
     }
 }
