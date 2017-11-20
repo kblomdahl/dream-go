@@ -11,14 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![feature(io)]
-#![feature(link_llvm_intrinsics)]
 
-#[macro_use] extern crate lazy_static;
-extern crate libc;
-extern crate rand;
-extern crate regex;
+extern crate pkg_config;
 
-pub mod dataset;
-pub mod go;
-pub mod nn;
+fn main() {
+    pkg_config::probe_library("cudart-8.0").unwrap();
+}

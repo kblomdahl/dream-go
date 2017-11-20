@@ -25,6 +25,7 @@ from datetime import datetime
 import sys
 
 import tensorflow as tf
+import numpy as np
 
 class BatchNorm:
     """ Batch normalization layer. """
@@ -99,6 +100,8 @@ class ResidualBlock:
 
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._conv_1)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._conv_2)
+        tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._conv_1)
+        tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._conv_2)
 
     def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._conv_1, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -138,6 +141,7 @@ class ValueHead:
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._weights_2)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias_1)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias_2)
+        tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._downsample)
 
     def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -173,6 +177,7 @@ class PolicyHead:
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._downsample)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._weights)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias)
+        tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._downsample)
 
     def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -226,6 +231,26 @@ class Tower:
 
         return v, p
 
+def save_to_json(sess, target, variables):
+    """ Saves all of the given variables as JSON to the given filename. """
+    import base64
+    import json
+
+    values = {}
+    tensors = sess.run(variables)
+
+    for (var, tensor) in zip(variables, tensors):
+        if var in tf.get_collection(tf.GraphKeys.WEIGHTS):
+            # tensorflow: [h, w, in, out]
+            # cudnn:      [out, in, h, w]
+            tensor = np.transpose(tensor, [3, 2, 0, 1])
+
+        serialized = tensor.flatten().astype(np.float16).tostring()
+        values[var.name] = base64.b85encode(serialized, pad=True).decode('ascii')
+
+    with open(target, 'w') as f:
+        json.dump(values, f, sort_keys=True)
+
 def main(args):
     """ Main function """
 
@@ -262,8 +287,8 @@ def main(args):
 
     learning_rate = tf.train.piecewise_constant(
         global_step,
-        [20000, 50000, 100000, 300000],
-        [1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
+        [20000, 50000, 100000, 300000, 600000],
+        [1e-2, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5]
     )
     optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
     optimizer_op = optimizer.minimize(loss, global_step=global_step)
@@ -295,7 +320,8 @@ def main(args):
     summary_writer = tf.summary.FileWriter('logs/' + datetime.now().strftime('%Y%m%d.%H%M') + '/', graph=tf.get_default_graph())
     summary_op = tf.summary.merge_all()
     update_op = tf.group(*tf.get_collection(tf.GraphKeys.UPDATE_OPS))
-    saver = tf.train.Saver(tf.model_variables() + [global_step, epoch], keep_checkpoint_every_n_hours=2)
+    saver_vars = tf.model_variables() + [global_step, epoch]
+    saver = tf.train.Saver(saver_vars, keep_checkpoint_every_n_hours=2)
 
     with tf.Session() as sess:
         sess.run([tf.local_variables_initializer(), tf.global_variables_initializer()])
@@ -325,9 +351,11 @@ def main(args):
             except:
                 sess.run([epoch_op])
                 saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
+                save_to_json(sess, 'models/dream-go.json', saver_vars)
 
         # save the model
         saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
+        save_to_json(sess, 'models/dream-go.json', saver_vars)
 
 if __name__ == '__main__':
     if len(sys.argv) <= 1:

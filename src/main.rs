@@ -14,8 +14,9 @@
 
 extern crate dream_go;
 
-use dream_go::dataset;
+use dream_go::{dataset, go, nn};
 use std::env;
+use std::path::Path;
 
 /// 
 fn main() {
@@ -48,7 +49,17 @@ fn main() {
             }
         }
     } else if args.iter().any(|arg| arg == "--self-play") {
-        unimplemented!();
+        let network = nn::Network::new(Path::new("models/dream-go.json")).unwrap();
+        let mut workspace = network.get_workspace();
+        let board = go::Board::new();
+        let (value, policy) = nn::forward(
+            &mut workspace,
+            &board.get_features(go::Color::Black)
+        );
+
+        println!("value: {:?}", value);
+        println!("policy: {:?}", policy);
+        println!("policy: {:?}", (0..362).max_by_key(|&i| (1e8 * policy[i]) as usize));
     } else if args.iter().any(|arg| arg == "--gtp") {
         unimplemented!();
     } else {
