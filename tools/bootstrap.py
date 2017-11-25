@@ -258,8 +258,7 @@ def main(args):
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
     dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
     dataset = dataset.shuffle(2048)
-    dataset = dataset.batch(272)
-
+    dataset = dataset.batch(256)
     iterator = dataset.make_initializable_iterator()
 
     #
@@ -323,7 +322,11 @@ def main(args):
     saver_vars = tf.model_variables() + [global_step, epoch]
     saver = tf.train.Saver(saver_vars, keep_checkpoint_every_n_hours=2)
 
-    with tf.Session() as sess:
+    #
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+
+    with tf.Session(config=config) as sess:
         sess.run([tf.local_variables_initializer(), tf.global_variables_initializer()])
         sess.graph.finalize()
 
