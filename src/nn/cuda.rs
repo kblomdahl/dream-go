@@ -92,6 +92,7 @@ pub enum MemcpyKind {
     DeviceToDevice = 3
 }
 
+#[link(name = "cudart")]
 extern {
     pub fn cudaFree(devPtr: *const c_void) -> Error;
     pub fn cudaMalloc(devPtr: *mut *mut c_void, size: usize) -> Error;

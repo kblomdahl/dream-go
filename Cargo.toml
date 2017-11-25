@@ -4,14 +4,10 @@ version = "0.1.0"
 authors = ["Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>"]
 license = "Apache-2.0"
 publish = false
-build = "build.rs"
 
 [profile.dev]
 opt-level = 2
 debug = true
-
-[build-dependencies]
-pkg-config = "0.3.9"
 
 [dependencies]
 lazy_static = "0.2"
