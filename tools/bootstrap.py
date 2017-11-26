@@ -22,6 +22,7 @@ Usage: ./bootstrap.py <dataset...>
 """
 
 from datetime import datetime
+from math import nan, isnan
 import sys
 
 import tensorflow as tf
@@ -360,9 +361,86 @@ def main(args):
         saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
         save_to_json(sess, 'models/dream-go.json', saver_vars)
 
+def verify(args):
+    """ Retrieve accuracy for a verification test-set. """
+
+    dataset = tf.data.FixedLengthRecordDataset(args, 25274)
+    dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
+    dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
+    dataset = dataset.batch(1)
+    iterator = dataset.make_initializable_iterator()
+
+    # get the answer from the data-set and the prediction
+    tower = Tower()
+    features, value, policy = iterator.get_next()
+    features = tf.reshape(features, (-1, 34, 19, 19))
+    value_hat, policy_hat = tower(features)
+
+    policy_accuracy_1 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=1), tf.float32)
+    policy_accuracy_3 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=3), tf.float32)
+    policy_accuracy_5 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=5), tf.float32)
+    value_accuracy = tf.cast(tf.equal(tf.sign(value), tf.sign(value_hat)), tf.float32)
+
+    # restore only model variables
+    saver_vars = tf.model_variables()
+    saver = tf.train.Saver(saver_vars, keep_checkpoint_every_n_hours=2)
+
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+
+    with tf.Session(config=config) as sess:
+        #from tensorflow.python import debug as tf_debug
+        #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+
+        sess.run([tf.local_variables_initializer(), tf.global_variables_initializer()])
+        sess.graph.finalize()
+
+        # restore model from checkpoint
+        latest_checkpoint = tf.train.latest_checkpoint('models/')
+        if latest_checkpoint is not None:
+            print('Restoring from ' + latest_checkpoint)
+
+            saver.restore(sess, latest_checkpoint)
+
+        # loop over the entire data-set
+        sess.run(iterator.initializer)
+
+        accuracy_p1 = nan
+        accuracy_p3 = nan
+        accuracy_p5 = nan
+        accuracy_v = nan
+
+        while True:
+            try:
+                [policy_1, policy_3, policy_5, value_1] = sess.run([
+                    policy_accuracy_1,
+                    policy_accuracy_3,
+                    policy_accuracy_5,
+                    value_accuracy
+                ])
+
+                accuracy_p1 = policy_1 if isnan(accuracy_p1) else 0.97 * accuracy_p1 + 0.03 * policy_1
+                accuracy_p3 = policy_3 if isnan(accuracy_p3) else 0.97 * accuracy_p3 + 0.03 * policy_3
+                accuracy_p5 = policy_5 if isnan(accuracy_p5) else 0.97 * accuracy_p5 + 0.03 * policy_5
+                accuracy_v = value_1 if isnan(accuracy_v) else 0.97 * accuracy_v + 0.03 * value_1
+            except (tf.errors.OutOfRangeError, KeyboardInterrupt):
+                break
+
+        print('policy (top 1/3/5): {:.1f}%/{:.1f}%/{:.1f}%'.format(
+            100.0 * np.asscalar(accuracy_p1),
+            100.0 * np.asscalar(accuracy_p3),
+            100.0 * np.asscalar(accuracy_p5)
+        ))
+        print('value: {:.1f}%'.format(
+            100.0 * np.asscalar(accuracy_v)
+        ))
+
 if __name__ == '__main__':
     if len(sys.argv) <= 1:
         print('Usage: bootstrap.py <data...>')
         quit()
 
-    main(sys.argv[1:])
+    if sys.argv[1] == '--verify':
+        verify(sys.argv[2:])
+    else:
+        main(sys.argv[1:])
