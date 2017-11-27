@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use libc::{c_float, c_int, c_void};
+use nn::cuda::Stream;
 
 #[repr(i32)]
 #[allow(dead_code)]
@@ -44,6 +45,52 @@ pub type Handle = *const c_void;
 extern {
     pub fn cublasCreate_v2(handle: *mut Handle) -> Status;
     pub fn cublasDestroy_v2(handle: Handle) -> Status;
+
+    /// This function sets the cuBLAS library stream, which will be used to execute all
+    /// subsequent calls to the cuBLAS library functions. If the cuBLAS library stream
+    /// is not set, all kernels use the defaultNULL stream. In particular, this routine
+    /// can be used to change the stream between kernel launches and then to reset the
+    /// cuBLAS library stream back to NULL.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - handle to the cuBLAS library context.
+    /// * `stream` -
+    /// 
+    pub fn cublasSetStream_v2(handle: Handle, stream: Stream) -> Status;
+
+    /// This function performs the matrix-matrix multiplication
+    /// 
+    /// ```C = α op(A) op(B) + β C```
+    /// 
+    /// where `α` and `β` are scalars, and `A`, `B` and `C` are matrices stored in
+    /// column-major format with dimensions `op(A)` m × k , `op(B)` k × n
+    /// and `C` m × n , respectively. Also, for matrix `A`
+    /// 
+    /// ```op(A) = A   if transa == CUBLAS_OP_N```
+    /// 
+    /// ```        A^T if transa == CUBLAS_OP_T```
+    /// 
+    /// ```        A^H if transa == CUBLAS_OP_C.```
+    /// 
+    /// and `op(B)` is defined similarly for matrix B .
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - handle to the cuBLAS library context.
+    /// * `transA` - operation `op(A)` that is non- or (conj.) transpose.
+    /// * `transB` - operation `op(B)` that is non- or (conj.) transpose.
+    /// * `m` - number of rows of matrix `op(A)` and `C`.
+    /// * `n` - number of columns of matrix `op(B)` and `C`.
+    /// * `k` - number of columns of `op(A)` and rows of `op(B)`.
+    /// * `alpha` - scalar used for multiplication.
+    /// * `A` - array of dimensions lda × k with `lda>=max(1,m)` if `transa == CUBLAS_OP_N` and lda × m with `lda>=max(1,k)` otherwise.
+    /// * `lda` - leading dimension of two-dimensional array used to store the matrix `A`.
+    /// * `B` - array of dimension ldb × n with `ldb>=max(1,k)` if `transa == CUBLAS_OP_N` and ldb × k with `ldb>=max(1,n)` otherwise.
+    /// * `ldb` - leading dimension of two-dimensional array used to store matrix `B`.
+    /// * `beta` - scalar used for multiplication.
+    /// * `C` - array of dimensions ldc × n with `ldc>=max(1,m)`.
+    /// * `ldc` - leading dimension of a two-dimensional array used to store the matrix `C`.
     pub fn cublasSgemm_v2(
         handle: Handle,
         transA: Operation,

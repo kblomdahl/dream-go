@@ -18,7 +18,9 @@
 extern crate libc;
 extern crate rand;
 extern crate regex;
+extern crate ordered_float;
 
 pub mod dataset;
 pub mod go;
+pub mod mcts;
 pub mod nn;

@@ -16,7 +16,6 @@ use libc::{c_void};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read};
-use std::mem::transmute;
 use std::path::Path;
 use std::ptr;
 
@@ -48,57 +47,7 @@ lazy_static! {
     };
 }
 
-pub fn f16_to_f32(i: u16) -> f32 {
-    // check for signed zero
-    if i & 0x7FFFu16 == 0 {
-        return unsafe { transmute((i as u32) << 16) };
-    }
-
-    let half_sign = (i & 0x8000u16) as u32;
-    let half_exp = (i & 0x7C00u16) as u32;
-    let half_man = (i & 0x03FFu16) as u32;
-
-    // check for an infinity or NaN when all exponent bits set
-    if half_exp == 0x7C00u32 {
-        // check for signed infinity if mantissa is zero
-        if half_man == 0 {
-            return unsafe { transmute((half_sign << 16) | 0x7F800000u32) };
-        } else {
-            // NaN, only 1st mantissa bit is set
-            return ::std::f32::NAN;
-        }
-    }
-
-    // calculate single-precision components with adjusted exponent
-    let sign = half_sign << 16;
-    // unbias exponent
-    let unbiased_exp = ((half_exp as i32) >> 10) - 15;
-    let man = (half_man & 0x03FFu32) << 13;
-
-    // check for subnormals, which will be normalized by adjusting exponent
-    if half_exp == 0 {
-        // calculate how much to adjust the exponent by
-        let e = {
-            let mut e_adj = 0;
-            let mut hm_adj = half_man << 1;
-            while hm_adj & 0x0400u32 == 0 {
-                e_adj += 1;
-                hm_adj <<= 1;
-            }
-            e_adj
-        };
-
-        // rebias and adjust exponent
-        let exp = ((unbiased_exp + 127 - e) << 23) as u32;
-        return unsafe { transmute(sign | exp | man) };
-    }
-
-    // rebias exponent for a normalized normal
-    let exp = ((unbiased_exp + 127) << 23) as u32;
-    unsafe { transmute(sign | exp | man) }
-}
-
-/// Decode a RFC 1924 (Ascii85) encoded string of FP16 values and returns
+/// Decode a RFC 1924 (Ascii85) encoded string of FP32 values and returns
 /// an array of the FP32 numbers it represents.
 fn decode_b85(input: &str) -> Option<Box<[f32]>> {
     let mut output = vec! [];
@@ -129,8 +78,12 @@ fn decode_b85(input: &str) -> Option<Box<[f32]>> {
             acc >>= 8;
         }
 
-        output.push(f16_to_f32(((dst[2] as u16) << 8) | (dst[3] as u16)));
-        output.push(f16_to_f32(((dst[0] as u16) << 8) | (dst[1] as u16)));
+        output.push(f32::from_bits(
+            ((dst[0] as u32) << 24)
+            | ((dst[1] as u32) << 16)
+            | ((dst[2] as u32) << 8)
+            | (dst[3] as u32))
+        );
     }
 
     Some(output.into_boxed_slice())
@@ -212,33 +165,22 @@ mod tests {
 
     #[test]
     fn pi_e() {
-        let string = "NJ4Ny";
+        let string = "+Yd=VRQN4G";
 
         assert_eq!(
             decode_b85(string),
-            Some(vec! [3.140625, 2.71875].into_boxed_slice())
+            Some(vec! [3.14159265, 2.71828183].into_boxed_slice())
         );
     }
 
     // Test that we can handle padding correctly
     #[test]
     fn _1234567() {
-        let string = "06YLd073vn07U>s07n1-";
+        let string = "004kL0000$002Nh004kM005vs006*1007`X";
 
         assert_eq!(
             decode_b85(string),
-            Some(vec! [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 0.0].into_boxed_slice())
-        );
-    }
-
-    // Test that we can handle padding correctly
-    #[test]
-    fn global_step() {
-        let string = "0DJ%d";
-
-        assert_eq!(
-            decode_b85(string),
-            Some(vec! [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 0.0].into_boxed_slice())
+            Some(vec! [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0].into_boxed_slice())
         );
     }
 }

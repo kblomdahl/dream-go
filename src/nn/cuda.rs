@@ -92,10 +92,28 @@ pub enum MemcpyKind {
     DeviceToDevice = 3
 }
 
+pub type Event = *const c_void;
+pub type Stream = *const c_void;
+
+#[link(name = "cuda")]
 #[link(name = "cudart")]
 extern {
+    pub fn cuInit(flags: u32) -> Error;
+
     pub fn cudaFree(devPtr: *const c_void) -> Error;
     pub fn cudaMalloc(devPtr: *mut *mut c_void, size: usize) -> Error;
     pub fn cudaMemcpy(dst: *mut c_void, src: *const c_void, count: usize, kind: MemcpyKind) -> Error;
+    pub fn cudaMemcpyAsync(dst: *mut c_void, src: *const c_void, count: usize, kind: MemcpyKind, stream: Stream) -> Error;
+
+    #[allow(dead_code)]
     pub fn cudaDeviceSynchronize() -> Error;
+
+    pub fn cudaEventCreate(event: *mut Event) -> Error;
+    pub fn cudaEventDestroy(event: Event) -> Error;
+    pub fn cudaEventRecord(event: Event, stream: Stream) -> Error;
+
+    pub fn cudaStreamCreate(stream: *mut Stream) -> Error;
+    pub fn cudaStreamDestroy(stream: Stream) -> Error;
+    pub fn cudaStreamSynchronize(stream: Stream) -> Error;
+    pub fn cudaStreamWaitEvent(stream: Stream, event: Event, flags: u32) -> Error;
 }
