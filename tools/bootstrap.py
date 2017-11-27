@@ -203,6 +203,7 @@ class Tower:
             self._bn = BatchNorm(num_features)
 
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._upsample)
+        tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._upsample)
 
         # residual blocks
         self._residuals = []
@@ -232,26 +233,6 @@ class Tower:
 
         return v, p
 
-def save_to_json(sess, target, variables):
-    """ Saves all of the given variables as JSON to the given filename. """
-    import base64
-    import json
-
-    values = {}
-    tensors = sess.run(variables)
-
-    for (var, tensor) in zip(variables, tensors):
-        if var in tf.get_collection(tf.GraphKeys.WEIGHTS):
-            # tensorflow: [h, w, in, out]
-            # cudnn:      [out, in, h, w]
-            tensor = np.transpose(tensor, [3, 2, 0, 1])
-
-        serialized = tensor.flatten().astype(np.float16).tostring()
-        values[var.name] = base64.b85encode(serialized, pad=True).decode('ascii')
-
-    with open(target, 'w') as f:
-        json.dump(values, f, sort_keys=True)
-
 def main(args):
     """ Main function """
 
@@ -259,7 +240,7 @@ def main(args):
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
     dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
     dataset = dataset.shuffle(2048)
-    dataset = dataset.batch(256)
+    dataset = dataset.batch(240)
     iterator = dataset.make_initializable_iterator()
 
     #
@@ -355,11 +336,9 @@ def main(args):
             except:
                 sess.run([epoch_op])
                 saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
-                save_to_json(sess, 'models/dream-go.json', saver_vars)
 
         # save the model
         saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
-        save_to_json(sess, 'models/dream-go.json', saver_vars)
 
 def verify(args):
     """ Retrieve accuracy for a verification test-set. """
@@ -374,7 +353,7 @@ def verify(args):
     tower = Tower()
     features, value, policy = iterator.get_next()
     features = tf.reshape(features, (-1, 34, 19, 19))
-    value_hat, policy_hat = tower(features)
+    value_hat, policy_hat = tower(features, is_training=False)
 
     policy_accuracy_1 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=1), tf.float32)
     policy_accuracy_3 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=3), tf.float32)
@@ -435,6 +414,50 @@ def verify(args):
             100.0 * np.asscalar(accuracy_v)
         ))
 
+def dump(args):
+    """
+    Dump the given (or latest if none is given) checkpoint as a JSON file that
+    is readable by dream-go
+    """
+    tower = Tower()
+    features = tf.placeholder(tf.float32, (1, 34, 19, 19))
+    _, _ = tower(features)
+
+    # restore only model variables
+    saver_vars = tf.model_variables()
+    saver = tf.train.Saver(saver_vars, keep_checkpoint_every_n_hours=2)
+
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+
+    with tf.Session(config=config) as sess:
+        sess.run([tf.local_variables_initializer(), tf.global_variables_initializer()])
+
+        if args == []:
+            latest_checkpoint = tf.train.latest_checkpoint('models/')
+            if latest_checkpoint is not None:
+                saver.restore(sess, latest_checkpoint)
+        else:
+            saver.restore(sess, args[0])
+
+        # dump the variables to JSON
+        import base64
+        import json
+
+        values = {}
+        saver_vals = sess.run(saver_vars)
+
+        for (var, value) in zip(saver_vars, saver_vals):
+            if var in tf.get_collection(tf.GraphKeys.WEIGHTS):
+                # tensorflow: [h, w, in, out]
+                # cudnn:      [out, in, h, w]
+                value = np.transpose(value, [3, 2, 0, 1])
+
+            serialized = value.flatten().astype(np.float32).tostring()
+            values[var.name] = base64.b85encode(serialized, pad=True).decode('ascii')
+
+        json.dump(values, sys.stdout, sort_keys=True)
+
 if __name__ == '__main__':
     if len(sys.argv) <= 1:
         print('Usage: bootstrap.py <data...>')
@@ -442,5 +465,7 @@ if __name__ == '__main__':
 
     if sys.argv[1] == '--verify':
         verify(sys.argv[2:])
+    if sys.argv[1] == '--dump':
+        dump(sys.argv[2:])
     else:
         main(sys.argv[1:])
