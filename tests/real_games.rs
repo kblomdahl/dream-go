@@ -37,6 +37,7 @@ fn playout_game(src: &str) -> Board {
     }
 
     let mut board = Board::new();
+    let mut count = 1;
 
     for cap in MOVE.captures_iter(src) {
         let color = match &cap[1] {
@@ -51,8 +52,10 @@ fn playout_game(src: &str) -> Board {
             .and_then(|y| LETTERS.binary_search(&y).ok())
             .unwrap_or(board.size());
 
-        assert!(board.is_valid(color, x, 18 - y), "invalid: {} {} {}\n{}", color, x, y, board);
+        assert!(board.is_valid(color, x, 18 - y), "invalid move {}: {} {} {}\n{}", count, color, x, y, board);
+
         board.place(color, x, 18 - y);
+        count += 1;
     }
 
     board
@@ -110,7 +113,9 @@ fn ke_jie_alpha_go_game_2() {
     assert_eq!(board.zobrist_hash(), 0xad4f3d0dfc4e535b, "wrong hash\n{}", board);
 }
 
-/// Test a game featuring a triple ko
+/// Test a game featuring a triple ko without the last two
+/// moves since they violate the super-ko rules our engine
+/// use.
 #[test]
 fn park_taehee_kim_dayoung() {
     let board = playout_game(r#"
@@ -145,8 +150,8 @@ fn park_taehee_kim_dayoung() {
 ;B[qc];W[qs];B[lo];W[lp];B[kp];W[ln];B[mn];W[mo];B[jo];W[lo]
 ;B[ps];W[ip];B[jp];W[ao];B[an];W[ap];B[cp];W[bq];B[pm];W[pn]
 ;B[nn];W[no];B[og];W[gn];B[oh];W[oi];B[oe];W[pf];B[rs];W[ca]
-;B[bd];W[qs];B[da];W[bc];B[rs]
+;B[bd];W[qs];B[da]
 "#);
 
-    assert_eq!(board.zobrist_hash(), 0x484a0ae6bdcf3eb3, "wrong hash\n{}", board);
+    assert_eq!(board.zobrist_hash(), 0x2867823577192483, "wrong hash\n{}", board);
 }
