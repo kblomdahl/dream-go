@@ -18,7 +18,7 @@ use dream_go::{dataset, nn, mcts};
 use std::env;
 use std::path::Path;
 
-/// 
+/// Main function.
 fn main() {
     // keep everything that is before the first "--" indicator as potential
     // program arguments

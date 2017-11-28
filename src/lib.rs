@@ -21,6 +21,7 @@ extern crate regex;
 extern crate ordered_float;
 
 pub mod dataset;
+mod f16;
 pub mod go;
 pub mod mcts;
 pub mod nn;

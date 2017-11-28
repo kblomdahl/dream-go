@@ -452,7 +452,7 @@ def dump(args):
                 # cudnn:      [out, in, h, w]
                 value = np.transpose(value, [3, 2, 0, 1])
 
-            serialized = value.flatten().astype(np.float32).tostring()
+            serialized = value.flatten().astype(np.float16).tostring()
             values[var.name] = base64.b85encode(serialized, pad=True).decode('ascii')
 
         json.dump(values, sys.stdout, sort_keys=True)

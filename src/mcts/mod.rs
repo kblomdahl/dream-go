@@ -81,6 +81,15 @@ fn choose(board: &Board, color: Color, policy: &mut [f32], greedy: bool) -> Opti
     }
 }
 
+/// Performs a forward pass through the neural network for the given board
+/// position using a random symmetry to increase entropy.
+/// 
+/// # Arguments
+/// 
+/// * `workspace` - the workspace to use during the forward pass
+/// * `board` - the board position
+/// * `color` - the current player
+/// 
 fn forward(workspace: &mut Workspace, board: &Board, color: Color) -> (f32, Box<[f32]>) {
     lazy_static! {
         static ref SYMM: Vec<symmetry::Transform> = vec! [
@@ -125,6 +134,9 @@ pub fn self_play(workspace: &mut Workspace) -> GameResult {
     let mut pass_count = 0;
     let mut count = 0;
 
+    // limit the maximum number of moves to `2 * 19 * 19` to avoid the
+    // engine playing pointless capture sequences at the end of the game
+    // that does not change the final result.
     while count < 722 {
         let (value, mut policy) = forward(workspace, &board, current);
 
@@ -133,8 +145,14 @@ pub fn self_play(workspace: &mut Workspace) -> GameResult {
 
             return GameResult::Resign(sgf, board, current.opposite(), -value);
         } else {
+            // add some random noise to the policy to increase the entropy of
+            // the self play dataset and avoid just overfitting to the current
+            // policy during training.
             dirichlet::add(&mut policy, 0.03);
 
+            // choose a random move from the policy for the first 10 turns, after
+            // that play deterministically (discounting the dirichlet noise) to
+            // avoid making large blunders during life or death situations.
             let policy_m = choose(&board, current, &mut policy, count >= 10);
 
             if policy_m.is_none() || policy_m == Some(361) {  // passing move
