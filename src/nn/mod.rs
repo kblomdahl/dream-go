@@ -12,27 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod ffi;
+mod loader;
+
 use libc::{c_void};
 use std::collections::HashMap;
 use std::path::Path;
 use std::ptr;
 
-mod cublas;
-mod cuda;
-mod cudnn;
-mod loader;
-
-use self::cublas::*;
-use self::cuda::*;
-use self::cudnn::*;
+use self::ffi::cublas::*;
+use self::ffi::cuda::*;
+use self::ffi::cudnn::*;
 
 /// The width of each filter in the neural network. Larger is "better" but takes
 /// longer to train and gives worse runtime performance during inference.
 const NUM_FEATURES: usize = 256;
 
 pub struct Network {
-    handle_blas: cublas::Handle,
-    handle_dnn: cudnn::Handle,
+    handle_blas: self::ffi::cublas::Handle,
+    handle_dnn: self::ffi::cudnn::Handle,
 
     // convolutional descriptors
     conv2d_1: ConvolutionDescriptor,
@@ -71,8 +69,8 @@ pub struct Network {
 /// network.
 pub struct Workspace<'a> {
     network: &'a Network,
-    handle_blas: cublas::Handle,
-    handle_dnn: cudnn::Handle,
+    handle_blas: self::ffi::cublas::Handle,
+    handle_dnn: self::ffi::cudnn::Handle,
 
     tower_s: Stream,
     policy_s: Stream,
@@ -93,10 +91,59 @@ pub struct Workspace<'a> {
     scratch_2: *mut c_void
 }
 
+macro_rules! check {
+    ($status:expr) => ({
+        let err = $status;
+
+        assert!(err.is_ok(), "cuda call failed -- {:?}", err);
+    });
+
+    ($status:expr, $name:expr, $result:expr, $batch_size:expr, $n:expr) => ({
+        check!($status);
+
+        #[cfg(feature = "trace-cuda")]
+        {
+            // copy the memory from the device back to the host so
+            // that we can look at it
+            let mut vec = [[0.0f32; $n]; $batch_size];
+
+            check!(cudaDeviceSynchronize());
+            check!(cudaMemcpy(
+                vec.as_mut_ptr() as *mut c_void,
+                $result,
+                4 * $batch_size * $n,
+                MemcpyKind::DeviceToHost
+            ));
+
+            // pretty-print the array and then output the debugging
+            // information
+            let mut s = String::new();
+            let mut sum = 0.0f32;
+
+            for i in 0..$batch_size {
+                if i > 0 { s += ", "; }
+                s += "[";
+
+                for j in 0..$n {
+                    if j > 0 { s += ", "; }
+
+                    sum += vec[i][j];
+                    s += &format!("{:.4}", vec[i][j]);
+                }
+
+                s += "]";
+            }
+
+            println!("sum(`{}`) == {}", $name, sum);
+            println!("eval(`{}`) == [{}]", $name, s);
+        }
+    })
+}
+
 impl Network {
     pub fn new(path: &Path) -> Option<Network> {
         unsafe {
-            assert_eq!(cuInit(0), Error::Success);
+            check!(cuInit(0));
         }
 
         if let Some(weights) = loader::load(path) {
@@ -132,172 +179,172 @@ impl Network {
             };
 
             unsafe {
-                assert_eq!(cublasCreate_v2(&mut n.handle_blas), cublas::Status::Success);
-                assert_eq!(cudnnCreate(&mut n.handle_dnn), cudnn::Status::Success);
+                check!(cublasCreate_v2(&mut n.handle_blas));
+                check!(cudnnCreate(&mut n.handle_dnn));
 
-                assert_eq!(cudnnCreateConvolutionDescriptor(&mut n.conv2d_1), cudnn::Status::Success);
-                assert_eq!(cudnnSetConvolution2dDescriptor(
+                check!(cudnnCreateConvolutionDescriptor(&mut n.conv2d_1));
+                check!(cudnnSetConvolution2dDescriptor(
                     n.conv2d_1,
                     0, 0,
                     1, 1,
                     1, 1,
                     ConvolutionMode::CrossCorrelation,
                     DataType::Float
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateConvolutionDescriptor(&mut n.conv2d_3), cudnn::Status::Success);
-                assert_eq!(cudnnSetConvolution2dDescriptor(
+                check!(cudnnCreateConvolutionDescriptor(&mut n.conv2d_3));
+                check!(cudnnSetConvolution2dDescriptor(
                     n.conv2d_3,
                     1, 1,
                     1, 1,
                     1, 1,
                     ConvolutionMode::CrossCorrelation,
                     DataType::Float
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateActivationDescriptor(&mut n.relu), cudnn::Status::Success);
-                assert_eq!(cudnnSetActivationDescriptor(
+                check!(cudnnCreateActivationDescriptor(&mut n.relu));
+                check!(cudnnSetActivationDescriptor(
                     n.relu,
                     ActivationMode::Relu,
                     NanPropagation::PropagateNan,
                     0.0
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateActivationDescriptor(&mut n.tanh), cudnn::Status::Success);
-                assert_eq!(cudnnSetActivationDescriptor(
+                check!(cudnnCreateActivationDescriptor(&mut n.tanh));
+                check!(cudnnSetActivationDescriptor(
                     n.tanh,
                     ActivationMode::Tanh,
                     NanPropagation::PropagateNan,
                     0.0
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateFilterDescriptor(&mut n.up_f), cudnn::Status::Success);
-                assert_eq!(cudnnSetFilter4dDescriptor(
+                check!(cudnnCreateFilterDescriptor(&mut n.up_f));
+                check!(cudnnSetFilter4dDescriptor(
                     n.up_f,
                     DataType::Float,
                     TensorFormat::NCHW,
                     NUM_FEATURES as i32, 34, 3, 3
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateFilterDescriptor(&mut n.residual_f), cudnn::Status::Success);
-                assert_eq!(cudnnSetFilter4dDescriptor(
+                check!(cudnnCreateFilterDescriptor(&mut n.residual_f));
+                check!(cudnnSetFilter4dDescriptor(
                     n.residual_f,
                     DataType::Float,
                     TensorFormat::NCHW,
                     NUM_FEATURES as i32, NUM_FEATURES as i32, 3, 3
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateFilterDescriptor(&mut n.value_f), cudnn::Status::Success);
-                assert_eq!(cudnnSetFilter4dDescriptor(
+                check!(cudnnCreateFilterDescriptor(&mut n.value_f));
+                check!(cudnnSetFilter4dDescriptor(
                     n.value_f,
                     DataType::Float,
                     TensorFormat::NCHW,
                     1, NUM_FEATURES as i32, 1, 1
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateFilterDescriptor(&mut n.policy_f), cudnn::Status::Success);
-                assert_eq!(cudnnSetFilter4dDescriptor(
+                check!(cudnnCreateFilterDescriptor(&mut n.policy_f));
+                check!(cudnnSetFilter4dDescriptor(
                     n.policy_f,
                     DataType::Float,
                     TensorFormat::NCHW,
                     2, NUM_FEATURES as i32, 1, 1
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateTensorDescriptor(&mut n.input_t), cudnn::Status::Success);
-                assert_eq!(cudnnSetTensor4dDescriptor(
+                check!(cudnnCreateTensorDescriptor(&mut n.input_t));
+                check!(cudnnSetTensor4dDescriptor(
                     n.input_t,
                     TensorFormat::NCHW,
                     DataType::Float,
                     1, 34, 19, 19
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateTensorDescriptor(&mut n.residual_t), cudnn::Status::Success);
-                assert_eq!(cudnnSetTensor4dDescriptor(
+                check!(cudnnCreateTensorDescriptor(&mut n.residual_t));
+                check!(cudnnSetTensor4dDescriptor(
                     n.residual_t,
                     TensorFormat::NCHW,
                     DataType::Float,
                     1, NUM_FEATURES as i32, 19, 19
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateTensorDescriptor(&mut n.residual_bn_t), cudnn::Status::Success);
-                assert_eq!(cudnnSetTensor4dDescriptor(
+                check!(cudnnCreateTensorDescriptor(&mut n.residual_bn_t));
+                check!(cudnnSetTensor4dDescriptor(
                     n.residual_bn_t,
                     TensorFormat::NCHW,
                     DataType::Float,
                     1, NUM_FEATURES as i32, 1, 1
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateTensorDescriptor(&mut n.value_t), cudnn::Status::Success);
-                assert_eq!(cudnnSetTensor4dDescriptor(
+                check!(cudnnCreateTensorDescriptor(&mut n.value_t));
+                check!(cudnnSetTensor4dDescriptor(
                     n.value_t,
                     TensorFormat::NCHW,
                     DataType::Float,
                     1, 1, 19, 19
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateTensorDescriptor(&mut n.value_bn_t), cudnn::Status::Success);
-                assert_eq!(cudnnSetTensor4dDescriptor(
+                check!(cudnnCreateTensorDescriptor(&mut n.value_bn_t));
+                check!(cudnnSetTensor4dDescriptor(
                     n.value_bn_t,
                     TensorFormat::NCHW,
                     DataType::Float,
                     1, 1, 1, 1
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateTensorDescriptor(&mut n.value_256_t), cudnn::Status::Success);
-                assert_eq!(cudnnSetTensor4dDescriptor(
+                check!(cudnnCreateTensorDescriptor(&mut n.value_256_t));
+                check!(cudnnSetTensor4dDescriptor(
                     n.value_256_t,
                     TensorFormat::NCHW,
                     DataType::Float,
                     1, NUM_FEATURES as i32, 1, 1
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateTensorDescriptor(&mut n.value_1_t), cudnn::Status::Success);
-                assert_eq!(cudnnSetTensor4dDescriptor(
+                check!(cudnnCreateTensorDescriptor(&mut n.value_1_t));
+                check!(cudnnSetTensor4dDescriptor(
                     n.value_1_t,
                     TensorFormat::NCHW,
                     DataType::Float,
                     1, 1, 1, 1
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateTensorDescriptor(&mut n.policy_t), cudnn::Status::Success);
-                assert_eq!(cudnnSetTensor4dDescriptor(
+                check!(cudnnCreateTensorDescriptor(&mut n.policy_t));
+                check!(cudnnSetTensor4dDescriptor(
                     n.policy_t,
                     TensorFormat::NCHW,
                     DataType::Float,
                     1, 2, 19, 19
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateTensorDescriptor(&mut n.policy_bn_t), cudnn::Status::Success);
-                assert_eq!(cudnnSetTensor4dDescriptor(
+                check!(cudnnCreateTensorDescriptor(&mut n.policy_bn_t));
+                check!(cudnnSetTensor4dDescriptor(
                     n.policy_bn_t,
                     TensorFormat::NCHW,
                     DataType::Float,
                     1, 2, 1, 1
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudnnCreateTensorDescriptor(&mut n.policy_softmax_t), cudnn::Status::Success);
-                assert_eq!(cudnnSetTensor4dDescriptor(
+                check!(cudnnCreateTensorDescriptor(&mut n.policy_softmax_t));
+                check!(cudnnSetTensor4dDescriptor(
                     n.policy_softmax_t,
                     TensorFormat::NCHW,
                     DataType::Float,
                     1, 362, 1, 1
-                ), cudnn::Status::Success);
+                ));
 
-                assert_eq!(cudaMalloc(&mut n.zeros, 1024), Error::Success);
-                assert_eq!(cudaMemcpy(
+                check!(cudaMalloc(&mut n.zeros, 1024));
+                check!(cudaMemcpy(
                     n.zeros,
                     vec! [0.0f32; NUM_FEATURES].as_ptr() as *const c_void,
                     4 * NUM_FEATURES,
                     MemcpyKind::HostToDevice
-                ), Error::Success);
+                ));
 
-                assert_eq!(cudaMalloc(&mut n.ones, 1024), Error::Success);
-                assert_eq!(cudaMemcpy(
+                check!(cudaMalloc(&mut n.ones, 1024));
+                check!(cudaMemcpy(
                     n.ones,
                     vec! [1.0f32; NUM_FEATURES].as_ptr() as *const c_void,
                     4 * NUM_FEATURES,
                     MemcpyKind::HostToDevice
-                ), Error::Success);
+                ));
             }
 
             Some(n)
@@ -334,22 +381,22 @@ impl Network {
         };
 
         unsafe {
-            assert_eq!(cublasCreate_v2(&mut w.handle_blas), cublas::Status::Success);
-            assert_eq!(cudnnCreate(&mut w.handle_dnn), cudnn::Status::Success);
+            check!(cublasCreate_v2(&mut w.handle_blas));
+            check!(cudnnCreate(&mut w.handle_dnn));
 
-            assert_eq!(cudaStreamCreate(&mut w.tower_s), Error::Success);
-            assert_eq!(cudaStreamCreate(&mut w.policy_s), Error::Success);
-            assert_eq!(cudaStreamCreate(&mut w.value_s), Error::Success);
-            assert_eq!(cudaEventCreate(&mut w.tower_e), Error::Success);
+            check!(cudaStreamCreate(&mut w.tower_s));
+            check!(cudaStreamCreate(&mut w.policy_s));
+            check!(cudaStreamCreate(&mut w.value_s));
+            check!(cudaEventCreate(&mut w.tower_e));
 
-            assert_eq!(cudaMalloc(&mut w.input, 49096), Error::Success);
-            assert_eq!(cudaMalloc(&mut w.residual_1, 369664), Error::Success);
-            assert_eq!(cudaMalloc(&mut w.residual_2, 369664), Error::Success);
-            assert_eq!(cudaMalloc(&mut w.residual_3, 369664), Error::Success);
-            assert_eq!(cudaMalloc(&mut w.policy_1, 2888), Error::Success);
-            assert_eq!(cudaMalloc(&mut w.policy_2, 2888), Error::Success);
-            assert_eq!(cudaMalloc(&mut w.value_1, 1444), Error::Success);
-            assert_eq!(cudaMalloc(&mut w.value_2, 1444), Error::Success);
+            check!(cudaMalloc(&mut w.input, 49096));
+            check!(cudaMalloc(&mut w.residual_1, 369664));
+            check!(cudaMalloc(&mut w.residual_2, 369664));
+            check!(cudaMalloc(&mut w.residual_3, 369664));
+            check!(cudaMalloc(&mut w.policy_1, 2888));
+            check!(cudaMalloc(&mut w.policy_2, 2888));
+            check!(cudaMalloc(&mut w.value_1, 1444));
+            check!(cudaMalloc(&mut w.value_2, 1444));
 
             // allocate two scratch workspaces that are at least as large as the
             // largest workspace requested by cuDNN.
@@ -358,7 +405,7 @@ impl Network {
             let mut value_s: usize = 0;
             let mut policy_s: usize = 0;
 
-            assert_eq!(cudnn::cudnnGetConvolutionForwardWorkspaceSize(
+            check!(cudnnGetConvolutionForwardWorkspaceSize(
                 self.handle_dnn,
                 self.input_t,
                 self.up_f,
@@ -366,9 +413,9 @@ impl Network {
                 self.residual_t,
                 ConvolutionFwdAlgo::Winograd,
                 &mut up_s
-            ), cudnn::Status::Success);
+            ));
 
-            assert_eq!(cudnn::cudnnGetConvolutionForwardWorkspaceSize(
+            check!(cudnnGetConvolutionForwardWorkspaceSize(
                 self.handle_dnn,
                 self.residual_t,
                 self.residual_f,
@@ -376,9 +423,9 @@ impl Network {
                 self.residual_t,
                 ConvolutionFwdAlgo::Winograd,
                 &mut residual_s
-            ), cudnn::Status::Success);
+            ));
 
-            assert_eq!(cudnn::cudnnGetConvolutionForwardWorkspaceSize(
+            check!(cudnnGetConvolutionForwardWorkspaceSize(
                 self.handle_dnn,
                 self.residual_t,
                 self.value_f,
@@ -386,9 +433,9 @@ impl Network {
                 self.value_t,
                 ConvolutionFwdAlgo::ImplicitPrecompGemm,
                 &mut value_s
-            ), cudnn::Status::Success);
+            ));
 
-            assert_eq!(cudnn::cudnnGetConvolutionForwardWorkspaceSize(
+            check!(cudnnGetConvolutionForwardWorkspaceSize(
                 self.handle_dnn,
                 self.residual_t,
                 self.policy_f,
@@ -396,12 +443,12 @@ impl Network {
                 self.policy_t,
                 ConvolutionFwdAlgo::ImplicitPrecompGemm,
                 &mut policy_s
-            ), cudnn::Status::Success);
+            ));
 
             w.scratch_size = vec! [up_s, residual_s, value_s, policy_s].into_iter().max().unwrap();
 
-            assert_eq!(cudaMalloc(&mut w.scratch_1, w.scratch_size), Error::Success);
-            assert_eq!(cudaMalloc(&mut w.scratch_2, w.scratch_size), Error::Success);
+            check!(cudaMalloc(&mut w.scratch_1, w.scratch_size));
+            check!(cudaMalloc(&mut w.scratch_2, w.scratch_size));
         }
 
         w
@@ -411,36 +458,36 @@ impl Network {
 impl Drop for Network {
     fn drop(&mut self) {
         unsafe {
-            assert_eq!(cudaFree(self.ones), Error::Success);
-            assert_eq!(cudaFree(self.zeros), Error::Success);
+            check!(cudaFree(self.ones));
+            check!(cudaFree(self.zeros));
             for &v in self.weights.values() {
-                assert_eq!(cudaFree(v), Error::Success);
+                check!(cudaFree(v));
             }
 
-            assert_eq!(cudnnDestroyTensorDescriptor(self.policy_t), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyTensorDescriptor(self.policy_bn_t), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyTensorDescriptor(self.policy_softmax_t), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyTensorDescriptor(self.value_t), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyTensorDescriptor(self.value_256_t), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyTensorDescriptor(self.value_1_t), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyTensorDescriptor(self.value_bn_t), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyTensorDescriptor(self.residual_t), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyTensorDescriptor(self.residual_bn_t), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyTensorDescriptor(self.input_t), cudnn::Status::Success);
+            check!(cudnnDestroyTensorDescriptor(self.policy_t));
+            check!(cudnnDestroyTensorDescriptor(self.policy_bn_t));
+            check!(cudnnDestroyTensorDescriptor(self.policy_softmax_t));
+            check!(cudnnDestroyTensorDescriptor(self.value_t));
+            check!(cudnnDestroyTensorDescriptor(self.value_256_t));
+            check!(cudnnDestroyTensorDescriptor(self.value_1_t));
+            check!(cudnnDestroyTensorDescriptor(self.value_bn_t));
+            check!(cudnnDestroyTensorDescriptor(self.residual_t));
+            check!(cudnnDestroyTensorDescriptor(self.residual_bn_t));
+            check!(cudnnDestroyTensorDescriptor(self.input_t));
 
-            assert_eq!(cudnnDestroyFilterDescriptor(self.up_f), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyFilterDescriptor(self.residual_f), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyFilterDescriptor(self.policy_f), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyFilterDescriptor(self.value_f), cudnn::Status::Success);
+            check!(cudnnDestroyFilterDescriptor(self.up_f));
+            check!(cudnnDestroyFilterDescriptor(self.residual_f));
+            check!(cudnnDestroyFilterDescriptor(self.policy_f));
+            check!(cudnnDestroyFilterDescriptor(self.value_f));
 
-            assert_eq!(cudnnDestroyActivationDescriptor(self.tanh), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyActivationDescriptor(self.relu), cudnn::Status::Success);
+            check!(cudnnDestroyActivationDescriptor(self.tanh));
+            check!(cudnnDestroyActivationDescriptor(self.relu));
 
-            assert_eq!(cudnnDestroyConvolutionDescriptor(self.conv2d_3), cudnn::Status::Success);
-            assert_eq!(cudnnDestroyConvolutionDescriptor(self.conv2d_1), cudnn::Status::Success);
+            check!(cudnnDestroyConvolutionDescriptor(self.conv2d_3));
+            check!(cudnnDestroyConvolutionDescriptor(self.conv2d_1));
 
-            assert_eq!(cudnnDestroy(self.handle_dnn), cudnn::Status::Success);
-            assert_eq!(cublasDestroy_v2(self.handle_blas), cublas::Status::Success);
+            check!(cudnnDestroy(self.handle_dnn));
+            check!(cublasDestroy_v2(self.handle_blas));
         }
     }
 }
@@ -448,70 +495,28 @@ impl Drop for Network {
 impl<'a> Drop for Workspace<'a> {
     fn drop(&mut self) {
         unsafe {
-            assert_eq!(cudaFree(self.scratch_1), Error::Success);
-            assert_eq!(cudaFree(self.scratch_2), Error::Success);
+            check!(cudaFree(self.scratch_1));
+            check!(cudaFree(self.scratch_2));
 
-            assert_eq!(cudaFree(self.input), Error::Success);
-            assert_eq!(cudaFree(self.residual_1), Error::Success);
-            assert_eq!(cudaFree(self.residual_2), Error::Success);
-            assert_eq!(cudaFree(self.residual_3), Error::Success);
-            assert_eq!(cudaFree(self.value_1), Error::Success);
-            assert_eq!(cudaFree(self.value_2), Error::Success);
-            assert_eq!(cudaFree(self.policy_1), Error::Success);
-            assert_eq!(cudaFree(self.policy_2), Error::Success);
+            check!(cudaFree(self.input));
+            check!(cudaFree(self.residual_1));
+            check!(cudaFree(self.residual_2));
+            check!(cudaFree(self.residual_3));
+            check!(cudaFree(self.value_1));
+            check!(cudaFree(self.value_2));
+            check!(cudaFree(self.policy_1));
+            check!(cudaFree(self.policy_2));
 
-            assert_eq!(cudaEventDestroy(self.tower_e), Error::Success);
-            assert_eq!(cudaStreamDestroy(self.tower_s), Error::Success);
-            assert_eq!(cudaStreamDestroy(self.policy_s), Error::Success);
-            assert_eq!(cudaStreamDestroy(self.value_s), Error::Success);
+            check!(cudaEventDestroy(self.tower_e));
+            check!(cudaStreamDestroy(self.tower_s));
+            check!(cudaStreamDestroy(self.policy_s));
+            check!(cudaStreamDestroy(self.value_s));
 
-            assert_eq!(cudnnDestroy(self.handle_dnn), cudnn::Status::Success);
-            assert_eq!(cublasDestroy_v2(self.handle_blas), cublas::Status::Success);
+            check!(cudnnDestroy(self.handle_dnn));
+            check!(cublasDestroy_v2(self.handle_blas));
         }
     }
 }
-
-macro_rules! debug_dump {
-    ($name:expr, $ptr:expr, $m:expr, $n:expr) => ({
-        #[cfg(feature = "debug_nn")]
-        {
-            let mut vec = [[0.0f32; $n]; $m];
-
-            assert_eq!(cudaDeviceSynchronize(), Error::Success);
-            assert_eq!(cudaMemcpy(
-                vec.as_mut_ptr() as *mut c_void,
-                $ptr,
-                4 * $m * $n,
-                MemcpyKind::DeviceToHost
-            ), Error::Success);
-
-            let mut s = String::new();
-            let mut sum = 0.0f32;
-
-            for i in 0..$m {
-                if i > 0 {
-                    s += ", ";
-                }
-                s += "[";
-
-                for j in 0..$n {
-                    if j > 0 {
-                        s += ", ";
-                    }
-
-                    sum += vec[i][j];
-                    s += &format!("{}", vec[i][j]);
-                }
-
-                s += "]";
-            }
-
-            println!("sum(`{}`) == {}", $name, sum);
-            println!("eval(`{}`) == [{}]", $name, s);
-        }
-    })
-}
-
 
 /// Returns the value and policy tensors obtained from a forward pass
 /// through the neural network.
@@ -527,22 +532,20 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
     let c_1 = 1.0f32;
 
     let mut softmax = vec! [0.0f32; 362];
-    let mut value = vec! [0.0f32; 1];
+    let mut value = [0.0f32; 1];
 
     unsafe {
-        assert_eq!(cudnnSetStream(w.handle_dnn, w.tower_s), cudnn::Status::Success);
-        assert_eq!(cudaMemcpyAsync(
+        check!(cudnnSetStream(w.handle_dnn, w.tower_s));
+        check!(cudaMemcpyAsync(
             w.input,
             features.as_ptr() as *const c_void,
             4 * features.len(),
             MemcpyKind::HostToDevice,
             w.tower_s
-        ), Error::Success);
-
-        debug_dump!("01_upsample/in", w.input, 34, 361);
+        ), "01_upsample/in", w.input, 34, 361);
 
         // up-sample the input features to the 256-wide internal representation
-        assert_eq!(cudnnConvolutionForward(
+        check!(cudnnConvolutionForward(
             w.handle_dnn,
             &c_1,  // alpha
             w.network.input_t, w.input,  // input
@@ -552,11 +555,9 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
             w.scratch_1, w.scratch_size,  // workspace
             &c_0,  // beta
             w.network.residual_t, w.residual_1,  // output
-        ), cudnn::Status::Success);
+        ), "01_upsample/up", w.residual_1, NUM_FEATURES, 361);
 
-        debug_dump!("01_upsample/up", w.residual_1, NUM_FEATURES, 361);
-
-        assert_eq!(cudnnBatchNormalizationForwardInference(
+        check!(cudnnBatchNormalizationForwardInference(
             w.handle_dnn,
             BatchNormMode::Spatial,
             &c_1,  // alpha
@@ -568,24 +569,20 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
             w.network.weights["01_upsample/mean:0"],
             w.network.weights["01_upsample/variance:0"],
             epsilon
-        ), cudnn::Status::Success);
+        ), "01_upsample/up_bn", w.residual_2, NUM_FEATURES, 361);
 
-        debug_dump!("01_upsample/up_bn", w.residual_2, NUM_FEATURES, 361);
-
-        assert_eq!(cudnnActivationForward(
+        check!(cudnnActivationForward(
             w.handle_dnn,
             w.network.relu,
             &c_1,  // alpha
             w.network.residual_t, w.residual_2,  // input
             &c_0,  // beta
             w.network.residual_t, w.residual_1,  // output
-        ), cudnn::Status::Success);
-
-        debug_dump!("01_upsample/up_relu", w.residual_1, NUM_FEATURES, 361);
+        ), "01_upsample/up_relu", w.residual_1, NUM_FEATURES, 361);
 
         // apply all of the residual blocks
         for i in 2..21 {
-            assert_eq!(cudnnConvolutionForward(
+            check!(cudnnConvolutionForward(
                 w.handle_dnn,
                 &c_1,  // alpha
                 w.network.residual_t, w.residual_1,  // input
@@ -595,11 +592,9 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
                 w.scratch_1, w.scratch_size,  // workspace
                 &c_0,  // beta
                 w.network.residual_t, w.residual_2,  // output
-            ), cudnn::Status::Success);
+            ), &format!("{:02}_residual/conv_1", i), w.residual_2, NUM_FEATURES, 361);
 
-            debug_dump!(&format!("{:02}_residual/conv_1", i), w.residual_2, NUM_FEATURES, 361);
-
-            assert_eq!(cudnnBatchNormalizationForwardInference(
+            check!(cudnnBatchNormalizationForwardInference(
                 w.handle_dnn,
                 BatchNormMode::Spatial,
                 &c_1,  // alpha
@@ -611,22 +606,18 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
                 w.network.weights[&format!("{:02}_residual/mean_1:0", i)],
                 w.network.weights[&format!("{:02}_residual/variance_1:0", i)],
                 epsilon
-            ), cudnn::Status::Success);
+            ), &format!("{:02}_residual/conv_bn_1", i), w.residual_3, NUM_FEATURES, 361);
 
-            debug_dump!(&format!("{:02}_residual/conv_bn_1", i), w.residual_3, NUM_FEATURES, 361);
-
-            assert_eq!(cudnnActivationForward(
+            check!(cudnnActivationForward(
                 w.handle_dnn,
                 w.network.relu,
                 &c_1,  // alpha
                 w.network.residual_t, w.residual_3,  // input
                 &c_0,  // beta
                 w.network.residual_t, w.residual_3,  // output
-            ), cudnn::Status::Success);
+            ), &format!("{:02}_residual/conv_relu_1", i), w.residual_3, NUM_FEATURES, 361);
 
-            debug_dump!(&format!("{:02}_residual/conv_relu_1", i), w.residual_3, NUM_FEATURES, 361);
-
-            assert_eq!(cudnnConvolutionForward(
+            check!(cudnnConvolutionForward(
                 w.handle_dnn,
                 &c_1,  // alpha
                 w.network.residual_t, w.residual_3,  // input
@@ -636,11 +627,9 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
                 w.scratch_1, w.scratch_size,  // workspace
                 &c_0,  // beta
                 w.network.residual_t, w.residual_2,  // output
-            ), cudnn::Status::Success);
+            ), &format!("{:02}_residual/conv_2", i), w.residual_2, NUM_FEATURES, 361);
 
-            debug_dump!(&format!("{:02}_residual/conv_2", i), w.residual_2, NUM_FEATURES, 361);
-
-            assert_eq!(cudnnBatchNormalizationForwardInference(
+            check!(cudnnBatchNormalizationForwardInference(
                 w.handle_dnn,
                 BatchNormMode::Spatial,
                 &c_1,  // alpha
@@ -652,30 +641,26 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
                 w.network.weights[&format!("{:02}_residual/mean_2:0", i)],
                 w.network.weights[&format!("{:02}_residual/variance_2:0", i)],
                 epsilon
-            ), cudnn::Status::Success);
+            ), &format!("{:02}_residual/conv_bn_2", i), w.residual_1, NUM_FEATURES, 361);
 
-            debug_dump!(&format!("{:02}_residual/conv_bn_2", i), w.residual_1, NUM_FEATURES, 361);
-
-            assert_eq!(cudnnActivationForward(
+            check!(cudnnActivationForward(
                 w.handle_dnn,
                 w.network.relu,
                 &c_1,  // alpha
                 w.network.residual_t, w.residual_1,  // input
                 &c_0,  // beta
                 w.network.residual_t, w.residual_1,  // output
-            ), cudnn::Status::Success);
-
-            debug_dump!(&format!("{:02}_residual/conv_relu_2", i), w.residual_1, NUM_FEATURES, 361);
+            ), &format!("{:02}_residual/conv_relu_2", i), w.residual_1, NUM_FEATURES, 361);
         }
 
-        assert_eq!(cudaEventRecord(w.tower_e, w.tower_s), Error::Success);
-        assert_eq!(cudaStreamWaitEvent(w.policy_s, w.tower_e, 0), Error::Success);
-        assert_eq!(cudaStreamWaitEvent(w.value_s, w.tower_e, 0), Error::Success);
+        check!(cudaEventRecord(w.tower_e, w.tower_s));
+        check!(cudaStreamWaitEvent(w.policy_s, w.tower_e, 0));
+        check!(cudaStreamWaitEvent(w.value_s, w.tower_e, 0));
 
         // policy head (21p_policy)
-        assert_eq!(cudnnSetStream(w.handle_dnn, w.policy_s), cudnn::Status::Success);
-        assert_eq!(cublasSetStream_v2(w.handle_blas, w.policy_s), cublas::Status::Success);
-        assert_eq!(cudnnConvolutionForward(
+        check!(cudnnSetStream(w.handle_dnn, w.policy_s));
+        check!(cublasSetStream_v2(w.handle_blas, w.policy_s));
+        check!(cudnnConvolutionForward(
             w.handle_dnn,
             &c_1,  // alpha
             w.network.residual_t, w.residual_1,  // input
@@ -685,11 +670,9 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
             w.scratch_1, w.scratch_size,  // workspace
             &c_0,  // beta
             w.network.policy_t, w.policy_1,  // output
-        ), cudnn::Status::Success);
+        ), "21p_policy/down", w.policy_1, 2, 361);
 
-        debug_dump!("21p_policy/down", w.policy_1, 2, 361);
-
-        assert_eq!(cudnnBatchNormalizationForwardInference(
+        check!(cudnnBatchNormalizationForwardInference(
             w.handle_dnn,
             BatchNormMode::Spatial,
             &c_1,  // alpha
@@ -701,22 +684,18 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
             w.network.weights["21p_policy/mean:0"],
             w.network.weights["21p_policy/variance:0"],
             epsilon
-        ), cudnn::Status::Success);
+        ), "21p_policy/down_bn", w.policy_2, 2, 361);
 
-        debug_dump!("21p_policy/down_bn", w.policy_2, 2, 361);
-
-        assert_eq!(cudnnActivationForward(
+        check!(cudnnActivationForward(
             w.handle_dnn,
             w.network.relu,
             &c_1,  // alpha
             w.network.policy_t, w.policy_2,  // input
             &c_0,  // beta
             w.network.policy_t, w.policy_2,  // output
-        ), cudnn::Status::Success);
+        ), "21p_policy/down_relu", w.policy_2, 2, 361);
 
-        debug_dump!("21p_policy/down_relu", w.policy_2, 2, 361);
-
-        assert_eq!(cublasSgemm_v2(
+        check!(cublasSgemm_v2(
             w.handle_blas,
             Operation::N,
             Operation::N,
@@ -726,21 +705,17 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
             w.policy_2, 722,  // input_1
             &c_0,  // beta
             w.policy_1, 362  // output
-        ), cublas::Status::Success);
+        ), "21p_policy/ff", w.policy_1, 1, 362);
 
-        debug_dump!("21p_policy/ff", w.policy_1, 1, 362);
-
-        assert_eq!(cudnnAddTensor(
+        check!(cudnnAddTensor(
             w.handle_dnn,
             &c_1,  // alpha
             w.network.policy_softmax_t, w.network.weights["21p_policy/bias:0"],  // bias
             &c_1,  // beta
             w.network.policy_softmax_t, w.policy_1  // input and output
-        ), cudnn::Status::Success);
+        ), "21p_policy/bias", w.policy_1, 1, 362);
 
-        debug_dump!("21p_policy/bias", w.policy_1, 1, 362);
-
-        assert_eq!(cudnnSoftmaxForward(
+        check!(cudnnSoftmaxForward(
             w.handle_dnn,
             SoftmaxAlgorithm::Accurate,
             SoftmaxMode::Instance,
@@ -748,22 +723,20 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
             w.network.policy_softmax_t, w.policy_1,  // input
             &c_0,  // beta
             w.network.policy_softmax_t, w.policy_2  // output
-        ), cudnn::Status::Success);
+        ), "21p_policy/softmax", w.policy_2, 1, 362);
 
-        debug_dump!("21p_policy/softmax", w.policy_2, 1, 362);
-
-        assert_eq!(cudaMemcpyAsync(
+        check!(cudaMemcpyAsync(
             softmax.as_mut_ptr() as *mut c_void,
             w.policy_2,
             1448,
             MemcpyKind::DeviceToHost,
             w.policy_s
-        ), Error::Success);
+        ));
 
         // value head (21v_value)
-        assert_eq!(cudnnSetStream(w.handle_dnn, w.value_s), cudnn::Status::Success);
-        assert_eq!(cublasSetStream_v2(w.handle_blas, w.value_s), cublas::Status::Success);
-        assert_eq!(cudnnConvolutionForward(
+        check!(cudnnSetStream(w.handle_dnn, w.value_s));
+        check!(cublasSetStream_v2(w.handle_blas, w.value_s));
+        check!(cudnnConvolutionForward(
             w.handle_dnn,
             &c_1,  // alpha
             w.network.residual_t, w.residual_1,  // input
@@ -773,11 +746,9 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
             w.scratch_2, w.scratch_size,  // workspace
             &c_0,  // beta
             w.network.value_t, w.value_1  // output
-        ), cudnn::Status::Success);
+        ), "21v_value/down", w.value_1, 1, 361);
 
-        debug_dump!("21v_value/down", w.value_1, 1, 361);
-
-        assert_eq!(cudnnBatchNormalizationForwardInference(
+        check!(cudnnBatchNormalizationForwardInference(
             w.handle_dnn,
             BatchNormMode::Spatial,
             &c_1,  // alpha
@@ -789,22 +760,18 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
             w.network.weights["21v_value/mean:0"],
             w.network.weights["21v_value/variance:0"],
             epsilon
-        ), cudnn::Status::Success);
+        ), "21v_value/down_bn", w.value_2, 1, 361);
 
-        debug_dump!("21v_value/down_bn", w.value_2, 1, 361);
-
-        assert_eq!(cudnnActivationForward(
+        check!(cudnnActivationForward(
             w.handle_dnn,
             w.network.relu,
             &c_1,  // alpha
             w.network.value_t, w.value_2,  // input
             &c_0,  // beta
             w.network.value_t, w.value_2,  // output
-        ), cudnn::Status::Success);
+        ), "21v_value/down_relu", w.value_2, 1, 361);
 
-        debug_dump!("21v_value/down_relu", w.value_2, 1, 361);
-
-        assert_eq!(cublasSgemm_v2(
+        check!(cublasSgemm_v2(
             w.handle_blas,
             Operation::N,
             Operation::N,
@@ -814,32 +781,26 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
             w.value_2, 361,  // input_1
             &c_0,  // beta
             w.value_1, 256  // output
-        ), cublas::Status::Success);
+        ), "21v_value/ff_256", w.value_1, 1, 256);
 
-        debug_dump!("21v_value/ff_256", w.value_1, 1, 256);
-
-        assert_eq!(cudnnAddTensor(
+        check!(cudnnAddTensor(
             w.handle_dnn,
             &c_1,  // alpha
             w.network.value_256_t, w.network.weights["21v_value/bias_1:0"],  // bias
             &c_1,  // beta
             w.network.value_256_t, w.value_1  // input and output
-        ), cudnn::Status::Success);
+        ), "21v_value/ff_bias_256", w.value_1, 1, 256);
 
-        debug_dump!("21v_value/ff_bias_256", w.value_1, 1, 256);
-
-        assert_eq!(cudnnActivationForward(
+        check!(cudnnActivationForward(
             w.handle_dnn,
             w.network.relu,
             &c_1,  // alpha
             w.network.value_256_t, w.value_1,  // input
             &c_0,  // beta
             w.network.value_256_t, w.value_1,  // output
-        ), cudnn::Status::Success);
+        ), "21v_value/ff_relu_256", w.value_1, 1, 256);
 
-        debug_dump!("21v_value/ff_relu_256", w.value_1, 1, 256);
-
-        assert_eq!(cublasSgemm_v2(
+        check!(cublasSgemm_v2(
             w.handle_blas,
             Operation::N,
             Operation::N,
@@ -849,121 +810,37 @@ pub fn forward(w: &mut Workspace, features: &[f32]) -> (f32, Box<[f32]>) {
             w.value_1, 256,  // input_1
             &c_0,  // beta
             w.value_2, 1  // output
-        ), cublas::Status::Success);
+        ), "21v_value/ff_1", w.value_2, 1, 1);
 
-        debug_dump!("21v_value/ff_1", w.value_2, 1, 1);
-
-        assert_eq!(cudnnAddTensor(
+        check!(cudnnAddTensor(
             w.handle_dnn,
             &c_1,  // alpha
             w.network.value_1_t, w.network.weights["21v_value/bias_2:0"],  // bias
             &c_1,  // beta
             w.network.value_1_t, w.value_2  // input and output
-        ), cudnn::Status::Success);
+        ), "21v_value/ff_bias_1", w.value_2, 1, 1);
 
-        debug_dump!("21v_value/ff_bias_1", w.value_2, 1, 1);
-
-        assert_eq!(cudnnActivationForward(
+        check!(cudnnActivationForward(
             w.handle_dnn,
             w.network.tanh,
             &c_1,  // alpha
             w.network.value_1_t, w.value_2,  // input
             &c_0,  // beta
             w.network.value_1_t, w.value_2,  // output
-        ), cudnn::Status::Success);
+        ), "21v_value/ff_tanh_2", w.value_2, 1, 1);
 
-        debug_dump!("21v_value/ff_tanh_2", w.value_2, 1, 1);
-
-        assert_eq!(cudaMemcpyAsync(
+        check!(cudaMemcpyAsync(
             value.as_mut_ptr() as *mut c_void,
             w.value_2,
             4,
             MemcpyKind::DeviceToHost,
             w.value_s
-        ), Error::Success);
+        ));
 
         // wait for both the value and policy head to finish
-        assert_eq!(cudaStreamSynchronize(w.policy_s), Error::Success);
-        assert_eq!(cudaStreamSynchronize(w.value_s), Error::Success);
+        check!(cudaStreamSynchronize(w.policy_s));
+        check!(cudaStreamSynchronize(w.value_s));
     }
 
     (value[0], softmax.into_boxed_slice())
-}
-
-#[cfg(test)]
-mod tests {
-    use ::nn::*;
-
-    #[test]
-    fn sgemm() {
-        let mut handle: cublas::Handle = ptr::null_mut();
-        let c_0 = 0.0f32;
-        let c_1 = 1.0f32;
-
-        unsafe {
-            let a = [  // 3x2
-                1.0f32, 2.0f32,
-                3.0f32, 4.0f32,
-                5.0f32, 6.0f32
-            ];
-            let b = [  // 2x3
-                1.0f32, 2.0f32, 3.0f32,
-                4.0f32, 5.0f32, 6.0f32
-            ];
-            let c = [  // 3x3
-                0.0f32, 0.0f32, 0.0f32,
-                0.0f32, 0.0f32, 0.0f32,
-                0.0f32, 0.0f32, 0.0f32
-            ];
-
-            // C = A * B
-            let mut a_ =  ptr::null_mut();
-            let mut b_ =  ptr::null_mut();
-            let mut c_ =  ptr::null_mut();
-
-            assert_eq!(cudaMalloc(&mut a_, 24), Error::Success);
-            assert_eq!(cudaMalloc(&mut b_, 24), Error::Success);
-            assert_eq!(cudaMalloc(&mut c_, 36), Error::Success);
-            assert_eq!(cudaMemcpy(
-                a_,
-                a.as_ptr() as *const c_void,
-                24,
-                MemcpyKind::HostToDevice
-            ), Error::Success);
-            assert_eq!(cudaMemcpy(
-                b_,
-                b.as_ptr() as *const c_void,
-                24,
-                MemcpyKind::HostToDevice
-            ), Error::Success);
-
-            assert_eq!(cublasCreate_v2(&mut handle), Status::Success);
-            assert_eq!(cublasSgemm_v2(
-                handle,
-                Operation::N,
-                Operation::N,
-                3, 3, 2,
-                &c_1,
-                b_, 3,
-                a_, 2,
-                &c_0,
-                c_, 3
-            ), Status::Success);
-            assert_eq!(cublasDestroy_v2(handle), Status::Success);
-
-            // check the results
-            assert_eq!(cudaMemcpy(
-                c.as_ptr() as *mut c_void,
-                c_,
-                36,
-                MemcpyKind::DeviceToHost
-            ), Error::Success);
-
-            assert_eq!(c, [
-                9.0f32, 12.0f32, 15.0f32,
-                19.0f32, 26.0f32, 33.0f32,
-                29.0f32, 40.0f32, 51.0f32
-            ])
-        }
-    }
 }

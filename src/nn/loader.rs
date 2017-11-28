@@ -19,7 +19,8 @@ use std::io::{BufReader, Read};
 use std::path::Path;
 use std::ptr;
 
-use nn::cuda::*;
+use f16::*;
+use nn::ffi::cuda::*;
 
 const BASE_85: [char; 85] = [
 	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
@@ -78,12 +79,8 @@ fn decode_b85(input: &str) -> Option<Box<[f32]>> {
             acc >>= 8;
         }
 
-        output.push(f32::from_bits(
-            ((dst[0] as u32) << 24)
-            | ((dst[1] as u32) << 16)
-            | ((dst[2] as u32) << 8)
-            | (dst[3] as u32))
-        );
+        output.push(f32::from(f16::from_bits(((dst[2] as u16) << 8) | (dst[3] as u16))));
+        output.push(f32::from(f16::from_bits(((dst[0] as u16) << 8) | (dst[1] as u16))));
     }
 
     Some(output.into_boxed_slice())
@@ -141,13 +138,13 @@ pub fn load(path: &Path) -> Option<HashMap<String, *const c_void>> {
                 let mut w = ptr::null_mut();
                 let size = 4 * tensor.len();
 
-                assert_eq!(cudaMalloc(&mut w, size), Error::Success);
-                assert_eq!(cudaMemcpy(
+                assert!(cudaMalloc(&mut w, size).is_ok());
+                assert!(cudaMemcpy(
                     w,
                     tensor.as_ptr() as *const c_void,
                     size,
                     MemcpyKind::HostToDevice
-                ), Error::Success);
+                ).is_ok());
 
                 out.insert(name, w as *const c_void);
             }
@@ -165,22 +162,22 @@ mod tests {
 
     #[test]
     fn pi_e() {
-        let string = "+Yd=VRQN4G";
+        let string = "NJ4Ny";
 
         assert_eq!(
             decode_b85(string),
-            Some(vec! [3.14159265, 2.71828183].into_boxed_slice())
+            Some(vec! [3.140625,  2.71875].into_boxed_slice())
         );
     }
 
     // Test that we can handle padding correctly
     #[test]
     fn _1234567() {
-        let string = "004kL0000$002Nh004kM005vs006*1007`X";
+        let string = "06YLd073vn07U>s07n1-";
 
         assert_eq!(
             decode_b85(string),
-            Some(vec! [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0].into_boxed_slice())
+            Some(vec! [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 0.0].into_boxed_slice())
         );
     }
 }

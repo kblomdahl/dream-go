@@ -9,7 +9,7 @@ publish = false
 default = []
 
 # print (a lot) of debug info during neural network evaluation
-debug_nn = []
+trace-cuda = []
 
 [profile.dev]
 opt-level = 2

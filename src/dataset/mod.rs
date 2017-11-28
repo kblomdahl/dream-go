@@ -22,6 +22,7 @@ use std::io::prelude::*;
 use std::io::{self, BufReader, Cursor};
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
+use ::f16::*;
 
 #[derive(Clone)]
 pub struct Entry {
@@ -143,11 +144,6 @@ impl Entry {
     }
 }
 
-extern "C" {
-    #[link_name = "llvm.convert.to.fp16.f32"]
-    fn convert_to_fp16_f32(f: f32) -> u16;
-}
-
 /// Write the given 32-bit floating point number to the given formatter
 /// in the platform endianess.
 ///
@@ -159,7 +155,7 @@ extern "C" {
 fn write_f32<T>(f: &mut T, value: f32) -> io::Result<()>
     where T: io::Write
 {
-    let value_b16: u16 = unsafe { convert_to_fp16_f32(value) };
+    let value_b16: u16 = f16::from(value).to_bits();
 
     unsafe {
         let bytes = transmute::<_, [u8; 2]>(value_b16);

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use libc::{c_double, c_int, c_void, size_t};
-use nn::cuda::Stream;
+use nn::ffi::cuda::Stream;
 
 #[repr(i32)]
 #[allow(dead_code)]
@@ -65,6 +65,13 @@ pub enum Status {
     NotSupported = 9,
     LicenseError = 10,
     RuntimePrerequisiteMissing = 11
+}
+
+impl Status {
+    /// Returns whether this status indicates a successful call.
+    pub fn is_ok(&self) -> bool {
+        *self == Status::Success
+    }
 }
 
 #[repr(i32)]

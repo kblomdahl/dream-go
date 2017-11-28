@@ -83,6 +83,13 @@ pub enum Error {
     StartupFailure = 0x7f
 }
 
+impl Error {
+    /// Returns whether this _error_ indicates a successful call.
+    pub fn is_ok(&self) -> bool {
+        *self == Error::Success
+    }
+}
+
 #[repr(i32)]
 #[allow(dead_code)]
 pub enum MemcpyKind {
