@@ -13,10 +13,12 @@
 // limitations under the License.
 
 mod circular_buf;
+mod small_set;
 pub mod symmetry;
 mod zobrist;
 
 use self::circular_buf::CircularBuf;
+use self::small_set::SmallSet;
 use std::fmt;
 
 #[repr(u8)]
@@ -113,7 +115,10 @@ pub struct Board {
     count: u16,
 
     /// The zobrist hash of the current board state.
-    zobrist_hash: u64
+    zobrist_hash: u64,
+
+    /// The zobrist hash of the most recent board positions.
+    zobrist_history: SmallSet
 }
 
 impl Clone for Board {
@@ -123,7 +128,8 @@ impl Clone for Board {
             next_vertex: self.next_vertex,
             history: self.history.clone(),
             count: self.count,
-            zobrist_hash: self.zobrist_hash
+            zobrist_hash: self.zobrist_hash,
+            zobrist_history: self.zobrist_history.clone()
         }
     }
 }
@@ -136,7 +142,8 @@ impl Board {
             next_vertex: [0; 361],
             history: CircularBuf::new(),
             count: 0,
-            zobrist_hash: 0
+            zobrist_hash: 0,
+            zobrist_history: SmallSet::new()
         };
 
         for i in 361..368 {
@@ -281,6 +288,30 @@ impl Board {
         }
     }
 
+    /// Returns the zobrist hash adjustment that would need to be done if the
+    /// group at the given index was capture and was of the given color.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `color` - the color of the group to capture
+    /// * `index` - the index of a stone in the group
+    /// 
+    fn capture_if(&self, color: usize, index: usize) -> u64 {
+        let mut adjustment = 0;
+        let mut current = index;
+
+        loop {
+            adjustment ^= zobrist::TABLE[color][current];
+
+            current = self.next_vertex[current] as usize;
+            if current == index {
+                break
+            }
+        }
+
+        adjustment
+    }
+
     /// Connects the chains of the two vertices into one chain. This method
     /// should not be called with the same group twice as that will result
     /// in a corrupted chain.
@@ -360,6 +391,36 @@ impl Board {
         }
     }
 
+    /// Returns whether playing the given rule violates the super-ko
+    /// rule. This functions assumes the given move is not suicide and
+    /// does not play on top of another stone, these pre-conditions can
+    /// be checked with the `_is_valid` function.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `color` - the color of the move
+    /// * `index` - the HW index of the move
+    /// 
+    pub fn _is_ko(&self, color: Color, index: usize) -> bool {
+        let mut zobrist_pretend = self.zobrist_hash ^ zobrist::TABLE[color as usize][index];
+        let opponent = color.opposite() as u8;
+
+        if N!(self.vertices, index) == opponent && !self.has_two_liberties(index + 19) {
+            zobrist_pretend ^= self.capture_if(opponent as usize, index + 19);
+        }
+        if E!(self.vertices, index) == opponent && !self.has_two_liberties(index + 1) {
+            zobrist_pretend ^= self.capture_if(opponent as usize, index + 1);
+        }
+        if S!(self.vertices, index) == opponent && !self.has_two_liberties(index - 19) {
+            zobrist_pretend ^= self.capture_if(opponent as usize, index - 19);
+        }
+        if W!(self.vertices, index) == opponent && !self.has_two_liberties(index - 1) {
+            zobrist_pretend ^= self.capture_if(opponent as usize, index - 1);
+        }
+
+        self.zobrist_history.contains(zobrist_pretend)
+    }
+
     /// Returns whether the given move is valid according to the
     /// Tromp-Taylor rules.
     ///
@@ -370,7 +431,9 @@ impl Board {
     /// * `y` - the row of the move
     ///
     pub fn is_valid(&self, color: Color, x: usize, y: usize) -> bool {
-        self._is_valid(color, 19 * y + x)
+        let index = 19 * y + x;
+
+        self._is_valid(color, index) && !self._is_ko(color, index)
     }
 
     /// Place the given stone on the board without checking if it is legal, the
@@ -416,6 +479,7 @@ impl Board {
         // 2. the circular stack starts with all buffers as zero, so there is no need to
         //    keep track of the initial board state.
         self.history.push(&self.vertices);
+        self.zobrist_history.push(self.zobrist_hash);
     }
 
     /// Fills the given array with all liberties of in the provided array of vertices
@@ -545,7 +609,12 @@ impl Board {
             }
         }
 
-        // x
+        // compute the distance to all neighbours using a dynamic programming
+        // approach where we at each iteration try to update the neighbours of
+        // each updated vertex, and if the distance we tried to set was smaller
+        // than the current distance we try to update that vertex neighbours.
+        //
+        // This is equivalent to a Bellman–Ford algorithm for the shortest path.
         while probes.len() > 0 {
             let index = probes.pop().unwrap();
             let t = territory[index] + 1;
@@ -810,5 +879,20 @@ mod tests {
         board.place(Color::Black, 1, 1);
 
         assert_eq!(board.get_num_liberties_if(Color::Black, 1), 5);
+    }
+
+    /// Test that we can accurately detect ko using the simplest possible
+    /// corner ko.
+    #[test]
+    fn ko() {
+        let mut board = Board::new();
+
+        board.place(Color::Black, 0, 0);
+        board.place(Color::Black, 0, 2);
+        board.place(Color::Black, 1, 1);
+        board.place(Color::White, 1, 0);
+        board.place(Color::White, 0, 1);
+
+        assert!(!board.is_valid(Color::Black, 0, 0));
     }
 }
