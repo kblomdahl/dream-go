@@ -419,9 +419,7 @@ def dump(args):
     Dump the given (or latest if none is given) checkpoint as a JSON file that
     is readable by dream-go
     """
-    tower = Tower()
-    features = tf.placeholder(tf.float32, (1, 34, 19, 19))
-    _, _ = tower(features)
+    _tower = Tower()
 
     # restore only model variables
     saver_vars = tf.model_variables()
@@ -440,7 +438,8 @@ def dump(args):
         else:
             saver.restore(sess, args[0])
 
-        # dump the variables to JSON
+        # dump the variables to JSON in half precision in order to save
+        # save disk space.
         import base64
         import json
 
