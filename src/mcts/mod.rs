@@ -13,7 +13,8 @@
 // limitations under the License.
 
 mod dirichlet;
-use ordered_float::OrderedFloat;
+mod tree;
+
 use rand::{thread_rng, Rng};
 
 use ::go::{symmetry, Board, Color};
@@ -27,58 +28,9 @@ const SGF_LETTERS: [char; 26] = [
     'w', 'x', 'y', 'z'
 ];
 
-lazy_static! {
-    /// Mapping from policy index to the `x` coordinate it represents.
-    static ref _X: Box<[u8]> = (0..361).map(|i| (i % 19) as u8).collect::<Vec<u8>>().into_boxed_slice();
-
-    /// Mapping from policy index to the `y` coordinate it represents.
-    static ref _Y: Box<[u8]> = (0..361).map(|i| (i / 19) as u8).collect::<Vec<u8>>().into_boxed_slice();
-}
-
 pub enum GameResult {
     Resign(String, Board, Color, f32),
     Ended(String, Board)
-}
-
-/// Returns an index from the given policy that represents a valid move
-/// and if `greedy` is false is randomly choosen weighted according to
-/// the value of each index in the `policy`.
-/// 
-/// # Arguments
-/// 
-/// * `board` - the board position to use when validity
-/// * `color` - the color to use when checking move validity
-/// * `policy` - the policy to pluck the moves from
-/// * `greedy` - whether to pick the move with the highest value or randomly
-///
-fn choose(board: &Board, color: Color, policy: &mut [f32], greedy: bool) -> Option<usize> {
-    assert_eq!(policy.len(), 362);
-
-    // reject any moves that are not valid from the distribution
-    let mut total = policy[361];
-
-    for i in 0..361 {
-        if !board.is_valid(color, _X[i] as usize, _Y[i] as usize) {
-            policy[i] = 0.0;
-        } else {
-            total += policy[i];
-        }
-    }
-
-    if greedy {
-        (0..362).max_by_key(|&i| OrderedFloat(policy[i]))
-    } else {
-        let mut r = total * thread_rng().next_f32();
-
-        for i in 0..362 {
-            r -= policy[i];
-            if r <= 1e-6 {
-                return Some(i);
-            }
-        }
-
-        None
-    }
 }
 
 /// Performs a forward pass through the neural network for the given board
@@ -118,7 +70,47 @@ fn forward(workspace: &mut Workspace, board: &Board, color: Color) -> (f32, Box<
 
     symmetry::apply(&mut policy, t.inverse());
 
+    // replace any invalid moves in the suggested policy with -Inf, while keeping
+    // the pass move (361) untouched so that there is always at least one valid
+    // move.
+    for i in 0..361 {
+        let (x, y) = (tree::X[i] as usize, tree::Y[i] as usize);
+
+        if !board.is_valid(color, x, y) {
+            policy[i] = ::std::f32::NEG_INFINITY;
+        }
+    }
+
     (value, policy)
+}
+
+pub fn predict(workspace: &mut Workspace, starting_point: &Board, starting_color: Color) -> (f32, usize, usize) {
+    // add some dirichlet noise to the root node of the search tree in order to increase
+    // the entropy of the search and avoid overfitting to the prior value
+    let (_, mut policy) = forward(workspace, starting_point, starting_color);
+    dirichlet::add(&mut policy, 0.03);
+
+    // perform exactly 2,000 probes into the search tree
+    let mut root = tree::Node::new(starting_color, policy);
+
+    for _ in 0..2000 {
+        let mut board = starting_point.clone();
+        let trace = unsafe { tree::probe(&mut root, &mut board) };
+
+        if let Some(&(_, color, _)) = trace.last() {
+            let next_color = color.opposite();
+            let (value, policy) = forward(workspace, &board, next_color);
+
+            unsafe {
+                tree::insert(&trace, next_color, value, policy);
+            }
+        }
+    }
+
+    let (value, index) = root.best();
+    let (_, prior_index) = root.prior();
+
+    (value, index, prior_index)
 }
 
 /// Play a game against the engine and return the result of the game.
@@ -138,35 +130,33 @@ pub fn self_play(workspace: &mut Workspace) -> GameResult {
     // engine playing pointless capture sequences at the end of the game
     // that does not change the final result.
     while count < 722 {
-        let (value, mut policy) = forward(workspace, &board, current);
+        let (value, index, prior_index) = predict(workspace, &board, current);
+
+        debug_assert!(-1.0 <= value && value <= 1.0);
+        debug_assert!(index < 362);
 
         if value < -0.9 {  // resign the game if the evaluation looks bad
             sgf += &format!(";{}[]", current);
 
             return GameResult::Resign(sgf, board, current.opposite(), -value);
         } else {
-            // add some random noise to the policy to increase the entropy of
-            // the self play dataset and avoid just overfitting to the current
-            // policy during training.
-            dirichlet::add(&mut policy, 0.03);
-
-            // choose a random move from the policy for the first 10 turns, after
-            // that play deterministically (discounting the dirichlet noise) to
-            // avoid making large blunders during life or death situations.
-            let policy_m = choose(&board, current, &mut policy, count >= 10);
-
-            if policy_m.is_none() || policy_m == Some(361) {  // passing move
+            if index == 361 {  // passing move
                 sgf += &format!(";{}[]C[{0} {}]", current, value);
                 pass_count += 1;
 
                 if pass_count >= 2 {
                     return GameResult::Ended(sgf, board)
                 }
-            } else if let Some(policy_m) = policy_m {
-                let y = _Y[policy_m] as usize;
-                let x = _X[policy_m] as usize;
+            } else {
+                let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
+                let (px, py) = (tree::X[prior_index] as usize, tree::Y[prior_index] as usize);
 
-                sgf += &format!(";{}[{}{}]C[{0} {}]", current, SGF_LETTERS[x], SGF_LETTERS[y], value);
+                sgf += &format!(";{}[{}{}]TR[{}{}]C[{0} {}]",
+                    current,
+                    SGF_LETTERS[x], SGF_LETTERS[y],
+                    SGF_LETTERS[px], SGF_LETTERS[py],
+                    value
+                );
                 pass_count = 0;
 
                 board.place(current, x, y);

@@ -18,6 +18,6 @@ debug = true
 [dependencies]
 lazy_static = "0.2"
 libc = "0.2"
+ordered-float = "0.5"
 rand = "0.3"
 regex = "0.2"
-ordered-float = "0.5"

@@ -266,7 +266,7 @@ pub fn add(x: &mut [f32], shape: f32) {
     let g_recip = g_sum.recip();
 
     for i in 0..(x.len()) {
-        x[i] = 0.9 * x[i] + 0.1 * g[i] * g_recip;
+        x[i] = 0.75 * x[i] + 0.25 * g[i] * g_recip;
     }
 }
 
@@ -287,6 +287,6 @@ mod tests {
             s += v;
         }
 
-        assert!(s >= 0.0999 && s <= 0.1001, "{}", s);
+        assert!(s >= 0.2499 && s <= 0.2501, "{}", s);
     }
 }

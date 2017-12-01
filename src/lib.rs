@@ -13,12 +13,13 @@
 // limitations under the License.
 #![feature(io)]
 #![feature(link_llvm_intrinsics)]
+#![feature(unique)]
 
 #[macro_use] extern crate lazy_static;
 extern crate libc;
+extern crate ordered_float;
 extern crate rand;
 extern crate regex;
-extern crate ordered_float;
 
 pub mod dataset;
 mod f16;
