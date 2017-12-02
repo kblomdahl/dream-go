@@ -93,9 +93,7 @@ fn apply_aux(values: &mut [f32], transform: &[usize]) {
     let mut out = [0.0f32; 361];
 
     for i in 0..361 {
-        let j = transform[i];
-
-        out[j] = values[i];
+        out[transform[i]] = values[i];
     }
 
     values.copy_from_slice(&out);

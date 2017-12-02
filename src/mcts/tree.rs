@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use go::{Board, Color};
+use mcts::spin::Mutex;
 
 use ordered_float::OrderedFloat;
 use std::ptr;
@@ -25,8 +26,11 @@ lazy_static! {
     pub static ref Y: Box<[u8]> = (0..361).map(|i| (i / 19) as u8).collect::<Vec<u8>>().into_boxed_slice();
 }
 
-///
+/// A monte carlo search tree.
 pub struct Node {
+    /// Spinlock used to protect the data in this node during modifications.
+    lock: Mutex,
+
     /// The color of each edge.
     color: Color,
 
@@ -77,6 +81,7 @@ impl Node {
         }
 
         Node {
+            lock: Mutex::new(),
             color: color,
             total_count: 0,
             count: [0; 368],
@@ -119,18 +124,7 @@ impl Node {
         s.into_boxed_slice()
     }
 
-    pub fn depth(&self) -> usize {
-        (0..362).map(|i| {
-            let child = self.children[i];
-
-            if child.is_null() {
-                0
-            } else {
-                unsafe { (*child).depth() }
-            }
-        }).max().unwrap() + 1
-    }
-
+    /// Returns the child with the maximum UCT value.
     fn select(&self) -> usize {
         // compute all UCB1 values in a SIMD friendly manner in the hopes
         // that the compiler will re-write it to make use of modern hardware
@@ -168,8 +162,12 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> NodeTrace {
     loop {
         let next_child = current.select();
 
-        current.total_count += 1;
-        current.count[next_child] += 1;
+        {
+            let _guard = current.lock.lock();
+
+            current.total_count += 1;
+            current.count[next_child] += 1;
+        }
 
         trace.push((current as *mut Node, current.color, next_child));
         if next_child != 361 {  // not a passing move
@@ -180,7 +178,11 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> NodeTrace {
         }
 
         //
-        let child = current.children[next_child];
+        let child = {
+            let _guard = current.lock.lock();
+
+            current.children[next_child]
+        };
 
         if child.is_null() {
             break
@@ -204,13 +206,21 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> NodeTrace {
 /// 
 pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Box<[f32]>) {
     if let Some(&(node, _, index)) = trace.last() {
-        (*node).children[index] = Box::into_raw(Box::new(Node::new(color, prior)));
+        let _guard = (*node).lock.lock();
+
+        if (*node).children[index].is_null() {
+            (*node).children[index] = Box::into_raw(Box::new(Node::new(color, prior)));
+        }
     }
 
     for &(node, _, index) in trace.iter() {
         let value_ = if color == (*node).color { value } else { -value };
 
         // incremental update of the average value
-        (*node).value[index] += (value_ - (*node).value[index]) / ((*node).count[index] as f32);
+        {
+            let _guard = (*node).lock.lock();
+
+            (*node).value[index] += (value_ - (*node).value[index]) / ((*node).count[index] as f32);
+        }
     }
 }
