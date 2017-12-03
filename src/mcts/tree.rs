@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use go::{Board, Color};
+use mcts::param::Param;
 use mcts::spin::Mutex;
 
 use ordered_float::OrderedFloat;
@@ -26,8 +27,87 @@ lazy_static! {
     pub static ref Y: Box<[u8]> = (0..361).map(|i| (i / 19) as u8).collect::<Vec<u8>>().into_boxed_slice();
 }
 
+pub trait Value {
+    unsafe fn update<C: Param, E: Value>(trace: &NodeTrace<E>, color: Color, value: f32);
+    fn get<C: Param, E: Value>(node: &Node<E>, index: usize) -> f32;
+}
+
+/// An implementation of the _Rapid Action Value Estimation_ heuristic
+/// with a minimum MSE schedule as suggested by Sylvain Gelly and
+/// David Silver [1].
+/// 
+/// [1] http://www.cs.utexas.edu/~pstone/Courses/394Rspring13/resources/mcrave.pdf
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct RAVE;
+
+impl Value for RAVE {
+    #[inline]
+    unsafe fn update<C: Param, E: Value>(trace: &NodeTrace<E>, color: Color, value: f32) {
+        PUCT::update::<C, E>(trace, color, value);
+
+        for (i, &(node, node_color, index)) in trace.iter().enumerate() {
+            let value_ = if color == (*node).color { value } else { -value };
+
+            for &(other, other_color, _) in trace.iter().take(i) {
+                if node_color == other_color {
+                    let _guard = (*other).lock.lock();
+
+                    (*other).amaf_count[index] += 1;
+                    (*other).amaf[index] += (value_ - (*other).amaf[index]) / ((*other).amaf_count[index] as f32);
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn get<C: Param, E: Value>(node: &Node<E>, index: usize) -> f32 {
+        let b_sqr = C::rave_bias() * C::rave_bias();
+
+        // minimum MSE schedule
+        if node.count[index] == 0 && node.amaf_count[index] == 0 {
+            node.value[index]
+        } else {
+            let count = node.count[index] as f32;
+            let amaf_count = node.amaf_count[index] as f32;
+            let beta = amaf_count / (count + amaf_count + 4.0f32*count*amaf_count*b_sqr);
+
+            assert!(0.0 <= beta && beta <= 1.0);
+
+            (1.0f32 - beta) * node.value[index] + beta * node.amaf[index]
+        }
+    }
+}
+
+/// An implementation of the _Polynomial UCT_ as suggested in the AlphaGo Zero
+/// paper [1].
+/// 
+/// [1] https://www.nature.com/articles/nature24270
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct PUCT;
+
+impl Value for PUCT {
+    #[inline]
+    unsafe fn update<C: Param, E: Value>(trace: &NodeTrace<E>, color: Color, value: f32) {
+        for &(node, _, index) in trace.iter() {
+            let value_ = if color == (*node).color { value } else { -value };
+
+            // incremental update of the average value
+            let _guard = (*node).lock.lock();
+
+            (*node).value[index] += (value_ - (*node).value[index]) / ((*node).count[index] as f32);
+        }
+    }
+
+    #[inline]
+    fn get<C: Param, E: Value>(node: &Node<E>, index: usize) -> f32 {
+        node.value[index]
+    }
+}
+
 /// A monte carlo search tree.
-pub struct Node {
+pub struct Node<E: Value> {
     /// Spinlock used to protect the data in this node during modifications.
     lock: Mutex,
 
@@ -46,11 +126,17 @@ pub struct Node {
     /// The average value for the sub-tree of each edge.
     value: [f32; 368],
 
+    /// The average value for the all moves as first heuristic of each edge.
+    amaf: [f32; 368],
+
+    /// The total number of all moves as first updates each edge has received.
+    amaf_count: [i32; 368],
+
     /// The sub-tree that each edge points towards.
-    children: [*mut Node; 362]
+    children: [*mut Node<E>; 362]
 }
 
-impl Drop for Node {
+impl<E: Value> Drop for Node<E> {
     fn drop(&mut self) {
         for &child in self.children.iter() {
             if !child.is_null() {
@@ -60,7 +146,7 @@ impl Drop for Node {
     }
 }
 
-impl Node {
+impl<E: Value> Node<E> {
     /// Returns an empty search tree with the given starting color and prior
     /// values.
     /// 
@@ -69,7 +155,7 @@ impl Node {
     /// * `color` - the color of the first players color
     /// * `prior` - the prior values of the nodes
     /// 
-    pub fn new(color: Color, prior: Box<[f32]>) -> Node {
+    pub fn new(color: Color, prior: Box<[f32]>) -> Node<E> {
         assert_eq!(prior.len(), 362);
 
         // copy the prior values into an array size that is dividable
@@ -87,6 +173,8 @@ impl Node {
             count: [0; 368],
             prior: prior_padding,
             value: [0.0f32; 368],
+            amaf: [0.0f32; 368],
+            amaf_count: [0; 368],
             children: [ptr::null_mut(); 362]
         }
     }
@@ -95,6 +183,14 @@ impl Node {
     /// determined as the most visited child.
     pub fn best(&self) -> (f32, usize) {
         let max_i = (0..362).max_by_key(|&i| self.count[i]).unwrap();
+
+        if self.amaf_count[max_i] > 0 {
+            eprintln!("value = {:.3}, amaf = {:.3}, diff = {:.3}",
+                self.value[max_i],
+                self.amaf[max_i],
+                (self.amaf[max_i] - self.value[max_i]).abs(),
+            );
+        }
 
         (self.value[max_i], max_i)
     }
@@ -125,17 +221,16 @@ impl Node {
     }
 
     /// Returns the child with the maximum UCT value.
-    fn select(&self) -> usize {
+    fn select<C: Param>(&self) -> usize {
         // compute all UCB1 values in a SIMD friendly manner in the hopes
         // that the compiler will re-write it to make use of modern hardware
         let mut uct = [0.0f32; 368];
         let sqrt_n = (1.0 + self.total_count as f32).sqrt();
 
         for i in 0..368 {
-            const C: f32 = 1.41421356237;
             let exp_bonus = sqrt_n / ((1 + self.count[i]) as f32);
 
-            uct[i] = self.value[i] + self.prior[i] * C * exp_bonus;
+            uct[i] = E::get::<C, E>(self, i) + self.prior[i] * C::exploration_rate() * exp_bonus;
         }
 
         // greedy selection based on the maximum ucb1 value
@@ -143,7 +238,7 @@ impl Node {
     }
 }
 
-pub type NodeTrace = Vec<(*mut Node, Color, usize)>;
+pub type NodeTrace<E> = Vec<(*mut Node<E>, Color, usize)>;
 
 /// Probe down the search tree, while updating the given board with the
 /// moves the traversed edges represents, and return a list of the
@@ -155,12 +250,14 @@ pub type NodeTrace = Vec<(*mut Node, Color, usize)>;
 /// * `root` - the search tree to probe into
 /// * `board` - the board to update with the traversed moves
 /// 
-pub unsafe fn probe(root: &mut Node, board: &mut Board) -> NodeTrace {
+pub unsafe fn probe<C, E>(root: &mut Node<E>, board: &mut Board) -> NodeTrace<E>
+    where C: Param, E: Value
+{
     let mut trace = vec! [];
     let mut current = root;
 
     loop {
-        let next_child = current.select();
+        let next_child = current.select::<C>();
 
         {
             let _guard = current.lock.lock();
@@ -169,7 +266,7 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> NodeTrace {
             current.count[next_child] += 1;
         }
 
-        trace.push((current as *mut Node, current.color, next_child));
+        trace.push((current as *mut Node<E>, current.color, next_child));
         if next_child != 361 {  // not a passing move
             let (x, y) = (X[next_child] as usize, Y[next_child] as usize);
 
@@ -204,7 +301,9 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> NodeTrace {
 /// * `value` -
 /// * `prior` -
 /// 
-pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Box<[f32]>) {
+pub unsafe fn insert<C, E>(trace: &NodeTrace<E>, color: Color, value: f32, prior: Box<[f32]>)
+    where C: Param, E: Value
+{
     if let Some(&(node, _, index)) = trace.last() {
         let _guard = (*node).lock.lock();
 
@@ -213,14 +312,5 @@ pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Box<[f3
         }
     }
 
-    for &(node, _, index) in trace.iter() {
-        let value_ = if color == (*node).color { value } else { -value };
-
-        // incremental update of the average value
-        {
-            let _guard = (*node).lock.lock();
-
-            (*node).value[index] += (value_ - (*node).value[index]) / ((*node).count[index] as f32);
-        }
-    }
+    E::update::<C, E>(trace, color, value);
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use mcts::param::Param;
 use rand::{thread_rng, Rng, Open01};
 
 const ZIG_NORM_R: f32 = 3.654152885361008796;
@@ -243,7 +244,7 @@ fn gamma_small(inv_shape: f32, c: f32, d: f32) -> f32 {
 /// * `x` - the vector to add the distribution to
 /// * `scale` - the scale of the distribution
 /// 
-pub fn add(x: &mut [f32], shape: f32) {
+pub fn add<C: Param>(x: &mut [f32], shape: f32) {
     assert!(shape < 1.0);
 
     let inv_shape = shape.recip();
@@ -264,21 +265,23 @@ pub fn add(x: &mut [f32], shape: f32) {
     // add the distribution to the given array with a
     // mixing constant of 0.2
     let g_recip = g_sum.recip();
+    let beta = C::dirichlet_noise();
 
     for i in 0..(x.len()) {
-        x[i] = 0.75 * x[i] + 0.25 * g[i] * g_recip;
+        x[i] = (1.0 - beta) * x[i] + beta * g[i] * g_recip;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use mcts::dirichlet::*;
+    use mcts::param::*;
 
     #[test]
     fn dirichlet() {
         let mut x = vec! [0.0; 256];
         let mut s = 0.0;
-        add(&mut x, 0.03);
+        add::<Standard>(&mut x, 0.03);
 
         for &v in x.iter() {
             assert!(v.is_finite());
@@ -287,6 +290,6 @@ mod tests {
             s += v;
         }
 
-        assert!(s >= 0.2499 && s <= 0.2501, "{}", s);
+        assert!(s >= Standard::dirichlet_noise() - 0.01 && s <= Standard::dirichlet_noise() + 0.01, "{}", s);
     }
 }

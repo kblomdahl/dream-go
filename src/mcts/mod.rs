@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod param;
 mod dirichlet;
 mod spin;
 mod tree;
@@ -25,11 +26,8 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use ::go::{symmetry, Board, Color};
+use ::mcts::param::*;
 use ::nn::{self, Network, Workspace};
-
-const NUM_ITERATIONS: usize = 2000;
-const NUM_THREADS: usize = 16;
-const BATCH_SIZE: usize = 8;
 
 /// Mapping from 1D coordinate to letter used to represent that coordinate in
 /// the SGF file format.
@@ -158,9 +156,9 @@ fn forward<A>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>)
 
 /// The shared variables between the master and each worker thread in the `predict` function.
 #[derive(Clone)]
-struct ThreadContext {
+struct ThreadContext<E: tree::Value + Clone> {
     /// The root of the monte carlo tree.
-    root: Arc<UnsafeCell<tree::Node>>,
+    root: Arc<UnsafeCell<tree::Node<E>>>,
 
     /// The number of probes that still needs to be done into the tree.
     remaining: Arc<AtomicIsize>,
@@ -172,7 +170,7 @@ struct ThreadContext {
     sender: Sender<(Box<[f32]>, Sender<(f32, Box<[f32]>)>)>
 }
 
-unsafe impl Send for ThreadContext { }
+unsafe impl<E: tree::Value + Clone> Send for ThreadContext<E> { }
 
 /// Predicts the _best_ next move according to the given neural network when applied
 /// to a monte carlo tree search.
@@ -183,26 +181,31 @@ unsafe impl Send for ThreadContext { }
 /// * `starting_point` -
 /// * `starting_color` -
 /// 
-pub fn predict(network: &Network, starting_point: &Board, starting_color: Color) -> (f32, usize, usize, Box<[f32]>) {
-    assert_eq!(NUM_ITERATIONS % BATCH_SIZE, 0);
-    assert_eq!(NUM_THREADS % BATCH_SIZE, 0);
+pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
+    network: &Network,
+    starting_point: &Board,
+    starting_color: Color
+) -> (f32, usize, usize, Box<[f32]>)
+{
+    assert_eq!(C::iteration_limit() % C::batch_size(), 0);
+    assert_eq!(C::thread_count() % C::batch_size(), 0);
 
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
     let mut immediate = ImmediateForward::new(network);
     let (_, mut policy) = forward(&mut immediate, starting_point, starting_color);
-    dirichlet::add(&mut policy, 0.03);
+    dirichlet::add::<C>(&mut policy, 0.03);
 
     // perform exactly NUM_ITERATIONS probes into the search tree
     let (sender, receiver) = channel();
-    let context = ThreadContext {
+    let context: ThreadContext<E> = ThreadContext {
         root: Arc::new(UnsafeCell::new(tree::Node::new(starting_color, policy))),
-        remaining: Arc::new(AtomicIsize::new(NUM_ITERATIONS as isize)),
+        remaining: Arc::new(AtomicIsize::new(C::iteration_limit() as isize)),
         starting_point: starting_point.clone(),
         sender: sender
     };
 
-    let handles = (0..NUM_THREADS).map(|_| {
+    let handles = (0..C::thread_count()).map(|_| {
         let context = context.clone();
 
         thread::spawn(move || {
@@ -210,14 +213,14 @@ pub fn predict(network: &Network, starting_point: &Board, starting_color: Color)
 
             while context.remaining.fetch_sub(1, Ordering::SeqCst) > 0 {
                 let mut board = context.starting_point.clone();
-                let trace = unsafe { tree::probe(&mut *context.root.get(), &mut board) };
+                let trace = unsafe { tree::probe::<C, E>(&mut *context.root.get(), &mut board) };
 
                 if let Some(&(_, color, _)) = trace.last() {
                     let next_color = color.opposite();
                     let (value, policy) = forward(&mut remote, &board, next_color);
 
                     unsafe {
-                        tree::insert(&trace, next_color, value, policy);
+                        tree::insert::<C, E>(&trace, next_color, value, policy);
                     }
                 }
             }
@@ -228,14 +231,15 @@ pub fn predict(network: &Network, starting_point: &Board, starting_color: Color)
     // an independent count instead of relying on `remaining` to avoid race-conditions
     // between when we check the loop invariant, when the workers decrease the
     // counter, and when the workers receive the response from the network.
-    let mut workspace_b = network.get_workspace(BATCH_SIZE);
+    let mut workspace_b = network.get_workspace(C::batch_size());
+    let batch_size = C::batch_size();
 
-    for _ in 0..(NUM_ITERATIONS/BATCH_SIZE) {
+    for _ in 0..(C::iteration_limit() / C::batch_size()) {
         // collect a full batch worth of features from the workers
         let mut features_list = vec! [];
         let mut sender_list = vec! [];
 
-        for _ in 0..BATCH_SIZE {
+        for _ in 0..batch_size {
             let (features, sender) = receiver.recv().unwrap();
 
             features_list.push(features);
@@ -301,7 +305,12 @@ pub fn self_play(network: &Network) -> GameResult {
     // engine playing pointless capture sequences at the end of the game
     // that does not change the final result.
     while count < 722 {
-        let (value, index, prior_index, _policy) = predict(network, &board, current);
+        let (value, index, prior_index, _policy) = if current == Color::Black {
+            predict::<Standard, tree::PUCT>(network, &board, current)
+        } else {
+            predict::<Standard, tree::PUCT>(network, &board, current)
+            //predict_policy(network, &board, current)
+        };
 
         debug_assert!(-1.0 <= value && value <= 1.0);
         debug_assert!(index < 362);
