@@ -19,6 +19,15 @@ use mcts::spin::Mutex;
 use ordered_float::OrderedFloat;
 use std::ptr;
 
+/// Mapping from 1D coordinate to letter used to represent that coordinate in
+/// the SGF file format.
+#[cfg(feature = "trace-mcts")]
+const SGF_LETTERS: [char; 26] = [
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
+    'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
+    'w', 'x', 'y', 'z'
+];
+
 lazy_static! {
     /// Mapping from policy index to the `x` coordinate it represents.
     pub static ref X: Box<[u8]> = (0..361).map(|i| (i % 19) as u8).collect::<Vec<u8>>().into_boxed_slice();
@@ -132,6 +141,11 @@ pub struct Node<E: Value> {
     /// The total number of all moves as first updates each edge has received.
     amaf_count: [i32; 368],
 
+    /// Whether some thread is currently busy (or is done) expanding the given
+    /// child. This is used to avoid the same child being expanded multiple
+    /// times by different threads.
+    expanding: [bool; 362],
+
     /// The sub-tree that each edge points towards.
     children: [*mut Node<E>; 362]
 }
@@ -175,22 +189,97 @@ impl<E: Value> Node<E> {
             value: [0.0f32; 368],
             amaf: [0.0f32; 368],
             amaf_count: [0; 368],
+            expanding: [false; 362],
             children: [ptr::null_mut(); 362]
         }
+    }
+
+    /// Returns a string that contains this entire search tree in SGF format. The tree
+    /// is formatted such that each node in the SGF file contains has a comment
+    /// that contains the properties of the sub-tree.
+    #[cfg(feature = "trace-mcts")]
+    pub fn as_sgf<C: Param>(&self) -> String {
+        use std::fmt::Write;
+
+        let mut out = String::new();
+        let sqrt_n = (1.0 + self.total_count as f32).sqrt();
+
+        // annotate the top-10 moves to make it easier to navigate for the
+        // user.
+        let mut children = (0..362).collect::<Vec<usize>>();
+        children.sort_by_key(|&i| -self.count[i]);
+
+        for i in 0..10 {
+            let j = children[i];
+
+            if j != 361 && self.count[j] > 0 {
+                lazy_static! {
+                    static ref LABELS: Vec<&'static str> = vec! [
+                        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"
+                    ];
+                }
+
+                write!(out, "LB[{}{}:{}]",
+                    SGF_LETTERS[X[j] as usize],
+                    SGF_LETTERS[Y[j] as usize],
+                    LABELS[i]
+                ).unwrap();
+            }
+        }
+
+        // mark all valid moves with a triangle (for debugging the symmetry code)
+        /*
+        for i in 0..361 {
+            if self.prior[i].is_normal() {
+                write!(out, "TR[{}{}]",
+                    SGF_LETTERS[X[i] as usize],
+                    SGF_LETTERS[Y[i] as usize],
+                ).unwrap();
+            }
+        }
+        */
+
+        for i in 0..362 {
+            // do not output nodes that has not been visited to reduce the
+            // size of the final SGF file.
+            if self.count[i] == 0 {
+                continue;
+            }
+
+            write!(out, "(").unwrap();
+            write!(out, ";{}[{}{}]",
+                if self.color == Color::Black { "B" } else { "W" },
+                if i == 361 { 't' } else { SGF_LETTERS[X[i] as usize] },
+                if i == 361 { 't' } else { SGF_LETTERS[Y[i] as usize] }
+            ).unwrap();
+            write!(out, "C[prior {:.4} value {:.4} (visits {} / total {}) amaf {:.4} (visits {}) uct {:.4}]",
+                self.prior[i],
+                self.value[i],
+                self.count[i],
+                self.total_count,
+                self.amaf[i],
+                self.amaf_count[i],
+                self.uct::<C>(i, sqrt_n)
+            ).unwrap();
+
+            unsafe {
+                let child = self.children[i];
+
+                if !child.is_null() {
+                    out += &(*child).as_sgf::<C>();
+                }
+            }
+
+            write!(out, ")").unwrap();
+        }
+
+        out
     }
 
     /// Returns the best move according to the current search tree. This is
     /// determined as the most visited child.
     pub fn best(&self) -> (f32, usize) {
         let max_i = (0..362).max_by_key(|&i| self.count[i]).unwrap();
-
-        if self.amaf_count[max_i] > 0 {
-            eprintln!("value = {:.3}, amaf = {:.3}, diff = {:.3}",
-                self.value[max_i],
-                self.amaf[max_i],
-                (self.amaf[max_i] - self.value[max_i]).abs(),
-            );
-        }
 
         (self.value[max_i], max_i)
     }
@@ -209,8 +298,10 @@ impl<E: Value> Node<E> {
         let mut s_total = 0.0f32;
 
         for i in 0..362 {
-            s[i] = self.count[i] as f32;
-            s_total += self.count[i] as f32;
+            let count = self.count[i] as f32;
+
+            s[i] = count;
+            s_total += count;
         }
 
         for i in 0..362 {
@@ -220,21 +311,46 @@ impl<E: Value> Node<E> {
         s.into_boxed_slice()
     }
 
-    /// Returns the child with the maximum UCT value.
-    fn select<C: Param>(&self) -> usize {
+    /// Return the UCT value for the given child.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `i` - the index of the child whose UCT value we are interested in
+    /// * `sqrt_n` - the square root of the total number of probes into this tree
+    /// 
+    #[inline]
+    fn uct<C: Param>(&self, i: usize, sqrt_n: f32) -> f32 {
+        let exp_bonus = sqrt_n / ((1 + self.count[i]) as f32);
+
+        E::get::<C, E>(self, i) + self.prior[i] * C::exploration_rate() * exp_bonus
+    }
+
+    /// Returns the child with the maximum UCT value, and increase its visit count
+    /// by one.
+    fn select<'a, C: Param>(&'a mut self) -> usize {
         // compute all UCB1 values in a SIMD friendly manner in the hopes
         // that the compiler will re-write it to make use of modern hardware
         let mut uct = [0.0f32; 368];
         let sqrt_n = (1.0 + self.total_count as f32).sqrt();
 
         for i in 0..368 {
-            let exp_bonus = sqrt_n / ((1 + self.count[i]) as f32);
-
-            uct[i] = E::get::<C, E>(self, i) + self.prior[i] * C::exploration_rate() * exp_bonus;
+            uct[i] = self.uct::<C>(i, sqrt_n);
         }
 
-        // greedy selection based on the maximum ucb1 value
-        (0..362).max_by_key(|&i| OrderedFloat(uct[i])).unwrap()
+        // greedy selection based on the maximum ucb1 value, but avoid picking nodes
+        // that are currently in the progress of being expanded. Then within the same
+        // lock, mark the selected edge as currently being expanding, so that some
+        // other thread does not pick it too.
+        let _guard = self.lock.lock();
+        let max_i = (0..362).filter(|&i| !self.expanding[i] || !self.children[i].is_null())
+                            .max_by_key(|&i| OrderedFloat(uct[i]))
+                            .unwrap();
+
+        self.total_count += 1;
+        self.count[max_i] += 1;
+        self.expanding[max_i] = true;
+
+        max_i
     }
 }
 
@@ -258,13 +374,6 @@ pub unsafe fn probe<C, E>(root: &mut Node<E>, board: &mut Board) -> NodeTrace<E>
 
     loop {
         let next_child = current.select::<C>();
-
-        {
-            let _guard = current.lock.lock();
-
-            current.total_count += 1;
-            current.count[next_child] += 1;
-        }
 
         trace.push((current as *mut Node<E>, current.color, next_child));
         if next_child != 361 {  // not a passing move
@@ -313,4 +422,40 @@ pub unsafe fn insert<C, E>(trace: &NodeTrace<E>, color: Color, value: f32, prior
     }
 
     E::update::<C, E>(trace, color, value);
+}
+
+/// Returns a SGF file that contains a pretty-print description of the given search tree.
+/// 
+/// # Arguments
+/// 
+/// * `root` -
+/// * `starting_point` -
+/// 
+#[cfg(feature = "trace-mcts")]
+pub fn to_sgf<C, E>(root: &Node<E>, starting_point: &Board) -> String
+    where C: Param, E: Value
+{
+    use std::fmt::Write;
+
+    // write the starting point to the SGF file as pre-set variables
+    let mut initial_board = String::new();
+
+    for y in 0..19 {
+        for x in 0..19 {
+            write!(initial_board, "{}",
+                match starting_point.at(x, y) {
+                    None => String::new(),
+                    Some(Color::Black) => format!("AB[{}{}]", SGF_LETTERS[x], SGF_LETTERS[y]),
+                    Some(Color::White) => format!("AW[{}{}]", SGF_LETTERS[x], SGF_LETTERS[y])
+                }
+            ).unwrap();
+        }
+    }
+
+    // add standard SGF prefix and suffix
+    format!("(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]PL[{}]{}{})",
+        if root.color == Color::Black { "B" } else { "W" },
+        initial_board,
+        root.as_sgf::<C>()
+    )
 }

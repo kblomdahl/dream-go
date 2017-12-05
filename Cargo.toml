@@ -11,6 +11,9 @@ default = []
 # print (a lot) of debug info during neural network evaluation
 trace-cuda = []
 
+# dump all finished search tree's to stdout
+trace-mcts = []
+
 [profile.dev]
 opt-level = 2
 debug = true

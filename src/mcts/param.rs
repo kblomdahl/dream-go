@@ -21,7 +21,7 @@ pub trait Param {
     fn iteration_limit() -> usize;  // 512
 
     /// The number of threads to run in parallel probing into the search tree.
-    fn thread_count() -> usize;  // 16'
+    fn thread_count() -> usize;  // 16
 
     /// The number of asynchronous neural network evaluations to batch together.
     fn batch_size() -> usize;  // 8
@@ -38,6 +38,9 @@ pub trait Param {
     /// this can be heuristically determined based on what the difference
     /// between the final value and the AMAF value is.
     fn rave_bias() -> f32;  // 0.1
+
+    /// Whether to use experimental features.
+    fn experimental() -> bool;
 }
 
 #[derive(Clone)]
@@ -125,6 +128,7 @@ impl Param for Standard {
     #[inline] fn dirichlet_noise() -> f32 { 0.25 }
     #[inline] fn exploration_rate() -> f32 { 1.41421356237 }
     #[inline] fn rave_bias() -> f32 { 0.1 }
+    #[inline] fn experimental() -> bool { false }
 }
 
 #[derive(Clone)]
@@ -136,6 +140,7 @@ impl Param for Experimental {
     #[inline] fn thread_count() -> usize { Standard::thread_count() }
     #[inline] fn batch_size() -> usize { Standard::batch_size() }
     #[inline] fn dirichlet_noise() -> f32 { Standard::dirichlet_noise() }
-    #[inline] fn exploration_rate() -> f32 { 0.70710678118 }
+    #[inline] fn exploration_rate() -> f32 { Standard::exploration_rate() }
     #[inline] fn rave_bias() -> f32 { Standard::rave_bias() }
+    #[inline] fn experimental() -> bool { true }
 }

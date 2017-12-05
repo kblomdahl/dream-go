@@ -110,8 +110,8 @@ impl Forwarder for RemoteForward {
 /// * `board` - the board position
 /// * `color` - the current player
 /// 
-fn forward<A>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>)
-    where A: Forwarder
+fn forward<C, A>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>)
+    where C: Param, A: Forwarder
 {
     lazy_static! {
         static ref SYMM: Vec<symmetry::Transform> = vec! [
@@ -148,6 +148,41 @@ fn forward<A>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>)
 
         if !board.is_valid(color, x, y) {
             policy[i] = ::std::f32::NEG_INFINITY;
+        }
+    }
+
+    // get ride of symmetric moves, this is mostly useful for the opening.
+    // Once we are past the first ~7 moves the board is usually sufficiently
+    // asymmetric for this to turn into a no-op.
+    //
+    // we skip the first symmetry because it is the identity symmetry, which
+    // is always a symmetry for any board.
+    for &t in &SYMM[1..8] {
+        if !symmetry::is_symmetric(board, t) {
+            continue;
+        }
+
+        // figure out which are the useful vertices by eliminating the
+        // symmetries from the board.
+        let mut visited = [false; 368];
+
+        for i in 0..361 {
+            let j = t.apply(i);
+
+            if i != j && !visited[i] {
+                visited[i] = true;
+                visited[j] = true;
+
+                let src = ::std::cmp::max(i, j);
+                let dst = ::std::cmp::min(i, j);
+
+                if policy[src].is_normal() {
+                    assert!(policy[dst].is_normal());
+
+                    policy[dst] += policy[src];
+                    policy[src] = ::std::f32::NEG_INFINITY;
+                }
+            }
         }
     }
 
@@ -193,7 +228,7 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
     let mut immediate = ImmediateForward::new(network);
-    let (_, mut policy) = forward(&mut immediate, starting_point, starting_color);
+    let (_, mut policy) = forward::<C, ImmediateForward>(&mut immediate, starting_point, starting_color);
     dirichlet::add::<C>(&mut policy, 0.03);
 
     // perform exactly NUM_ITERATIONS probes into the search tree
@@ -217,7 +252,7 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
 
                 if let Some(&(_, color, _)) = trace.last() {
                     let next_color = color.opposite();
-                    let (value, policy) = forward(&mut remote, &board, next_color);
+                    let (value, policy) = forward::<C, RemoteForward>(&mut remote, &board, next_color);
 
                     unsafe {
                         tree::insert::<C, E>(&trace, next_color, value, policy);
@@ -234,7 +269,7 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
     let mut workspace_b = network.get_workspace(C::batch_size());
     let batch_size = C::batch_size();
 
-    for _ in 0..(C::iteration_limit() / C::batch_size()) {
+    for _ in 0..(C::iteration_limit() / batch_size) {
         // collect a full batch worth of features from the workers
         let mut features_list = vec! [];
         let mut sender_list = vec! [];
@@ -265,6 +300,9 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
         let (_, prior_index) = root.prior();
         let policy = root.softmax();
 
+        #[cfg(feature = "trace-mcts")]
+        println!("{}", tree::to_sgf::<C, E>(root, starting_point));
+
         (value, index, prior_index, policy)
     }
 }
@@ -278,9 +316,14 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
 /// * `starting_color` -
 /// 
 #[allow(dead_code)]
-pub fn predict_policy(network: &Network, starting_point: &Board, starting_color: Color) -> (f32, usize, usize, Box<[f32]>) {
+pub fn predict_policy<C: Param>(
+    network: &Network,
+    starting_point: &Board,
+    starting_color: Color
+) -> (f32, usize, usize, Box<[f32]>)
+{
     let mut immediate = ImmediateForward::new(network);
-    let (value, policy) = forward(&mut immediate, starting_point, starting_color);
+    let (value, policy) = forward::<C, ImmediateForward>(&mut immediate, starting_point, starting_color);
     let policy_index = (0..362).max_by_key(|&i| OrderedFloat(policy[i])).unwrap();
     let mut softmax = vec! [0.0f32; 362];
     softmax[policy_index] = 1.0;
@@ -309,7 +352,7 @@ pub fn self_play(network: &Network) -> GameResult {
             predict::<Standard, tree::PUCT>(network, &board, current)
         } else {
             predict::<Standard, tree::PUCT>(network, &board, current)
-            //predict_policy(network, &board, current)
+            //predict_policy::<Standard>(network, &board, current)
         };
 
         debug_assert!(-1.0 <= value && value <= 1.0);

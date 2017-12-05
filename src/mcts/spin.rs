@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering, fence};
 
 pub struct MutexGuard<'a> {
     mutex: &'a Mutex
@@ -20,7 +20,7 @@ pub struct MutexGuard<'a> {
 
 impl<'a> Drop for MutexGuard<'a> {
     fn drop(&mut self) {
-        let previous = self.mutex.lock.compare_and_swap(false, true, Ordering::SeqCst);
+        let previous = self.mutex.lock.compare_and_swap(false, true, Ordering::Release);
 
         assert_eq!(previous, false);
     }
@@ -40,10 +40,14 @@ impl Mutex {
     }
 
     #[inline]
-    pub fn lock<'a>(&'a mut self) -> MutexGuard<'a> {
-        while !self.lock.compare_and_swap(true, false, Ordering::SeqCst) {
-            // pass
+    pub fn lock<'a>(&'a self) -> MutexGuard<'a> {
+        while !self.lock.compare_and_swap(true, false, Ordering::Relaxed) {
+            unsafe { asm!("pause" :::: "volatile"); }
         }
+
+        // use a separate fence here so that we can avoid the tighter ordering
+        // inside of the spin-lock.
+        fence(Ordering::Acquire);
 
         MutexGuard { mutex: self }
     }

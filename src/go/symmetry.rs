@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use go::Board;
+
 fn get_transformation<F, G>(ax: F, ay: G) -> Box<[usize]>
     where F: Fn(i32, i32) -> i32, G: Fn(i32, i32) -> i32
 {
@@ -58,7 +60,7 @@ lazy_static! {
 }
 
 /// Available transformations that are part of the go boards symmetry group.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Transform {
     Identity,
     FlipLR,
@@ -81,6 +83,19 @@ impl Transform {
             Transform::Rot90 => Transform::Rot270,
             Transform::Rot180 => Transform::Rot180,
             Transform::Rot270 => Transform::Rot90
+        }
+    }
+
+    pub fn apply(&self, index: usize) -> usize {
+        match *self {
+            Transform::Identity => _IDENTITY[index],
+            Transform::FlipLR => _FLIP_LR[index],
+            Transform::FlipUD => _FLIP_UD[index],
+            Transform::Transpose => _TRANSPOSE_MAIN[index],
+            Transform::TransposeAnti => _TRANSPOSE_ANTI[index],
+            Transform::Rot90 => _ROT_90[index],
+            Transform::Rot180 => _ROT_180[index],
+            Transform::Rot270 => _ROT_270[index],
         }
     }
 }
@@ -127,6 +142,32 @@ pub fn apply(values: &mut [f32], transform: Transform) {
             Transform::Rot270 => apply_aux(vs, &_ROT_270),
         }
     }
+}
+
+/// Returns if the given board is symmetric over the given group.
+/// 
+/// # Arguments
+/// 
+/// * `board` -
+/// * `transform` -
+/// 
+pub fn is_symmetric(board: &Board, transform: Transform) -> bool {
+    let lookup: &[usize] = match transform {
+        Transform::Identity => &_IDENTITY,
+        Transform::FlipLR => &_FLIP_LR,
+        Transform::FlipUD => &_FLIP_UD,
+        Transform::Transpose => &_TRANSPOSE_MAIN,
+        Transform::TransposeAnti => &_TRANSPOSE_ANTI,
+        Transform::Rot90 => &_ROT_90,
+        Transform::Rot180 => &_ROT_180,
+        Transform::Rot270 => &_ROT_270,
+    };
+
+    (0..361).all(|i| {
+        let j = lookup[i];
+
+        board.vertices[i] == board.vertices[j]
+    })
 }
 
 #[cfg(test)]
