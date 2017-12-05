@@ -240,7 +240,7 @@ def main(args):
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
     dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
     dataset = dataset.shuffle(2048)
-    dataset = dataset.batch(240)
+    dataset = dataset.batch(288)
     iterator = dataset.make_initializable_iterator()
 
     #
@@ -268,7 +268,7 @@ def main(args):
 
     learning_rate = tf.train.piecewise_constant(
         global_step,
-        [20000, 50000, 100000, 300000, 600000],
+        [50000, 100000, 300000, 500000, 700000],
         [1e-2, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5]
     )
     optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
