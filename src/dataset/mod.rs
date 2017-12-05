@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use go::{Board, Color};
+use go::{Board, Color, symmetry};
 use regex::Regex;
 
 use rand::{self, Rng};
@@ -98,18 +98,53 @@ impl Entry {
             }
         }
 
-        // pick exactly one entry from each game
-        rand::thread_rng().choose(&entries)
-                .map(|&(ref board, current_color, correct_index)| {
-                    let mut policy = vec! [0.0f32; 362];
-                    policy[correct_index] = 1.0;
+        // pick exactly one entry for each symmetry of the game
+        lazy_static! {
+            static ref SYMMETRIES: Vec<symmetry::Transform> = vec! [
+                symmetry::Transform::Identity,
+                symmetry::Transform::FlipLR,
+                symmetry::Transform::FlipUD,
+                symmetry::Transform::Transpose,
+                symmetry::Transform::TransposeAnti,
+                symmetry::Transform::Rot90,
+                symmetry::Transform::Rot180,
+                symmetry::Transform::Rot270
+            ];
+        }
 
-                    vec! [Entry::new(
-                        &board.get_features(current_color),
-                        if current_color == winner { 1.0 } else { -1.0 },
-                        &policy
-                    )]
+        SYMMETRIES.iter()
+                .filter_map(|s| {
+                    // because we remove symmetric board positions we
+                    // want to give the engine several attempts to find
+                    // a good position for each symmetry.
+                    (0..5).map(|_| {
+                            rand::thread_rng().choose(&entries)
+                                .and_then(|&(ref board, current_color, correct_index)| {
+                                    if *s != symmetry::Transform::Identity && symmetry::is_symmetric(board, *s) {
+                                        None
+                                    } else {
+                                        let mut features = board.get_features(current_color);
+                                        let mut policy = vec! [0.0f32; 362];
+
+                                        symmetry::apply(&mut features, *s);
+
+                                        if correct_index < 361 {
+                                            policy[s.apply(correct_index)] = 1.0;
+                                        } else {
+                                            policy[correct_index] = 1.0;
+                                        }
+
+                                        Some(Entry::new(
+                                            &features,
+                                            if current_color == winner { 1.0 } else { -1.0 },
+                                            &policy
+                                        ))
+                                    }
+                                })
+                          })
+                          .next()
                 })
+                .collect()
     }
 
     /// Returns an entry with the given values stored as compressed FP16
