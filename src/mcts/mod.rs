@@ -186,6 +186,18 @@ fn forward<C, A>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>
         }
     }
 
+    // renormalize the policy so that it sums to one after all the pruning that
+    // we have performed.
+    let policy_sum: f32 = policy.iter().filter(|p| p.is_normal()).sum();
+
+    if policy_sum > 1e-4 {  // do not divide by zero
+        let policy_recip = policy_sum.recip();
+
+        for i in 0..362 {
+            policy[i] *= policy_recip;
+        }
+    }
+
     (value, policy)
 }
 

@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn lock() {
-        let mut mutex = Mutex::new();
+        let mutex = Mutex::new();
 
         mutex.lock();
     }
