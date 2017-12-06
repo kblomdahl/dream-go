@@ -40,7 +40,7 @@ pub enum ConvolutionMode {
 #[allow(dead_code)]
 pub enum ConvolutionFwdAlgo {
     ImplicitPrecompGemm = 1,
-    Winograd = 6,
+    Winograd = 6
 }
 
 #[repr(i32)]
