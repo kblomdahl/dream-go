@@ -15,12 +15,14 @@
 #![feature(io)]
 #![feature(link_llvm_intrinsics)]
 #![feature(unique)]
+#![feature(test)]
 
 #[macro_use] extern crate lazy_static;
 extern crate libc;
 extern crate ordered_float;
 extern crate rand;
 extern crate regex;
+#[cfg(test)] extern crate test;
 
 pub mod dataset;
 mod f16;
