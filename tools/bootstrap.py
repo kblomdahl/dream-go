@@ -24,6 +24,7 @@ Usage: ./bootstrap.py <dataset...>
 from datetime import datetime
 from math import nan, isnan
 import sys
+import os
 
 import tensorflow as tf
 import numpy as np
@@ -240,7 +241,7 @@ def main(args):
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
     dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
     dataset = dataset.shuffle(2048)
-    dataset = dataset.batch(288)
+    dataset = dataset.batch(256 if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
     iterator = dataset.make_initializable_iterator()
 
     #
