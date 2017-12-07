@@ -25,9 +25,10 @@ use std::sync::mpsc::{Sender, channel};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use ::go::{symmetry, Board, Color};
-use ::mcts::param::*;
-use ::nn::{self, Network, Workspace};
+use go::{symmetry, Board, Color};
+use mcts::param::*;
+use nn::{self, Network, Workspace};
+use util::b85;
 
 /// Mapping from 1D coordinate to letter used to represent that coordinate in
 /// the SGF file format.
@@ -360,7 +361,7 @@ pub fn self_play(network: &Network) -> GameResult {
     // engine playing pointless capture sequences at the end of the game
     // that does not change the final result.
     while count < 722 {
-        let (value, index, prior_index, _policy) = if current == Color::Black {
+        let (value, index, prior_index, policy) = if current == Color::Black {
             predict::<Standard, tree::PUCT>(network, &board, current)
         } else {
             predict::<Standard, tree::PUCT>(network, &board, current)
@@ -376,7 +377,7 @@ pub fn self_play(network: &Network) -> GameResult {
             return GameResult::Resign(sgf, board, current.opposite(), -value);
         } else {
             if index == 361 {  // passing move
-                sgf += &format!(";{}[]C[{0} {}]", current, value);
+                sgf += &format!(";{}[]P[{}]", current, b85::encode(&policy));
                 pass_count += 1;
 
                 if pass_count >= 2 {
@@ -390,11 +391,11 @@ pub fn self_play(network: &Network) -> GameResult {
                     (tree::X[prior_index] as usize, tree::Y[prior_index] as usize)
                 };
 
-                sgf += &format!(";{}[{}{}]TR[{}{}]C[{0} {}]",
+                sgf += &format!(";{}[{}{}]P[{}]TR[{}{}]",
                     current,
                     SGF_LETTERS[x], SGF_LETTERS[y],
-                    SGF_LETTERS[px], SGF_LETTERS[py],
-                    value
+                    b85::encode(&policy),
+                    SGF_LETTERS[px], SGF_LETTERS[py]
                 );
                 pass_count = 0;
 

@@ -11,21 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![feature(asm)]
-#![feature(io)]
-#![feature(link_llvm_intrinsics)]
-#![feature(unique)]
-#![feature(test)]
 
-#[macro_use] extern crate lazy_static;
-extern crate libc;
-extern crate ordered_float;
-extern crate rand;
-extern crate regex;
-#[cfg(test)] extern crate test;
-
-pub mod dataset;
-pub mod go;
-pub mod mcts;
-pub mod nn;
-mod util;
+pub mod b85;
+pub mod f16;

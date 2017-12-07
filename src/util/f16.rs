@@ -59,7 +59,7 @@ impl From<f32> for f16 {
 
 #[cfg(test)]
 mod tests {
-    use ::f16::*;
+    use util::f16::*;
 
     #[test]
     fn from_f16_to_f32() {

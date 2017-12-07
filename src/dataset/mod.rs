@@ -13,16 +13,37 @@
 // limitations under the License.
 
 use go::{Board, Color, symmetry};
-use regex::Regex;
+use util::b85;
+use util::f16::*;
 
-use rand::{self, Rng};
 use std::fs::File;
 use std::mem::transmute;
 use std::io::prelude::*;
 use std::io::{self, BufReader, Cursor};
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
-use ::f16::*;
+
+use rand::{self, Rng};
+use regex::Regex;
+
+enum PolicyEntry {
+    Full(String),
+    Partial(usize)
+}
+
+impl PolicyEntry {
+    /// Returns a slice containing the full policy of this entry.
+    fn to_slice(&self) -> Box<[f32]> {
+        match *self {
+            PolicyEntry::Full(ref input) => b85::decode(input).unwrap(),
+            PolicyEntry::Partial(index) => {
+                let mut policy = vec! [0.0; 362];
+                policy[index] = 1.0;
+                policy.into_boxed_slice()
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Entry {
@@ -56,7 +77,7 @@ impl Entry {
                 'w', 'x', 'y', 'z'
             ];
             static ref WINNER: Regex = Regex::new(r"RE\[([^\]]*)\]").unwrap();
-            static ref MOVE: Regex = Regex::new(r";([BW])\[([a-z]*)\]").unwrap();
+            static ref MOVE: Regex = Regex::new(r";([BW])\[([a-z]*)\](?:P\[([^\]]*)\])?").unwrap();
         }
 
         let winner = {
@@ -71,7 +92,7 @@ impl Entry {
             }
         };
 
-        let mut entries: Vec<(Board, Color, usize)> = vec! [];
+        let mut entries: Vec<(Board, Color, PolicyEntry)> = vec! [];
         let mut board = Board::new();
         let size = board.size();
 
@@ -83,15 +104,22 @@ impl Entry {
             };
             let x = moves[2].chars().nth(0)
                 .and_then(|x| LETTERS.binary_search(&x).ok())
-                .unwrap_or(board.size());
+                .unwrap_or(size);
             let y = moves[2].chars().nth(1)
                 .and_then(|y| LETTERS.binary_search(&y).ok())
-                .unwrap_or(board.size());
+                .unwrap_or(size);
+            let policy = moves.get(3)
+                .map(|input| { PolicyEntry::Full(input.as_str().to_string()) })
+                .unwrap_or_else(|| {
+                    let index = size*y + x;
 
-            if x >= board.size() || y >= board.size() {
-                entries.push((board.clone(), current_color, size*size));
+                    PolicyEntry::Partial(::std::cmp::min(361, index))
+                });
+
+            if x >= size || y >= size {
+                entries.push((board.clone(), current_color, policy));
             } else if board.is_valid(current_color, x, y) {
-                entries.push((board.clone(), current_color, size*y + x));
+                entries.push((board.clone(), current_color, policy));
                 board.place(current_color, x, y);
             } else {
                 return None;  // invalid game
@@ -112,39 +140,37 @@ impl Entry {
             ];
         }
 
-        SYMMETRIES.iter()
-                .filter_map(|s| {
-                    // because we remove symmetric board positions we
-                    // want to give the engine several attempts to find
-                    // a good position for each symmetry.
-                    (0..5).map(|_| {
-                            rand::thread_rng().choose(&entries)
-                                .and_then(|&(ref board, current_color, correct_index)| {
-                                    if *s != symmetry::Transform::Identity && symmetry::is_symmetric(board, *s) {
-                                        None
-                                    } else {
-                                        let mut features = board.get_features(current_color);
-                                        let mut policy = vec! [0.0f32; 362];
+        let examples = SYMMETRIES.iter()
+            .filter_map(|s| {
+                // because we remove symmetric board positions we
+                // want to give the engine several attempts to find
+                // a good position for each symmetry.
+                (0..5)
+                    .filter_map(|_| {
+                        rand::thread_rng().choose(&entries)
+                            .and_then(|&(ref board, current_color, ref policy)| {
+                                if *s != symmetry::Transform::Identity && symmetry::is_symmetric(board, *s) {
+                                    None
+                                } else {
+                                    let mut features = board.get_features(current_color);
+                                    let mut policy = policy.to_slice();
 
-                                        symmetry::apply(&mut features, *s);
+                                    symmetry::apply(&mut features, *s);
+                                    symmetry::apply(&mut policy, *s);
 
-                                        if correct_index < 361 {
-                                            policy[s.apply(correct_index)] = 1.0;
-                                        } else {
-                                            policy[correct_index] = 1.0;
-                                        }
+                                    Some(Entry::new(
+                                        &features,
+                                        if current_color == winner { 1.0 } else { -1.0 },
+                                        &policy
+                                    ))
+                                }
+                            })
+                    })
+                    .next()
+            })
+            .collect();
 
-                                        Some(Entry::new(
-                                            &features,
-                                            if current_color == winner { 1.0 } else { -1.0 },
-                                            &policy
-                                        ))
-                                    }
-                                })
-                          })
-                          .next()
-                })
-                .collect()
+        Some(examples)
     }
 
     /// Returns an entry with the given values stored as compressed FP16
@@ -275,7 +301,7 @@ impl Dataset {
             }
         });
 
-	Ok(Dataset {
+        Ok(Dataset {
             receiver: r_entry
         })
     }
