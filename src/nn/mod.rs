@@ -160,6 +160,10 @@ macro_rules! check {
                         s += &format!("{:.4}", vec[i][j]);
                     }
                 } else {
+                    for j in 0..$n {
+                        sum += vec[i][j];
+                    }
+
                     for j in 0..8 {
                         s += &format!("{:.4}, ", vec[i][j]);
                     }
@@ -326,39 +330,26 @@ impl Network {
                     1, 1, 1, 1
                 ));
 
+                // The `.zeros` and `.ones` are always f32 regardless of the _main_ data
+                // type since they are only used for batch-normalization which requires
+                // all of the `scale`, `bias`, `estimated_mean`, `estimated_variance`
+                // values to be `f32`.
+                check!(cudaMalloc(&mut n.zeros, NUM_FEATURES * DataType::Float.size()));
+                check!(cudaMalloc(&mut n.ones, NUM_FEATURES * DataType::Float.size()));
 
-                check!(cudaMalloc(&mut n.zeros, NUM_FEATURES * n.data_type.size()));
-                check!(cudaMalloc(&mut n.ones, NUM_FEATURES * n.data_type.size()));
+                check!(cudaMemcpy(
+                    n.zeros,
+                    vec! [0.0f32; NUM_FEATURES].as_ptr() as *const c_void,
+                    NUM_FEATURES * DataType::Float.size(),
+                    MemcpyKind::HostToDevice
+                ));
 
-                if n.data_type == DataType::Float {
-                    check!(cudaMemcpy(
-                        n.zeros,
-                        vec! [0.0f32; NUM_FEATURES].as_ptr() as *const c_void,
-                        NUM_FEATURES * n.data_type.size(),
-                        MemcpyKind::HostToDevice
-                    ));
-
-                    check!(cudaMemcpy(
-                        n.ones,
-                        vec! [1.0f32; NUM_FEATURES].as_ptr() as *const c_void,
-                        NUM_FEATURES * n.data_type.size(),
-                        MemcpyKind::HostToDevice
-                    ));
-                } else {
-                    check!(cudaMemcpy(
-                        n.zeros,
-                        vec! [f16::from(0.0); NUM_FEATURES].as_ptr() as *const c_void,
-                        NUM_FEATURES * n.data_type.size(),
-                        MemcpyKind::HostToDevice
-                    ));
-
-                    check!(cudaMemcpy(
-                        n.ones,
-                        vec! [f16::from(1.0); NUM_FEATURES].as_ptr() as *const c_void,
-                        NUM_FEATURES * n.data_type.size(),
-                        MemcpyKind::HostToDevice
-                    ));
-                }
+                check!(cudaMemcpy(
+                    n.ones,
+                    vec! [1.0f32; NUM_FEATURES].as_ptr() as *const c_void,
+                    NUM_FEATURES * DataType::Float.size(),
+                    MemcpyKind::HostToDevice
+                ));
             }
 
             Some(n)
@@ -462,7 +453,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.residual_bn_t,
                 TensorFormat::NCHW,
-                self.data_type,
+                DataType::Float,  // batch normalization parameters are always `f32`
                 1, NUM_FEATURES as i32, 1, 1
             ));
 
@@ -478,7 +469,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.value_bn_t,
                 TensorFormat::NCHW,
-                self.data_type,
+                DataType::Float,  // batch normalization parameters are always `f32`
                 1, 1, 1, 1
             ));
 
@@ -510,7 +501,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.policy_bn_t,
                 TensorFormat::NCHW,
-                self.data_type,
+                DataType::Float,  // batch normalization parameters are always `f32`
                 1, 2, 1, 1
             ));
 

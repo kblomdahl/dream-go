@@ -37,10 +37,10 @@ impl Tensor {
         }
     }
 
-    fn len(&self) -> usize {
+    fn size_in_bytes(&self) -> usize {
         match *self {
-            Tensor::Float(ref b) => b.len(),
-            Tensor::Half(ref b) => b.len()
+            Tensor::Float(ref b) => 4 * b.len(),
+            Tensor::Half(ref b) => 2 * b.len()
         }
     }
 
@@ -93,7 +93,9 @@ pub fn load(path: &Path, data_type: DataType) -> Option<HashMap<String, *const c
             // value of the tensor
             let value = skip_until(&mut iter, '"');
             let tensor = {
-                if data_type == DataType::Float {
+                let force_f32 = name.contains("/mean") || name.contains("/variance");
+
+                if data_type == DataType::Float || force_f32 {
                     Tensor::Float(b85::decode::<f32>(&value).unwrap())
                 } else {
                     assert_eq!(data_type, DataType::Half);
@@ -112,7 +114,7 @@ pub fn load(path: &Path, data_type: DataType) -> Option<HashMap<String, *const c
             // copy the value of this tensor to the device
             unsafe {
                 let mut w = ptr::null_mut();
-                let size = data_type.size() * tensor.len();
+                let size = tensor.size_in_bytes();
 
                 assert!(cudaMalloc(&mut w, size).is_ok());
                 assert!(cudaMemcpy(

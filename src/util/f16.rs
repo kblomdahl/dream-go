@@ -71,6 +71,7 @@ impl From<f32> for f16 {
 
 #[cfg(test)]
 mod tests {
+    use test::Bencher;
     use util::f16::*;
 
     #[test]
@@ -86,7 +87,19 @@ mod tests {
 
     #[test]
     fn from_f32_to_f16() {
-        assert_eq!(f16::from(::std::f32::consts::PI).to_bits(), 0x4248);  // pi        
-        assert_eq!(f16::from(::std::f32::consts::E).to_bits(), 0x4170);  // pi        
+        assert_eq!(f16::from(::std::f32::consts::PI).to_bits(), 0x4248);  // pi
+        assert_eq!(f16::from(::std::f32::consts::E).to_bits(), 0x4170);  // e
+    }
+
+    #[bench]
+    fn convert_to_fp16_f32(b: &mut Bencher) {
+        b.iter(|| { f16::from(3.14f32) })
+    }
+
+    #[bench]
+    fn convert_from_fp16_f32(b: &mut Bencher) {
+        let e = f16::from_bits(0x4248);
+
+        b.iter(|| { f32::from(e) })
     }
 }
