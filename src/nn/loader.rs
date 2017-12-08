@@ -20,7 +20,38 @@ use std::path::Path;
 use std::ptr;
 
 use nn::ffi::cuda::*;
+use nn::ffi::cudnn::*;
 use util::b85;
+use util::f16::*;
+
+enum Tensor {
+    Float(Box<[f32]>),
+    Half(Box<[f16]>)
+}
+
+impl Tensor {
+    unsafe fn as_ptr(&self) -> *const c_void {
+        match *self {
+            Tensor::Float(ref b) => b.as_ptr() as *const c_void,
+            Tensor::Half(ref b) => b.as_ptr() as *const c_void
+        }
+    }
+
+    fn len(&self) -> usize {
+        match *self {
+            Tensor::Float(ref b) => b.len(),
+            Tensor::Half(ref b) => b.len()
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn as_vec(&self) -> Vec<f32> {
+        match *self {
+            Tensor::Float(ref b) => b.iter().map(|&v| v).collect(),
+            Tensor::Half(ref b) => b.iter().map(|&v| f32::from(v)).collect()
+        }
+    }
+}
 
 fn skip_until<I>(iter: &mut I, stop: char) -> String
     where I: Iterator<Item=char>
@@ -40,7 +71,7 @@ fn skip_until<I>(iter: &mut I, stop: char) -> String
     out
 }
 
-pub fn load(path: &Path) -> Option<HashMap<String, *const c_void>> {
+pub fn load(path: &Path, data_type: DataType) -> Option<HashMap<String, *const c_void>> {
     if let Ok(file) = File::open(path) {
         let mut iter = BufReader::new(file).chars().map(|ch| ch.unwrap());
         let mut out: HashMap<String, *const c_void> = HashMap::new();
@@ -61,23 +92,32 @@ pub fn load(path: &Path) -> Option<HashMap<String, *const c_void>> {
 
             // value of the tensor
             let value = skip_until(&mut iter, '"');
-            let tensor = b85::decode(&value).unwrap();
+            let tensor = {
+                if data_type == DataType::Float {
+                    Tensor::Float(b85::decode::<f32>(&value).unwrap())
+                } else {
+                    assert_eq!(data_type, DataType::Half);
 
-            for (i, element) in tensor.iter().enumerate() {
+                    Tensor::Half(b85::decode::<f16>(&value).unwrap())
+                }
+            };
+
+            #[cfg(debug_assertions)]
+            for (i, element) in tensor.as_vec().iter().enumerate() {
                 if !element.is_finite() {
-                    println!("{}: element {} is not finite -- {}", name, i, element);
+                    eprintln!("{}: element {} is not finite -- {}", name, i, element);
                 }
             }
 
             // copy the value of this tensor to the device
             unsafe {
                 let mut w = ptr::null_mut();
-                let size = 4 * tensor.len();
+                let size = data_type.size() * tensor.len();
 
                 assert!(cudaMalloc(&mut w, size).is_ok());
                 assert!(cudaMemcpy(
                     w,
-                    tensor.as_ptr() as *const c_void,
+                    tensor.as_ptr(),
                     size,
                     MemcpyKind::HostToDevice
                 ).is_ok());

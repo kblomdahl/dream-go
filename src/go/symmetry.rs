@@ -102,10 +102,10 @@ impl Transform {
 
 /// Helper method that transforms the given values in-place using the
 /// given transformation array.
-fn apply_aux(values: &mut [f32], transform: &[usize]) {
+fn apply_aux<T: Copy + Default>(values: &mut [T], transform: &[usize]) {
     assert_eq!(values.len(), 361);
 
-    let mut out = [0.0f32; 361];
+    let mut out = [T::default(); 361];
 
     for i in 0..361 {
         out[transform[i]] = values[i];
@@ -123,7 +123,7 @@ fn apply_aux(values: &mut [f32], transform: &[usize]) {
 /// * `values` -
 /// * `transform` - 
 /// 
-pub fn apply(values: &mut [f32], transform: Transform) {
+pub fn apply<T: Copy + Default>(values: &mut [T], transform: Transform) {
     let n = values.len() / 361;
 
     for i in 0..n {

@@ -33,12 +33,12 @@ enum PolicyEntry {
 
 impl PolicyEntry {
     /// Returns a slice containing the full policy of this entry.
-    fn to_slice(&self) -> Box<[f32]> {
+    fn to_slice(&self) -> Box<[f16]> {
         match *self {
             PolicyEntry::Full(ref input) => b85::decode(input).unwrap(),
             PolicyEntry::Partial(index) => {
-                let mut policy = vec! [0.0; 362];
-                policy[index] = 1.0;
+                let mut policy = vec! [f16::from(0.0); 362];
+                policy[index] = f16::from(1.0);
                 policy.into_boxed_slice()
             }
         }
@@ -160,7 +160,7 @@ impl Entry {
 
                                     Some(Entry::new(
                                         &features,
-                                        if current_color == winner { 1.0 } else { -1.0 },
+                                        f16::from(if current_color == winner { 1.0 } else { -1.0 }),
                                         &policy
                                     ))
                                 }
@@ -182,11 +182,11 @@ impl Entry {
     /// * `winner` - the winner
     /// * `policy` - the policy vector
     ///
-    fn new(features: &[f32], winner: f32, policy: &[f32]) -> Entry {
+    fn new(features: &[f16], winner: f16, policy: &[f16]) -> Entry {
         Entry {
-            features: f32_to_f16(features),
-            winner: f32_to_f16(&[winner]),
-            policy: f32_to_f16(policy)
+            features: f16_to_bytes(features),
+            winner: f16_to_bytes(&[winner]),
+            policy: f16_to_bytes(policy)
         }
     }
 
@@ -213,29 +213,28 @@ impl Entry {
 /// * `f` - the formatter to write to
 /// * `value` - the value to write
 ///
-fn write_f32<T>(f: &mut T, value: f32) -> io::Result<()>
+fn write_f16<T>(f: &mut T, value: f16) -> io::Result<()>
     where T: io::Write
 {
-    let value_b16: u16 = f16::from(value).to_bits();
-
     unsafe {
-        let bytes = transmute::<_, [u8; 2]>(value_b16);
+        let bytes = transmute::<_, [u8; 2]>(value.to_bits());
 
         f.write_all(&bytes)
     }
 }
 
-/// Returns an array of floating point serialized (and compressed) as FP16.
+/// Returns an array of floating point serialized (and compressed) as
+/// a byte array of FP16.
 ///
 /// # Arguments
 ///
-/// * `array` - the array of 32-bit floating point numbers to compress
+/// * `array` - the array of 16-bit floating point numbers to serialize
 ///
-fn f32_to_f16(array: &[f32]) -> Box<[u8]> {
+fn f16_to_bytes(array: &[f16]) -> Box<[u8]> {
     let mut cursor = Cursor::new(vec! [0u8; 2 * array.len()]);
 
     for &value in array {
-        write_f32(&mut cursor, value).unwrap();
+        write_f16(&mut cursor, value).unwrap();
     }
 
     cursor.into_inner().into_boxed_slice()

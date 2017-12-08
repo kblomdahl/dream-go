@@ -14,6 +14,7 @@
 
 use libc::{c_float, c_int, c_void};
 use nn::ffi::cuda::Stream;
+use util::f16::*;
 
 #[repr(i32)]
 #[allow(dead_code)]
@@ -111,6 +112,55 @@ extern {
         B: *const c_void,
         ldb: c_int,
         beta: *const c_float,
+        C: *mut c_void,
+        ldc: c_int
+    ) -> Status;
+
+    /// This function performs the matrix-matrix multiplication
+    /// 
+    /// ```C = α op(A) op(B) + β C```
+    /// 
+    /// where `α` and `β` are scalars, and `A`, `B` and `C` are matrices stored in
+    /// column-major format with dimensions `op(A)` m × k , `op(B)` k × n
+    /// and `C` m × n , respectively. Also, for matrix `A`
+    /// 
+    /// ```op(A) = A   if transa == CUBLAS_OP_N```
+    /// 
+    /// ```        A^T if transa == CUBLAS_OP_T```
+    /// 
+    /// ```        A^H if transa == CUBLAS_OP_C.```
+    /// 
+    /// and `op(B)` is defined similarly for matrix B .
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - handle to the cuBLAS library context.
+    /// * `transA` - operation `op(A)` that is non- or (conj.) transpose.
+    /// * `transB` - operation `op(B)` that is non- or (conj.) transpose.
+    /// * `m` - number of rows of matrix `op(A)` and `C`.
+    /// * `n` - number of columns of matrix `op(B)` and `C`.
+    /// * `k` - number of columns of `op(A)` and rows of `op(B)`.
+    /// * `alpha` - scalar used for multiplication.
+    /// * `A` - array of dimensions lda × k with `lda>=max(1,m)` if `transa == CUBLAS_OP_N` and lda × m with `lda>=max(1,k)` otherwise.
+    /// * `lda` - leading dimension of two-dimensional array used to store the matrix `A`.
+    /// * `B` - array of dimension ldb × n with `ldb>=max(1,k)` if `transa == CUBLAS_OP_N` and ldb × k with `ldb>=max(1,n)` otherwise.
+    /// * `ldb` - leading dimension of two-dimensional array used to store matrix `B`.
+    /// * `beta` - scalar used for multiplication.
+    /// * `C` - array of dimensions ldc × n with `ldc>=max(1,m)`.
+    /// * `ldc` - leading dimension of a two-dimensional array used to store the matrix `C`.
+    pub fn cublasHgemm(
+        handle: Handle,
+        transA: Operation,
+        transB: Operation,
+        m: c_int,
+        n: c_int,
+        k: c_int,
+        alpha: *const f16,
+        A: *const c_void,
+        lda: c_int,
+        B: *const c_void,
+        ldb: c_int,
+        beta: *const f16,
         C: *mut c_void,
         ldc: c_int
     ) -> Status;

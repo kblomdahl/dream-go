@@ -30,23 +30,31 @@ pub enum BatchNormMode {
 }
 
 #[repr(i32)]
-#[allow(dead_code)]
 pub enum ConvolutionMode {
-    Convolution = 0,
     CrossCorrelation = 1
 }
 
 #[repr(i32)]
-#[allow(dead_code)]
 pub enum ConvolutionFwdAlgo {
     ImplicitPrecompGemm = 1,
-    Winograd = 6
+    Winograd = 6,
+    WinogradNonFused = 7
 }
 
 #[repr(i32)]
-#[allow(dead_code)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum DataType {
-    Float = 0
+    Float = 0,
+    Half = 2
+}
+
+impl DataType {
+    pub fn size(&self) -> usize {
+        match *self {
+            DataType::Float => 4,
+            DataType::Half => 2
+        }
+    }
 }
 
 #[repr(i32)]
@@ -75,6 +83,12 @@ impl Status {
 }
 
 #[repr(i32)]
+#[cfg(feature = "tensor-core")]
+pub enum MathType {
+    TensorOpMath = 1
+}
+
+#[repr(i32)]
 #[allow(dead_code)]
 pub enum NanPropagation {
     NotPropagateNan = 0,
@@ -97,7 +111,6 @@ pub enum SoftmaxMode {
 }
 
 #[repr(i32)]
-#[allow(dead_code)]
 pub enum TensorFormat {
     NCHW = 0
 }
@@ -112,6 +125,33 @@ pub type TensorDescriptor = *const c_void;
 extern {
     pub fn cudnnCreate(handle: *mut Handle) -> Status;
     pub fn cudnnDestroy(handle: Handle) -> Status;
+
+    /// This function copies the scaled data from one tensor to another tensor with a different
+    /// layout. Those descriptors need to have the same dimensions but not necessarily the
+    /// same strides. The input and output tensors must not overlap in any way (i.e., tensors
+    /// cannot be transformed in place). This function can be used to convert a tensor with an
+    /// unsupported format to a supported one.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - Handle to a previously created cuDNN context.
+    /// * `alpha` -
+    /// * `xDesc` -
+    /// * `x` -
+    /// * `beta` -
+    /// * `yDesc` -
+    /// * `y` -
+    /// 
+    #[allow(dead_code)]
+    pub fn cudnnTransformTensor(
+        handle: Handle,
+        alpha: *const f32,
+        xDesc: TensorDescriptor,
+        x: *const c_void,
+        beta: *const f32,
+        yDesc: TensorDescriptor,
+        y: *mut c_void,
+    ) -> Status;
 
     /// This function sets the cuDNN library stream, which will be used to execute all
     /// subsequent calls to the cuDNN library functions with that particular handle. If the
@@ -234,6 +274,20 @@ extern {
         dilation_w: c_int,
         mode: ConvolutionMode,
         computeType: DataType
+    ) -> Status;
+
+    /// This function allows the user to specify whether or not the use of tensor op is permitted
+    /// in library routines associated with a given convolution descriptor.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `convDesc` -
+    /// * `mathType` -
+    /// 
+    #[cfg(feature = "tensor-core")]
+    pub fn cudnnSetConvolutionMathType(
+        convDesc: ConvolutionDescriptor,
+        mathType: MathType
     ) -> Status;
 
     /// This function adds the scaled values of a bias tensor to another tensor. Each dimension

@@ -14,6 +14,8 @@
 
 /// 16-bit floating point numbers as defined in IEEE 754-2008.
 #[allow(non_camel_case_types)]
+#[derive(Copy, Clone, PartialEq)]
+#[repr(C)]
 pub struct f16(u16);
 
 impl f16 {
@@ -32,6 +34,16 @@ impl f16 {
         let f16(bits) = *self;
 
         bits
+    }
+}
+
+impl Default for f16 {
+    fn default() -> f16 { f16(0) }
+}
+
+impl ::std::fmt::Debug for f16 {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::result::Result<(), ::std::fmt::Error> {
+        write!(f, "{}", f32::from(*self))
     }
 }
 

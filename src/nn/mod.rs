@@ -23,6 +23,7 @@ use std::ptr;
 use self::ffi::cublas::*;
 use self::ffi::cuda::*;
 use self::ffi::cudnn::*;
+use util::f16::*;
 
 /// The width of each filter in the neural network. Larger is "better" but takes
 /// longer to train and gives worse runtime performance during inference.
@@ -31,6 +32,10 @@ const NUM_FEATURES: usize = 256;
 pub struct Network {
     handle_blas: self::ffi::cublas::Handle,
     handle_dnn: self::ffi::cudnn::Handle,
+
+    /// The data-type to use during computation. This will be either FLOAT or HALF
+    /// depending on the _compute capability_ of the given device.
+    data_type: DataType,
 
     // convolutional descriptors
     conv2d_1: ConvolutionDescriptor,
@@ -103,7 +108,7 @@ macro_rules! check {
         assert!(err.is_ok(), "cuda call failed -- {:?}", err);
     });
 
-    ($status:expr, $name:expr, $result:expr, $batch_size:expr, $n:expr) => ({
+    ($status:expr, $workspace:expr, $name:expr, $result:expr, $batch_size:expr, $n:expr) => ({
         check!($status);
 
         #[cfg(feature = "trace-cuda")]
@@ -113,12 +118,30 @@ macro_rules! check {
             let mut vec = vec! [[0.0f32; $n]; $batch_size];
 
             check!(cudaDeviceSynchronize());
-            check!(cudaMemcpy(
-                vec.as_mut_ptr() as *mut c_void,
-                $result,
-                4 * $batch_size * $n,
-                MemcpyKind::DeviceToHost
-            ));
+
+            if $workspace.network.is_half() {
+                let mut other = vec! [[f16::default(); $n]; $batch_size];
+
+                check!(cudaMemcpy(
+                    other.as_mut_ptr() as *mut c_void,
+                    $result,
+                    $workspace.network.data_type.size() * $batch_size * $n,
+                    MemcpyKind::DeviceToHost
+                ));
+
+                for i in 0..$batch_size {
+                    for j in 0..$n {
+                        vec[i][j] = f32::from(other[i][j]);
+                    }
+                }
+            } else {
+                check!(cudaMemcpy(
+                    vec.as_mut_ptr() as *mut c_void,
+                    $result,
+                    $workspace.network.data_type.size() * $batch_size * $n,
+                    MemcpyKind::DeviceToHost
+                ));
+            }
 
             // pretty-print the array and then output the debugging
             // information
@@ -152,21 +175,32 @@ macro_rules! check {
         }
     });
 
-    ($status:expr, $name:expr, $result:expr, $batch_size:expr, $m:expr, $n:expr) => ({
-        check!($status, $name, $result, $batch_size, $m * $n);
+    ($status:expr, $workspace:expr, $name:expr, $result:expr, $batch_size:expr, $m:expr, $n:expr) => ({
+        check!($status, $workspace, $name, $result, $batch_size, $m * $n);
     })
 }
 
 impl Network {
     pub fn new(path: &Path) -> Option<Network> {
+        let mut version_major: i32 = 0;
+        let mut version_minor: i32 = 0;
+        let mut runtime_version: i32 = 0;
+
         unsafe {
             check!(cuInit(0));
+            check!(cudaRuntimeGetVersion(&mut runtime_version));
+            check!(cudaDeviceGetAttribute(&mut version_major, DeviceAttr::ComputeCapabilityMajor, 0));
+            check!(cudaDeviceGetAttribute(&mut version_minor, DeviceAttr::ComputeCapabilityMinor, 0));
         }
 
-        if let Some(weights) = loader::load(path) {
+        let data_type = if runtime_version >= 9000 && version_major >= 7 { DataType::Half } else { DataType::Float };
+
+        if let Some(weights) = loader::load(path, data_type) {
             let mut n = Network {
                 handle_blas: ptr::null_mut(),
                 handle_dnn: ptr::null_mut(),
+
+                data_type: data_type,
 
                 conv2d_1: ptr::null_mut(),
                 conv2d_3: ptr::null_mut(),
@@ -199,7 +233,7 @@ impl Network {
                     1, 1,
                     1, 1,
                     ConvolutionMode::CrossCorrelation,
-                    DataType::Float
+                    n.data_type
                 ));
 
                 check!(cudnnCreateConvolutionDescriptor(&mut n.conv2d_3));
@@ -209,8 +243,16 @@ impl Network {
                     1, 1,
                     1, 1,
                     ConvolutionMode::CrossCorrelation,
-                    DataType::Float
+                    n.data_type
                 ));
+
+                #[cfg(feature = "tensor-core")]
+                {
+                    if version_major >= 7 {
+                        check!(cudnnSetConvolutionMathType(n.conv2d_1, MathType::TensorOpMath));
+                        check!(cudnnSetConvolutionMathType(n.conv2d_3, MathType::TensorOpMath));
+                    }
+                }
 
                 check!(cudnnCreateActivationDescriptor(&mut n.relu));
                 check!(cudnnSetActivationDescriptor(
@@ -231,7 +273,7 @@ impl Network {
                 check!(cudnnCreateFilterDescriptor(&mut n.up_f));
                 check!(cudnnSetFilter4dDescriptor(
                     n.up_f,
-                    DataType::Float,
+                    n.data_type,
                     TensorFormat::NCHW,
                     NUM_FEATURES as i32, 34, 3, 3
                 ));
@@ -239,7 +281,7 @@ impl Network {
                 check!(cudnnCreateFilterDescriptor(&mut n.residual_f));
                 check!(cudnnSetFilter4dDescriptor(
                     n.residual_f,
-                    DataType::Float,
+                    n.data_type,
                     TensorFormat::NCHW,
                     NUM_FEATURES as i32, NUM_FEATURES as i32, 3, 3
                 ));
@@ -247,7 +289,7 @@ impl Network {
                 check!(cudnnCreateFilterDescriptor(&mut n.value_f));
                 check!(cudnnSetFilter4dDescriptor(
                     n.value_f,
-                    DataType::Float,
+                    n.data_type,
                     TensorFormat::NCHW,
                     1, NUM_FEATURES as i32, 1, 1
                 ));
@@ -255,7 +297,7 @@ impl Network {
                 check!(cudnnCreateFilterDescriptor(&mut n.policy_f));
                 check!(cudnnSetFilter4dDescriptor(
                     n.policy_f,
-                    DataType::Float,
+                    n.data_type,
                     TensorFormat::NCHW,
                     2, NUM_FEATURES as i32, 1, 1
                 ));
@@ -264,7 +306,7 @@ impl Network {
                 check!(cudnnSetTensor4dDescriptor(
                     n.policy_bias_t,
                     TensorFormat::NCHW,
-                    DataType::Float,
+                    n.data_type,
                     1, 362, 1, 1
                 ));
 
@@ -272,7 +314,7 @@ impl Network {
                 check!(cudnnSetTensor4dDescriptor(
                     n.value_256_bias_t,
                     TensorFormat::NCHW,
-                    DataType::Float,
+                    n.data_type,
                     1, 256, 1, 1
                 ));
 
@@ -280,30 +322,73 @@ impl Network {
                 check!(cudnnSetTensor4dDescriptor(
                     n.value_1_bias_t,
                     TensorFormat::NCHW,
-                    DataType::Float,
+                    n.data_type,
                     1, 1, 1, 1
                 ));
 
-                check!(cudaMalloc(&mut n.zeros, 1024));
-                check!(cudaMemcpy(
-                    n.zeros,
-                    vec! [0.0f32; NUM_FEATURES].as_ptr() as *const c_void,
-                    4 * NUM_FEATURES,
-                    MemcpyKind::HostToDevice
-                ));
 
-                check!(cudaMalloc(&mut n.ones, 1024));
-                check!(cudaMemcpy(
-                    n.ones,
-                    vec! [1.0f32; NUM_FEATURES].as_ptr() as *const c_void,
-                    4 * NUM_FEATURES,
-                    MemcpyKind::HostToDevice
-                ));
+                check!(cudaMalloc(&mut n.zeros, NUM_FEATURES * n.data_type.size()));
+                check!(cudaMalloc(&mut n.ones, NUM_FEATURES * n.data_type.size()));
+
+                if n.data_type == DataType::Float {
+                    check!(cudaMemcpy(
+                        n.zeros,
+                        vec! [0.0f32; NUM_FEATURES].as_ptr() as *const c_void,
+                        NUM_FEATURES * n.data_type.size(),
+                        MemcpyKind::HostToDevice
+                    ));
+
+                    check!(cudaMemcpy(
+                        n.ones,
+                        vec! [1.0f32; NUM_FEATURES].as_ptr() as *const c_void,
+                        NUM_FEATURES * n.data_type.size(),
+                        MemcpyKind::HostToDevice
+                    ));
+                } else {
+                    check!(cudaMemcpy(
+                        n.zeros,
+                        vec! [f16::from(0.0); NUM_FEATURES].as_ptr() as *const c_void,
+                        NUM_FEATURES * n.data_type.size(),
+                        MemcpyKind::HostToDevice
+                    ));
+
+                    check!(cudaMemcpy(
+                        n.ones,
+                        vec! [f16::from(1.0); NUM_FEATURES].as_ptr() as *const c_void,
+                        NUM_FEATURES * n.data_type.size(),
+                        MemcpyKind::HostToDevice
+                    ));
+                }
             }
 
             Some(n)
         } else {
             None
+        }
+    }
+
+    /// Returns whether this network is running is half precision mode.
+    pub fn is_half(&self) -> bool {
+        return self.data_type == DataType::Half;
+    }
+
+    /// Returns the best convolution algorithm for the given filter size.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `filter_size` - The width and height of the filter
+    /// 
+    fn get_convolution_algo(&self, filter_size: usize) -> ConvolutionFwdAlgo {
+        if self.is_half() {
+            match filter_size {
+                3 => ConvolutionFwdAlgo::WinogradNonFused,
+                _ => ConvolutionFwdAlgo::ImplicitPrecompGemm
+            }
+        } else {
+            match filter_size {
+                3 => ConvolutionFwdAlgo::Winograd,
+                _ => ConvolutionFwdAlgo::ImplicitPrecompGemm
+            }
         }
     }
 
@@ -361,7 +446,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.input_t,
                 TensorFormat::NCHW,
-                DataType::Float,
+                self.data_type,
                 batch_size as i32, 34, 19, 19
             ));
 
@@ -369,7 +454,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.residual_t,
                 TensorFormat::NCHW,
-                DataType::Float,
+                self.data_type,
                 batch_size as i32, NUM_FEATURES as i32, 19, 19
             ));
 
@@ -377,7 +462,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.residual_bn_t,
                 TensorFormat::NCHW,
-                DataType::Float,
+                self.data_type,
                 1, NUM_FEATURES as i32, 1, 1
             ));
 
@@ -385,7 +470,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.value_t,
                 TensorFormat::NCHW,
-                DataType::Float,
+                self.data_type,
                 batch_size as i32, 1, 19, 19
             ));
 
@@ -393,7 +478,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.value_bn_t,
                 TensorFormat::NCHW,
-                DataType::Float,
+                self.data_type,
                 1, 1, 1, 1
             ));
 
@@ -401,7 +486,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.value_256_t,
                 TensorFormat::NCHW,
-                DataType::Float,
+                self.data_type,
                 batch_size as i32, NUM_FEATURES as i32, 1, 1
             ));
 
@@ -409,7 +494,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.value_1_t,
                 TensorFormat::NCHW,
-                DataType::Float,
+                self.data_type,
                 batch_size as i32, 1, 1, 1
             ));
 
@@ -417,7 +502,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.policy_t,
                 TensorFormat::NCHW,
-                DataType::Float,
+                self.data_type,
                 batch_size as i32, 2, 19, 19
             ));
 
@@ -425,7 +510,7 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.policy_bn_t,
                 TensorFormat::NCHW,
-                DataType::Float,
+                self.data_type,
                 1, 2, 1, 1
             ));
 
@@ -433,18 +518,18 @@ impl Network {
             check!(cudnnSetTensor4dDescriptor(
                 w.policy_softmax_t,
                 TensorFormat::NCHW,
-                DataType::Float,
+                self.data_type,
                 batch_size as i32, 362, 1, 1
             ));
 
-            check!(cudaMalloc(&mut w.input, batch_size * 49096));
-            check!(cudaMalloc(&mut w.residual_1, batch_size * 369664));
-            check!(cudaMalloc(&mut w.residual_2, batch_size * 369664));
-            check!(cudaMalloc(&mut w.residual_3, batch_size * 369664));
-            check!(cudaMalloc(&mut w.policy_1, batch_size * 2888));
-            check!(cudaMalloc(&mut w.policy_2, batch_size * 2888));
-            check!(cudaMalloc(&mut w.value_1, batch_size * 1444));
-            check!(cudaMalloc(&mut w.value_2, batch_size * 1444));
+            check!(cudaMalloc(&mut w.input, batch_size * self.data_type.size() * 12274));
+            check!(cudaMalloc(&mut w.residual_1, batch_size * self.data_type.size() * 92416));
+            check!(cudaMalloc(&mut w.residual_2, batch_size * self.data_type.size() * 92416));
+            check!(cudaMalloc(&mut w.residual_3, batch_size * self.data_type.size() * 92416));
+            check!(cudaMalloc(&mut w.policy_1, batch_size * self.data_type.size() * 722));
+            check!(cudaMalloc(&mut w.policy_2, batch_size * self.data_type.size() * 722));
+            check!(cudaMalloc(&mut w.value_1, batch_size * self.data_type.size() * 361));
+            check!(cudaMalloc(&mut w.value_2, batch_size * self.data_type.size() * 361));
 
             // allocate two scratch workspaces that are at least as large as the
             // largest workspace requested by cuDNN.
@@ -459,7 +544,7 @@ impl Network {
                 self.up_f,
                 self.conv2d_3,
                 w.residual_t,
-                ConvolutionFwdAlgo::Winograd,
+                self.get_convolution_algo(3),
                 &mut up_s
             ));
 
@@ -469,7 +554,7 @@ impl Network {
                 self.residual_f,
                 self.conv2d_3,
                 w.residual_t,
-                ConvolutionFwdAlgo::Winograd,
+                self.get_convolution_algo(3),
                 &mut residual_s
             ));
 
@@ -479,7 +564,7 @@ impl Network {
                 self.value_f,
                 self.conv2d_1,
                 w.value_t,
-                ConvolutionFwdAlgo::ImplicitPrecompGemm,
+                self.get_convolution_algo(1),
                 &mut value_s
             ));
 
@@ -489,7 +574,7 @@ impl Network {
                 self.policy_f,
                 self.conv2d_1,
                 w.policy_t,
-                ConvolutionFwdAlgo::ImplicitPrecompGemm,
+                self.get_convolution_algo(1),
                 &mut policy_s
             ));
 
@@ -578,15 +663,22 @@ impl<'a> Drop for Workspace<'a> {
 /// * `ws` - the workspace for the current thread
 /// * `features` - the input features
 ///
-pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<Box<[f32]>>) {
+fn forward_aux<T: From<f32> + Clone>(
+    w: &mut Workspace,
+    features: &Vec<Box<[T]>>
+) -> (Vec<T>, Vec<Box<[T]>>)
+{
     assert_eq!(w.batch_size, features.len());
+    assert_eq!(::std::mem::size_of::<T>(), w.network.data_type.size());
 
     let epsilon: f64 = 0.001;  // tensorflow default
     let c_0 = 0.0f32;
     let c_1 = 1.0f32;
+    let ch_0 = f16::from(c_0);
+    let ch_1 = f16::from(c_1);
 
-    let mut softmax = vec! [vec! [0.0f32; 362]; w.batch_size];
-    let mut value = vec! [0.0f32; w.batch_size];
+    let mut softmax = vec! [vec! [T::from(0.0f32); 362]; w.batch_size];
+    let mut value = vec! [T::from(0.0f32); w.batch_size];
 
     unsafe {
         check!(cudnnSetStream(w.handle_dnn, w.tower_s));
@@ -595,10 +687,12 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             assert_eq!(feature.len(), 12274);
             assert_eq!(1, ::std::mem::size_of::<c_void>());
 
+            let element_size = 12274 * w.network.data_type.size();
+
             check!(cudaMemcpyAsync(
-                w.input.offset((i * 49096) as isize),
+                w.input.offset((i * element_size) as isize),
                 feature.as_ptr() as *const c_void,
-                49096,
+                element_size,
                 MemcpyKind::HostToDevice,
                 w.tower_s
             ));
@@ -611,11 +705,11 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.input_t, w.input,  // input
             w.network.up_f, w.network.weights["01_upsample/weights:0"],  // weights
             w.network.conv2d_3,  // convolution
-            ConvolutionFwdAlgo::Winograd,  // algo
+            w.network.get_convolution_algo(3),  // algo
             w.scratch_1, w.scratch_size,  // workspace
             &c_0,  // beta
             w.residual_t, w.residual_1,  // output
-        ), "01_upsample/up", w.residual_1, w.batch_size, NUM_FEATURES, 361);
+        ), w, "01_upsample/up", w.residual_1, w.batch_size, NUM_FEATURES, 361);
 
         check!(cudnnBatchNormalizationForwardInference(
             w.handle_dnn,
@@ -629,7 +723,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.network.weights["01_upsample/mean:0"],
             w.network.weights["01_upsample/variance:0"],
             epsilon
-        ), "01_upsample/up_bn", w.residual_2, w.batch_size, NUM_FEATURES, 361);
+        ), w, "01_upsample/up_bn", w.residual_2, w.batch_size, NUM_FEATURES, 361);
 
         check!(cudnnActivationForward(
             w.handle_dnn,
@@ -638,7 +732,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.residual_t, w.residual_2,  // input
             &c_0,  // beta
             w.residual_t, w.residual_1,  // output
-        ), "01_upsample/up_relu", w.residual_1, w.batch_size, NUM_FEATURES, 361);
+        ), w, "01_upsample/up_relu", w.residual_1, w.batch_size, NUM_FEATURES, 361);
 
         // apply all of the residual blocks
         for i in 2..21 {
@@ -648,11 +742,11 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
                 w.residual_t, w.residual_1,  // input
                 w.network.residual_f, w.network.weights[&format!("{:02}_residual/weights_1:0", i)],  // weights
                 w.network.conv2d_3,  // convolution
-                ConvolutionFwdAlgo::Winograd,  // algo
+                w.network.get_convolution_algo(3),  // algo
                 w.scratch_1, w.scratch_size,  // workspace
                 &c_0,  // beta
                 w.residual_t, w.residual_2,  // output
-            ), &format!("{:02}_residual/conv_1", i), w.residual_2, w.batch_size, NUM_FEATURES, 361);
+            ), w, &format!("{:02}_residual/conv_1", i), w.residual_2, w.batch_size, NUM_FEATURES, 361);
 
             check!(cudnnBatchNormalizationForwardInference(
                 w.handle_dnn,
@@ -666,7 +760,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
                 w.network.weights[&format!("{:02}_residual/mean_1:0", i)],
                 w.network.weights[&format!("{:02}_residual/variance_1:0", i)],
                 epsilon
-            ), &format!("{:02}_residual/conv_bn_1", i), w.residual_3, w.batch_size, NUM_FEATURES, 361);
+            ), w, &format!("{:02}_residual/conv_bn_1", i), w.residual_3, w.batch_size, NUM_FEATURES, 361);
 
             check!(cudnnActivationForward(
                 w.handle_dnn,
@@ -675,7 +769,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
                 w.residual_t, w.residual_3,  // input
                 &c_0,  // beta
                 w.residual_t, w.residual_3,  // output
-            ), &format!("{:02}_residual/conv_relu_1", i), w.residual_3, w.batch_size, NUM_FEATURES, 361);
+            ), w, &format!("{:02}_residual/conv_relu_1", i), w.residual_3, w.batch_size, NUM_FEATURES, 361);
 
             check!(cudnnConvolutionForward(
                 w.handle_dnn,
@@ -683,11 +777,11 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
                 w.residual_t, w.residual_3,  // input
                 w.network.residual_f, w.network.weights[&format!("{:02}_residual/weights_2:0", i)],  // weights
                 w.network.conv2d_3,  // convolution
-                ConvolutionFwdAlgo::Winograd,  // algo
+                w.network.get_convolution_algo(3),  // algo
                 w.scratch_1, w.scratch_size,  // workspace
                 &c_0,  // beta
                 w.residual_t, w.residual_2,  // output
-            ), &format!("{:02}_residual/conv_2", i), w.residual_2, w.batch_size, NUM_FEATURES, 361);
+            ), w, &format!("{:02}_residual/conv_2", i), w.residual_2, w.batch_size, NUM_FEATURES, 361);
 
             check!(cudnnBatchNormalizationForwardInference(
                 w.handle_dnn,
@@ -701,7 +795,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
                 w.network.weights[&format!("{:02}_residual/mean_2:0", i)],
                 w.network.weights[&format!("{:02}_residual/variance_2:0", i)],
                 epsilon
-            ), &format!("{:02}_residual/conv_bn_2", i), w.residual_1, w.batch_size, NUM_FEATURES, 361);
+            ), w, &format!("{:02}_residual/conv_bn_2", i), w.residual_1, w.batch_size, NUM_FEATURES, 361);
 
             check!(cudnnActivationForward(
                 w.handle_dnn,
@@ -710,7 +804,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
                 w.residual_t, w.residual_1,  // input
                 &c_0,  // beta
                 w.residual_t, w.residual_1,  // output
-            ), &format!("{:02}_residual/conv_relu_2", i), w.residual_1, w.batch_size, NUM_FEATURES, 361);
+            ), w, &format!("{:02}_residual/conv_relu_2", i), w.residual_1, w.batch_size, NUM_FEATURES, 361);
         }
 
         check!(cudaEventRecord(w.tower_e, w.tower_s));
@@ -726,11 +820,11 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.residual_t, w.residual_1,  // input
             w.network.policy_f, w.network.weights["21p_policy/downsample:0"],  // weights
             w.network.conv2d_1,  // convolution
-            ConvolutionFwdAlgo::ImplicitPrecompGemm,  // algo
+            w.network.get_convolution_algo(1),  // algo
             w.scratch_1, w.scratch_size,  // workspace
             &c_0,  // beta
             w.policy_t, w.policy_1,  // output
-        ), "21p_policy/down", w.policy_1, w.batch_size, 2, 361);
+        ), w, "21p_policy/down", w.policy_1, w.batch_size, 2, 361);
 
         check!(cudnnBatchNormalizationForwardInference(
             w.handle_dnn,
@@ -744,7 +838,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.network.weights["21p_policy/mean:0"],
             w.network.weights["21p_policy/variance:0"],
             epsilon
-        ), "21p_policy/down_bn", w.policy_2, w.batch_size, 2, 361);
+        ), w, "21p_policy/down_bn", w.policy_2, w.batch_size, 2, 361);
 
         check!(cudnnActivationForward(
             w.handle_dnn,
@@ -753,19 +847,33 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.policy_t, w.policy_2,  // input
             &c_0,  // beta
             w.policy_t, w.policy_2,  // output
-        ), "21p_policy/down_relu", w.policy_2, w.batch_size, 2, 361);
+        ), w, "21p_policy/down_relu", w.policy_2, w.batch_size, 2, 361);
 
-        check!(cublasSgemm_v2(
-            w.handle_blas,
-            Operation::N,
-            Operation::N,
-            362, w.batch_size as i32, 722, // output_dims, batch_size, input_dims
-            &c_1,  // alpha
-            w.network.weights["21p_policy/weights:0"], 362,  // input_2
-            w.policy_2, 722,  // input_1
-            &c_0,  // beta
-            w.policy_1, 362  // output
-        ), "21p_policy/ff", w.policy_1, w.batch_size, 362);
+        if w.network.is_half() {
+            check!(cublasHgemm(
+                w.handle_blas,
+                Operation::N,
+                Operation::N,
+                362, w.batch_size as i32, 722, // output_dims, batch_size, input_dims
+                &ch_1,  // alpha
+                w.network.weights["21p_policy/weights:0"], 362,  // input_2
+                w.policy_2, 722,  // input_1
+                &ch_0,  // beta
+                w.policy_1, 362  // output
+            ), w, "21p_policy/ff", w.policy_1, w.batch_size, 362);
+        } else {
+            check!(cublasSgemm_v2(
+                w.handle_blas,
+                Operation::N,
+                Operation::N,
+                362, w.batch_size as i32, 722, // output_dims, batch_size, input_dims
+                &c_1,  // alpha
+                w.network.weights["21p_policy/weights:0"], 362,  // input_2
+                w.policy_2, 722,  // input_1
+                &c_0,  // beta
+                w.policy_1, 362  // output
+            ), w, "21p_policy/ff", w.policy_1, w.batch_size, 362);
+        }
 
         check!(cudnnAddTensor(
             w.handle_dnn,
@@ -773,7 +881,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.network.policy_bias_t, w.network.weights["21p_policy/bias:0"],  // bias
             &c_1,  // beta
             w.policy_softmax_t, w.policy_1  // input and output
-        ), "21p_policy/bias", w.policy_1, w.batch_size, 362);
+        ), w, "21p_policy/bias", w.policy_1, w.batch_size, 362);
 
         check!(cudnnSoftmaxForward(
             w.handle_dnn,
@@ -783,13 +891,15 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.policy_softmax_t, w.policy_1,  // input
             &c_0,  // beta
             w.policy_softmax_t, w.policy_2  // output
-        ), "21p_policy/softmax", w.policy_2, w.batch_size, 362);
+        ), w, "21p_policy/softmax", w.policy_2, w.batch_size, 362);
 
         for i in 0..w.batch_size {
+            let element_size = 362 * w.network.data_type.size();
+
             check!(cudaMemcpyAsync(
                 softmax[i].as_mut_ptr() as *mut c_void,
-                w.policy_2.offset((i * 1448) as isize),
-                1448,
+                w.policy_2.offset((i * element_size) as isize),
+                element_size,
                 MemcpyKind::DeviceToHost,
                 w.policy_s
             ));
@@ -804,11 +914,11 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.residual_t, w.residual_1,  // input
             w.network.value_f, w.network.weights["21v_value/downsample:0"],  // weights
             w.network.conv2d_1,  // convolution
-            ConvolutionFwdAlgo::ImplicitPrecompGemm,  // algo
+            w.network.get_convolution_algo(1),  // algo
             w.scratch_2, w.scratch_size,  // workspace
             &c_0,  // beta
             w.value_t, w.value_1  // output
-        ), "21v_value/down", w.value_1, w.batch_size, 361);
+        ), w, "21v_value/down", w.value_1, w.batch_size, 361);
 
         check!(cudnnBatchNormalizationForwardInference(
             w.handle_dnn,
@@ -822,7 +932,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.network.weights["21v_value/mean:0"],
             w.network.weights["21v_value/variance:0"],
             epsilon
-        ), "21v_value/down_bn", w.value_2, w.batch_size, 361);
+        ), w, "21v_value/down_bn", w.value_2, w.batch_size, 361);
 
         check!(cudnnActivationForward(
             w.handle_dnn,
@@ -831,19 +941,33 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.value_t, w.value_2,  // input
             &c_0,  // beta
             w.value_t, w.value_2,  // output
-        ), "21v_value/down_relu", w.value_2, w.batch_size, 361);
+        ), w, "21v_value/down_relu", w.value_2, w.batch_size, 361);
 
-        check!(cublasSgemm_v2(
-            w.handle_blas,
-            Operation::N,
-            Operation::N,
-            256, w.batch_size as i32, 361,  // output_dims, batch_size, input_dims
-            &c_1,  // alpha
-            w.network.weights["21v_value/weights_1:0"], 256,  // input_2
-            w.value_2, 361,  // input_1
-            &c_0,  // beta
-            w.value_1, 256  // output
-        ), "21v_value/ff_256", w.value_1, w.batch_size, 256);
+        if w.network.is_half() {
+            check!(cublasHgemm(
+                w.handle_blas,
+                Operation::N,
+                Operation::N,
+                256, w.batch_size as i32, 361,  // output_dims, batch_size, input_dims
+                &ch_1,  // alpha
+                w.network.weights["21v_value/weights_1:0"], 256,  // input_2
+                w.value_2, 361,  // input_1
+                &ch_0,  // beta
+                w.value_1, 256  // output
+            ), w, "21v_value/ff_256", w.value_1, w.batch_size, 256);
+        } else {
+            check!(cublasSgemm_v2(
+                w.handle_blas,
+                Operation::N,
+                Operation::N,
+                256, w.batch_size as i32, 361,  // output_dims, batch_size, input_dims
+                &c_1,  // alpha
+                w.network.weights["21v_value/weights_1:0"], 256,  // input_2
+                w.value_2, 361,  // input_1
+                &c_0,  // beta
+                w.value_1, 256  // output
+            ), w, "21v_value/ff_256", w.value_1, w.batch_size, 256);
+        }
 
         check!(cudnnAddTensor(
             w.handle_dnn,
@@ -851,7 +975,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.network.value_256_bias_t, w.network.weights["21v_value/bias_1:0"],  // bias
             &c_1,  // beta
             w.value_256_t, w.value_1  // input and output
-        ), "21v_value/ff_bias_256", w.value_1, w.batch_size, 256);
+        ), w, "21v_value/ff_bias_256", w.value_1, w.batch_size, 256);
 
         check!(cudnnActivationForward(
             w.handle_dnn,
@@ -860,19 +984,33 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.value_256_t, w.value_1,  // input
             &c_0,  // beta
             w.value_256_t, w.value_1,  // output
-        ), "21v_value/ff_relu_256", w.value_1, w.batch_size, 256);
+        ), w, "21v_value/ff_relu_256", w.value_1, w.batch_size, 256);
 
-        check!(cublasSgemm_v2(
-            w.handle_blas,
-            Operation::N,
-            Operation::N,
-            1, w.batch_size as i32, 256,  // output_dims, batch_size, input_dims
-            &c_1,  // alpha
-            w.network.weights["21v_value/weights_2:0"], 1,  // input_2
-            w.value_1, 256,  // input_1
-            &c_0,  // beta
-            w.value_2, 1  // output
-        ), "21v_value/ff_1", w.value_2, w.batch_size, 1);
+        if w.network.is_half() {
+            check!(cublasHgemm(
+                w.handle_blas,
+                Operation::N,
+                Operation::N,
+                1, w.batch_size as i32, 256,  // output_dims, batch_size, input_dims
+                &ch_1,  // alpha
+                w.network.weights["21v_value/weights_2:0"], 1,  // input_2
+                w.value_1, 256,  // input_1
+                &ch_0,  // beta
+                w.value_2, 1  // output
+            ), w, "21v_value/ff_1", w.value_2, w.batch_size, 1);
+        } else {
+            check!(cublasSgemm_v2(
+                w.handle_blas,
+                Operation::N,
+                Operation::N,
+                1, w.batch_size as i32, 256,  // output_dims, batch_size, input_dims
+                &c_1,  // alpha
+                w.network.weights["21v_value/weights_2:0"], 1,  // input_2
+                w.value_1, 256,  // input_1
+                &c_0,  // beta
+                w.value_2, 1  // output
+            ), w, "21v_value/ff_1", w.value_2, w.batch_size, 1);
+        }
 
         check!(cudnnAddTensor(
             w.handle_dnn,
@@ -880,7 +1018,7 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.network.value_1_bias_t, w.network.weights["21v_value/bias_2:0"],  // bias
             &c_1,  // beta
             w.value_1_t, w.value_2  // input and output
-        ), "21v_value/ff_bias_1", w.value_2, w.batch_size, 1);
+        ), w, "21v_value/ff_bias_1", w.value_2, w.batch_size, 1);
 
         check!(cudnnActivationForward(
             w.handle_dnn,
@@ -889,12 +1027,12 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
             w.value_1_t, w.value_2,  // input
             &c_0,  // beta
             w.value_1_t, w.value_2,  // output
-        ), "21v_value/ff_tanh_2", w.value_2, w.batch_size, 1);
+        ), w, "21v_value/ff_tanh_2", w.value_2, w.batch_size, 1);
 
         check!(cudaMemcpyAsync(
             value.as_mut_ptr() as *mut c_void,
             w.value_2,
-            4 * w.batch_size,
+            w.batch_size * w.network.data_type.size(),
             MemcpyKind::DeviceToHost,
             w.value_s
         ));
@@ -905,6 +1043,48 @@ pub fn forward(w: &mut Workspace, features: &Vec<Box<[f32]>>) -> (Vec<f32>, Vec<
     }
 
     (value, softmax.into_iter().map(|s| s.into_boxed_slice()).collect())
+}
+
+/// Returns the value and policy tensors obtained from a forward pass
+/// through the neural network.
+///
+/// # Arguments
+///
+/// * `ws` - the workspace for the current thread
+/// * `features` - the input features
+///
+pub fn forward(
+    w: &mut Workspace,
+    features: &Vec<Box<[f32]>>
+) -> (Vec<f32>, Vec<Box<[f32]>>)
+{
+    if w.network.data_type == DataType::Float {
+        forward_aux::<f32>(w, features)
+    } else {
+        let features = features.iter()
+            .map(|feature| {
+                (0..feature.len())
+                    .map(|i| f16::from(feature[i]))
+                    .collect::<Vec<f16>>()
+                    .into_boxed_slice()
+            })
+            .collect();
+
+        let (value, policy) = forward_aux::<f16>(w, &features);
+        let value = value.into_iter()
+            .map(|v| f32::from(v))
+            .collect();
+        let policy = policy.into_iter()
+            .map(|p| {
+                (0..p.len())
+                    .map(|i| f32::from(p[i]))
+                    .collect::<Vec<f32>>()
+                    .into_boxed_slice()
+            })
+            .collect();
+
+        (value, policy)
+    }
 }
 
 #[cfg(test)]
@@ -918,19 +1098,35 @@ mod tests {
         let mut workspace = network.get_workspace(batch_size);
 
         // allocate a feature vector filled with random ones and zeros
-        let features = (0..batch_size).map(|_| {
-            let mut input = vec! [0.0f32; 12274];
+        if network.is_half() {
+            let features = (0..batch_size).map(|_| {
+                let mut input = vec! [f16::from(0.0); 12274];
 
-            for b in input.iter_mut() {
-                *b = if thread_rng().next_f32() < 0.2 { 1.0 } else { 0.0 };
-            }
+                for b in input.iter_mut() {
+                    *b = f16::from(if thread_rng().next_f32() < 0.2 { 1.0 } else { 0.0 });
+                }
 
-            input.into_boxed_slice()
-        }).collect();
+                input.into_boxed_slice()
+            }).collect();
 
-        b.iter(move || {
-            forward(&mut workspace, &features)
-        });
+            b.iter(move || {
+                forward_aux(&mut workspace, &features)
+            });
+        } else {
+            let features = (0..batch_size).map(|_| {
+                let mut input = vec! [0.0f32; 12274];
+
+                for b in input.iter_mut() {
+                    *b = if thread_rng().next_f32() < 0.2 { 1.0 } else { 0.0 };
+                }
+
+                input.into_boxed_slice()
+            }).collect();
+
+            b.iter(move || {
+                forward(&mut workspace, &features)
+            });
+        }
     }
 
     #[bench] fn batch_size_01(b: &mut Bencher) { bench_batch_size(b,  1); }
