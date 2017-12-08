@@ -17,6 +17,9 @@ pub mod cuda;
 pub mod cudnn;
 
 #[cfg(test)]
+mod type_bench;
+
+#[cfg(test)]
 mod tests {
     use libc::{c_void};
     use std::ptr;
@@ -167,6 +170,105 @@ mod tests {
                 f16::from(19.0f32), f16::from(26.0f32), f16::from(33.0f32),
                 f16::from(29.0f32), f16::from(40.0f32), f16::from(51.0f32)
             ])
+        }
+    }
+
+    #[test]
+    fn sconv() {
+        let mut handle: cudnn::Handle = ptr::null_mut();
+        let mut convolution: cudnn::ConvolutionDescriptor = ptr::null_mut();
+        let mut filter: cudnn::FilterDescriptor = ptr::null_mut();
+        let mut inout_tensor: cudnn::TensorDescriptor = ptr::null_mut();
+
+        let mut input = ptr::null_mut();
+        let mut output = ptr::null_mut();
+        let mut weights = ptr::null_mut();
+
+        let mut workspace_size: usize = 0;
+        let mut workspace = ptr::null_mut();
+
+        let c_0: f32 = 0.0;
+        let c_1: f32 = 1.0;
+
+        unsafe {
+            assert!(cudnn::cudnnCreate(&mut handle).is_ok());
+
+            assert!(cudnn::cudnnCreateTensorDescriptor(&mut inout_tensor).is_ok());
+            assert!(cudnn::cudnnSetTensor4dDescriptor(
+                inout_tensor,
+                cudnn::TensorFormat::NCHW,
+                cudnn::DataType::Float,
+                1, 256, 19, 19
+            ).is_ok());
+
+            assert!(cudnn::cudnnCreateConvolutionDescriptor(&mut convolution).is_ok());
+            assert!(cudnn::cudnnSetConvolution2dDescriptor(
+                convolution,
+                1, 1, 1, 1, 1, 1,
+                cudnn::ConvolutionMode::CrossCorrelation,
+                cudnn::DataType::Float
+            ).is_ok());
+
+            assert!(cudnn::cudnnCreateFilterDescriptor(&mut filter).is_ok());
+            assert!(cudnn::cudnnSetFilter4dDescriptor(
+                filter,
+                cudnn::DataType::Float,
+                cudnn::TensorFormat::NCHW,
+                256, 256, 3, 3
+            ).is_ok());
+
+            assert!(cudnn::cudnnGetConvolutionForwardWorkspaceSize(
+                handle,
+                inout_tensor,
+                filter,
+                convolution,
+                inout_tensor,
+                cudnn::ConvolutionFwdAlgo::Winograd,
+                &mut workspace_size
+            ).is_ok());
+
+            assert!(cuda::cudaMalloc(&mut input, 4 * 92416).is_ok());
+            assert!(cuda::cudaMemcpy(
+                input,
+                vec! [1.0f32; 92416].as_ptr() as *const c_void,
+                4 * 92416, cuda::MemcpyKind::HostToDevice
+            ).is_ok());
+            assert!(cuda::cudaMalloc(&mut weights, 4 * 589824).is_ok());
+            assert!(cuda::cudaMemcpy(
+                weights,
+                vec! [1.0f32; 589824].as_ptr() as *const c_void,
+                4 * 589824, cuda::MemcpyKind::HostToDevice
+            ).is_ok());
+
+            assert!(cuda::cudaMalloc(&mut output, 4 * 92416).is_ok());
+            assert!(cuda::cudaMalloc(&mut workspace, workspace_size).is_ok());
+
+            assert!(cudnn::cudnnConvolutionForward(
+                handle,
+                &c_1,
+                inout_tensor, input,
+                filter, weights,
+                convolution,
+                cudnn::ConvolutionFwdAlgo::Winograd,
+                workspace, workspace_size,
+                &c_0,
+                inout_tensor, output
+            ).is_ok());
+
+            let ones = vec! [0.0f32; 92416];
+
+            assert!(cuda::cudaMemcpy(
+                ones.as_ptr() as *mut c_void,
+                output,
+                4 * 92416, cuda::MemcpyKind::DeviceToHost
+            ).is_ok());
+
+            for one in ones.iter() {
+                assert!(*one == 1024.0
+                    || *one == 1536.0
+                    || *one == 2304.0,
+                    "{}", *one);
+            }
         }
     }
 }

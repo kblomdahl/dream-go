@@ -1093,6 +1093,7 @@ mod tests {
     use rand::{Rng, thread_rng};
     use nn::*;
 
+    #[allow(dead_code)]
     fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
         let network = Network::new(Path::new("models/dream-go.json")).unwrap();
         let mut workspace = network.get_workspace(batch_size);
