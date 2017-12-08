@@ -18,28 +18,29 @@ pub trait Param {
     /// The number of probes into the monte carlo tree to perform at each step. This
     /// integer must be dividable by both `thread_count` and `batch_size` and larger
     /// than zero.
-    fn iteration_limit() -> usize;  // 512
+    fn iteration_limit() -> usize;
 
     /// The number of threads to run in parallel probing into the search tree.
-    fn thread_count() -> usize;  // 16
+    fn thread_count() -> usize;
 
     /// The number of asynchronous neural network evaluations to batch together.
-    fn batch_size() -> usize;  // 8
+    fn batch_size() -> usize;
 
     /// How much dirichlet noise to add to the policy at the root of the
     /// monte carlo tree search.
-    fn dirichlet_noise() -> f32;  // 0.25
+    fn dirichlet_noise() -> f32;
 
     /// The exploration rate constant in the UCT formula, a higher value
     /// indicate a higher level of exploration.
-    fn exploration_rate() -> f32;  // sqrt(2)
+    fn exploration_rate() -> f32;
 
     /// The absolute bias of the AMAF value compared to the local value,
     /// this can be heuristically determined based on what the difference
     /// between the final value and the AMAF value is.
-    fn rave_bias() -> f32;  // 0.1
+    fn rave_bias() -> f32;
 
-    /// Whether to use experimental features.
+    /// Whether to use experimental features. This is mainly used during internal
+    /// testing of *new* features.
     fn experimental() -> bool;
 }
 
@@ -53,7 +54,7 @@ impl Param for Standard {
                 let limit = match env::var("NUM_ITER") {
                     Ok(val) => val.parse::<usize>()
                                   .expect(&format!("NUM_ITER: expected number, received {}", val)),
-                    Err(_) => 512
+                    Err(_) => 800
                 };
 
                 assert!(limit > 0,
