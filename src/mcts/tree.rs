@@ -230,7 +230,7 @@ impl<E: Value> Node<E> {
         // mark all valid moves with a triangle (for debugging the symmetry code)
         /*
         for i in 0..361 {
-            if self.prior[i].is_normal() {
+            if self.prior[i].is_finite() {
                 write!(out, "TR[{}{}]",
                     SGF_LETTERS[X[i] as usize],
                     SGF_LETTERS[Y[i] as usize],

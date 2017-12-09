@@ -177,8 +177,8 @@ fn forward<C, A>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>
                 let src = ::std::cmp::max(i, j);
                 let dst = ::std::cmp::min(i, j);
 
-                if policy[src].is_normal() {
-                    assert!(policy[dst].is_normal());
+                if policy[src].is_finite() {
+                    assert!(policy[dst].is_finite());
 
                     policy[dst] += policy[src];
                     policy[src] = ::std::f32::NEG_INFINITY;
@@ -189,7 +189,7 @@ fn forward<C, A>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>
 
     // renormalize the policy so that it sums to one after all the pruning that
     // we have performed.
-    let policy_sum: f32 = policy.iter().filter(|p| p.is_normal()).sum();
+    let policy_sum: f32 = policy.iter().filter(|p| p.is_finite()).sum();
 
     if policy_sum > 1e-4 {  // do not divide by zero
         let policy_recip = policy_sum.recip();
