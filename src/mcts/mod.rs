@@ -29,6 +29,7 @@ use go::{symmetry, Board, Color};
 use mcts::param::*;
 use nn::{self, Network, Workspace};
 use util::b85;
+use util::f16::*;
 
 /// Mapping from 1D coordinate to letter used to represent that coordinate in
 /// the SGF file format.
@@ -51,7 +52,7 @@ pub enum GameResult {
 /// 
 /// All methods appears to be synchronous but may sleep due to communication with
 /// other threads.
-trait Forwarder {
+trait Forwarder<T: From<f32> + Clone> {
     /// Perform a forward pass of a neural network with the given features
     /// and returns the value and policy.
     /// 
@@ -59,7 +60,7 @@ trait Forwarder {
     /// 
     /// * `features` -
     /// 
-    fn forward(&mut self, features: Box<[f32]>) -> (f32, Box<[f32]>);
+    fn forward(&mut self, features: Box<[T]>) -> (T, Box<[T]>);
 }
 
 /// An implementation of `Forwarder` that performs the forward pass immedietly on
@@ -76,23 +77,23 @@ impl<'a> ImmediateForward<'a> {
     }
 }
 
-impl<'a> Forwarder for ImmediateForward<'a> {
-    fn forward(&mut self, features: Box<[f32]>) -> (f32, Box<[f32]>) {
-        let (values, policies) = nn::forward(&mut self.workspace, &vec! [features]);
+impl<'a, T: From<f32> + Clone> Forwarder<T> for ImmediateForward<'a> {
+    fn forward(&mut self, features: Box<[T]>) -> (T, Box<[T]>) {
+        let (values, policies) = nn::forward::<T>(&mut self.workspace, &vec! [features]);
 
-        (values[0], policies[0].clone())
+        (values[0].clone(), policies[0].clone())
     }
 }
 
 /// An implementation of `Forwarder` that sends the received features over a
 /// channel and relies on the remote endpoint performing the forward
 /// pass (presumably with some batching).
-struct RemoteForward {
-    remote: Sender<(Box<[f32]>, Sender<(f32, Box<[f32]>)>)>
+struct RemoteForward<T: From<f32> + Clone> {
+    remote: Sender<(Box<[T]>, Sender<(T, Box<[T]>)>)>
 }
 
-impl Forwarder for RemoteForward {
-    fn forward(&mut self, features: Box<[f32]>) -> (f32, Box<[f32]>) {
+impl<T: From<f32> + Clone> Forwarder<T> for RemoteForward<T> {
+    fn forward(&mut self, features: Box<[T]>) -> (T, Box<[T]>) {
         let (sender, receiver) = channel();
 
         self.remote.send((features, sender)).unwrap();
@@ -111,8 +112,8 @@ impl Forwarder for RemoteForward {
 /// * `board` - the board position
 /// * `color` - the current player
 /// 
-fn forward<C, A>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>)
-    where C: Param, A: Forwarder
+fn forward<C, A, T>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>)
+    where C: Param, A: Forwarder<T>, T: From<f32> + Copy + Default, f32: From<T>
 {
     lazy_static! {
         static ref SYMM: Vec<symmetry::Transform> = vec! [
@@ -131,24 +132,28 @@ fn forward<C, A>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>
     // to increase the entropy of the game slightly and to ensure the engine
     // learns the game is symmetric (which should help generalize)
     let t = *thread_rng().choose(&SYMM).unwrap();
-    let mut features = board.get_features(color);
+    let mut features = board.get_features::<T>(color);
 
     symmetry::apply(&mut features, t);
 
     // run a forward pass through the network using this transformation
     // and when we are done undo it using the opposite.
-    let (value, mut policy) = agent.forward(features);
+    let (value, mut original_policy) = agent.forward(features);
 
-    symmetry::apply(&mut policy, t.inverse());
+    symmetry::apply(&mut original_policy, t.inverse());
 
-    // replace any invalid moves in the suggested policy with -Inf, while keeping
-    // the pass move (361) untouched so that there is always at least one valid
-    // move.
+    // copy the policy and replace any invalid moves in the suggested policy
+    // with -Inf, while keeping the pass move (361) untouched so that there
+    // is always at least one valid move.
+    let mut policy = vec! [0.0f32; 362];
+
     for i in 0..361 {
         let (x, y) = (tree::X[i] as usize, tree::Y[i] as usize);
 
         if !board.is_valid(color, x, y) {
             policy[i] = ::std::f32::NEG_INFINITY;
+        } else {
+            policy[i] = f32::from(original_policy[i]);
         }
     }
 
@@ -199,12 +204,12 @@ fn forward<C, A>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>
         }
     }
 
-    (value, policy)
+    (f32::from(value), policy.into_boxed_slice())
 }
 
 /// The shared variables between the master and each worker thread in the `predict` function.
 #[derive(Clone)]
-struct ThreadContext<E: tree::Value + Clone> {
+struct ThreadContext<E: tree::Value + Clone, T: From<f32> + Copy> {
     /// The root of the monte carlo tree.
     root: Arc<UnsafeCell<tree::Node<E>>>,
 
@@ -215,10 +220,10 @@ struct ThreadContext<E: tree::Value + Clone> {
     starting_point: Board,
 
     /// The channel to use when communicating features to the cuDNN worker thread.
-    sender: Sender<(Box<[f32]>, Sender<(f32, Box<[f32]>)>)>
+    sender: Sender<(Box<[T]>, Sender<(T, Box<[T]>)>)>
 }
 
-unsafe impl<E: tree::Value + Clone> Send for ThreadContext<E> { }
+unsafe impl<E: tree::Value + Clone, T: From<f32> + Copy> Send for ThreadContext<E, T> { }
 
 /// Predicts the _best_ next move according to the given neural network when applied
 /// to a monte carlo tree search.
@@ -229,11 +234,14 @@ unsafe impl<E: tree::Value + Clone> Send for ThreadContext<E> { }
 /// * `starting_point` -
 /// * `starting_color` -
 /// 
-pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
+pub fn predict_aux<C, E, T>(
     network: &Network,
     starting_point: &Board,
     starting_color: Color
 ) -> (f32, usize, usize, Box<[f32]>)
+    where C: Param + Clone + 'static,
+          E: tree::Value + Clone + 'static,
+          T: From<f32> + Copy + Default + 'static, f32: From<T>
 {
     assert_eq!(C::iteration_limit() % C::batch_size(), 0);
     assert_eq!(C::thread_count() % C::batch_size(), 0);
@@ -241,12 +249,12 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
     let mut immediate = ImmediateForward::new(network);
-    let (_, mut policy) = forward::<C, ImmediateForward>(&mut immediate, starting_point, starting_color);
+    let (_, mut policy) = forward::<C, ImmediateForward, T>(&mut immediate, starting_point, starting_color);
     dirichlet::add::<C>(&mut policy, 0.03);
 
     // perform exactly NUM_ITERATIONS probes into the search tree
     let (sender, receiver) = channel();
-    let context: ThreadContext<E> = ThreadContext {
+    let context: ThreadContext<E, T> = ThreadContext {
         root: Arc::new(UnsafeCell::new(tree::Node::new(starting_color, policy))),
         remaining: Arc::new(AtomicIsize::new(C::iteration_limit() as isize)),
         starting_point: starting_point.clone(),
@@ -257,7 +265,7 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
         let context = context.clone();
 
         thread::spawn(move || {
-            let mut remote = RemoteForward { remote: context.sender };
+            let mut remote = RemoteForward::<T> { remote: context.sender };
 
             while context.remaining.fetch_sub(1, Ordering::SeqCst) > 0 {
                 let mut board = context.starting_point.clone();
@@ -265,7 +273,7 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
 
                 if let Some(&(_, color, _)) = trace.last() {
                     let next_color = color.opposite();
-                    let (value, policy) = forward::<C, RemoteForward>(&mut remote, &board, next_color);
+                    let (value, policy) = forward::<C, RemoteForward<T>, T>(&mut remote, &board, next_color);
 
                     unsafe {
                         tree::insert::<C, E>(&trace, next_color, value, policy);
@@ -296,15 +304,14 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
 
         // process the features and the send them back to the worker who
         // sent it using the OneShot channel.
-        let (values, policies) = nn::forward(&mut workspace_b, &features_list);
+        let (values, policies) = nn::forward::<T>(&mut workspace_b, &features_list);
 
         for (i, policy) in policies.into_iter().enumerate() {
             sender_list[i].send((values[i], policy)).unwrap();
         }
     }
 
-    // wait for all threads to finish their work and then terminate
-    // with some additional information
+    // wait for all threads to terminate to avoid any zombie processes
     for handle in handles.into_iter() { handle.join().unwrap(); }
 
     unsafe {
@@ -319,6 +326,29 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
         (value, index, prior_index, policy)
     }
 }
+
+/// Predicts the _best_ next move according to the given neural network when applied
+/// to a monte carlo tree search.
+/// 
+/// # Arguments
+/// 
+/// * `network` -
+/// * `starting_point` -
+/// * `starting_color` -
+/// 
+pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
+    network: &Network,
+    starting_point: &Board,
+    starting_color: Color
+) -> (f32, usize, usize, Box<[f32]>)
+{
+    if network.is_half() {
+        predict_aux::<C, E, f16>(network, starting_point, starting_color)
+    } else {
+        predict_aux::<C, E, f32>(network, starting_point, starting_color)
+    }
+}
+
 
 /// A variant of `predict` that does not perform any search and only uses the neural network.
 /// 
@@ -336,7 +366,11 @@ pub fn predict_policy<C: Param>(
 ) -> (f32, usize, usize, Box<[f32]>)
 {
     let mut immediate = ImmediateForward::new(network);
-    let (value, policy) = forward::<C, ImmediateForward>(&mut immediate, starting_point, starting_color);
+    let (value, policy) = if network.is_half() {
+        forward::<C, ImmediateForward, f16>(&mut immediate, starting_point, starting_color)
+    } else {
+        forward::<C, ImmediateForward, f32>(&mut immediate, starting_point, starting_color)
+    };
     let policy_index = (0..362).max_by_key(|&i| OrderedFloat(policy[i])).unwrap();
     let mut softmax = vec! [0.0f32; 362];
     softmax[policy_index] = 1.0;
@@ -364,8 +398,8 @@ pub fn self_play(network: &Network) -> GameResult {
         let (value, index, prior_index, policy) = if current == Color::Black {
             predict::<Standard, tree::PUCT>(network, &board, current)
         } else {
-            predict::<Standard, tree::PUCT>(network, &board, current)
-            //predict_policy::<Standard>(network, &board, current)
+            //predict::<Standard, tree::PUCT, f32>(network, &board, current)
+            predict_policy::<Standard>(network, &board, current)
         };
 
         debug_assert!(-1.0 <= value && value <= 1.0);

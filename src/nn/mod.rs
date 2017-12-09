@@ -654,7 +654,7 @@ impl<'a> Drop for Workspace<'a> {
 /// * `ws` - the workspace for the current thread
 /// * `features` - the input features
 ///
-fn forward_aux<T: From<f32> + Clone>(
+pub fn forward<T: From<f32> + Clone>(
     w: &mut Workspace,
     features: &Vec<Box<[T]>>
 ) -> (Vec<T>, Vec<Box<[T]>>)
@@ -1034,48 +1034,6 @@ fn forward_aux<T: From<f32> + Clone>(
     }
 
     (value, softmax.into_iter().map(|s| s.into_boxed_slice()).collect())
-}
-
-/// Returns the value and policy tensors obtained from a forward pass
-/// through the neural network.
-///
-/// # Arguments
-///
-/// * `ws` - the workspace for the current thread
-/// * `features` - the input features
-///
-pub fn forward(
-    w: &mut Workspace,
-    features: &Vec<Box<[f32]>>
-) -> (Vec<f32>, Vec<Box<[f32]>>)
-{
-    if w.network.data_type == DataType::Float {
-        forward_aux::<f32>(w, features)
-    } else {
-        let features = features.iter()
-            .map(|feature| {
-                (0..feature.len())
-                    .map(|i| f16::from(feature[i]))
-                    .collect::<Vec<f16>>()
-                    .into_boxed_slice()
-            })
-            .collect();
-
-        let (value, policy) = forward_aux::<f16>(w, &features);
-        let value = value.into_iter()
-            .map(|v| f32::from(v))
-            .collect();
-        let policy = policy.into_iter()
-            .map(|p| {
-                (0..p.len())
-                    .map(|i| f32::from(p[i]))
-                    .collect::<Vec<f32>>()
-                    .into_boxed_slice()
-            })
-            .collect();
-
-        (value, policy)
-    }
 }
 
 #[cfg(test)]
