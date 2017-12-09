@@ -38,6 +38,22 @@ impl Color {
     }
 }
 
+impl ::std::str::FromStr for Color {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Color, Self::Err> {
+        let s = s.to_lowercase();
+
+        if s == "black" || s == "b" {
+            Ok(Color::Black)
+        } else if s == "white" || s == "w" {
+            Ok(Color::White)
+        } else {
+            Err(())
+        }
+    }
+}
+
 impl fmt::Display for Color {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {

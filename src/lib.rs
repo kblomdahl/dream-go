@@ -22,10 +22,12 @@ extern crate libc;
 extern crate ordered_float;
 extern crate rand;
 extern crate regex;
+extern crate rustyline;
 #[cfg(test)] extern crate test;
 
 pub mod dataset;
 pub mod go;
+pub mod gtp;
 pub mod mcts;
 pub mod nn;
 mod util;
