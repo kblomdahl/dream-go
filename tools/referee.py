@@ -86,6 +86,7 @@ def play_game(engine_1, engine_2):
         pass_count = 0
         move_count = 0
         sgf = ''
+        re = '?'
 
         while move_count < 722 and pass_count < 2:
             current, other = turns[0], turns[1]
@@ -154,7 +155,7 @@ def play_game(engine_1, engine_2):
             white[0],
             re,
             sgf
-        ))
+        ), flush=True)
 
         # terminate the engines the hard way if they have not died already
         if not proc_1.poll():
@@ -195,59 +196,60 @@ def main(num_games, engines):
     # pair, how many times `engine_1` has won.
     wins = np.zeros((num_engines, num_engines), np.int32)
 
-    def total_played(engine_1, engine_2):
-        """
-        Returns the total number of games that the two given engines
-        has played against each other.
-        """
-        return wins[engine_1, engine_2] + wins[engine_2, engine_1]
+    try:
+        def total_played(engine_1, engine_2):
+            """
+            Returns the total number of games that the two given engines
+            has played against each other.
+            """
+            return wins[engine_1, engine_2] + wins[engine_2, engine_1]
 
-    while min([total_played(p[0], p[1]) for p in pairings]) < num_games:
-        next_pair = min(pairings, key=lambda p: total_played(p[0], p[1]))
-        winner = play_game(engines[next_pair[0]], engines[next_pair[1]])
+        while min([total_played(p[0], p[1]) for p in pairings]) < num_games:
+            next_pair = min(pairings, key=lambda p: total_played(p[0], p[1]))
+            winner = play_game(engines[next_pair[0]], engines[next_pair[1]])
 
-        if winner == 0:
-            wins[next_pair[0], next_pair[1]] += 1
-        elif winner == 1:
-            wins[next_pair[1], next_pair[0]] += 1
-        else:
-            pass  # error? retry again later
+            if winner == 0:
+                wins[next_pair[0], next_pair[1]] += 1
+            elif winner == 1:
+                wins[next_pair[1], next_pair[0]] += 1
+            else:
+                pass  # error? retry again later
+    finally:
+        # pretty-print the engines scores, sorted according to their total number
+        # of wins.
+        print('# Played {} games between all engines, outputting the confidence'.format(np.sum(wins)), file=sys.stderr)
+        print('# interval for each engine winning against every other engine.', file=sys.stderr)
+        print(file=sys.stderr)
 
-    # pretty-print the engines scores, sorted according to their total number
-    # of wins.
-    print('# Played {} games between each engine, outputting the confidence'.format(num_games), file=sys.stderr)
-    print('# interval for each engine winning against every other engine.', file=sys.stderr)
-    print(file=sys.stderr)
+        names = ['{}. {}'.format(i + 1, engines[i]) for i in range(num_engines)]
+        titles = ['vs {}'.format(name) for name in names]
+        max_name = max([len(name) for name in names])
+        name_padding = max_name + 4
 
-    names = ['{}. {}'.format(i + 1, engines[i]) for i in range(num_engines)]
-    titles = ['vs {}'.format(name) for name in names]
-    max_name = max([len(name) for name in names])
-    name_padding = max_name + 4
+        def get_score(engine_1, engine_2):
+            """ Returns the score of `engine_1` vs `engine_2` """
+            if engine_1 == engine_2:
+                return '-'
+            else:
+                n_s = float(wins[engine_1, engine_2])
+                n_f = float(wins[engine_2, engine_1])
+                z = 0.6  # about a 70% confidence interval
+                lower = 1.0 / (num_games + z*z) \
+                    * (n_s + z*z / 2 - z*sqrt(n_s*n_f/num_games + z*z/4.0))
+                upper = 1.0 / (num_games + z*z) \
+                    * (n_s + z*z / 2 + z*sqrt(n_s*n_f/num_games + z*z/4.0))
 
-    def get_score(engine_1, engine_2):
-        """ Returns the score of `engine_1` vs `engine_2` """
-        if engine_1 == engine_2:
-            return '-'
-        else:
-            n_s = float(wins[engine_1, engine_2])
-            n_f = float(wins[engine_2, engine_1])
-            z = 0.6  # about a 70% confidence interval
-            lower = 1.0 / (num_games + z*z) \
-                * (n_s + z*z / 2 - z*sqrt(n_s*n_f/num_games + z*z/4.0))
-            upper = 1.0 / (num_games + z*z) \
-                * (n_s + z*z / 2 + z*sqrt(n_s*n_f/num_games + z*z/4.0))
+                return '{:.0f}% - {:.0f}%'.format(100.0 * lower, 100.0 * upper)
 
-            return '{:.0f}% - {:.0f}%'.format(100.0 * lower, 100.0 * upper)
+        print(' ' * name_padding + '{}'.format(join_pretty(titles, titles)), file=sys.stderr)
+        for i in sorted(range(num_engines), key=lambda e: -np.sum(wins[e, :])):
+            scores = [get_score(i, other) for other in range(num_engines)]
 
-    print(' ' * name_padding + '{}'.format(join_pretty(titles, titles)), file=sys.stderr)
-    for i in sorted(range(num_engines), key=lambda e: -np.sum(wins[e, :])):
-        scores = [get_score(i, other) for other in range(num_engines)]
-
-        print('{}{}{}'.format(
-            names[i],
-            ' ' * (name_padding - len(names[i])),
-            join_pretty(titles, scores)
-        ), file=sys.stderr)
+            print('{}{}{}'.format(
+                names[i],
+                ' ' * (name_padding - len(names[i])),
+                join_pretty(titles, scores)
+            ), file=sys.stderr)
 
 if __name__ == '__main__':
     if len(sys.argv) <= 3:
