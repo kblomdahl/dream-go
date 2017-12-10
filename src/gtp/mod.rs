@@ -27,7 +27,7 @@ use gtp::vertex::*;
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
 const KNOWN_COMMANDS: [&'static str; 14] = [
-    "protocol_verion", "name", "version", "board_size", "clear_board", "komi", "play",
+    "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove", "undo",
     "quit"
 ];
@@ -71,7 +71,7 @@ macro_rules! error {
 
 lazy_static! {
     static ref ID_PREFIX: Regex = Regex::new(r"^([0-9]+)(?: +(.*)$|$)").unwrap();
-    static ref BOARD_SIZE: Regex = Regex::new(r"^board_size +([0-9]+)").unwrap();
+    static ref BOARD_SIZE: Regex = Regex::new(r"^boardsize +([0-9]+)").unwrap();
     static ref KOMI: Regex = Regex::new(r"^komi +([0-9\.]+)").unwrap();
     static ref PLAY: Regex = Regex::new(r"^play +([bBwW]) +([a-z][0-9]+)").unwrap();
     static ref KNOWN_COMMAND: Regex = Regex::new(r"^known_command +([^ ]+)").unwrap();
@@ -372,9 +372,9 @@ mod tests {
     }
 
     #[test]
-    fn board_size() {
-        assert_eq!(Gtp::parse_line("1 board_size 7"), Some((Some(1), Command::BoardSize(7))));
-        assert_eq!(Gtp::parse_line("board_size 13"), Some((None, Command::BoardSize(13))));
+    fn boardsize() {
+        assert_eq!(Gtp::parse_line("1 boardsize 7"), Some((Some(1), Command::BoardSize(7))));
+        assert_eq!(Gtp::parse_line("boardsize 13"), Some((None, Command::BoardSize(13))));
     }
 
     #[test]
