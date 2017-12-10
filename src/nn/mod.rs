@@ -28,7 +28,7 @@ use util::f16::*;
 
 /// The width of each filter in the neural network. Larger is "better" but takes
 /// longer to train and gives worse runtime performance during inference.
-const NUM_FEATURES: usize = 256;
+const NUM_FEATURES: usize = 128;
 
 pub struct Network {
     handle_blas: self::ffi::cublas::Handle,
@@ -502,7 +502,7 @@ impl Network {
                 w.value_256_t,
                 TensorFormat::NCHW,
                 self.data_type,
-                batch_size as i32, NUM_FEATURES as i32, 1, 1
+                batch_size as i32, 256, 1, 1
             ));
 
             check!(cudnnCreateTensorDescriptor(&mut w.value_1_t));

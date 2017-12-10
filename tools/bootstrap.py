@@ -196,7 +196,7 @@ class Tower:
     positions.
     """
 
-    def __init__(self, num_features=256):
+    def __init__(self, num_features=128):
         glorot_op = tf.glorot_normal_initializer()
 
         with tf.variable_scope('01_upsample'):
@@ -240,8 +240,8 @@ def main(args):
     dataset = tf.data.FixedLengthRecordDataset(args, 25274)
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
     dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
-    dataset = dataset.shuffle(2048)
-    dataset = dataset.batch(256 if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
+    dataset = dataset.shuffle(8196)
+    dataset = dataset.batch(512 if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
     iterator = dataset.make_initializable_iterator()
 
     #
