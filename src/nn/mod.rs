@@ -16,6 +16,7 @@ mod ffi;
 mod loader;
 
 use libc::{c_void};
+use std::env;
 use std::collections::HashMap;
 use std::path::Path;
 use std::ptr;
@@ -185,6 +186,29 @@ macro_rules! check {
 }
 
 impl Network {
+    pub fn default() -> Option<Network> {
+        lazy_static! {
+            static ref PATHS: Vec<String> = vec! [
+                // check for a file named the same as the current executable, but
+                // with a `.json` extension.
+                env::current_exe().ok().and_then(|file| {
+                    let mut json = file.clone();
+                    json.set_extension("json");
+                    json.as_path().to_str().map(|s| s.to_string())
+                }).unwrap_or("dream_go.json".to_string()),
+
+                // hard-coded paths to make development and deployment easier
+                "dream_go.json".to_string(),
+                "models/dream_go.json".to_string(),
+                "/usr/share/dream_go/dream_go.json".to_string()
+            ];
+        }
+
+        PATHS.iter()
+            .filter_map(|path| Network::new(Path::new(path)))
+            .next()
+    }
+
     pub fn new(path: &Path) -> Option<Network> {
         let mut version_major: i32 = 0;
         let mut version_minor: i32 = 0;

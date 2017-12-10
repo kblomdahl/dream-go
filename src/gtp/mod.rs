@@ -14,7 +14,6 @@
 
 use regex::Regex;
 use rustyline::Editor;
-use std::path::Path;
 
 use go::{Board, Color};
 use mcts;
@@ -203,7 +202,7 @@ impl Gtp {
 
     fn generate_move(&mut self, id: Option<usize>, color: Color) -> Option<Vertex> {
         if self.network.is_none() {
-            self.network = Network::new(Path::new("models/dream-go.json"));
+            self.network = Network::default();
         }
 
         let board = self.history.last().unwrap();
