@@ -35,7 +35,7 @@ $ python tools/bootstrap.py kgs_big.bin
 $ tensorboard --logdir logs/
 ```
 
-When you done training your network you need to transcode the weights from Tensorflow protobufs into a format that can be read by Dream Go, this can be accomplich using the `--dump` command of the bootstrap script:
+When you done training your network you need to transcode the weights from Tensorflow protobufs into a format that can be read by Dream Go, this can be accomplished using the `--dump` command of the bootstrap script:
 
 ```
 $ python tools/bootstrap.py --dump > models/dream-go.json

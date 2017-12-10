@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod param;
+pub mod param;
 mod dirichlet;
 mod spin;
-mod tree;
+pub mod tree;
 
 use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
@@ -396,10 +396,10 @@ pub fn self_play(network: &Network) -> GameResult {
     // that does not change the final result.
     while count < 722 {
         let (value, index, prior_index, policy) = if current == Color::Black {
-            predict::<Standard, tree::PUCT>(network, &board, current)
+            predict::<Standard, tree::DefaultValue>(network, &board, current)
         } else {
-            //predict::<Standard, tree::PUCT, f32>(network, &board, current)
-            predict_policy::<Standard>(network, &board, current)
+            predict::<Standard, tree::DefaultValue>(network, &board, current)
+            //predict_policy::<Standard>(network, &board, current)
         };
 
         debug_assert!(-1.0 <= value && value <= 1.0);

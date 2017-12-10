@@ -115,6 +115,8 @@ impl Value for PUCT {
     }
 }
 
+pub type DefaultValue = PUCT;
+
 /// A monte carlo search tree.
 pub struct Node<E: Value> {
     /// Spinlock used to protect the data in this node during modifications.

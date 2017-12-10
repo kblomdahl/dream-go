@@ -14,7 +14,7 @@
 
 extern crate dream_go;
 
-use dream_go::{dataset, nn, mcts};
+use dream_go::{dataset, gtp, nn, mcts};
 use std::env;
 use std::path::Path;
 
@@ -67,13 +67,13 @@ fn main() {
                 }
             }
         }
-    } else if args.iter().any(|arg| arg == "--gtp") {
-        unimplemented!();
+    } else if args.iter().any(|arg| arg == "--gtp") || args.len() == 0 {
+        gtp::run();
     } else {
         println!("Usage: ./dream-go [options]");
         println!("");
         println!("  --dataset <files...>  Extract a dataset for training from the given SGF files");
         println!("  --self-play <n>       Extract a dataset from self-play containing n examples");
-        println!("  --gtp                 Run GTP client");
+        println!("  --gtp                 Run GTP client (default)");
     }
 }
