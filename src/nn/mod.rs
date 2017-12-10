@@ -1060,7 +1060,7 @@ mod tests {
             }).collect();
 
             b.iter(move || {
-                forward_aux(&mut workspace, &features)
+                forward(&mut workspace, &features)
             });
         } else {
             let features = (0..batch_size).map(|_| {
