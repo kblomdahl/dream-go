@@ -1068,7 +1068,7 @@ mod tests {
 
     #[allow(dead_code)]
     fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
-        let network = Network::new(Path::new("models/dream-go.json")).unwrap();
+        let network = Network::default().unwrap();
         let mut workspace = network.get_workspace(batch_size);
 
         // allocate a feature vector filled with random ones and zeros
