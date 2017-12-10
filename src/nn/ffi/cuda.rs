@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use libc::{c_void};
+use libc::{c_void, c_int};
+
+#[repr(i32)]
+#[derive(Debug, PartialEq, Eq)]
+pub enum DeviceAttr {
+    ComputeCapabilityMajor = 75,
+    ComputeCapabilityMinor = 76
+}
 
 #[repr(i32)]
 #[derive(Debug, PartialEq, Eq)]
@@ -112,8 +119,10 @@ extern {
     pub fn cudaMemcpy(dst: *mut c_void, src: *const c_void, count: usize, kind: MemcpyKind) -> Error;
     pub fn cudaMemcpyAsync(dst: *mut c_void, src: *const c_void, count: usize, kind: MemcpyKind, stream: Stream) -> Error;
 
-    #[allow(dead_code)]
+    #[cfg(feature = "trace-cuda")]
     pub fn cudaDeviceSynchronize() -> Error;
+    pub fn cudaRuntimeGetVersion(version: *mut c_int) -> Error;
+    pub fn cudaDeviceGetAttribute(value: *mut c_int, attr: DeviceAttr, device: c_int) -> Error;
 
     pub fn cudaEventCreate(event: *mut Event) -> Error;
     pub fn cudaEventDestroy(event: Event) -> Error;

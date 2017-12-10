@@ -14,6 +14,8 @@
 
 /// 16-bit floating point numbers as defined in IEEE 754-2008.
 #[allow(non_camel_case_types)]
+#[derive(Copy, Clone, PartialEq)]
+#[repr(C)]
 pub struct f16(u16);
 
 impl f16 {
@@ -32,6 +34,16 @@ impl f16 {
         let f16(bits) = *self;
 
         bits
+    }
+}
+
+impl Default for f16 {
+    fn default() -> f16 { f16(0) }
+}
+
+impl ::std::fmt::Debug for f16 {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::result::Result<(), ::std::fmt::Error> {
+        write!(f, "{}", f32::from(*self))
     }
 }
 
@@ -59,6 +71,7 @@ impl From<f32> for f16 {
 
 #[cfg(test)]
 mod tests {
+    use test::Bencher;
     use util::f16::*;
 
     #[test]
@@ -74,7 +87,19 @@ mod tests {
 
     #[test]
     fn from_f32_to_f16() {
-        assert_eq!(f16::from(::std::f32::consts::PI).to_bits(), 0x4248);  // pi        
-        assert_eq!(f16::from(::std::f32::consts::E).to_bits(), 0x4170);  // pi        
+        assert_eq!(f16::from(::std::f32::consts::PI).to_bits(), 0x4248);  // pi
+        assert_eq!(f16::from(::std::f32::consts::E).to_bits(), 0x4170);  // e
+    }
+
+    #[bench]
+    fn convert_to_fp16_f32(b: &mut Bencher) {
+        b.iter(|| { f16::from(3.14f32) })
+    }
+
+    #[bench]
+    fn convert_from_fp16_f32(b: &mut Bencher) {
+        let e = f16::from_bits(0x4248);
+
+        b.iter(|| { f32::from(e) })
     }
 }

@@ -47,7 +47,7 @@ lazy_static! {
 /// 
 /// * `input` -
 /// 
-pub fn decode(input: &str) -> Option<Box<[f32]>> {
+pub fn decode<T: From<f16> + Clone>(input: &str) -> Option<Box<[T]>> {
     let mut output = vec! [];
     let mut iter = input.chars();
 
@@ -76,8 +76,8 @@ pub fn decode(input: &str) -> Option<Box<[f32]>> {
             acc >>= 8;
         }
 
-        output.push(f32::from(f16::from_bits(u16::from_be(((dst[3] as u16) << 8) | (dst[2] as u16)))));
-        output.push(f32::from(f16::from_bits(u16::from_be(((dst[1] as u16) << 8) | (dst[0] as u16)))));
+        output.push(T::from(f16::from_bits(u16::from_be(((dst[3] as u16) << 8) | (dst[2] as u16)))));
+        output.push(T::from(f16::from_bits(u16::from_be(((dst[1] as u16) << 8) | (dst[0] as u16)))));
     }
 
     Some(output.into_boxed_slice())

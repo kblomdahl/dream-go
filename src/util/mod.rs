@@ -14,3 +14,4 @@
 
 pub mod b85;
 pub mod f16;
+pub mod q8;
