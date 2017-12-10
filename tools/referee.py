@@ -151,8 +151,8 @@ def play_game(engine_1, engine_2):
             return white[3]
     finally:
         print('(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]PW[{}]PB[{}]RE[{}]{})'.format(
-            black[0],
             white[0],
+            black[0],
             re,
             sgf
         ), flush=True)
