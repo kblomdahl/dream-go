@@ -115,7 +115,7 @@ impl Value for PUCT {
     }
 }
 
-pub type DefaultValue = PUCT;
+pub type DefaultValue = RAVE;
 
 /// A monte carlo search tree.
 pub struct Node<E: Value> {
@@ -329,7 +329,7 @@ impl<E: Value> Node<E> {
 
     /// Returns the child with the maximum UCT value, and increase its visit count
     /// by one.
-    fn select<'a, C: Param>(&'a mut self) -> usize {
+    fn select<'a, C: Param>(&'a mut self) -> Option<usize> {
         // compute all UCB1 values in a SIMD friendly manner in the hopes
         // that the compiler will re-write it to make use of modern hardware
         let mut uct = [0.0f32; 368];
@@ -339,18 +339,24 @@ impl<E: Value> Node<E> {
             uct[i] = self.uct::<C>(i, sqrt_n);
         }
 
-        // greedy selection based on the maximum ucb1 value, but avoid picking nodes
-        // that are currently in the progress of being expanded. Then within the same
-        // lock, mark the selected edge as currently being expanding, so that some
-        // other thread does not pick it too.
+        // greedy selection based on the maximum ucb1 value, failing if someone else
+        // is already expanding the node we want to expand.
         let _guard = self.lock.lock();
-        let max_i = (0..362).filter(|&i| !self.expanding[i] || !self.children[i].is_null())
+        let max_i = (0..362).filter(|&i| self.prior[i].is_finite())
                             .max_by_key(|&i| OrderedFloat(uct[i]))
-                            .unwrap();
+                            .and_then(|i| {
+                                if self.expanding[i] && self.children[i].is_null() {
+                                    None  // someone else is already expanding this node
+                                } else {
+                                    Some(i)
+                                }
+                            });
 
-        self.total_count += 1;
-        self.count[max_i] += 1;
-        self.expanding[max_i] = true;
+        if let Some(max_i) = max_i {
+            self.total_count += 1;
+            self.count[max_i] += 1;
+            self.expanding[max_i] = true;
+        }
 
         max_i
     }
@@ -368,38 +374,46 @@ pub type NodeTrace<E> = Vec<(*mut Node<E>, Color, usize)>;
 /// * `root` - the search tree to probe into
 /// * `board` - the board to update with the traversed moves
 /// 
-pub unsafe fn probe<C, E>(root: &mut Node<E>, board: &mut Board) -> NodeTrace<E>
+pub unsafe fn probe<C, E>(root: &mut Node<E>, board: &mut Board) -> Option<NodeTrace<E>>
     where C: Param, E: Value
 {
     let mut trace = vec! [];
     let mut current = root;
 
     loop {
-        let next_child = current.select::<C>();
+        if let Some(next_child) = current.select::<C>() {
+            trace.push((current as *mut Node<E>, current.color, next_child));
 
-        trace.push((current as *mut Node<E>, current.color, next_child));
-        if next_child != 361 {  // not a passing move
-            let (x, y) = (X[next_child] as usize, Y[next_child] as usize);
+            if next_child != 361 {  // not a passing move
+                let (x, y) = (X[next_child] as usize, Y[next_child] as usize);
 
-            debug_assert!(board.is_valid(current.color, x, y));
-            board.place(current.color, x, y);
-        }
+                debug_assert!(board.is_valid(current.color, x, y));
+                board.place(current.color, x, y);
+            }
 
-        //
-        let child = {
-            let _guard = current.lock.lock();
+            //
+            let child = current.children[next_child];
 
-            current.children[next_child]
-        };
-
-        if child.is_null() {
-            break
+            if child.is_null() {
+                break
+            } else {
+                current = &mut *child;
+            }
         } else {
-            current = &mut *child;
+            // undo the entire trace, since we added virtual losses (optimistically)
+            // on the way down.
+            for (node, _, next_child) in trace.into_iter() {
+                let _guard = (*node).lock.lock();
+
+                (*node).total_count -= 1;
+                (*node).count[next_child] -= 1;
+            }
+
+            return None;
         }
     }
 
-    trace
+    Some(trace)
 }
 
 /// Insert a new node at the end of the given trace and perform the backup pass
@@ -416,10 +430,13 @@ pub unsafe fn insert<C, E>(trace: &NodeTrace<E>, color: Color, value: f32, prior
     where C: Param, E: Value
 {
     if let Some(&(node, _, index)) = trace.last() {
+        let next = Box::new(Node::new(color, prior));
         let _guard = (*node).lock.lock();
 
         if (*node).children[index].is_null() {
-            (*node).children[index] = Box::into_raw(Box::new(Node::new(color, prior)));
+            (*node).children[index] = Box::into_raw(next);
+        } else {
+            unreachable!();
         }
     }
 
