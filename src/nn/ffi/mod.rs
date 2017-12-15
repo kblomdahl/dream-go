@@ -16,6 +16,89 @@ pub mod cublas;
 pub mod cuda;
 pub mod cudnn;
 
+macro_rules! check {
+    ($status:expr) => ({
+        let err = $status;
+
+        assert!(err.is_ok(), "cuda call failed -- {:?}", err);
+    });
+
+    ($status:expr, $workspace:expr, $name:expr, $result:expr, $batch_size:expr, $n:expr) => ({
+        check!($status);
+
+        #[cfg(feature = "trace-cuda")]
+        {
+            // copy the memory from the device back to the host so
+            // that we can look at it
+            let mut vec = vec! [[0.0f32; $n]; $batch_size];
+
+            check!(cudaDeviceSynchronize());
+
+            if $workspace.network.is_half() {
+                let mut other = vec! [[f16::default(); $n]; $batch_size];
+
+                check!(cudaMemcpy(
+                    other.as_mut_ptr() as *mut c_void,
+                    $result,
+                    $workspace.network.data_type.size() * $batch_size * $n,
+                    MemcpyKind::DeviceToHost
+                ));
+
+                for i in 0..$batch_size {
+                    for j in 0..$n {
+                        vec[i][j] = f32::from(other[i][j]);
+                    }
+                }
+            } else {
+                check!(cudaMemcpy(
+                    vec.as_mut_ptr() as *mut c_void,
+                    $result,
+                    $workspace.network.data_type.size() * $batch_size * $n,
+                    MemcpyKind::DeviceToHost
+                ));
+            }
+
+            // pretty-print the array and then output the debugging
+            // information
+            let mut s = String::new();
+            let mut sum = 0.0f32;
+
+            for i in 0..$batch_size {
+                if i > 0 { s += ", "; }
+                s += "[";
+
+                if $n < 8 {
+                    for j in 0..$n {
+                        if j > 0 { s += ", "; }
+
+                        sum += vec[i][j];
+                        s += &format!("{:.4}", vec[i][j]);
+                    }
+                } else {
+                    for j in 0..$n {
+                        sum += vec[i][j];
+                    }
+
+                    for j in 0..8 {
+                        s += &format!("{:.4}, ", vec[i][j]);
+                    }
+
+                    s += "...";
+                }
+
+                s += "]";
+            }
+
+            println!("sum(`{}`) == {}", $name, sum);
+            println!("eval(`{}`) == [{}]", $name, s);
+        }
+    });
+
+    ($status:expr, $workspace:expr, $name:expr, $result:expr, $batch_size:expr, $m:expr, $n:expr) => ({
+        check!($status, $workspace, $name, $result, $batch_size, $m * $n);
+    })
+}
+
 #[cfg(test)]
 mod type_bench;
 

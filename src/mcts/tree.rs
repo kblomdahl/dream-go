@@ -115,7 +115,7 @@ impl Value for PUCT {
     }
 }
 
-pub type DefaultValue = RAVE;
+pub type DefaultValue = PUCT;
 
 /// A monte carlo search tree.
 pub struct Node<E: Value> {

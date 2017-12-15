@@ -618,6 +618,8 @@ impl Board {
         let mut territory = [0xff; 368];
         let mut probes = vec! [];
 
+        probes.reserve(368);
+
         for index in 0..361 {
             if self.vertices[index] == current as u8 {
                 territory[index] = 0;

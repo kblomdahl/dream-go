@@ -77,6 +77,7 @@ impl Entry {
                 'w', 'x', 'y', 'z'
             ];
             static ref WINNER: Regex = Regex::new(r"RE\[([^\]]*)\]").unwrap();
+            static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
             static ref MOVE: Regex = Regex::new(r";([BW])\[([a-z]*)\](?:P\[([^\]]*)\])?").unwrap();
         }
 
@@ -124,6 +125,13 @@ impl Entry {
             } else {
                 return None;  // invalid game
             }
+        }
+
+        // if the game was scored, then add two pass moves at the end of the game
+        // since they are missing from a lot of SGF files
+        if SCORED.is_match(src) {
+            entries.push((board.clone(), Color::Black, PolicyEntry::Partial(361)));
+            entries.push((board.clone(), Color::White, PolicyEntry::Partial(361)));
         }
 
         // pick exactly one entry for each symmetry of the game

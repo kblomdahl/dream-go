@@ -48,7 +48,7 @@ fn main() {
             }
         }
     } else if args.iter().any(|arg| arg == "--self-play") {
-        let network = nn::Network::default()
+        let network = nn::Network::new()
             .expect("no model found");
         let n = if remaining.len() > 0 {
             remaining[0].parse::<usize>().unwrap()

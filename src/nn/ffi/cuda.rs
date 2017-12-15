@@ -112,8 +112,6 @@ pub type Stream = *const c_void;
 #[link(name = "cuda")]
 #[link(name = "cudart")]
 extern {
-    pub fn cuInit(flags: u32) -> Error;
-
     pub fn cudaFree(devPtr: *const c_void) -> Error;
     pub fn cudaMalloc(devPtr: *mut *mut c_void, size: usize) -> Error;
     pub fn cudaMemcpy(dst: *mut c_void, src: *const c_void, count: usize, kind: MemcpyKind) -> Error;

@@ -21,13 +21,13 @@ use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{Sender, Receiver, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 
 use go::{symmetry, Board, Color};
 use mcts::param::*;
-use nn::{self, Network, Workspace};
+use nn::{self, Network, WorkspaceGuard};
 use util::b85;
 use util::f16::*;
 
@@ -42,6 +42,11 @@ const SGF_LETTERS: [char; 26] = [
 pub enum GameResult {
     Resign(String, Board, Color, f32),
     Ended(String, Board)
+}
+
+pub enum PolicyRequest<T: From<f32> + Clone> {
+    Ask(Box<[T]>, Sender<(T, Box<[T]>)>),
+    Wait(Sender<()>)
 }
 
 /// An abstraction that hides the exact details of how a neural network forward
@@ -66,18 +71,14 @@ trait Forwarder<T: From<f32> + Clone> {
 /// An implementation of `Forwarder` that performs the forward pass immedietly on
 /// a local `nn::Workspace` with batch size `1`.
 struct ImmediateForward<'a> {
-    workspace: Workspace<'a>
+    workspace: WorkspaceGuard<'a>
 }
 
 impl<'a> ImmediateForward<'a> {
-    fn new(network: &'a Network) -> ImmediateForward<'a> {
+    fn new(network: &'a Network) -> ImmediateForward {
         ImmediateForward {
             workspace: network.get_workspace(1)
         }
-    }
-
-    fn into_workspace(agent: ImmediateForward<'a>) -> Workspace<'a> {
-        agent.workspace
     }
 }
 
@@ -94,14 +95,14 @@ impl<'a, T: From<f32> + Clone> Forwarder<T> for ImmediateForward<'a> {
 /// channel and relies on the remote endpoint performing the forward
 /// pass (presumably with some batching).
 struct RemoteForward<T: From<f32> + Clone> {
-    remote: Sender<(Box<[T]>, Sender<(T, Box<[T]>)>)>
+    remote: Sender<PolicyRequest<T>>
 }
 
 impl<T: From<f32> + Clone> Forwarder<T> for RemoteForward<T> {
     fn forward(&mut self, features: Box<[T]>) -> (T, Box<[T]>) {
         let (sender, receiver) = channel();
 
-        self.remote.send((features, sender)).unwrap();
+        self.remote.send(PolicyRequest::Ask(features, sender)).unwrap();
         let (value, policy) = receiver.recv().unwrap();
 
         (value, policy)
@@ -222,7 +223,7 @@ struct ThreadContext<E: tree::Value + Clone, T: From<f32> + Copy> {
     starting_point: Board,
 
     /// The channel to use when communicating features to the cuDNN worker thread.
-    sender: Sender<(Box<[T]>, Sender<(T, Box<[T]>)>)>,
+    sender: Sender<PolicyRequest<T>>,
 
     /// The number of probes that still needs to be done into the tree.
     remaining: Arc<AtomicIsize>,
@@ -236,6 +237,127 @@ struct ThreadContext<E: tree::Value + Clone, T: From<f32> + Copy> {
 }
 
 unsafe impl<E: tree::Value + Clone, T: From<f32> + Copy> Send for ThreadContext<E, T> { }
+
+/// Worker that probes into the given monte carlo search tree until the context
+/// is exhausted.
+/// 
+/// # Arguments
+/// 
+/// * `context` -
+/// 
+fn predict_worker<C, E, T>(context: ThreadContext<E, T>)
+    where C: Param + Clone + 'static,
+          E: tree::Value + Clone + 'static,
+          T: From<f32> + Copy + Default + 'static, f32: From<T>
+{
+    let server = context.sender.clone();
+    let mut remote = RemoteForward::<T> { remote: context.sender };
+
+    while context.remaining.fetch_sub(1, Ordering::SeqCst) > 0 {
+        loop {
+            let mut board = context.starting_point.clone();
+            let trace = unsafe { tree::probe::<C, E>(&mut *context.root.get(), &mut board) };
+
+            if let Some(trace) = trace {
+                let &(_, color, _) = trace.last().unwrap();
+                let next_color = color.opposite();
+                let (value, policy) = forward::<C, RemoteForward<T>, T>(&mut remote, &board, next_color);
+
+                unsafe {
+                    tree::insert::<C, E>(&trace, next_color, value, policy);
+
+                    // wake-up all threads that are waiting for the tree to be
+                    // expanded.
+                    context.changed.1.notify_all();
+                    break
+                }
+            } else {
+                let (tx, rx) = channel();
+
+                server.send(PolicyRequest::Wait(tx)).unwrap();
+                rx.recv().unwrap();
+            }
+        }
+    }
+}
+
+/// Worker that listens for requests to compute the neural network, collect them
+/// into batches as much as possible, and then evaluate and send the correct
+/// response back to each MCTS worker.
+/// 
+/// # Arguments
+/// 
+/// * `network` - the neural network to use for evaluations
+/// * `receiver` - the channel to listen for requests on
+/// 
+fn predict_serve<'a, C, E, T>(
+    network: &Network,
+    receiver: Receiver<PolicyRequest<T>>
+)
+    where C: Param + Clone + 'static,
+          E: tree::Value + Clone + 'static,
+          T: From<f32> + Copy + Default + 'static, f32: From<T>
+{
+    let mut workspaces = (0..C::batch_size())
+        .map(|s| network.get_workspace(s + 1))
+        .collect::<Vec<WorkspaceGuard>>();
+    let mut evaluated = 0;
+
+    while evaluated < C::iteration_limit() {
+        // collect a full batch worth of features from the workers
+        let mut features_list = vec! [];
+        let mut sender_list = vec! [];
+        let mut waiting_list = vec! [];
+        let max_thread_count = ::std::cmp::min(
+            C::iteration_limit() - evaluated,
+            C::thread_count()
+        );
+        let max_batch_size = ::std::cmp::min(
+            C::iteration_limit() - evaluated,
+            C::batch_size()
+        );
+
+        while features_list.len() < max_batch_size {
+            match receiver.recv().unwrap() {
+                PolicyRequest::Ask(features, sender) => {
+                    features_list.push(features);
+                    sender_list.push(sender);
+                }
+                PolicyRequest::Wait(sender) => {
+                    if features_list.is_empty() {
+                        // if we have no features, then this _should_
+                        // be about a request from the last evaluation.
+                        sender.send(()).unwrap();
+                    } else {
+                        waiting_list.push(sender);
+                    }
+                }
+            }
+
+            if max_thread_count == waiting_list.len() + features_list.len() {
+                break;
+            }
+        }
+
+        debug_assert!(!features_list.is_empty());
+        debug_assert!(features_list.len() == sender_list.len());
+
+        // process the features and the send them back to the worker who
+        // sent it using the OneShot channel.
+        let workspace = &mut workspaces[features_list.len() - 1];
+        let (values, policies) = nn::forward::<T>(workspace, &features_list);
+
+        for ((value, policy), sender) in values.into_iter().zip(policies.into_iter()).zip(sender_list.into_iter()) {
+            sender.send((value, policy)).unwrap();
+            evaluated += 1;
+        }
+
+        // awaken any workers waiting for updates before continuing
+        for waiting in waiting_list.into_iter() {
+            waiting.send(()).unwrap();
+        }
+    }
+}
 
 /// Predicts the _best_ next move according to the given neural network when applied
 /// to a monte carlo tree search.
@@ -256,7 +378,6 @@ pub fn predict_aux<C, E, T>(
           T: From<f32> + Copy + Default + 'static, f32: From<T>
 {
     assert_eq!(C::iteration_limit() % C::batch_size(), 0);
-    assert_eq!(C::thread_count() % C::batch_size(), 0);
 
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
@@ -279,125 +400,10 @@ pub fn predict_aux<C, E, T>(
     let handles = (0..C::thread_count()).map(|_| {
         let context = context.clone();
 
-        thread::spawn(move || {
-            let mut remote = RemoteForward::<T> { remote: context.sender };
-
-            while context.remaining.fetch_sub(1, Ordering::SeqCst) > 0 {
-                loop {
-                    let mut board = context.starting_point.clone();
-                    let trace = unsafe { tree::probe::<C, E>(&mut *context.root.get(), &mut board) };
-
-                    if let Some(trace) = trace {
-                        let &(_, color, _) = trace.last().unwrap();
-                        let next_color = color.opposite();
-                        let (value, policy) = forward::<C, RemoteForward<T>, T>(&mut remote, &board, next_color);
-
-                        unsafe {
-                            tree::insert::<C, E>(&trace, next_color, value, policy);
-
-                            // wake-up all threads that are waiting for the tree to be
-                            // expanded 
-                            context.changed.1.notify_all();
-                            break
-                        }
-                    } else {
-                        context.waiting.fetch_add(1, Ordering::Acquire);
-
-                        let changed = context.changed.0.lock().unwrap();
-                        drop(context.changed.1.wait(changed).unwrap());
-
-                        context.waiting.fetch_sub(1, Ordering::Release);
-                    }
-                }
-            }
-        })
+        thread::spawn(move || { predict_worker::<C, E, T>(context) })
     }).collect::<Vec<JoinHandle<()>>>();
 
-    // process the requests from all worker threads on the main thread, we keep
-    // an independent count instead of relying on `remaining` to avoid race-conditions
-    // between when we check the loop invariant, when the workers decrease the
-    // counter, and when the workers receive the response from the network.
-    let batch_size = C::batch_size();
-    let half_batch_size = ::std::cmp::max(1, batch_size / 2);
-
-    let mut workspace_b = network.get_workspace(batch_size);
-    let mut workspace_h = network.get_workspace(half_batch_size);
-    let mut workspace_1 = ImmediateForward::into_workspace(immediate);
-    let mut evaluated = 0;
-
-    while evaluated < C::iteration_limit() {
-        // collect a full batch worth of features from the workers
-        let mut features_list = vec! [];
-        let mut sender_list = vec! [];
-
-        while features_list.len() < batch_size {
-            if let Ok((features, sender)) = receiver.try_recv() {
-                features_list.push(features);
-                sender_list.push(sender);
-            } else {
-                let spots = batch_size - features_list.len();
-                let available = {
-                    let waiting = context.waiting.load(Ordering::Acquire);
-                    let remaining_threads = ::std::cmp::min(
-                        C::thread_count(),
-                        C::iteration_limit() - evaluated
-                    );
-
-                    remaining_threads - waiting - features_list.len()
-                };
-
-                if available == 0 && features_list.is_empty() {
-                    // avoid deadlock that can occur because the last `notify_all`
-                    // in the threads was called while increasing the `waiting`
-                    // counter
-                    context.changed.1.notify_all();
-                } else if available < spots {
-                    // terminate as soon as we have encountered an underful batch
-                    // in an attempt to encourage the next batch to be full instead
-                    break
-                } else {
-                    // just try again without yielding since we want the minimum
-                    // possible latency within the neural network thread to avoid
-                    // bottlenecking
-                }
-            }
-        }
-
-        // process the features and the send them back to the worker who
-        // sent it using the OneShot channel.
-        if features_list.len() < batch_size {
-            // check if we can at least perform a half-batch
-            if features_list.len() >= half_batch_size {
-                let features_rest = features_list.split_off(half_batch_size);
-                let sender_rest = sender_list.split_off(half_batch_size);
-                let (values, policies) = nn::forward::<T>(&mut workspace_h, &features_list);
-
-                for (i, policy) in policies.into_iter().enumerate() {
-                    sender_list[i].send((values[i], policy)).unwrap();
-                    evaluated += 1;
-                }
-
-                features_list = features_rest;
-                sender_list = sender_rest;
-            }
-
-            // if we did not receive a full batch then process them one-by-one
-            for (features, sender) in features_list.into_iter().zip(sender_list.into_iter()) {
-                let (values, mut policies) = nn::forward::<T>(&mut workspace_1, &vec! [features]);
-                let policy = policies.pop().unwrap();
-
-                sender.send((values[0], policy)).unwrap();
-                evaluated += 1;
-            }
-        } else {
-            let (values, policies) = nn::forward::<T>(&mut workspace_b, &features_list);
-
-            for (i, policy) in policies.into_iter().enumerate() {
-                sender_list[i].send((values[i], policy)).unwrap();
-                evaluated += 1;
-            }
-        }
-    }
+    predict_serve::<C, E, T>(network, receiver);
 
     // wait for all threads to terminate to avoid any zombie processes
     for handle in handles.into_iter() { handle.join().unwrap(); }

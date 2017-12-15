@@ -202,7 +202,12 @@ impl Gtp {
 
     fn generate_move(&mut self, id: Option<usize>, color: Color) -> Option<Vertex> {
         if self.network.is_none() {
-            self.network = Network::default();
+            match Network::new() {
+                None => {},
+                Some(network) => {
+                    self.network = Some(network);
+                }
+            }
         }
 
         let board = self.history.last().unwrap();

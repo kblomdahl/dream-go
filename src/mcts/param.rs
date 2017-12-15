@@ -13,6 +13,18 @@
 // limitations under the License.
 
 use std::env;
+use std::fmt;
+use std::str::FromStr;
+
+fn env_or_default<T: FromStr>(name: &str, default: T) -> T
+    where <T as FromStr>::Err : fmt::Debug
+{
+    match env::var(name) {
+        Ok(value) => value.parse::<T>()
+                          .expect(&format!("{}: unexpected type -- {}", name, value)),
+        Err(_) => default
+    }
+}
 
 pub trait Param {
     /// The number of probes into the monte carlo tree to perform at each step. This
@@ -51,11 +63,7 @@ impl Param for Standard {
     fn iteration_limit() -> usize {
         lazy_static! {
             static ref LIMIT: usize = {
-                let limit = match env::var("NUM_ITER") {
-                    Ok(val) => val.parse::<usize>()
-                                  .expect(&format!("NUM_ITER: expected number, received {}", val)),
-                    Err(_) => 800
-                };
+                let limit = env_or_default("NUM_ITER", 800);
 
                 assert!(limit > 0,
                     "The number of iterations ({}) must be larger than zero",
@@ -72,20 +80,11 @@ impl Param for Standard {
     fn thread_count() -> usize {
         lazy_static! {
             static ref COUNT: usize = {
-                let count = match env::var("NUM_THREADS") {
-                    Ok(val) => val.parse::<usize>()
-                                  .expect(&format!("NUM_THREADS: expected number, received {}", val)),
-                    Err(_) => 16
-                };
+                let count = env_or_default("NUM_THREADS", 16);
 
                 assert!(count > 0,
                     "The number of threads ({}) must be larger than zero",
                     count
-                );
-                assert_eq!(Standard::iteration_limit() % count, 0,
-                    "The number of threads ({}) must be an integer divider of the number of iterations ({})",
-                    count,
-                    Standard::iteration_limit()
                 );
 
                 count
@@ -98,20 +97,11 @@ impl Param for Standard {
     fn batch_size() -> usize {
         lazy_static! {
             static ref SIZE: usize = {
-                let size = match env::var("BATCH_SIZE") {
-                    Ok(val) => val.parse::<usize>()
-                                  .expect(&format!("BATCH_SIZE: expected number, received {}", val)),
-                    Err(_) => 8
-                };
+                let size = env_or_default("BATCH_SIZE", 8);
 
                 assert!(size > 0,
                     "The batch size ({}) must be larger than zero",
                     size
-                );
-                assert_eq!(Standard::iteration_limit() % size, 0,
-                    "The batch size ({}) must be an integer divider of the number of iterations ({})",
-                    size,
-                    Standard::iteration_limit()
                 );
                 assert!(size <= Standard::thread_count(),
                     "The batch size ({}) must be smaller than or equal to the number of threads ({})",
@@ -127,8 +117,41 @@ impl Param for Standard {
     }
 
     #[inline] fn dirichlet_noise() -> f32 { 0.25 }
-    #[inline] fn exploration_rate() -> f32 { 1.41421356237 }
-    #[inline] fn rave_bias() -> f32 { 0.1 }
+
+    #[inline] fn exploration_rate() -> f32 {
+        lazy_static! {
+            static ref EXPLORATION_RATE: f32 = {
+                let rate = env_or_default("EXPLORATION_RATE", 2.23822);
+
+                assert!(rate >= 0.0,
+                    "The exploration rate ({}) must be at least zero",
+                    rate
+                );
+
+                rate
+            };
+        }
+
+        *EXPLORATION_RATE
+    }
+
+    #[inline] fn rave_bias() -> f32 {
+        lazy_static! {
+            static ref RAVE_BIAS: f32 = {
+                let bias = env_or_default("RAVE_BIAS", 0.4);
+
+                assert!(bias >= 0.0,
+                    "The RAVE bias ({}) must be at least zero",
+                    bias
+                );
+
+                bias
+            };
+        }
+
+        *RAVE_BIAS
+    }
+
     #[inline] fn experimental() -> bool { false }
 }
 
