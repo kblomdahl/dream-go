@@ -1,0 +1,22 @@
+Name DreamGo
+Script ./tools/clop_dreamgo.py
+
+# The parameters to tune:
+#
+# * Name
+# * Lower bound
+# * Upper bound
+#
+LinearParameter EXPLORATION_RATE 0.1 3.0
+LinearParameter RAVE_BIAS 0.01 1.0
+
+# Parallelization parameters
+Processor localhost
+Replications 2
+
+# Parameters for statistical model of outcome
+DrawElo 0
+
+# Regression parameters
+H 3
+Correlations none
