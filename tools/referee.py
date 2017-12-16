@@ -127,7 +127,7 @@ def play_game(engine_1, engine_2):
         #
         # We use the `final_score` variant here to avoid any incorrect scores due to
         # complicated situations that `estimate_score` fail to take into account.
-        gnugo = subprocess.Popen('gnugo --mode gtp', shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        gnugo = subprocess.Popen('gnugo --chinese-rules --mode gtp', shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         gnugo.stdin.write(b'komi 7.5\n')
         gnugo.stdin.write(b'boardsize 19\n')
         gnugo.stdin.write(b'clear_board\n')
@@ -233,11 +233,12 @@ def main(num_games, engines):
             else:
                 n_s = float(wins[engine_1, engine_2])
                 n_f = float(wins[engine_2, engine_1])
+                n = n_s + n_f
                 z = 0.6  # about a 70% confidence interval
-                lower = 1.0 / (num_games + z*z) \
-                    * (n_s + z*z / 2 - z*sqrt(n_s*n_f/num_games + z*z/4.0))
-                upper = 1.0 / (num_games + z*z) \
-                    * (n_s + z*z / 2 + z*sqrt(n_s*n_f/num_games + z*z/4.0))
+                lower = 1.0 / (n + z*z) \
+                    * (n_s + z*z / 2 - z*sqrt((n_s*n_f)/n + z*z/4.0))
+                upper = 1.0 / (n + z*z) \
+                    * (n_s + z*z / 2 + z*sqrt((n_s*n_f)/n + z*z/4.0))
 
                 return '{:.0f}% - {:.0f}%'.format(100.0 * lower, 100.0 * upper)
 
