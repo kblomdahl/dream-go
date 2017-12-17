@@ -198,7 +198,7 @@ impl Param for Tournament {
     #[inline] fn temperature() -> f32 {
         lazy_static! {
             static ref TEMPERATURE: f32 = {
-                let temp = env_or_default("TEMPERATURE", 0.3);
+                let temp = env_or_default("TEMPERATURE", 0.2);
 
                 assert!(temp > 0.0,
                     "The temperature ({}) must be larger than zero",
