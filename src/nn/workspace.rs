@@ -201,7 +201,7 @@ impl Shared {
 
                 // The `.zeros` and `.ones` are always f32 regardless of the _main_ data
                 // type since they are only used for batch-normalization which requires
-                // all of the `scale`, `bias`, `estimated_mean`, `estimated_variance`
+                // all of the `scale`, `bias`, `estimated_mean`, and `estimated_variance`
                 // values to be `f32`.
                 check!(cudaMalloc(&mut n.zeros, NUM_FEATURES * DataType::Float.size()));
                 check!(cudaMalloc(&mut n.ones, NUM_FEATURES * DataType::Float.size()));

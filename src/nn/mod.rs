@@ -465,4 +465,5 @@ mod tests {
     #[bench] fn batch_size_08(b: &mut Bencher) { bench_batch_size(b,  8); }
     #[bench] fn batch_size_16(b: &mut Bencher) { bench_batch_size(b, 16); }
     #[bench] fn batch_size_32(b: &mut Bencher) { bench_batch_size(b, 32); }
+    #[bench] fn batch_size_64(b: &mut Bencher) { bench_batch_size(b, 64); }
 }
