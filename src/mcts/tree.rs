@@ -124,7 +124,7 @@ pub struct Node<E: Value> {
     lock: Mutex,
 
     /// The color of each edge.
-    color: Color,
+    pub color: Color,
 
     /// The total number of times any edge has been traversed.
     total_count: i32,
@@ -194,6 +194,42 @@ impl<E: Value> Node<E> {
             amaf_count: [0; 368],
             expanding: [false; 362],
             children: [ptr::null_mut(); 362]
+        }
+    }
+
+    /// Re-use an existing search tree but with a new prior values.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `other` - the search tree to re-use
+    /// * `prior` - the new prior distribution
+    /// 
+    pub fn reuse(mut other: Node<E>, prior: Box<[f32]>) -> Node<E> {
+        for i in 0..362 {
+            other.prior[i] = prior[i];
+        }
+
+        other
+    }
+
+    /// Returns the sub-tree that contains the exploration of the given move index.
+    /// 
+    /// # Argumnets
+    /// 
+    /// * `self` - the search tree to pluck the child from
+    /// * `index` - the move to pluck the sub-tree for
+    /// 
+    pub fn forward(mut self, index: usize) -> Option<Node<E>> {
+        let child = self.children[index];
+
+        if child.is_null() {
+            None
+        } else {
+            Some(unsafe {
+                self.children[index] = ptr::null_mut();
+
+                ptr::read(child)
+            })
         }
     }
 
@@ -296,12 +332,12 @@ impl<E: Value> Node<E> {
 
             (self.value[max_i], max_i)
         } else {
-            let t = temperature.recip();
-            let mut s = vec! [0.0f32; 362];
-            let mut s_total = 0.0f32;
+            let t = (temperature as f64).recip();
+            let mut s = vec! [0.0; 362];
+            let mut s_total = 0.0;
 
             for i in 0..362 {
-                let count = (self.count[i] as f32).powf(t);
+                let count = (self.count[i] as f64).powf(t);
 
                 s[i] = count;
                 s_total += count;
@@ -309,8 +345,8 @@ impl<E: Value> Node<E> {
 
             debug_assert!(s_total.is_finite());
 
-            let threshold = s_total * thread_rng().next_f32();
-            let mut so_far = 0.0f32;
+            let threshold = s_total * thread_rng().next_f64();
+            let mut so_far = 0.0;
 
             for i in 0..362 {
                 so_far += s[i];

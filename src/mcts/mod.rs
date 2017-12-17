@@ -17,7 +17,6 @@ mod dirichlet;
 mod spin;
 pub mod tree;
 
-use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -359,9 +358,10 @@ fn predict_serve<'a, C, E, T>(
 /// 
 pub fn predict_aux<C, E, T>(
     network: &Network,
+    starting_tree: Option<tree::Node<E>>,
     starting_point: &Board,
     starting_color: Color
-) -> (f32, usize, usize, Box<[f32]>)
+) -> (f32, usize, tree::Node<E>)
     where C: Param + Clone + 'static,
           E: tree::Value + Clone + 'static,
           T: From<f32> + Copy + Default + 'static, f32: From<T>
@@ -375,7 +375,13 @@ pub fn predict_aux<C, E, T>(
     // perform exactly NUM_ITERATIONS probes into the search tree
     let (sender, receiver) = channel();
     let context: ThreadContext<E, T> = ThreadContext {
-        root: Arc::new(UnsafeCell::new(tree::Node::new(starting_color, policy))),
+        root: if let Some(starting_tree) = starting_tree {
+            assert_eq!(starting_tree.color, starting_color);
+
+            Arc::new(UnsafeCell::new(tree::Node::reuse(starting_tree, policy)))
+        } else {
+            Arc::new(UnsafeCell::new(tree::Node::new(starting_color, policy)))
+        },
         starting_point: starting_point.clone(),
         sender: sender,
 
@@ -393,16 +399,16 @@ pub fn predict_aux<C, E, T>(
     // wait for all threads to terminate to avoid any zombie processes
     for handle in handles.into_iter() { handle.join().unwrap(); }
 
+    assert_eq!(Arc::strong_count(&context.root), 1);
+
     unsafe {
-        let root = &*context.root.get();
+        let root = UnsafeCell::into_inner(Arc::try_unwrap(context.root).ok().expect(""));
         let (value, index) = root.best(if starting_point.count() < 8 { C::temperature() } else { 0.0 });
-        let (_, prior_index) = root.prior();
-        let policy = root.softmax();
 
         #[cfg(feature = "trace-mcts")]
-        eprintln!("{}", tree::to_sgf::<C, E>(root, starting_point));
+        eprintln!("{}", tree::to_sgf::<C, E>(&root, starting_point));
 
-        (value, index, prior_index, policy)
+        (value, index, root)
     }
 }
 
@@ -417,44 +423,16 @@ pub fn predict_aux<C, E, T>(
 /// 
 pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
     network: &Network,
+    starting_tree: Option<tree::Node<E>>,
     starting_point: &Board,
     starting_color: Color
-) -> (f32, usize, usize, Box<[f32]>)
+) -> (f32, usize, tree::Node<E>)
 {
     if network.is_half() {
-        predict_aux::<C, E, f16>(network, starting_point, starting_color)
+        predict_aux::<C, E, f16>(network, starting_tree, starting_point, starting_color)
     } else {
-        predict_aux::<C, E, f32>(network, starting_point, starting_color)
+        predict_aux::<C, E, f32>(network, starting_tree, starting_point, starting_color)
     }
-}
-
-
-/// A variant of `predict` that does not perform any search and only uses the neural network.
-/// 
-/// # Arguments
-/// 
-/// * `network` -
-/// * `starting_point` -
-/// * `starting_color` -
-/// 
-#[allow(dead_code)]
-pub fn predict_policy<C: Param>(
-    network: &Network,
-    starting_point: &Board,
-    starting_color: Color
-) -> (f32, usize, usize, Box<[f32]>)
-{
-    let mut immediate = ImmediateForward::new(network);
-    let (value, policy) = if network.is_half() {
-        forward::<C, ImmediateForward, f16>(&mut immediate, starting_point, starting_color)
-    } else {
-        forward::<C, ImmediateForward, f32>(&mut immediate, starting_point, starting_color)
-    };
-    let policy_index = (0..362).max_by_key(|&i| OrderedFloat(policy[i])).unwrap();
-    let mut softmax = vec! [0.0f32; 362];
-    softmax[policy_index] = 1.0;
-
-    (value, policy_index, policy_index, softmax.into_boxed_slice())
 }
 
 /// Play a game against the engine and return the result of the game.
@@ -473,16 +451,20 @@ pub fn self_play(network: &Network) -> GameResult {
     // limit the maximum number of moves to `2 * 19 * 19` to avoid the
     // engine playing pointless capture sequences at the end of the game
     // that does not change the final result.
+    let mut root = None;
+
     while count < 722 {
-        let (value, index, prior_index, policy) = if current == Color::Black {
-            predict::<Standard, tree::DefaultValue>(network, &board, current)
+        let (value, index, tree) = if current == Color::Black {
+            predict::<Standard, tree::DefaultValue>(network, root, &board, current)
         } else {
-            predict::<Standard, tree::DefaultValue>(network, &board, current)
-            //predict_policy::<Standard>(network, &board, current)
+            predict::<Standard, tree::DefaultValue>(network, root, &board, current)
         };
 
         debug_assert!(-1.0 <= value && value <= 1.0);
         debug_assert!(index < 362);
+
+        let policy = tree.softmax();
+        let (_, prior_index) = tree.prior();
 
         if value < -0.9 {  // resign the game if the evaluation looks bad
             sgf += &format!(";{}[]", current);
@@ -496,6 +478,8 @@ pub fn self_play(network: &Network) -> GameResult {
                 if pass_count >= 2 {
                     return GameResult::Ended(sgf, board)
                 }
+
+                root = tree::Node::forward(tree, 361);
             } else {
                 let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
                 let (px, py) = if prior_index == 361 {
@@ -513,6 +497,7 @@ pub fn self_play(network: &Network) -> GameResult {
                 pass_count = 0;
 
                 board.place(current, x, y);
+                root = tree::Node::forward(tree, index);
             }
         }
 

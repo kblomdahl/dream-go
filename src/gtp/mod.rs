@@ -80,6 +80,7 @@ lazy_static! {
 
 struct Gtp {
     network: Option<Network>,
+    search_tree: Option<mcts::tree::Node<mcts::tree::DefaultValue>>,
     history: Vec<Board>,
     komi: f32
 }
@@ -213,7 +214,14 @@ impl Gtp {
         let board = self.history.last().unwrap();
 
         if let Some(ref network) = self.network {
-            let (value, index, _prior_index, _policy) = mcts::predict::<mcts::param::Tournament, mcts::tree::DefaultValue>(network, &board, color);
+            let (value, index, tree) = mcts::predict::<mcts::param::Tournament, mcts::tree::DefaultValue>(
+                network,
+                self.search_tree.take(),
+                &board,
+                color
+            );
+
+            self.search_tree = Some(tree);
 
             if value < -0.95 {  // 2.5% chance of winning
                 success!(id, "resign");
@@ -265,10 +273,17 @@ impl Gtp {
                     let board = self.history.last().unwrap();
 
                     if vertex.is_pass() {
+                        self.search_tree = self.search_tree.take().and_then(|tree| {
+                            mcts::tree::Node::forward(tree, 361)
+                        });
+
                         Some(board.clone())
                     } else if board.is_valid(color, vertex.x, vertex.y) {
                         let mut other = board.clone();
                         other.place(color, vertex.x, vertex.y);
+                        self.search_tree = self.search_tree.take().and_then(|tree| {
+                            mcts::tree::Node::forward(tree, 19 * vertex.y + vertex.x)
+                        });
 
                         Some(other)
                     } else {
@@ -308,14 +323,23 @@ impl Gtp {
                     board.place(color, vertex.x, vertex.y);
 
                     self.history.push(board);
+                    self.search_tree = self.search_tree.take().and_then(|tree| {
+                        mcts::tree::Node::forward(tree, 19 * vertex.y + vertex.x)
+                    });
+                } else {
+                    self.search_tree = self.search_tree.take().and_then(|tree| {
+                        mcts::tree::Node::forward(tree, 361)
+                    });
                 }
             },
             Command::RegGenMove(color) => {
+                self.search_tree = None;
                 self.generate_move(id, color);
             },
             Command::Undo => {
                 if self.history.len() > 1 {
                     self.history.pop();
+                    self.search_tree = None;
                     success!(id, "");
                 } else {
                     error!(id, "cannot undo");
@@ -332,6 +356,7 @@ pub fn run() {
     let mut rl = Editor::<()>::new();
     let mut gtp = Gtp {
         network: None,
+        search_tree: None,
         history: vec! [Board::new()],
         komi: 7.5
     };
