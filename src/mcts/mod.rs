@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod param;
 mod dirichlet;
+mod global_cache;
+pub mod param;
 mod spin;
 pub mod tree;
 
@@ -45,7 +46,8 @@ pub enum GameResult {
 
 pub enum PolicyRequest<T: From<f32> + Clone> {
     Ask(Box<[T]>, Sender<(T, Box<[T]>)>),
-    Wait(Sender<()>)
+    Wait(Sender<()>),
+    Done
 }
 
 /// An abstraction that hides the exact details of how a neural network forward
@@ -133,83 +135,85 @@ fn forward<C, A, T>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f3
         ];
     }
 
-    // pick a random transformation to apply to the features. This is done
-    // to increase the entropy of the game slightly and to ensure the engine
-    // learns the game is symmetric (which should help generalize)
-    let t = *thread_rng().choose(&SYMM).unwrap();
-    let mut features = board.get_features::<T>(color);
+    global_cache::get_or_insert(board, color, || {
+        // pick a random transformation to apply to the features. This is done
+        // to increase the entropy of the game slightly and to ensure the engine
+        // learns the game is symmetric (which should help generalize)
+        let t = *thread_rng().choose(&SYMM).unwrap();
+        let mut features = board.get_features::<T>(color);
 
-    symmetry::apply(&mut features, t);
+        symmetry::apply(&mut features, t);
 
-    // run a forward pass through the network using this transformation
-    // and when we are done undo it using the opposite.
-    let (value, mut original_policy) = agent.forward(features);
+        // run a forward pass through the network using this transformation
+        // and when we are done undo it using the opposite.
+        let (value, mut original_policy) = agent.forward(features);
 
-    symmetry::apply(&mut original_policy, t.inverse());
+        symmetry::apply(&mut original_policy, t.inverse());
 
-    // copy the policy and replace any invalid moves in the suggested policy
-    // with -Inf, while keeping the pass move (361) untouched so that there
-    // is always at least one valid move.
-    let mut policy = vec! [0.0f32; 362];
-
-    for i in 0..361 {
-        let (x, y) = (tree::X[i] as usize, tree::Y[i] as usize);
-
-        if !board.is_valid(color, x, y) {
-            policy[i] = ::std::f32::NEG_INFINITY;
-        } else {
-            policy[i] = f32::from(original_policy[i]);
-        }
-    }
-
-    // get ride of symmetric moves, this is mostly useful for the opening.
-    // Once we are past the first ~7 moves the board is usually sufficiently
-    // asymmetric for this to turn into a no-op.
-    //
-    // we skip the first symmetry because it is the identity symmetry, which
-    // is always a symmetry for any board.
-    for &t in &SYMM[1..8] {
-        if !symmetry::is_symmetric(board, t) {
-            continue;
-        }
-
-        // figure out which are the useful vertices by eliminating the
-        // symmetries from the board.
-        let mut visited = [false; 368];
+        // copy the policy and replace any invalid moves in the suggested policy
+        // with -Inf, while keeping the pass move (361) untouched so that there
+        // is always at least one valid move.
+        let mut policy = vec! [0.0f32; 362];
 
         for i in 0..361 {
-            let j = t.apply(i);
+            let (x, y) = (tree::X[i] as usize, tree::Y[i] as usize);
 
-            if i != j && !visited[i] {
-                visited[i] = true;
-                visited[j] = true;
+            if !board.is_valid(color, x, y) {
+                policy[i] = ::std::f32::NEG_INFINITY;
+            } else {
+                policy[i] = f32::from(original_policy[i]);
+            }
+        }
 
-                let src = ::std::cmp::max(i, j);
-                let dst = ::std::cmp::min(i, j);
+        // get ride of symmetric moves, this is mostly useful for the opening.
+        // Once we are past the first ~7 moves the board is usually sufficiently
+        // asymmetric for this to turn into a no-op.
+        //
+        // we skip the first symmetry because it is the identity symmetry, which
+        // is always a symmetry for any board.
+        for &t in &SYMM[1..8] {
+            if !symmetry::is_symmetric(board, t) {
+                continue;
+            }
 
-                if policy[src].is_finite() {
-                    assert!(policy[dst].is_finite());
+            // figure out which are the useful vertices by eliminating the
+            // symmetries from the board.
+            let mut visited = [false; 368];
 
-                    policy[dst] += policy[src];
-                    policy[src] = ::std::f32::NEG_INFINITY;
+            for i in 0..361 {
+                let j = t.apply(i);
+
+                if i != j && !visited[i] {
+                    visited[i] = true;
+                    visited[j] = true;
+
+                    let src = ::std::cmp::max(i, j);
+                    let dst = ::std::cmp::min(i, j);
+
+                    if policy[src].is_finite() {
+                        assert!(policy[dst].is_finite());
+
+                        policy[dst] += policy[src];
+                        policy[src] = ::std::f32::NEG_INFINITY;
+                    }
                 }
             }
         }
-    }
 
-    // renormalize the policy so that it sums to one after all the pruning that
-    // we have performed.
-    let policy_sum: f32 = policy.iter().filter(|p| p.is_finite()).sum();
+        // renormalize the policy so that it sums to one after all the pruning that
+        // we have performed.
+        let policy_sum: f32 = policy.iter().filter(|p| p.is_finite()).sum();
 
-    if policy_sum > 1e-4 {  // do not divide by zero
-        let policy_recip = policy_sum.recip();
+        if policy_sum > 1e-4 {  // do not divide by zero
+            let policy_recip = policy_sum.recip();
 
-        for i in 0..362 {
-            policy[i] *= policy_recip;
+            for i in 0..362 {
+                policy[i] *= policy_recip;
+            }
         }
-    }
 
-    (f32::from(value), policy.into_boxed_slice())
+        (f32::from(value), policy.into_boxed_slice())
+    })
 }
 
 /// The shared variables between the master and each worker thread in the `predict` function.
@@ -267,6 +271,8 @@ fn predict_worker<C, E, T>(context: ThreadContext<E, T>)
             }
         }
     }
+
+    server.send(PolicyRequest::Done).unwrap();
 }
 
 /// Worker that listens for requests to compute the neural network, collect them
@@ -289,25 +295,17 @@ fn predict_serve<'a, C, E, T>(
     let mut workspaces = (0..C::batch_size())
         .map(|s| network.get_workspace(s + 1))
         .collect::<Vec<WorkspaceGuard>>();
-    let mut evaluated = 0;
+    let mut remaining_workers = C::thread_count();
 
-    while evaluated < C::iteration_limit() {
+    while remaining_workers > 0 {
         // collect a full batch worth of features from the workers, or if the
         // workers gets stuck because they want to probe into a sub-tree that
         // is currently being expanded get as large of a batch as possible.
         let mut features_list = vec! [];
         let mut sender_list = vec! [];
         let mut waiting_list = vec! [];
-        let max_thread_count = ::std::cmp::min(
-            C::iteration_limit() - evaluated,
-            C::thread_count()
-        );
-        let max_batch_size = ::std::cmp::min(
-            C::iteration_limit() - evaluated,
-            C::batch_size()
-        );
 
-        while features_list.len() < max_batch_size {
+        while features_list.len() < C::batch_size() {
             match receiver.recv().unwrap() {
                 PolicyRequest::Ask(features, sender) => {
                     features_list.push(features);
@@ -322,29 +320,32 @@ fn predict_serve<'a, C, E, T>(
                         waiting_list.push(sender);
                     }
                 }
+                PolicyRequest::Done => {
+                    remaining_workers -= 1;
+                },
             }
 
-            if max_thread_count == waiting_list.len() + features_list.len() {
+            if remaining_workers == waiting_list.len() + features_list.len() {
                 break;
             }
         }
 
-        debug_assert!(!features_list.is_empty());
         debug_assert!(features_list.len() == sender_list.len());
 
-        // process the features and the send them back to the worker who
-        // sent it using the OneShot channel.
-        let workspace = &mut workspaces[features_list.len() - 1];
-        let (values, policies) = nn::forward::<T>(workspace, &features_list);
+        if !features_list.is_empty() {
+            // process the features and the send them back to the worker who
+            // sent it using the OneShot channel.
+            let workspace = &mut workspaces[features_list.len() - 1];
+            let (values, policies) = nn::forward::<T>(workspace, &features_list);
 
-        for ((value, policy), sender) in values.into_iter().zip(policies.into_iter()).zip(sender_list.into_iter()) {
-            sender.send((value, policy)).unwrap();
-            evaluated += 1;
-        }
+            for ((value, policy), sender) in values.into_iter().zip(policies.into_iter()).zip(sender_list.into_iter()) {
+                sender.send((value, policy)).unwrap();
+            }
 
-        // awaken any workers waiting for updates before continuing
-        for waiting in waiting_list.into_iter() {
-            waiting.send(()).unwrap();
+            // awaken any workers waiting for updates before continuing
+            for waiting in waiting_list.into_iter() {
+                waiting.send(()).unwrap();
+            }
         }
     }
 }

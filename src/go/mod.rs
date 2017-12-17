@@ -17,12 +17,14 @@ mod small_set;
 pub mod symmetry;
 mod zobrist;
 
+use std::fmt;
+use std::hash::{Hash, Hasher};
+
 use self::circular_buf::CircularBuf;
 use self::small_set::SmallSet;
-use std::fmt;
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Color {
     Black = 1,
     White = 2
@@ -823,6 +825,23 @@ impl fmt::Display for Board {
         Ok(())
     }
 }
+
+impl Hash for Board {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u16(self.count);
+        state.write_u64(self.zobrist_hash);
+    }
+}
+
+impl PartialEq for Board {
+    fn eq(&self, other: &Board) -> bool {
+        self.vertices.iter()
+            .zip(other.vertices.iter())
+            .all(|(a, b)| a == b)
+    }
+}
+
+impl Eq for Board { }
 
 #[cfg(test)]
 mod tests {
