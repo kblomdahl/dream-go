@@ -51,6 +51,16 @@ pub trait Param {
     /// between the final value and the AMAF value is.
     fn rave_bias() -> f32;
 
+    /// The temperature of the opening, a larger temperature means the opening will
+    /// be more random while a smaller value it will be greedy with respect to the
+    /// moves suggested by the tree search.
+    /// 
+    /// This is applied to the first 8 moves of a game to ensure exploration and
+    /// diversity. Past the first 8 moves, once we are in the middle game, it is
+    /// too important to not make a tactical blunder that the temperature is forced
+    /// to zero.
+    fn temperature() -> f32;
+
     /// Whether to use experimental features. This is mainly used during internal
     /// testing of *new* features.
     fn experimental() -> bool;
@@ -152,7 +162,55 @@ impl Param for Standard {
         *RAVE_BIAS
     }
 
+    #[inline] fn temperature() -> f32 {
+        lazy_static! {
+            static ref TEMPERATURE: f32 = {
+                let temp = env_or_default("TEMPERATURE", 0.7);
+
+                assert!(temp > 0.0,
+                    "The temperature ({}) must be at least zero",
+                    temp
+                );
+
+                temp
+            };
+        }
+
+        *TEMPERATURE
+    }
+
     #[inline] fn experimental() -> bool { false }
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct Tournament;
+
+impl Param for Tournament {
+    #[inline] fn iteration_limit() -> usize { Standard::iteration_limit() }
+    #[inline] fn thread_count() -> usize { Standard::thread_count() }
+    #[inline] fn batch_size() -> usize { Standard::batch_size() }
+    #[inline] fn dirichlet_noise() -> f32 { Standard::dirichlet_noise() }
+    #[inline] fn exploration_rate() -> f32 { Standard::exploration_rate() }
+    #[inline] fn rave_bias() -> f32 { Standard::rave_bias() }
+    #[inline] fn experimental() -> bool { Standard::experimental() }
+
+    #[inline] fn temperature() -> f32 {
+        lazy_static! {
+            static ref TEMPERATURE: f32 = {
+                let temp = env_or_default("TEMPERATURE", 0.3);
+
+                assert!(temp > 0.0,
+                    "The temperature ({}) must be larger than zero",
+                    temp
+                );
+
+                temp
+            };
+        }
+
+        *TEMPERATURE
+    }
 }
 
 #[derive(Clone)]
@@ -166,5 +224,6 @@ impl Param for Experimental {
     #[inline] fn dirichlet_noise() -> f32 { Standard::dirichlet_noise() }
     #[inline] fn exploration_rate() -> f32 { Standard::exploration_rate() }
     #[inline] fn rave_bias() -> f32 { Standard::rave_bias() }
+    #[inline] fn temperature() -> f32 { Standard::temperature() }
     #[inline] fn experimental() -> bool { true }
 }

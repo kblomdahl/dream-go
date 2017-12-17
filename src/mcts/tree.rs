@@ -17,6 +17,7 @@ use mcts::param::Param;
 use mcts::spin::Mutex;
 
 use ordered_float::OrderedFloat;
+use rand::{thread_rng, Rng};
 use std::ptr;
 
 /// Mapping from 1D coordinate to letter used to represent that coordinate in
@@ -279,11 +280,48 @@ impl<E: Value> Node<E> {
     }
 
     /// Returns the best move according to the current search tree. This is
-    /// determined as the most visited child.
-    pub fn best(&self) -> (f32, usize) {
-        let max_i = (0..362).max_by_key(|&i| self.count[i]).unwrap();
+    /// determined as the most visited child. If the temperature is non-zero
+    /// then this process is stochastic, so that the probability that a move
+    /// is picked is proportional to its visit count.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `temperature` - How random the process should be, if set to +Inf
+    ///   then the values are picked completely at random, and if set to 0
+    ///   the selection is greedy.
+    /// 
+    pub fn best(&self, temperature: f32) -> (f32, usize) {
+        if temperature <= 9e-2 { // greedy
+            let max_i = (0..362).max_by_key(|&i| self.count[i]).unwrap();
 
-        (self.value[max_i], max_i)
+            (self.value[max_i], max_i)
+        } else {
+            let t = temperature.recip();
+            let mut s = vec! [0.0f32; 362];
+            let mut s_total = 0.0f32;
+
+            for i in 0..362 {
+                let count = (self.count[i] as f32).powf(t);
+
+                s[i] = count;
+                s_total += count;
+            }
+
+            debug_assert!(s_total.is_finite());
+
+            let threshold = s_total * thread_rng().next_f32();
+            let mut so_far = 0.0f32;
+
+            for i in 0..362 {
+                so_far += s[i];
+
+                if so_far >= threshold {
+                    return (self.value[i], i);
+                }
+            }
+
+            unreachable!();
+        }
     }
 
     /// Returns the best move according to the prior value of the root node.

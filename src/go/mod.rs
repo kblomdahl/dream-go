@@ -181,6 +181,12 @@ impl Board {
         self.zobrist_hash
     }
 
+    /// Returns the number of moves that has been played on this board.
+    #[inline]
+    pub fn count(&self) -> u16 {
+        self.count
+    }
+
     /// Returns the color (if the vertex is not empty) of the stone at
     /// the given coordinates.
     ///

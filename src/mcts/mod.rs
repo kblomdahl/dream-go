@@ -366,8 +366,6 @@ pub fn predict_aux<C, E, T>(
           E: tree::Value + Clone + 'static,
           T: From<f32> + Copy + Default + 'static, f32: From<T>
 {
-    assert_eq!(C::iteration_limit() % C::batch_size(), 0);
-
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
     let mut immediate = ImmediateForward::new(network);
@@ -397,7 +395,7 @@ pub fn predict_aux<C, E, T>(
 
     unsafe {
         let root = &*context.root.get();
-        let (value, index) = root.best();
+        let (value, index) = root.best(if starting_point.count() < 8 { C::temperature() } else { 0.0 });
         let (_, prior_index) = root.prior();
         let policy = root.softmax();
 

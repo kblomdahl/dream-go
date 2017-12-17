@@ -213,7 +213,7 @@ impl Gtp {
         let board = self.history.last().unwrap();
 
         if let Some(ref network) = self.network {
-            let (value, index, _prior_index, _policy) = mcts::predict::<mcts::param::Standard, mcts::tree::DefaultValue>(network, &board, color);
+            let (value, index, _prior_index, _policy) = mcts::predict::<mcts::param::Tournament, mcts::tree::DefaultValue>(network, &board, color);
 
             if value < -0.95 {  // 2.5% chance of winning
                 success!(id, "resign");
