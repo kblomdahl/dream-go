@@ -20,9 +20,9 @@ pub mod tree;
 use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::mpsc::{Sender, Receiver, channel};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use go::{symmetry, Board, Color};
@@ -227,13 +227,6 @@ struct ThreadContext<E: tree::Value + Clone, T: From<f32> + Copy> {
 
     /// The number of probes that still needs to be done into the tree.
     remaining: Arc<AtomicIsize>,
-
-    /// The number of threads that are waiting for the tree to be expanded before
-    /// they can continue their search.
-    waiting: Arc<AtomicUsize>,
-
-    /// A conditional variable that is notified whenever the search tree is changed.
-    changed: Arc<(Mutex<()>, Condvar)>
 }
 
 unsafe impl<E: tree::Value + Clone, T: From<f32> + Copy> Send for ThreadContext<E, T> { }
@@ -265,10 +258,6 @@ fn predict_worker<C, E, T>(context: ThreadContext<E, T>)
 
                 unsafe {
                     tree::insert::<C, E>(&trace, next_color, value, policy);
-
-                    // wake-up all threads that are waiting for the tree to be
-                    // expanded.
-                    context.changed.1.notify_all();
                     break
                 }
             } else {
@@ -393,8 +382,6 @@ pub fn predict_aux<C, E, T>(
         sender: sender,
 
         remaining: Arc::new(AtomicIsize::new(C::iteration_limit() as isize)),
-        waiting: Arc::new(AtomicUsize::new(0)),
-        changed: Arc::new((Mutex::new(()), Condvar::new()))
     };
 
     let handles = (0..C::thread_count()).map(|_| {
