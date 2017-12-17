@@ -424,7 +424,7 @@ mod tests {
 
     #[allow(dead_code)]
     fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
-        let network = Network::default().unwrap();
+        let network = Network::new().unwrap();
         let mut workspace = network.get_workspace(batch_size);
 
         // allocate a feature vector filled with random ones and zeros
