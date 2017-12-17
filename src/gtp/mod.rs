@@ -262,6 +262,7 @@ impl Gtp {
             },
             Command::ClearBoard => {
                 self.history = vec! [Board::new()];
+                self.search_tree = None;
                 success!(id, "");
             },
             Command::Komi(komi) => {
