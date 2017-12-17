@@ -80,7 +80,7 @@ impl Param for Standard {
     fn thread_count() -> usize {
         lazy_static! {
             static ref COUNT: usize = {
-                let count = env_or_default("NUM_THREADS", 16);
+                let count = env_or_default("NUM_THREADS", 64);
 
                 assert!(count > 0,
                     "The number of threads ({}) must be larger than zero",
@@ -97,7 +97,7 @@ impl Param for Standard {
     fn batch_size() -> usize {
         lazy_static! {
             static ref SIZE: usize = {
-                let size = env_or_default("BATCH_SIZE", 8);
+                let size = env_or_default("BATCH_SIZE", 16);
 
                 assert!(size > 0,
                     "The batch size ({}) must be larger than zero",
