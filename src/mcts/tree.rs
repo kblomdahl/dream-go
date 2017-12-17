@@ -133,7 +133,7 @@ pub struct Node<E: Value> {
     count: [i32; 368],
 
     /// The prior value of each edge as indicated by the policy.
-    prior: [f32; 368],
+    pub prior: [f32; 368],
 
     /// The average value for the sub-tree of each edge.
     value: [f32; 368],
@@ -195,21 +195,6 @@ impl<E: Value> Node<E> {
             expanding: [false; 362],
             children: [ptr::null_mut(); 362]
         }
-    }
-
-    /// Re-use an existing search tree but with a new prior values.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `other` - the search tree to re-use
-    /// * `prior` - the new prior distribution
-    /// 
-    pub fn reuse(mut other: Node<E>, prior: Box<[f32]>) -> Node<E> {
-        for i in 0..362 {
-            other.prior[i] = prior[i];
-        }
-
-        other
     }
 
     /// Returns the sub-tree that contains the exploration of the given move index.
@@ -339,24 +324,16 @@ impl<E: Value> Node<E> {
             for i in 0..362 {
                 let count = (self.count[i] as f64).powf(t);
 
-                s[i] = count;
                 s_total += count;
+                s[i] = s_total;
             }
 
             debug_assert!(s_total.is_finite());
 
             let threshold = s_total * thread_rng().next_f64();
-            let mut so_far = 0.0;
+            let max_i = (0..362).filter(|&i| s[i] >= threshold).next().unwrap();
 
-            for i in 0..362 {
-                so_far += s[i];
-
-                if so_far >= threshold {
-                    return (self.value[i], i);
-                }
-            }
-
-            unreachable!();
+            (self.value[max_i], max_i)
         }
     }
 

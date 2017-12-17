@@ -292,7 +292,9 @@ fn predict_serve<'a, C, E, T>(
     let mut evaluated = 0;
 
     while evaluated < C::iteration_limit() {
-        // collect a full batch worth of features from the workers
+        // collect a full batch worth of features from the workers, or if the
+        // workers gets stuck because they want to probe into a sub-tree that
+        // is currently being expanded get as large of a batch as possible.
         let mut features_list = vec! [];
         let mut sender_list = vec! [];
         let mut waiting_list = vec! [];
@@ -366,22 +368,33 @@ pub fn predict_aux<C, E, T>(
           E: tree::Value + Clone + 'static,
           T: From<f32> + Copy + Default + 'static, f32: From<T>
 {
+    // if we have a starting tree given, then re-use that tree (after some sanity
+    // checks), otherwise we need to query the neural network about what the
+    // prior value should be at the root node.
+    let mut starting_tree = if let Some(mut starting_tree) = starting_tree {
+        assert_eq!(starting_tree.color, starting_color);
+
+        starting_tree
+    } else {
+        let mut immediate = ImmediateForward::new(network);
+        let (_, mut policy) = forward::<C, ImmediateForward, T>(
+            &mut immediate,
+            starting_point,
+            starting_color
+        );
+
+        tree::Node::new(starting_color, policy)
+    };
+
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
-    let mut immediate = ImmediateForward::new(network);
-    let (_, mut policy) = forward::<C, ImmediateForward, T>(&mut immediate, starting_point, starting_color);
-    dirichlet::add::<C>(&mut policy, 0.03);
+    dirichlet::add::<C>(&mut starting_tree.prior, 0.03);
 
-    // perform exactly NUM_ITERATIONS probes into the search tree
+    // start-up all of the worker threads, and then start listening for requests on the
+    // channel we gave each thread.
     let (sender, receiver) = channel();
     let context: ThreadContext<E, T> = ThreadContext {
-        root: if let Some(starting_tree) = starting_tree {
-            assert_eq!(starting_tree.color, starting_color);
-
-            Arc::new(UnsafeCell::new(tree::Node::reuse(starting_tree, policy)))
-        } else {
-            Arc::new(UnsafeCell::new(tree::Node::new(starting_color, policy)))
-        },
+        root: Arc::new(UnsafeCell::new(starting_tree)),
         starting_point: starting_point.clone(),
         sender: sender,
 
@@ -403,7 +416,11 @@ pub fn predict_aux<C, E, T>(
 
     unsafe {
         let root = UnsafeCell::into_inner(Arc::try_unwrap(context.root).ok().expect(""));
-        let (value, index) = root.best(if starting_point.count() < 8 { C::temperature() } else { 0.0 });
+        let (value, index) = root.best(if starting_point.count() < 8 {
+            C::temperature()
+        } else {
+            0.0
+        });
 
         #[cfg(feature = "trace-mcts")]
         eprintln!("{}", tree::to_sgf::<C, E>(&root, starting_point));
@@ -470,35 +487,33 @@ pub fn self_play(network: &Network) -> GameResult {
             sgf += &format!(";{}[]", current);
 
             return GameResult::Resign(sgf, board, current.opposite(), -value);
-        } else {
-            if index == 361 {  // passing move
-                sgf += &format!(";{}[]P[{}]", current, b85::encode(&policy));
-                pass_count += 1;
+        } else if index == 361 {  // passing move
+            sgf += &format!(";{}[]P[{}]", current, b85::encode(&policy));
+            pass_count += 1;
 
-                if pass_count >= 2 {
-                    return GameResult::Ended(sgf, board)
-                }
-
-                root = tree::Node::forward(tree, 361);
-            } else {
-                let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
-                let (px, py) = if prior_index == 361 {
-                    (19, 19)
-                } else {
-                    (tree::X[prior_index] as usize, tree::Y[prior_index] as usize)
-                };
-
-                sgf += &format!(";{}[{}{}]P[{}]TR[{}{}]",
-                    current,
-                    SGF_LETTERS[x], SGF_LETTERS[y],
-                    b85::encode(&policy),
-                    SGF_LETTERS[px], SGF_LETTERS[py]
-                );
-                pass_count = 0;
-
-                board.place(current, x, y);
-                root = tree::Node::forward(tree, index);
+            if pass_count >= 2 {
+                return GameResult::Ended(sgf, board)
             }
+
+            root = tree::Node::forward(tree, 361);
+        } else {
+            let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
+            let (px, py) = if prior_index == 361 {
+                (19, 19)
+            } else {
+                (tree::X[prior_index] as usize, tree::Y[prior_index] as usize)
+            };
+
+            sgf += &format!(";{}[{}{}]P[{}]TR[{}{}]",
+                current,
+                SGF_LETTERS[x], SGF_LETTERS[y],
+                b85::encode(&policy),
+                SGF_LETTERS[px], SGF_LETTERS[py]
+            );
+            pass_count = 0;
+
+            board.place(current, x, y);
+            root = tree::Node::forward(tree, index);
         }
 
         current = current.opposite();

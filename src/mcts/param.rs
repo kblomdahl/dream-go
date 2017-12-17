@@ -190,7 +190,7 @@ impl Param for Tournament {
     #[inline] fn iteration_limit() -> usize { Standard::iteration_limit() }
     #[inline] fn thread_count() -> usize { Standard::thread_count() }
     #[inline] fn batch_size() -> usize { Standard::batch_size() }
-    #[inline] fn dirichlet_noise() -> f32 { Standard::dirichlet_noise() }
+    #[inline] fn dirichlet_noise() -> f32 { 0.1 }
     #[inline] fn exploration_rate() -> f32 { Standard::exploration_rate() }
     #[inline] fn rave_bias() -> f32 { Standard::rave_bias() }
     #[inline] fn experimental() -> bool { Standard::experimental() }
@@ -198,7 +198,7 @@ impl Param for Tournament {
     #[inline] fn temperature() -> f32 {
         lazy_static! {
             static ref TEMPERATURE: f32 = {
-                let temp = env_or_default("TEMPERATURE", 0.2);
+                let temp = env_or_default("TEMPERATURE", 0.3);
 
                 assert!(temp > 0.0,
                     "The temperature ({}) must be larger than zero",
