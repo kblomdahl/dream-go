@@ -49,6 +49,35 @@ impl SmallSet {
     pub fn contains(&self, other: u64) -> bool {
         (0..8).any(|x| self.buf[x] == other)
     }
+
+    /// Returns an iterator over all elements in this set.
+    pub fn iter<'a>(&'a self) -> SmallIter<'a> {
+        SmallIter {
+            set: self,
+            position: 0
+        }
+    }
+}
+
+/// Iterator over all elements contained within a `SmallSet`.
+pub struct SmallIter<'a> {
+    set: &'a SmallSet,
+    position: usize
+}
+
+impl<'a> Iterator for SmallIter<'a> {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<u64> {
+        if self.position >= 8 {
+            None
+        } else {
+            let value = self.set.buf[self.position];
+            self.position += 1;
+
+            Some(value)
+        }
+    }
 }
 
 #[cfg(test)]

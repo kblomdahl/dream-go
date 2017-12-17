@@ -828,16 +828,22 @@ impl fmt::Display for Board {
 
 impl Hash for Board {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u16(self.count);
-        state.write_u64(self.zobrist_hash);
+        // include the entire zobrist hash history, since we use six planes of
+        // historic data in the features, and transposing them does not necessary
+        // result in the same neural network output (mostly due to super-ko).
+        for z in self.zobrist_history.iter() {
+            state.write_u64(z);
+        }
     }
 }
 
 impl PartialEq for Board {
     fn eq(&self, other: &Board) -> bool {
-        self.vertices.iter()
-            .zip(other.vertices.iter())
-            .all(|(a, b)| a == b)
+        let history = self.zobrist_history.iter()
+            .zip(other.zobrist_history.iter())
+            .all(|(a, b)| a == b);
+
+        history && self.vertices.iter().zip(other.vertices.iter()).all(|(a, b)| a == b)
     }
 }
 
