@@ -121,10 +121,8 @@ impl Shared {
 
                 #[cfg(feature = "tensor-core")]
                 {
-                    if version_major >= 7 {
-                        check!(cudnnSetConvolutionMathType(n.conv2d_1, MathType::TensorOpMath));
-                        check!(cudnnSetConvolutionMathType(n.conv2d_3, MathType::TensorOpMath));
-                    }
+                    check!(cudnnSetConvolutionMathType(n.conv2d_1, MathType::TensorOpMath));
+                    check!(cudnnSetConvolutionMathType(n.conv2d_3, MathType::TensorOpMath));
                 }
 
                 check!(cudnnCreateActivationDescriptor(&mut n.relu));
