@@ -16,6 +16,7 @@ use go::{Board, Color, symmetry};
 use util::b85;
 use util::f16::*;
 
+use std::env;
 use std::fs::File;
 use std::mem::transmute;
 use std::io::prelude::*;
@@ -25,6 +26,31 @@ use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
 
 use rand::{self, Rng};
 use regex::Regex;
+
+enum SamplingStrategy {
+    Percent(f32),
+    Fixed(usize)
+}
+
+impl ::std::str::FromStr for SamplingStrategy {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, ()> {
+        let s = s.trim();
+
+        if s.ends_with("%") {
+            let s = s.trim_right_matches("%");
+
+            s.parse::<f32>()
+                .map_err(|_| ())
+                .map(|p| SamplingStrategy::Percent(p / 100.0))
+        } else {
+            s.parse::<usize>()
+                .map_err(|_| ())
+                .map(|f| SamplingStrategy::Fixed(f))
+        }
+    }
+}
 
 enum PolicyEntry {
     Full(String),
@@ -95,6 +121,7 @@ impl Entry {
 
         let mut entries: Vec<(Board, Color, PolicyEntry)> = vec! [];
         let mut board = Board::new();
+        let mut pass_count = 0;
         let size = board.size();
 
         for moves in MOVE.captures_iter(src) {
@@ -119,23 +146,45 @@ impl Entry {
 
             if x >= size || y >= size {
                 entries.push((board.clone(), current_color, policy));
+                pass_count += 1;
             } else if board.is_valid(current_color, x, y) {
                 entries.push((board.clone(), current_color, policy));
                 board.place(current_color, x, y);
+                pass_count = 0;
             } else {
                 return None;  // invalid game
             }
         }
 
         // if the game was scored, then add two pass moves at the end of the game
-        // since they are missing from a lot of SGF files
-        if SCORED.is_match(src) {
-            entries.push((board.clone(), Color::Black, PolicyEntry::Partial(361)));
-            entries.push((board.clone(), Color::White, PolicyEntry::Partial(361)));
+        // since they are missing from a lot of SGF files and we want to engine
+        // to learn that one should pass when the game has finished
+        if SCORED.is_match(src) && pass_count < 2 {
+            let last_color = entries.last().map(|&(_, color, _)| color).unwrap_or(Color::Black);
+
+            if pass_count == 1 && last_color == Color::Black {
+                entries.push((board.clone(), Color::White, PolicyEntry::Partial(361)));
+            } else if pass_count == 1 && last_color == Color::White {
+                entries.push((board.clone(), Color::Black, PolicyEntry::Partial(361)));
+            } else {
+                entries.push((board.clone(), Color::Black, PolicyEntry::Partial(361)));
+                entries.push((board.clone(), Color::White, PolicyEntry::Partial(361)));
+            }
         }
 
-        // pick exactly one entry for each symmetry of the game
+        // pluck the specified amount of samples from the game, where each sample
+        // is randomly transformed according to one of the symmetries in an attempt
+        // to use more samples per file without overfitting
         lazy_static! {
+            static ref STRATEGY: SamplingStrategy = {
+                match env::var("NUM_SAMPLES") {
+                    Ok(value) => {
+                        value.parse::<SamplingStrategy>().ok()
+                            .expect(&format!("NUM_SAMPLES must be a number or a percentage, e.g. \"3\" or \"5%\", got {}", value))
+                    },
+                    _ => SamplingStrategy::Fixed(1)
+                }
+            };
             static ref SYMMETRIES: Vec<symmetry::Transform> = vec! [
                 symmetry::Transform::Identity,
                 symmetry::Transform::FlipLR,
@@ -148,33 +197,35 @@ impl Entry {
             ];
         }
 
-        let examples = SYMMETRIES.iter()
-            .filter_map(|s| {
-                // because we remove symmetric board positions we
-                // want to give the engine several attempts to find
-                // a good position for each symmetry.
-                (0..5)
-                    .filter_map(|_| {
-                        rand::thread_rng().choose(&entries)
-                            .and_then(|&(ref board, current_color, ref policy)| {
-                                if *s != symmetry::Transform::Identity && symmetry::is_symmetric(board, *s) {
-                                    None
-                                } else {
-                                    let mut features = board.get_features(current_color);
-                                    let mut policy = policy.to_slice();
+        let num_samples = ::std::cmp::max(1, match *STRATEGY {
+            SamplingStrategy::Percent(pct) => (pct * (entries.len() as f32)) as usize,
+            SamplingStrategy::Fixed(f) => f
+        });
 
-                                    symmetry::apply(&mut features, *s);
-                                    symmetry::apply(&mut policy, *s);
+        // instead of plucking `num_samples` examples randomly, just shuffle the
+        // list and take the first elements from the array. This avoids picking the
+        // same element twice, and automatically handles the case where there are less
+        // entries than `num_samples`.
+        let mut symmetries = SYMMETRIES.clone();
 
-                                    Some(Entry::new(
-                                        &features,
-                                        f16::from(if current_color == winner { 1.0 } else { -1.0 }),
-                                        &policy
-                                    ))
-                                }
-                            })
-                    })
-                    .next()
+        rand::thread_rng().shuffle(&mut entries);
+        rand::thread_rng().shuffle(&mut symmetries);
+
+        let examples: Vec<Entry> = entries.into_iter()
+            .zip(symmetries.into_iter().cycle())
+            .take(num_samples)
+            .map(|((ref board, current_color, ref policy), s)| {
+                let mut features = board.get_features(current_color);
+                let mut policy = policy.to_slice();
+
+                symmetry::apply(&mut features, s);
+                symmetry::apply(&mut policy, s);
+
+                Entry::new(
+                    &features,
+                    f16::from(if current_color == winner { 1.0 } else { -1.0 }),
+                    &policy
+                )
             })
             .collect();
 

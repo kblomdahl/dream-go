@@ -485,8 +485,6 @@ pub fn self_play(network: &Network) -> GameResult {
         let (_, prior_index) = tree.prior();
 
         if value < -0.9 {  // resign the game if the evaluation looks bad
-            sgf += &format!(";{}[]", current);
-
             return GameResult::Resign(sgf, board, current.opposite(), -value);
         } else if index == 361 {  // passing move
             sgf += &format!(";{}[]P[{}]", current, b85::encode(&policy));
