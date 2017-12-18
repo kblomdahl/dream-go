@@ -13,9 +13,17 @@
 // limitations under the License.
 
 extern crate dream_go;
+extern crate time;
 
 use dream_go::{dataset, gtp, nn, mcts};
 use std::env;
+
+/// Returns the current time formatted according to ISO 8601.
+fn iso8601() -> String {
+    let now = time::now_utc();
+
+    time::strftime("%Y-%m-%dT%H:%M:%S%z", &now).unwrap()
+}
 
 /// Main function.
 fn main() {
@@ -59,10 +67,10 @@ fn main() {
         for _ in 0..n {
             match mcts::self_play(&network) {
                 mcts::GameResult::Resign(sgf, _, winner, _) => {
-                    println!("(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]RE[{}+Resign]{})", winner, sgf);
+                    println!("(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[7.5]RE[{}+Resign]{})", iso8601(), winner, sgf);
                 }
                 mcts::GameResult::Ended(sgf, _) => {
-                    println!("(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]RE[?]{})", sgf);
+                    println!("(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[7.5]RE[?]{})", iso8601(), sgf);
                 }
             }
         }
