@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod asm;
 mod circular_buf;
 mod small_set;
 pub mod symmetry;
 mod zobrist;
 
 use std::fmt;
+use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 
 use self::circular_buf::CircularBuf;
 use self::small_set::SmallSet;
+use self::asm::*;
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -545,13 +548,13 @@ impl Board {
         if memoize[index] != 0 {
             memoize[index]
         } else {
-            let mut liberties = [0xff; 368];
+            let mut liberties = [0xff; 384];
 
             self.fill_liberties(&self.vertices, index, &mut liberties);
 
             // count the number of liberties, maybe in the future using a SIMD
             // implementation which would be a lot faster than this
-            let num_liberties = (0..361).filter(|i| liberties[*i] == 0).count();
+            let num_liberties = count_zero(&liberties);
 
             // update the cached value in the memoize array for all stones
             // that are strongly connected to the given index
@@ -596,7 +599,7 @@ impl Board {
 
         // add liberties based on the liberties of the friendly neighbouring
         // groups
-        let mut liberties = [0xff; 368];
+        let mut liberties = [0xff; 384];
 
         if N!(vertices, index) == current { self.fill_liberties(&vertices, index + 19, &mut liberties); }
         if E!(vertices, index) == current { self.fill_liberties(&vertices, index + 1, &mut liberties); }
@@ -609,7 +612,7 @@ impl Board {
         liberties[_S[index]] = S!(vertices, index);
         liberties[_W[index]] = W!(vertices, index);
 
-        (0..361).filter(|i| liberties[*i] == 0).count()
+        count_zero(&liberties)
     }
 
     /// Returns an array containing the (manhattan) distance to the closest stone
@@ -624,14 +627,12 @@ impl Board {
 
         // find all of our stones and mark them as starting points
         let mut territory = [0xff; 368];
-        let mut probes = vec! [];
-
-        probes.reserve(368);
+        let mut probes = VecDeque::with_capacity(722);
 
         for index in 0..361 {
-            if self.vertices[index] == current as u8 {
+            if self.vertices[index] == current {
                 territory[index] = 0;
-                probes.push(index);
+                probes.push_back(index);
             }
         }
 
@@ -641,14 +642,14 @@ impl Board {
         // than the current distance we try to update that vertex neighbours.
         //
         // This is equivalent to a Bellman–Ford algorithm for the shortest path.
-        while probes.len() > 0 {
-            let index = probes.pop().unwrap();
+        while !probes.is_empty() {
+            let index = probes.pop_front().unwrap();
             let t = territory[index] + 1;
 
-            if N!(self.vertices, index) == 0 && N!(territory, index) > t { probes.push(_N[index]); territory[_N[index]] = t; }
-            if E!(self.vertices, index) == 0 && E!(territory, index) > t { probes.push(_E[index]); territory[_E[index]] = t; }
-            if S!(self.vertices, index) == 0 && S!(territory, index) > t { probes.push(_S[index]); territory[_S[index]] = t; }
-            if W!(self.vertices, index) == 0 && W!(territory, index) > t { probes.push(_W[index]); territory[_W[index]] = t; }
+            if N!(self.vertices, index) == 0 && N!(territory, index) > t { probes.push_back(_N[index]); territory[_N[index]] = t; }
+            if E!(self.vertices, index) == 0 && E!(territory, index) > t { probes.push_back(_E[index]); territory[_E[index]] = t; }
+            if S!(self.vertices, index) == 0 && S!(territory, index) > t { probes.push_back(_S[index]); territory[_S[index]] = t; }
+            if W!(self.vertices, index) == 0 && W!(territory, index) > t { probes.push_back(_W[index]); territory[_W[index]] = t; }
         }
 
         territory

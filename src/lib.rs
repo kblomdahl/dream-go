@@ -14,7 +14,6 @@
 #![feature(asm)]
 #![feature(io)]
 #![feature(link_llvm_intrinsics)]
-#![feature(unique)]
 #![feature(test)]
 
 #[macro_use] extern crate lazy_static;
