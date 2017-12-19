@@ -52,6 +52,7 @@ impl ::std::str::FromStr for SamplingStrategy {
     }
 }
 
+#[derive(Clone)]
 enum PolicyEntry {
     Full(String),
     Partial(usize)
@@ -206,15 +207,18 @@ impl Entry {
         // list and take the first elements from the array. This avoids picking the
         // same element twice, and automatically handles the case where there are less
         // entries than `num_samples`.
-        let mut symmetries = SYMMETRIES.clone();
+        let mut entries: Vec<(&(Board, Color, PolicyEntry), &symmetry::Transform)> = entries.iter()
+            .flat_map(|e| ::std::iter::repeat(e).zip(SYMMETRIES.iter()))
+            .filter(|&(&(ref board, _, _), &s)| {
+                s == symmetry::Transform::Identity || !symmetry::is_symmetric(board, s)
+            })
+            .collect();
 
         rand::thread_rng().shuffle(&mut entries);
-        rand::thread_rng().shuffle(&mut symmetries);
 
         let examples: Vec<Entry> = entries.into_iter()
-            .zip(symmetries.into_iter().cycle())
             .take(num_samples)
-            .map(|((ref board, current_color, ref policy), s)| {
+            .map(|(&(ref board, current_color, ref policy), &s)| {
                 let mut features = board.get_features(current_color);
                 let mut policy = policy.to_slice();
 
