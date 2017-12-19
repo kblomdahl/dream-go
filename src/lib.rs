@@ -30,4 +30,4 @@ pub mod go;
 pub mod gtp;
 pub mod mcts;
 pub mod nn;
-mod util;
+pub mod util;

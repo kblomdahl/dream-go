@@ -35,6 +35,7 @@ pub enum ConvolutionMode {
 }
 
 #[repr(i32)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[allow(dead_code)]
 pub enum ConvolutionFwdAlgo {
     ImplicitPrecompGemm = 1,
@@ -49,7 +50,8 @@ pub enum DataType {
     Float = 0,
     Half = 2,
     Int8 = 3,
-    Int32 = 4
+    Int32 = 4,
+    Int8x4 = 5,
 }
 
 impl DataType {
@@ -58,7 +60,8 @@ impl DataType {
             DataType::Float => 4,
             DataType::Half => 2,
             DataType::Int8 => 1,
-            DataType::Int32 => 4
+            DataType::Int32 => 4,
+            DataType::Int8x4 => 1
         }
     }
 }
@@ -117,10 +120,12 @@ pub enum SoftmaxMode {
 }
 
 #[repr(i32)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[allow(dead_code)]
 pub enum TensorFormat {
     NCHW = 0,
-    NHWC = 1
+    NHWC = 1,
+    NCHWVECTC = 2
 }
 
 pub type ActivationDescriptor = *const c_void;

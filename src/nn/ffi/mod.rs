@@ -100,9 +100,6 @@ macro_rules! check {
 }
 
 #[cfg(test)]
-mod type_bench;
-
-#[cfg(test)]
 mod tests {
     use libc::{c_void};
     use std::ptr;

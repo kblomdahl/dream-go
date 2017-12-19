@@ -14,7 +14,7 @@
 
 use libc::{c_void};
 
-#[macro_use] mod ffi;
+#[macro_use] pub mod ffi;
 mod loader;
 mod network;
 mod workspace;
@@ -414,56 +414,4 @@ pub fn forward<T: From<f32> + Clone>(
     }
 
     (value, softmax.into_iter().map(|s| s.into_boxed_slice()).collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use test::Bencher;
-    use rand::{Rng, thread_rng};
-    use nn::*;
-
-    #[allow(dead_code)]
-    fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
-        let network = Network::new().unwrap();
-        let mut workspace = network.get_workspace(batch_size);
-
-        // allocate a feature vector filled with random ones and zeros
-        if network.is_half() {
-            let features = (0..batch_size).map(|_| {
-                let mut input = vec! [f16::from(0.0); 12274];
-
-                for b in input.iter_mut() {
-                    *b = f16::from(if thread_rng().next_f32() < 0.2 { 1.0 } else { 0.0 });
-                }
-
-                input.into_boxed_slice()
-            }).collect();
-
-            b.iter(move || {
-                forward(&mut workspace, &features)
-            });
-        } else {
-            let features = (0..batch_size).map(|_| {
-                let mut input = vec! [0.0f32; 12274];
-
-                for b in input.iter_mut() {
-                    *b = if thread_rng().next_f32() < 0.2 { 1.0 } else { 0.0 };
-                }
-
-                input.into_boxed_slice()
-            }).collect();
-
-            b.iter(move || {
-                forward(&mut workspace, &features)
-            });
-        }
-    }
-
-    #[bench] fn batch_size_01(b: &mut Bencher) { bench_batch_size(b,  1); }
-    #[bench] fn batch_size_02(b: &mut Bencher) { bench_batch_size(b,  2); }
-    #[bench] fn batch_size_04(b: &mut Bencher) { bench_batch_size(b,  4); }
-    #[bench] fn batch_size_08(b: &mut Bencher) { bench_batch_size(b,  8); }
-    #[bench] fn batch_size_16(b: &mut Bencher) { bench_batch_size(b, 16); }
-    #[bench] fn batch_size_32(b: &mut Bencher) { bench_batch_size(b, 32); }
-    #[bench] fn batch_size_64(b: &mut Bencher) { bench_batch_size(b, 64); }
 }

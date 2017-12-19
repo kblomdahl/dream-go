@@ -71,7 +71,7 @@ impl From<f32> for f16 {
 
 #[cfg(test)]
 mod tests {
-    use test::Bencher;
+    use test::{self, Bencher};
     use util::f16::*;
 
     #[test]
@@ -93,13 +93,21 @@ mod tests {
 
     #[bench]
     fn convert_to_fp16_f32(b: &mut Bencher) {
-        b.iter(|| { f16::from(3.14f32) })
+        b.iter(|| {
+            let pi = test::black_box(3.14f32);
+
+            f16::from(pi)
+        })
     }
 
     #[bench]
     fn convert_from_fp16_f32(b: &mut Bencher) {
         let e = f16::from_bits(0x4248);
 
-        b.iter(|| { f32::from(e) })
+        b.iter(|| {
+            let e = test::black_box(e);
+
+            f32::from(e)
+        })
     }
 }
