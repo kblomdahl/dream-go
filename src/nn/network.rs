@@ -20,8 +20,6 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use nn::ffi::cuda::*;
-use nn::ffi::cudnn::DataType;
 use nn::workspace::{Shared, Workspace};
 
 type WorkspaceQueue = Rc<RefCell<Vec<Rc<Workspace>>>>;
@@ -54,31 +52,6 @@ impl<'a> Drop for WorkspaceGuard<'a> {
     }
 }
 
-/// Returns the version of the CUDA Runtime library.
-fn runtime_version() -> i32 {
-    let mut runtime_version: i32 = 0;
-
-    unsafe {
-        check!(cudaRuntimeGetVersion(&mut runtime_version));
-    }
-
-    runtime_version
-}
-
-/// Returns the major and minor version (in that order) of the CUDA
-/// Compute Capability for the currently selected device.
-fn compute_capability() -> (i32, i32) {
-    let mut version_major: i32 = 0;
-    let mut version_minor: i32 = 0;
-
-    unsafe {
-        check!(cudaDeviceGetAttribute(&mut version_major, DeviceAttr::ComputeCapabilityMajor, 0));
-        check!(cudaDeviceGetAttribute(&mut version_minor, DeviceAttr::ComputeCapabilityMinor, 0));
-    }
-
-    (version_major, version_minor)
-}
-
 /// Pool of workspaces that can be used for network evaluations.
 pub struct Network {
     shared: Arc<Shared>,
@@ -104,15 +77,8 @@ impl Network {
             ];
         }
 
-        // figure out if it is better to use half precision or single precision
-        let data_type = if runtime_version() >= 9000 && compute_capability().0 >= 7 {
-            DataType::Half
-        } else {
-            DataType::Float
-        };
-
         PATHS.iter()
-            .filter_map(|path| Shared::new(Path::new(path), data_type))
+            .filter_map(|path| Shared::new(Path::new(path)))
             .next()
             .map(|shared| Network { shared: Arc::new(shared), workspaces: Mutex::new(HashMap::new()) })
     }

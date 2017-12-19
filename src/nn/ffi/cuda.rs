@@ -119,6 +119,7 @@ extern {
 
     #[cfg(feature = "trace-cuda")]
     pub fn cudaDeviceSynchronize() -> Error;
+    #[cfg(feature = "tensor-core")]
     pub fn cudaRuntimeGetVersion(version: *mut c_int) -> Error;
     pub fn cudaDeviceGetAttribute(value: *mut c_int, attr: DeviceAttr, device: c_int) -> Error;
 

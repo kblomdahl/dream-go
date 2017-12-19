@@ -29,6 +29,61 @@ use nn::loader;
 /// longer to train and gives worse runtime performance during inference.
 pub const NUM_FEATURES: usize = 128;
 
+/// Returns the version of the CUDA Runtime library.
+#[cfg(feature = "tensor-core")]
+fn runtime_version() -> i32 {
+    let mut runtime_version: i32 = 0;
+
+    unsafe {
+        check!(cudaRuntimeGetVersion(&mut runtime_version));
+    }
+
+    runtime_version
+}
+
+/// Returns the major and minor version (in that order) of the CUDA
+/// Compute Capability for the currently selected device.
+fn compute_capability() -> (i32, i32) {
+    let mut version_major: i32 = 0;
+    let mut version_minor: i32 = 0;
+
+    unsafe {
+        check!(cudaDeviceGetAttribute(&mut version_major, DeviceAttr::ComputeCapabilityMajor, 0));
+        check!(cudaDeviceGetAttribute(&mut version_minor, DeviceAttr::ComputeCapabilityMinor, 0));
+    }
+
+    (version_major, version_minor)
+}
+
+/// Returns whether we should use half precision on the current device.
+/// 
+/// See the (CUDA Programmers Guide)[http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#arithmetic-instructions]
+/// for an exhaustive list of what each compute capability means.
+fn should_use_half() -> bool {
+    let (major, minor) = compute_capability();
+
+    major == 6 && (minor == 0 || minor == 2) ||
+    major == 7 && minor == 0
+}
+
+/// Returns whether we should use tensor cores on the current device.
+/// 
+/// There is currently no flag that NVIDIA expose to determine this,
+/// so it is mostly determined by the CUDA version (>= 9), CUDNN
+/// version (>= 7), and CUBLAS version (>= ).
+fn should_use_tensor_core() -> bool {
+    #[cfg(feature = "tensor-core")] {
+        let (major, minor) = compute_capability();
+        let version = runtime_version();
+
+        version >= 9000 && major == 7 && minor == 0
+    }
+
+    #[cfg(not(feature = "tensor-core"))] {
+        false
+    }
+}
+
 /// Read-only data necessary to compute the neural network that can be shared
 /// between multiple workspaces without being copied.
 pub struct Shared {
@@ -38,6 +93,7 @@ pub struct Shared {
     /// The data-type to use during computation. This will be either FLOAT or HALF
     /// depending on the _compute capability_ of the given device.
     pub(super) data_type: DataType,
+    pub(super) tensor_core: bool,
 
     // convolutional descriptors
     pub(super) conv2d_1: ConvolutionDescriptor,
@@ -65,8 +121,13 @@ pub struct Shared {
 }
 
 impl Shared {
-    pub fn new(path: &Path, data_type: DataType) -> Option<Shared> {
-        assert!(data_type == DataType::Float || data_type == DataType::Half);
+    pub fn new(path: &Path) -> Option<Shared> {
+        let tensor_core = should_use_tensor_core();
+        let data_type = if tensor_core || should_use_half() {
+            DataType::Half
+        } else {
+            DataType::Float
+        };
 
         if let Some(weights) = loader::load(path, data_type) {
             let mut n = Shared {
@@ -74,6 +135,7 @@ impl Shared {
                 handle_dnn: ptr::null_mut(),
 
                 data_type: data_type,
+                tensor_core: tensor_core,
 
                 conv2d_1: ptr::null_mut(),
                 conv2d_3: ptr::null_mut(),
@@ -106,7 +168,7 @@ impl Shared {
                     1, 1,
                     1, 1,
                     ConvolutionMode::CrossCorrelation,
-                    n.data_type
+                    if tensor_core { DataType::Float } else { n.data_type }
                 ));
 
                 check!(cudnnCreateConvolutionDescriptor(&mut n.conv2d_3));
@@ -116,13 +178,15 @@ impl Shared {
                     1, 1,
                     1, 1,
                     ConvolutionMode::CrossCorrelation,
-                    n.data_type
+                    if tensor_core { DataType::Float } else { n.data_type }
                 ));
 
-                #[cfg(feature = "tensor-core")]
-                {
-                    check!(cudnnSetConvolutionMathType(n.conv2d_1, MathType::TensorOpMath));
-                    check!(cudnnSetConvolutionMathType(n.conv2d_3, MathType::TensorOpMath));
+                if tensor_core {
+                    #[cfg(feature = "tensor-core")]
+                    {
+                        check!(cudnnSetConvolutionMathType(n.conv2d_1, MathType::TensorOpMath));
+                        check!(cudnnSetConvolutionMathType(n.conv2d_3, MathType::TensorOpMath));
+                    }
                 }
 
                 check!(cudnnCreateActivationDescriptor(&mut n.relu));
@@ -225,9 +289,10 @@ impl Shared {
         }
     }
 
-    /// Returns whether this network is running is half precision mode.
+    /// Returns whether this network is running is half precision mode and therefore
+    /// expects the input features to be in `f16` format.
     pub fn is_half(&self) -> bool {
-        return self.data_type == DataType::Half;
+        self.data_type == DataType::Half
     }
 
     /// Returns the best convolution algorithm for the given filter size.
@@ -237,7 +302,9 @@ impl Shared {
     /// * `filter_size` - The width and height of the filter
     /// 
     pub fn get_convolution_algo(&self, filter_size: usize) -> ConvolutionFwdAlgo {
-        if self.is_half() {
+        if self.tensor_core {
+            ConvolutionFwdAlgo::ImplicitPrecompGemm
+        } else if self.is_half() {
             match filter_size {
                 3 => ConvolutionFwdAlgo::WinogradNonFused,
                 _ => ConvolutionFwdAlgo::ImplicitPrecompGemm
