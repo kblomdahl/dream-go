@@ -201,6 +201,17 @@ impl Gtp {
         }
     }
 
+    /// Generate a move using the monte carlo tree search engine for the given
+    /// color, using the stored search tree if available.
+    /// 
+    /// If the given `color` is not the players whose turn it is according to the
+    /// search tree then the tree is fast-forwarded until it is that players turn.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `id` - the identifier of the command
+    /// * `color` - the color to generate the move for
+    /// 
     fn generate_move(&mut self, id: Option<usize>, color: Color) -> Option<Vertex> {
         if self.network.is_none() {
             match Network::new() {
@@ -214,9 +225,17 @@ impl Gtp {
         let board = self.history.last().unwrap();
 
         if let Some(ref network) = self.network {
+            let search_tree = self.search_tree.take().and_then(|tree| {
+                if tree.color != color {
+                    mcts::tree::Node::forward(tree, 361)  // pass
+                } else {
+                    Some(tree)
+                }
+            });
+
             let (value, index, tree) = mcts::predict::<mcts::param::Tournament, mcts::tree::DefaultValue>(
                 network,
-                self.search_tree.take(),
+                search_tree,
                 &board,
                 color
             );

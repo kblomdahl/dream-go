@@ -113,11 +113,6 @@ impl Param for Standard {
                     "The batch size ({}) must be larger than zero",
                     size
                 );
-                assert!(size <= Standard::thread_count(),
-                    "The batch size ({}) must be smaller than or equal to the number of threads ({})",
-                    size,
-                    Standard::thread_count()
-                );
 
                 size
             };
