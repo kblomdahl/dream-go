@@ -68,6 +68,7 @@ def play_game(engine_1, engine_2):
             if line.startswith('=' + str(line_nr)):
                 return line
             elif line.startswith('?' + str(line_nr)):
+                print(line, file=sys.stderr)
                 break
 
     try:
@@ -99,6 +100,7 @@ def play_game(engine_1, engine_2):
 
                 if move == 'pass':
                     pass_count += 1
+                    sgf += ';{}[]'.format(current[2])
                 elif move == 'resign':
                     re = '{}+Resign'.format(other[2])
                     return other[3]
@@ -112,6 +114,7 @@ def play_game(engine_1, engine_2):
                     sgf += ';{}[{}]'.format(current[2], gtp_to_sgf(move))
             else:
                 # if an engine encounter an error, then it loses
+                print('Received erroneous response from {}'.format(current[0]), file=sys.stderr)
                 re = '{}+Resign'.format(other[2])
                 return other[3]
 
@@ -234,14 +237,8 @@ def main(num_games, engines):
             else:
                 n_s = float(wins[engine_1, engine_2])
                 n_f = float(wins[engine_2, engine_1])
-                n = n_s + n_f
-                z = 0.6  # about a 70% confidence interval
-                lower = 1.0 / (n + z*z) \
-                    * (n_s + z*z / 2 - z*sqrt((n_s*n_f)/n + z*z/4.0))
-                upper = 1.0 / (n + z*z) \
-                    * (n_s + z*z / 2 + z*sqrt((n_s*n_f)/n + z*z/4.0))
 
-                return '{:.0f}% - {:.0f}%'.format(100.0 * lower, 100.0 * upper)
+                return '{} - {}'.format(int(n_s), int(n_f))
 
         print(' ' * name_padding + '{}'.format(join_pretty(titles, titles)), file=sys.stderr)
         for i in sorted(range(num_engines), key=lambda e: -np.sum(wins[e, :])):
