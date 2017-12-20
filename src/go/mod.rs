@@ -572,6 +572,49 @@ impl Board {
         }
     }
 
+    /// Returns whether the given move is valid according to the
+    /// Tromp-Taylor rules using the provided `memoize` table to
+    /// determine the number of liberties.
+    /// 
+    /// This function also assume the given vertex is empty and does
+    /// not perform the check itself.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the move
+    /// * `index` - the HW index of the move
+    /// * `memoize` - cache of already calculated liberty counts
+    ///
+    fn _is_valid_memoize(&self, color: Color, index: usize, memoize: &mut [usize]) -> bool {
+        debug_assert!(self.vertices[index] == 0);
+
+        let n = N!(self.vertices, index);
+        let e = E!(self.vertices, index);
+        let s = S!(self.vertices, index);
+        let w = W!(self.vertices, index);
+
+        // check for direct liberties
+        if n == 0 { return true; }
+        if e == 0 { return true; }
+        if s == 0 { return true; }
+        if w == 0 { return true; }
+
+        // check for the following two conditions simplied into one case:
+        //
+        // 1. If a neighbour is friendly then we are fine if it has at
+        //    least two liberties.
+        // 2. If a neighbour is unfriendly then we are fine if it has less
+        //    than two liberties (i.e. one).
+        let current = color as u8;
+
+        if n != 0xff && (n == current) == (self.get_num_liberties(index + 19, memoize) >= 2) { return true; }
+        if e != 0xff && (e == current) == (self.get_num_liberties(index + 1, memoize) >= 2) { return true; }
+        if s != 0xff && (s == current) == (self.get_num_liberties(index - 19, memoize) >= 2) { return true; }
+        if w != 0xff && (w == current) == (self.get_num_liberties(index - 1, memoize) >= 2) { return true; }
+
+        false  // move is suicide :'(
+    }
+
     /// Returns the number of liberties of the group connected to the given stone
     /// *if* it was played, will panic if the vertex is not empty.
     ///
@@ -580,7 +623,7 @@ impl Board {
     /// * `color` - the color of the stone to pretend place
     /// * `index` - the index of the stone to pretend place
     ///
-    fn get_num_liberties_if(&self, color: Color, index: usize) -> usize {
+    fn get_num_liberties_if(&self, color: Color, index: usize, memoize: &mut [usize]) -> usize {
         debug_assert!(self.vertices[index] == 0);
 
         let mut vertices = self.vertices.clone();
@@ -591,10 +634,10 @@ impl Board {
         let current = color as u8;
         let opponent = color.opposite() as u8;
 
-        if N!(vertices, index) == opponent && !self.has_two_liberties(index + 19) { self.capture_other(&mut vertices, index + 19); }
-        if E!(vertices, index) == opponent && !self.has_two_liberties(index + 1) { self.capture_other(&mut vertices, index + 1); }
-        if S!(vertices, index) == opponent && !self.has_two_liberties(index - 19) { self.capture_other(&mut vertices, index - 19); }
-        if W!(vertices, index) == opponent && !self.has_two_liberties(index - 1) { self.capture_other(&mut vertices, index - 1); }
+        if N!(vertices, index) == opponent && self.get_num_liberties(index + 19, memoize) == 1 { self.capture_other(&mut vertices, index + 19); }
+        if E!(vertices, index) == opponent && self.get_num_liberties(index + 1, memoize) == 1 { self.capture_other(&mut vertices, index + 1); }
+        if S!(vertices, index) == opponent && self.get_num_liberties(index - 19, memoize) == 1 { self.capture_other(&mut vertices, index - 19); }
+        if W!(vertices, index) == opponent && self.get_num_liberties(index - 1, memoize) == 1 { self.capture_other(&mut vertices, index - 1); }
 
         // add liberties based on the liberties of the friendly neighbouring
         // groups
@@ -735,9 +778,9 @@ impl Board {
                 };
 
                 features[l * 361 + other] = c_1;
-            } else if self._is_valid(color, index) {
+            } else if self._is_valid_memoize(color, index, &mut liberties) {
                 let num_liberties = ::std::cmp::min(
-                    self.get_num_liberties_if(color, index),
+                    self.get_num_liberties_if(color, index, &mut liberties),
                     6
                 );
                 let l = 7 + num_liberties;
@@ -936,13 +979,14 @@ mod tests {
     /// Test so that the correct number of pretend liberties are correct.
     #[test]
     fn liberties_if() {
+        let mut liberties = [0; 368];
         let mut board = Board::new();
 
         board.place(Color::White, 0, 0);
         board.place(Color::Black, 0, 1);
         board.place(Color::Black, 1, 1);
 
-        assert_eq!(board.get_num_liberties_if(Color::Black, 1), 5);
+        assert_eq!(board.get_num_liberties_if(Color::Black, 1, &mut liberties), 5);
     }
 
     /// Test that we can accurately detect ko using the simplest possible
