@@ -219,10 +219,9 @@ impl Entry {
         let examples: Vec<Entry> = entries.into_iter()
             .take(num_samples)
             .map(|(&(ref board, current_color, ref policy), &s)| {
-                let mut features = board.get_features(current_color);
+                let features = board.get_features(current_color, s);
                 let mut policy = policy.to_slice();
 
-                symmetry::apply(&mut features, s);
                 symmetry::apply(&mut policy, s);
 
                 Entry::new(

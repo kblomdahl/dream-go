@@ -140,9 +140,7 @@ fn forward<C, A, T>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f3
         // to increase the entropy of the game slightly and to ensure the engine
         // learns the game is symmetric (which should help generalize)
         let t = *thread_rng().choose(&SYMM).unwrap();
-        let mut features = board.get_features::<T>(color);
-
-        symmetry::apply(&mut features, t);
+        let features = board.get_features::<T>(color, t);
 
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
@@ -497,20 +495,20 @@ pub fn self_play(network: &Network) -> GameResult {
             root = tree::Node::forward(tree, 361);
         } else {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
-            let (px, py) = if prior_index == 361 {
-                (19, 19)
-            } else {
-                (tree::X[prior_index] as usize, tree::Y[prior_index] as usize)
-            };
 
-            sgf += &format!(";{}[{}{}]P[{}]TR[{}{}]",
+            sgf += &format!(";{}[{}{}]P[{}]",
                 current,
                 SGF_LETTERS[x], SGF_LETTERS[y],
-                b85::encode(&policy),
-                SGF_LETTERS[px], SGF_LETTERS[py]
+                b85::encode(&policy)
             );
-            pass_count = 0;
+            if prior_index != 361 {
+                sgf += &format!("TR[{}{}]",
+                    SGF_LETTERS[tree::X[prior_index] as usize],
+                    SGF_LETTERS[tree::Y[prior_index] as usize]
+                );
+            };
 
+            pass_count = 0;
             board.place(current, x, y);
             root = tree::Node::forward(tree, index);
         }

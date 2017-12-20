@@ -20,13 +20,13 @@
 /// * `array` - 
 /// 
 #[inline]
-pub fn count_zero(array: &[u8]) -> usize {
+pub fn count_zeros(array: &[u8]) -> usize {
     debug_assert!(array.len() == 384);
 
     let count: usize;
 
-    if cfg!(all(target_arch = "x86_64")) {
-        #[cfg(any(target_arch = "x86_64"))]
+    if cfg!(target_arch = "x86_64") {
+        #[cfg(target_arch = "x86_64")]
         unsafe {
             // 256-bit AVX2 implementation of the following algorithm, where
             // the main _trick_ is the use of the `movemask` and `popcnt` in
@@ -50,7 +50,7 @@ pub fn count_zero(array: &[u8]) -> usize {
                 1:
                 vmovups ymm1, [rbx]        # ymm1 = array[rbx..(rbx+32)]
                 vpcmpeqb ymm1, ymm1, ymm0  # ymm1 = (xmm0 == 0)
-                vpmovmskb edx, ymm1        # edx = 1 bit set for each byte in xmm1 that is not 0
+                vpmovmskb edx, ymm1        # edx = 1 bit set for each byte in ymm1 that is not 0
                 popcnt edx, edx            # edx = number of bits set in edx
                 add rax, rdx               # rax += edx
 
@@ -61,7 +61,7 @@ pub fn count_zero(array: &[u8]) -> usize {
                 : "={rax}"(count)  // outputs
                 : "{rbx}"(&array[0])  // inputs
                 : "rax", "rbx", "rcx", "rdx", "ymm0", "ymm1"  // clobbers
-                : "intel"
+                : "intel", "volatile"
             );
         }
     } else {
@@ -85,11 +85,11 @@ mod tests {
         array[212] = 0; array[281] = 0; array[300] = 0; array[311] = 0;
 
         // check that the result is correct before the tight loop
-        assert_eq!(asm::count_zero(&array), 12);
+        assert_eq!(asm::count_zeros(&array), 12);
 
         // benchmark our implementation
         b.iter(move || {
-            asm::count_zero(&array)
+            asm::count_zeros(&array)
         });
     }
 }

@@ -24,7 +24,6 @@ use std::hash::{Hash, Hasher};
 
 use self::circular_buf::CircularBuf;
 use self::small_set::SmallSet;
-use self::asm::*;
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -554,7 +553,7 @@ impl Board {
 
             // count the number of liberties, maybe in the future using a SIMD
             // implementation which would be a lot faster than this
-            let num_liberties = count_zero(&liberties);
+            let num_liberties = asm::count_zeros(&liberties);
 
             // update the cached value in the memoize array for all stones
             // that are strongly connected to the given index
@@ -612,7 +611,7 @@ impl Board {
         liberties[_S[index]] = S!(vertices, index);
         liberties[_W[index]] = W!(vertices, index);
 
-        count_zero(&liberties)
+        asm::count_zeros(&liberties)
     }
 
     /// Returns an array containing the (manhattan) distance to the closest stone
@@ -697,11 +696,17 @@ impl Board {
     ///
     /// * `color` - the color of the current player
     ///
-    pub fn get_features<T: From<f32> + Copy>(&self, color: Color) -> Box<[T]> {
+    pub fn get_features<T: From<f32> + Copy>(
+        &self,
+        color: Color,
+        symmetry: symmetry::Transform
+    ) -> Box<[T]>
+    {
         let c_0: T = T::from(0.0);
         let c_1: T = T::from(1.0);
 
         let mut features = vec! [ c_0; 34 * 361 ];
+        let symmetry_table = symmetry.get_table();
         let is_black = if color == Color::Black { c_1 } else { c_0 };
         let current = color as u8;
 
@@ -709,8 +714,10 @@ impl Board {
         let mut liberties = [0; 368];
 
         for index in 0..361 {
-            features[0 * 361 + index] = c_1;
-            features[1 * 361 + index] = is_black;
+            let other = symmetry_table[index] as usize;
+
+            features[0 * 361 + other] = c_1;
+            features[1 * 361 + other] = is_black;
 
             if self.vertices[index] != 0 {
                 let num_liberties = ::std::cmp::min(
@@ -727,7 +734,7 @@ impl Board {
                     }
                 };
 
-                features[l * 361 + index] = c_1;
+                features[l * 361 + other] = c_1;
             } else if self._is_valid(color, index) {
                 let num_liberties = ::std::cmp::min(
                     self.get_num_liberties_if(color, index),
@@ -735,7 +742,7 @@ impl Board {
                 );
                 let l = 7 + num_liberties;
 
-                features[l * 361 + index] = c_1;
+                features[l * 361 + other] = c_1;
             }
         }
 
@@ -744,28 +751,32 @@ impl Board {
         let opponent_territory = self.get_territory_distance(color.opposite());
 
         for index in 0..361 {
+            let other = symmetry_table[index] as usize;
+
             if self.vertices[index] != 0 {
                 // pass
             } else if our_territory[index] < opponent_territory[index] {
-                features[14 * 361 + index] = c_1;
+                features[14 * 361 + other] = c_1;
             } else if opponent_territory[index] < our_territory[index] {
-                features[27 * 361 + index] = c_1;
+                features[27 * 361 + other] = c_1;
             }
         }
 
         // set the 12 planes that denotes our and the opponents stones
         for (i, vertices) in self.history.iter().enumerate() {
             for index in 0..361 {
+                let other = symmetry_table[index] as usize;
+
                 if vertices[index] == 0 {
                     // pass
                 } else if vertices[index] == current {
                     let p = 15 + i;
 
-                    features[p * 361 + index] = c_1;
+                    features[p * 361 + other] = c_1;
                 } else { // opponent
                     let p = 28 + i;
 
-                    features[p * 361 + index] = c_1;
+                    features[p * 361 + other] = c_1;
                 }
             }
         }
