@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -260,7 +261,7 @@ def main(args):
     policy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=policy, logits=policy_hat))
     value_loss = tf.reduce_mean(tf.squared_difference(value, value_hat))
     reg_loss = tf.reduce_sum([tf.nn.l2_loss(var) for var in tf.trainable_variables()])
-    loss = policy_loss + value_loss + 1e-4 * reg_loss
+    loss = policy_loss + 0.01 * value_loss + 1e-4 * reg_loss
 
     tf.summary.scalar('loss/policy', policy_loss)
     tf.summary.scalar('loss/value', value_loss)
@@ -465,7 +466,7 @@ if __name__ == '__main__':
 
     if sys.argv[1] == '--verify':
         verify(sys.argv[2:])
-    if sys.argv[1] == '--dump':
+    elif sys.argv[1] == '--dump':
         dump(sys.argv[2:])
     else:
         main(sys.argv[1:])
