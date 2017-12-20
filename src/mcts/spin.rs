@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 
 pub struct MutexGuard<'a> {
     mutex: &'a Mutex
@@ -42,10 +43,7 @@ impl Mutex {
     #[inline]
     pub fn lock<'a>(&'a self) -> MutexGuard<'a> {
         while !self.is_available.compare_and_swap(true, false, Ordering::Acquire) {
-            // wait until the lock "looks unlocked" before trying again.
-            while !self.is_available.load(Ordering::Relaxed) {
-                unsafe { asm!("pause" :::: "volatile"); }
-            }
+            thread::yield_now();
         }
 
         MutexGuard { mutex: self }
