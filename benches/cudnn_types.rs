@@ -75,7 +75,7 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
 
     #[cfg(feature = "tensor-core")]
     {
-        assert!(cudnnSetConvolutionMathType(conv_desc, cudnn::MathType::TensorOpMath).is_ok());
+        assert!(cudnn::cudnnSetConvolutionMathType(conv_desc, cudnn::MathType::TensorOpMath).is_ok());
     }
 
     // create a 3x3 filter description of the given data type
