@@ -72,25 +72,97 @@ impl Value for RAVE {
 
     #[inline]
     fn get<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
-        let sqrt_n = (1.0 + node.total_count as f32).sqrt();
+        let sqrt_n = ((1 + node.total_count) as f32).sqrt();
         let b_sqr = C::rave_bias() * C::rave_bias();
 
-        for i in 0..362 {
-            let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
-            let value = if node.count[i] == 0 && node.amaf_count[i] == 0 {
-                node.value[i]
-            } else {
-                // minimum MSE schedule
-                let count = node.count[i] as f32;
-                let amaf_count = node.amaf_count[i] as f32;
-                let beta = amaf_count / (count + amaf_count + 4.0f32*count*amaf_count*b_sqr);
+        if cfg!(target_arch = "x86_64") {
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                const ONE: f32 = 1.0f32;
 
-                debug_assert!(0.0 <= beta && beta <= 1.0);
+                asm!(r#"
+                    vxorps ymm11, ymm11, ymm11        # ymm11 = 0
+                    vbroadcastss ymm12, [rax]         # ymm12 = sqrt (total_count + 1)
+                    vbroadcastss ymm13, [rbx]         # ymm13 = 4 * b_sqr
+                    vbroadcastss ymm14, [rcx]         # ymm14 = exploration_rate
+                    vbroadcastss ymm15, [rdx]         # ymm15 = 1.0
+                    mov rcx, 46                       # loop counter
+                    xor rax, rax                      # rax = 0
 
-                (1.0f32 - beta) * node.value[i] + beta * node.amaf[i]
-            };
+                    1:
+                    vmovups ymm0, [ r8+4*rax]         # ymm0 = count[rax]
+                    vmovups ymm1, [ r9+4*rax]         # ymm1 = value[rax]
+                    vmovups ymm2, [r10+4*rax]         # ymm2 = amaf_count[rax]
+                    vmovups ymm3, [r11+4*rax]         # ymm3 = amaf[rax]
+                    vmovups ymm4, [r12+4*rax]         # ymm4 = prior[rax]
 
-            dst[i] = value + node.prior[i] * C::exploration_rate() * exp_bonus
+                    vcvtdq2ps ymm5, ymm0              # ymm5  = ymm0 as f32
+                    vaddps ymm6, ymm5, ymm15          # ymm6 += ymm5 + 1
+                    vrcpps ymm6, ymm6                 # ymm6  = 1 / ymm6
+                    vmulps ymm6, ymm6, ymm12          # ymm6 *= sqrt_n  (=exp_bonus)
+
+                    vcvtdq2ps ymm7, ymm2              # ymm7  = ymm2 as f32
+                    vmulps ymm8, ymm13, ymm5          # ymm8  = (4 * b_sqr) * count
+                    vmulps ymm8, ymm8, ymm7           # ymm8 *= amaf_count
+                    vaddps ymm8, ymm8, ymm7           # ymm8 += amaf_count
+                    vaddps ymm8, ymm8, ymm5           # ymm8 += count
+                    vrcpps ymm8, ymm8                 # ymm8  = 1 / ymm8
+                    vmulps ymm8, ymm8, ymm7           # ymm8 *= amaf_count  (=beta)
+                    vsubps ymm9, ymm15, ymm8          # ymm9  = 1.0 - ymm8
+                    vmulps ymm9, ymm9, ymm1           # ymm9 *= value
+                    vmulps ymm3, ymm8, ymm3           # ymm3 *= ymm8
+                    vaddps ymm3, ymm3, ymm9           # ymm3 += ymm9
+
+                    vpcmpeqd ymm7, ymm0, ymm11        # ymm7  = (ymm0 == 0)
+                    vpcmpeqd ymm8, ymm2, ymm11        # ymm8  = (ymm2 == 0)
+                    vandps ymm8, ymm8, ymm7           # ymm8  = ymm7 && ymm8
+                    vblendvps ymm1, ymm3, ymm1, ymm8  # ymm1  = if ymm8 { ymm1 } else { ymm3 }
+
+                    vmulps ymm4, ymm4, ymm14          # ymm4 *= ymm14
+                    vmulps ymm4, ymm4, ymm6           # ymm4 *= ymm6
+                    vaddps ymm4, ymm4, ymm1           # ymm4 += ymm1
+
+                    vmovups [r13+4*rax], ymm4         # dst[rax] = ymm4
+
+                    add rax, 8                        # rax += 8
+                    dec ecx                           # rcx -= 1
+                    jnz 1b                            # repeat until rcx = 0
+                    "#
+                    : // no register outputs, but clobber memory
+                    : "{r8}"(node.count.as_ptr()),
+                      "{r9}"(node.value.as_ptr()),
+                      "{r10}"(node.amaf_count.as_ptr()),
+                      "{r11}"(node.amaf.as_ptr()),
+                      "{r12}"(node.prior.as_ptr()),
+                      "{r13}"(dst.as_ptr()),
+                      "{rax}"(&sqrt_n),
+                      "{rbx}"(&(4.0f32 * b_sqr)),
+                      "{rcx}"(&C::exploration_rate()),
+                      "{rdx}"(&ONE)
+                    : "memory", "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", "ymm5", "ymm6",
+                      "ymm7", "ymm8", "ymm9", "ymm11", "ymm12", "ymm13", "ymm14", "ymm15"
+                    : "intel", "volatile"
+                );
+            }
+        } else {
+            // reference implementation
+            for i in 0..362 {
+                let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
+                let value = if node.count[i] == 0 && node.amaf_count[i] == 0 {
+                    node.value[i]
+                } else {
+                    // minimum MSE schedule
+                    let count = node.count[i] as f32;
+                    let amaf_count = node.amaf_count[i] as f32;
+                    let beta = amaf_count / (count + amaf_count + 4.0f32*count*amaf_count*b_sqr);
+
+                    debug_assert!(0.0 <= beta && beta <= 1.0);
+
+                    (1.0f32 - beta) * node.value[i] + beta * node.amaf[i]
+                };
+
+                dst[i] = value + node.prior[i] * C::exploration_rate() * exp_bonus
+            }
         }
     }
 }
@@ -118,10 +190,12 @@ impl Value for PUCT {
 
     #[inline]
     fn get<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
+        let sqrt_n = ((1 + node.total_count) as f32).sqrt();
+
         if cfg!(target_arch = "x86_64") {
             #[cfg(target_arch = "x86_64")]
             unsafe {
-                const ONE: [i32; 8] = [1, 1, 1, 1, 1, 1, 1, 1];
+                const ONE: i32 = 1;
 
                 asm!(r#"
                     vbroadcastss ymm3, [r12]  # ymm3 = exploration_rate
@@ -157,16 +231,14 @@ impl Value for PUCT {
                       "{r10}"(node.prior.as_ptr()),
                       "{r11}"(dst.as_ptr()),
                       "{r12}"(&C::exploration_rate()),
-                      "{r13}"(&((1 + node.total_count) as f32).sqrt()),
-                      "{r14}"(ONE.as_ptr())
+                      "{r13}"(&sqrt_n),
+                      "{r14}"(&ONE)
                     : "memory", "rcx", "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", "ymm5"
                     : "intel", "volatile"
                 );
             }
         } else {
             // reference implemenation
-            let sqrt_n = (1.0 + node.total_count as f32).sqrt();
-
             for i in 0..362 {
                 let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
 
@@ -368,7 +440,6 @@ impl<E: Value> Node<E> {
         use std::fmt::Write;
 
         let mut out = String::new();
-        let sqrt_n = (1.0 + self.total_count as f32).sqrt();
 
         // annotate the top-10 moves to make it easier to navigate for the
         // user.
@@ -405,6 +476,9 @@ impl<E: Value> Node<E> {
         }
         */
 
+        let mut uct = [::std::f32::NEG_INFINITY; 368];
+        E::get::<C, E>(self, &mut uct);
+
         for i in 0..362 {
             // do not output nodes that has not been visited to reduce the
             // size of the final SGF file.
@@ -425,7 +499,7 @@ impl<E: Value> Node<E> {
                 self.total_count,
                 self.amaf[i],
                 self.amaf_count[i],
-                self.uct::<C>(i, sqrt_n)
+                uct[i]
             ).unwrap();
 
             unsafe {
@@ -511,7 +585,7 @@ impl<E: Value> Node<E> {
     fn select<'a, C: Param>(&'a mut self) -> Option<usize> {
         // compute all UCB1 values for each node before trying to figure out which
         // to pick to make it possible to do it with SIMD.
-        let mut uct = [0.0f32; 368];
+        let mut uct = [::std::f32::NEG_INFINITY; 368];
 
         E::get::<C, E>(self, &mut uct);
 
