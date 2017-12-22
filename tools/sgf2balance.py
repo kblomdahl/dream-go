@@ -29,11 +29,14 @@ def main():
     blacks = []  # queue of black wins that does not have a corresponding white win
     whites = []  # queue of white wins that does not have a corresponding black win
     unrecognized = 0
+    wrong_komi = 0
 
     for line in sys.stdin:
         assert not blacks or not whites
 
-        if "RE[B" in line:
+        if not "KM[7.5" in line and not "KM[6.5" in line:
+            wrong_komi += 1
+        elif "RE[B" in line:
             blacks += (line,)
         elif "RE[W" in line:
             whites += (line,)
@@ -44,6 +47,8 @@ def main():
             print(blacks.pop().strip())
             print(whites.pop().strip())
 
+    if wrong_komi > 0:
+        print('Discarded {} games with the wrong komi'.format(wrong_komi), file=sys.stderr)
     if unrecognized > 0:
         print('Discarded {} games without a winner'.format(unrecognized), file=sys.stderr)
     if blacks:
