@@ -40,6 +40,7 @@ lazy_static! {
 pub trait Value {
     unsafe fn update<C: Param, E: Value>(trace: &NodeTrace<E>, color: Color, value: f32);
     fn get<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]);
+    fn get_ref<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]);
 }
 
 /// An implementation of the _Rapid Action Value Estimation_ heuristic
@@ -70,12 +71,43 @@ impl Value for RAVE {
         }
     }
 
+    /// Reference implementation of the RAVE value function.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `node` -
+    /// * `dst` - output array for the UCT value
+    /// 
     #[inline]
-    fn get<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
+    fn get_ref<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
         let sqrt_n = ((1 + node.total_count) as f32).sqrt();
         let b_sqr = C::rave_bias() * C::rave_bias();
 
+        for i in 0..362 {
+            let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
+            let value = if node.count[i] == 0 && node.amaf_count[i] == 0 {
+                node.value[i]
+            } else {
+                // minimum MSE schedule
+                let count = node.count[i] as f32;
+                let amaf_count = node.amaf_count[i] as f32;
+                let beta = amaf_count / (count + amaf_count + 4.0f32*count*amaf_count*b_sqr);
+
+                debug_assert!(0.0 <= beta && beta <= 1.0);
+
+                (1.0f32 - beta) * node.value[i] + beta * node.amaf[i]
+            };
+
+            dst[i] = value + node.prior[i] * C::exploration_rate() * exp_bonus
+        }
+    }
+
+    #[inline]
+    fn get<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
         if cfg!(target_arch = "x86_64") {
+            let sqrt_n = ((1 + node.total_count) as f32).sqrt();
+            let b_sqr = C::rave_bias() * C::rave_bias();
+
             #[cfg(target_arch = "x86_64")]
             unsafe {
                 const ONE: f32 = 1.0f32;
@@ -98,8 +130,7 @@ impl Value for RAVE {
 
                     vcvtdq2ps ymm5, ymm0              # ymm5  = ymm0 as f32
                     vaddps ymm6, ymm5, ymm15          # ymm6 += ymm5 + 1
-                    vrcpps ymm6, ymm6                 # ymm6  = 1 / ymm6
-                    vmulps ymm6, ymm6, ymm12          # ymm6 *= sqrt_n  (=exp_bonus)
+                    vdivps ymm6, ymm12, ymm6          # ymm6  = sqrt_n / ymm6  (=exp_bonus)
 
                     vcvtdq2ps ymm7, ymm2              # ymm7  = ymm2 as f32
                     vmulps ymm8, ymm13, ymm5          # ymm8  = (4 * b_sqr) * count
@@ -107,7 +138,7 @@ impl Value for RAVE {
                     vaddps ymm8, ymm8, ymm7           # ymm8 += amaf_count
                     vaddps ymm8, ymm8, ymm5           # ymm8 += count
                     vrcpps ymm8, ymm8                 # ymm8  = 1 / ymm8
-                    vmulps ymm8, ymm8, ymm7           # ymm8 *= amaf_count  (=beta)
+                    vmulps ymm8, ymm7, ymm8           # ymm8 *= amaf_count  (=beta)
                     vsubps ymm9, ymm15, ymm8          # ymm9  = 1.0 - ymm8
                     vmulps ymm9, ymm9, ymm1           # ymm9 *= value
                     vmulps ymm3, ymm8, ymm3           # ymm3 *= ymm8
@@ -145,24 +176,7 @@ impl Value for RAVE {
                 );
             }
         } else {
-            // reference implementation
-            for i in 0..362 {
-                let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
-                let value = if node.count[i] == 0 && node.amaf_count[i] == 0 {
-                    node.value[i]
-                } else {
-                    // minimum MSE schedule
-                    let count = node.count[i] as f32;
-                    let amaf_count = node.amaf_count[i] as f32;
-                    let beta = amaf_count / (count + amaf_count + 4.0f32*count*amaf_count*b_sqr);
-
-                    debug_assert!(0.0 <= beta && beta <= 1.0);
-
-                    (1.0f32 - beta) * node.value[i] + beta * node.amaf[i]
-                };
-
-                dst[i] = value + node.prior[i] * C::exploration_rate() * exp_bonus
-            }
+            RAVE::get_ref::<C, E>(node, dst);
         }
     }
 }
@@ -188,11 +202,29 @@ impl Value for PUCT {
         }
     }
 
+    /// Reference implementation of the RAVE value function.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `node` -
+    /// * `dst` - output array for the UCT value
+    /// 
     #[inline]
-    fn get<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
+    fn get_ref<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
         let sqrt_n = ((1 + node.total_count) as f32).sqrt();
 
+        for i in 0..362 {
+            let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
+
+            dst[i] = node.value[i] + node.prior[i] * C::exploration_rate() * exp_bonus
+        }
+    }
+
+    #[inline]
+    fn get<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
         if cfg!(target_arch = "x86_64") {
+            let sqrt_n = ((1 + node.total_count) as f32).sqrt();
+
             #[cfg(target_arch = "x86_64")]
             unsafe {
                 const ONE: i32 = 1;
@@ -211,8 +243,7 @@ impl Value for PUCT {
                     vpaddd ymm0, ymm0, ymm5   # count[i] += 1
                     vcvtdq2ps ymm0, ymm0      # count[i] = count[i] as f32
                     vmulps ymm2, ymm2, ymm3   # prior[i] *= exploration_rate
-                    vrcpps ymm0, ymm0         # count[i]  = 1 / count[i]
-                    vmulps ymm0, ymm0, ymm4   # count[i] *= sqrt (total_count + 1)
+                    vdivps ymm0, ymm4, ymm0   # count[i] = sqrt (total_count + 1) / count[i]
                     vmulps ymm0, ymm0, ymm2   # count[i] *= prior[i]
                     vaddps ymm0, ymm0, ymm1   # count[i] += value[i]
                     vmovups [r11], ymm0       # dst[i] = count[i]
@@ -238,12 +269,7 @@ impl Value for PUCT {
                 );
             }
         } else {
-            // reference implemenation
-            for i in 0..362 {
-                let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
-
-                dst[i] = node.value[i] + node.prior[i] * C::exploration_rate() * exp_bonus
-            }
+            PUCT::get_ref::<C, E>(node, dst);
         }
     }
 }
@@ -727,6 +753,9 @@ pub fn to_sgf<C, E>(root: &Node<E>, starting_point: &Board) -> String
 #[cfg(test)]
 mod tests {
     use test::{self, Bencher};
+    use rand::{XorShiftRng, Rng};
+    use go::*;
+    use mcts::param::*;
     use mcts::tree::*;
 
     #[bench]
@@ -754,5 +783,73 @@ mod tests {
         array[234] = -0.1;
 
         assert_eq!(argmax(&array), Some(234));
+    }
+
+    fn get_prior_distribution(rng: &mut Rng) -> Box<[f32]> {
+        let mut prior: Vec<f32> = (0..362).map(|_| rng.next_f32()).collect();
+        let sum_recip: f32 = prior.iter().map(|&f| f).sum();
+
+        for i in 0..362 {
+            prior[i] *= sum_recip;
+        }
+
+        prior.into_boxed_slice()
+    }
+
+    unsafe fn bench_test<C: Param, E: Value>(b: &mut Bencher) {
+        let mut rng = XorShiftRng::new_unseeded();
+        let mut root = Node::<E>::new(Color::Black, get_prior_distribution(&mut rng));
+
+        for t in 0..800 {
+            let mut board = Board::new();
+            let mut dst_ref = [0.0f32; 362];
+            let mut dst_asm = [0.0f32; 362];
+
+            // check so that the reference and asm implementation gives back the same
+            // value
+            E::get::<C, E>(&root, &mut dst_asm);
+            E::get_ref::<C, E>(&root, &mut dst_ref);
+
+            for i in 0..362 {
+                // because of numeric instabilities and approximations the answers may
+                // be slightly different
+                const EPS: f32 = 1e-1;
+
+                assert!(
+                    (dst_asm[i] - dst_ref[i]).abs() < EPS,
+                    "epoch {}: dst[{}] <=> asm {} != ref {}",
+                    t, i, dst_asm[i], dst_ref[i]
+                );
+            }
+
+            // expand the tree by one probe so that the root values change
+            let trace = probe::<C, E>(&mut root, &mut board).unwrap();
+            let &(_, color, _) = trace.last().unwrap();
+            let next_color = color.opposite();
+            let (value, policy) = (rng.next_f32(), get_prior_distribution(&mut rng));
+
+            insert::<C, E>(&trace, next_color, value, policy);
+        }
+
+        // benchmark the value function only
+        let root = test::black_box(root);
+
+        b.iter(|| {
+            let mut dst = [0.0f32; 362];
+
+            E::get::<C, E>(&root, &mut dst);
+            dst
+        });
+
+    }
+
+    #[bench]
+    fn puct(b: &mut Bencher) {
+        unsafe { bench_test::<Standard, PUCT>(b); }
+    }
+
+    #[bench]
+    fn rave(b: &mut Bencher) {
+        unsafe { bench_test::<Standard, RAVE>(b); }
     }
 }
