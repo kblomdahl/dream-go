@@ -18,13 +18,6 @@ extern crate time;
 use dream_go::{dataset, gtp, nn, mcts};
 use std::env;
 
-/// Returns the current time formatted according to ISO 8601.
-fn iso8601() -> String {
-    let now = time::now_utc();
-
-    time::strftime("%Y-%m-%dT%H:%M:%S%z", &now).unwrap()
-}
-
 /// Main function.
 fn main() {
     // keep everything that is before the first "--" indicator as potential
@@ -65,14 +58,28 @@ fn main() {
         };
 
         for _ in 0..n {
-            match mcts::self_play(&network) {
-                mcts::GameResult::Resign(sgf, _, winner, _) => {
-                    println!("(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[7.5]RE[{}+Resign]{})", iso8601(), winner, sgf);
-                }
-                mcts::GameResult::Ended(sgf, _) => {
-                    println!("(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[7.5]RE[?]{})", iso8601(), sgf);
-                }
+            let result = mcts::self_play(&network);
+
+            println!("{}", result);
+        }
+    } else if args.iter().any(|arg| arg == "--policy-play") {
+        let network = nn::Network::new()
+            .expect("no model found");
+        let receiver = mcts::policy_play(network);
+
+        let mut n = if remaining.len() > 0 {
+            remaining[0].parse::<usize>().unwrap()
+        } else {
+            ::std::usize::MAX
+        };
+
+        while n > 0 {
+            match receiver.recv() {
+                Ok(result) => { println!("{}", result); },
+                _ => { unreachable!(); }
             }
+
+            n -= 1;
         }
     } else if args.iter().any(|arg| arg == "--gtp") || args.len() == 0 {
         gtp::run();
@@ -81,6 +88,7 @@ fn main() {
         println!("");
         println!("  --dataset <files...>  Extract a dataset for training from the given SGF files");
         println!("  --self-play <n>       Extract a dataset from self-play containing n examples");
+        println!("  --policy-play <n>     Extract a dataset from self-play using only the policy network");
         println!("  --gtp                 Run GTP client (default)");
     }
 }

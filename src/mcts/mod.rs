@@ -20,10 +20,12 @@ pub mod tree;
 
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
+use std::fmt;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use time;
 
 use go::{symmetry, Board, Color};
 use mcts::param::*;
@@ -42,6 +44,35 @@ const SGF_LETTERS: [char; 26] = [
 pub enum GameResult {
     Resign(String, Board, Color, f32),
     Ended(String, Board)
+}
+
+impl fmt::Display for GameResult {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        let now = time::now_utc();
+        let iso8601 = time::strftime("%Y-%m-%dT%H:%M:%S%z", &now).unwrap();
+
+        match *self {
+            GameResult::Resign(ref sgf, _, winner, _) => {
+                write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[7.5]RE[{}+Resign]{})", iso8601, winner, sgf)
+            },
+            GameResult::Ended(ref sgf, ref board) => {
+                let (black, white) = board.get_score();
+                let black = black as f32;
+                let white = white as f32 + 7.5;
+                let winner = {
+                    if black > white {
+                        format!("B+{:.1}", black - white)
+                    } else if white > black {
+                        format!("W+{:.1}", white - black)
+                    } else {
+                        format!("0")
+                    }
+                };
+
+                write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[7.5]RE[{}]{})", iso8601, winner, sgf)
+            }
+        }
+    }
 }
 
 pub enum PolicyRequest<T: From<f32> + Clone> {
@@ -120,7 +151,7 @@ impl<T: From<f32> + Clone> Forwarder<T> for RemoteForward<T> {
 /// * `color` - the current player
 /// 
 fn forward<C, A, T>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>)
-    where C: Param, A: Forwarder<T>, T: From<f32> + Copy + Default, f32: From<T>
+    where C: Param, A: Forwarder<T>, T: From<f32> + Copy, f32: From<T>
 {
     lazy_static! {
         static ref SYMM: Vec<symmetry::Transform> = vec! [
@@ -282,13 +313,12 @@ fn predict_worker<C, E, T>(context: ThreadContext<E, T>)
 /// * `network` - the neural network to use for evaluations
 /// * `receiver` - the channel to listen for requests on
 /// 
-fn predict_serve<'a, C, E, T>(
+fn predict_serve<'a, C, T>(
     network: &Network,
     receiver: Receiver<PolicyRequest<T>>
 )
-    where C: Param + Clone + 'static,
-          E: tree::Value + Clone + 'static,
-          T: From<f32> + Copy + Default + 'static, f32: From<T>
+    where C: Param + 'static,
+          T: From<f32> + Copy + 'static, f32: From<T>
 {
     let mut workspaces = (0..C::batch_size())
         .map(|s| network.get_workspace(s + 1))
@@ -406,7 +436,7 @@ pub fn predict_aux<C, E, T>(
         thread::spawn(move || { predict_worker::<C, E, T>(context) })
     }).collect::<Vec<JoinHandle<()>>>();
 
-    predict_serve::<C, E, T>(network, receiver);
+    predict_serve::<C, T>(network, receiver);
 
     // wait for all threads to terminate to avoid any zombie processes
     for handle in handles.into_iter() { handle.join().unwrap(); }
@@ -455,7 +485,7 @@ pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
 /// 
 /// # Arguments
 /// 
-/// * `workspace` - the neural network workspace to use during evaluation
+/// * `network` - the neural network to use during evaluation
 /// 
 pub fn self_play(network: &Network) -> GameResult {
     let mut board = Board::new();
@@ -470,11 +500,12 @@ pub fn self_play(network: &Network) -> GameResult {
     let mut root = None;
 
     while count < 722 {
-        let (value, index, tree) = if current == Color::Black {
-            predict::<Standard, tree::DefaultValue>(network, root, &board, current)
-        } else {
-            predict::<Standard, tree::DefaultValue>(network, root, &board, current)
-        };
+        let (value, index, tree) = predict::<Standard, tree::DefaultValue>(
+            network,
+            root,
+            &board,
+            current
+        );
 
         debug_assert!(-1.0 <= value && value <= 1.0);
         debug_assert!(index < 362);
@@ -518,4 +549,123 @@ pub fn self_play(network: &Network) -> GameResult {
     }
 
     GameResult::Ended(sgf, board)
+}
+
+/// Play a game against the engine and return the results of the game over
+/// the returned channel. This is different from `send_play` because this
+/// method does not perform any search and only plays stochastically according
+/// to the policy network.
+/// 
+/// # Arguments
+/// 
+/// * `network` - the neural network to use during evaluation
+/// 
+pub fn policy_play_aux<C, T>(
+    network: Network
+) -> Receiver<GameResult>
+    where C: Param + 'static,
+          T: From<f32> + Copy + Send + 'static, f32: From<T>
+{
+    let (sender, receiver) = channel();
+
+    // spawn the worker threads that generate the self-play games
+    let (policy_sender, policy_receiver) = channel();
+
+    for _ in 0..(C::thread_count()) {
+        let policy_sender = policy_sender.clone();
+        let sender = sender.clone();
+
+        thread::spawn(move || {
+            let mut remote = RemoteForward::<T> { remote: policy_sender };
+
+            loop {
+                let mut board = Board::new();
+                let mut sgf = String::new();
+                let mut current = Color::Black;
+                let mut pass_count = 0;
+                let mut count = 0;
+
+                while pass_count < 2 && count < 722 && !board.is_scoreable() {
+                    let (_, policy) = forward::<C, RemoteForward<T>, T>(
+                        &mut remote,
+                        &board,
+                        current
+                    );
+
+                    // pick a move stochastically according to its prior value, we
+                    // do not need to compute the sum because `forward` always
+                    // returns a normalized vector of prior values
+                    let index = {
+                        let threshold = thread_rng().next_f32();
+                        let mut so_far = 0.0f32;
+                        let mut best = None;
+
+                        for i in 0..362 {
+                            if policy[i].is_finite() {
+                                so_far += policy[i];
+
+                                if so_far >= threshold {
+                                    best = Some(i);
+                                    break
+                                }
+                            }
+                        }
+
+                        best  // if nothing, then pass
+                    };
+
+                    if let Some(index) = index {
+                        if index == 361 {  // pass
+                            sgf += &format!(";{}[]", current);
+                            pass_count += 1;
+                        } else {  // normal move
+                            let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
+
+                            sgf += &format!(";{}[{}{}]", current, SGF_LETTERS[x], SGF_LETTERS[y]);
+                            pass_count = 0;
+                            board.place(current, x, y);
+                        }
+                    } else {  // no valid moves remaining
+                        sgf += &format!(";{}[]", current);
+                        pass_count += 1;
+                    }
+
+                    // continue with the next turn
+                    current = current.opposite();
+                    count += 1;
+                }
+
+                // if the receiver has terminated then quit
+                if sender.send(GameResult::Ended(sgf, board)).is_err() {
+                    break;
+                }
+            }
+
+            remote.remote.send(PolicyRequest::Done).unwrap();
+        });
+    }
+
+    // spawn the server thread that computes the policies for the workers
+    thread::spawn(move || { predict_serve::<C, T>(&network, policy_receiver) });
+
+    receiver
+}
+
+/// Play a game against the engine and return the results of the game over
+/// the returned channel. This is different from `send_play` because this
+/// method does not perform any search and only plays stochastically according
+/// to the policy network.
+/// 
+/// # Arguments
+/// 
+/// * `network` - the neural network to use during evaluation
+/// 
+pub fn policy_play(network: Network) -> Receiver<GameResult> {
+    let is_half = network.is_half();
+
+    if is_half {
+        policy_play_aux::<Standard, f16>(network)
+    } else {
+        policy_play_aux::<Standard, f32>(network)
+    }
 }

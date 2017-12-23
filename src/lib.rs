@@ -23,6 +23,7 @@ extern crate rand;
 extern crate regex;
 extern crate rustyline;
 #[cfg(test)] extern crate test;
+extern crate time;
 
 pub mod dataset;
 pub mod go;

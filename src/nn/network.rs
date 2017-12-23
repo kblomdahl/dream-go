@@ -55,8 +55,11 @@ impl<'a> Drop for WorkspaceGuard<'a> {
 /// Pool of workspaces that can be used for network evaluations.
 pub struct Network {
     shared: Arc<Shared>,
-    workspaces: Mutex<HashMap<usize, WorkspaceQueue>>
+    workspaces: Arc<Mutex<HashMap<usize, WorkspaceQueue>>>
 }
+
+unsafe impl Send for Network { }  // this is safe because the Rc<...> is guarded by a Mutex and/or Arc
+unsafe impl Sync for Network { }  // this is safe because the Rc<...> is guarded by a Mutex and/or Arc
 
 impl Network {
     pub fn new() -> Option<Network> {
@@ -80,7 +83,10 @@ impl Network {
         PATHS.iter()
             .filter_map(|path| Shared::new(Path::new(path)))
             .next()
-            .map(|shared| Network { shared: Arc::new(shared), workspaces: Mutex::new(HashMap::new()) })
+            .map(|shared| Network {
+                shared: Arc::new(shared),
+                workspaces: Arc::new(Mutex::new(HashMap::new()))
+            })
     }
 
     /// Returns a `Workspace` with the given batch size.
