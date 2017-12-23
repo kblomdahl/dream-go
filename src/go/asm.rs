@@ -49,7 +49,7 @@ pub fn count_zeros(array: &[u8]) -> usize {
 
                 1:
                 vmovups ymm1, [rbx]        # ymm1 = array[rbx..(rbx+32)]
-                vpcmpeqb ymm1, ymm1, ymm0  # ymm1 = (xmm0 == 0)
+                vpcmpeqb ymm1, ymm1, ymm0  # ymm1 = (xmm1 == 0)
                 vpmovmskb edx, ymm1        # edx = 1 bit set for each byte in ymm1 that is not 0
                 popcnt edx, edx            # edx = number of bits set in edx
                 add rax, rdx               # rax += edx

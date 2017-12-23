@@ -14,6 +14,7 @@
 
 mod asm;
 mod circular_buf;
+mod codegen;
 mod small_set;
 pub mod symmetry;
 mod zobrist;
@@ -67,54 +68,29 @@ impl fmt::Display for Color {
     }
 }
 
-/// Returns an array that contains the mapping from original index to the
-/// translated vertex according to the given deltas, if the translated
-/// vertex ends up out of bounds then that element is set to 361.
-///
-/// # Arguments
-///
-/// * `dx` - the delta in columns
-/// * `dy` - the delta in rows
-///
-fn get_direction_array(dx: i32, dy: i32) -> [usize; 361] {
-    let mut out = [0; 361];
-
-    for x in 0..19 {
-        let x_ = (x as i32) + dx;
-
-        for y in 0..19 {
-            let y_ = (y as i32) + dy;
-            let index = 19 * y + x;
-
-            if x_ >= 0 && x_ < 19 && y_ >= 0 && y_ < 19 {
-                out[index] = (19 * y_ + x_) as usize;
-            } else {
-                out[index] = 361;
-            }
-        }
-    }
-
-    out
-}
-
-lazy_static! {
-    static ref _N: [usize; 361] = get_direction_array(0, 1);
-    static ref _E: [usize; 361] = get_direction_array(1, 0);
-    static ref _S: [usize; 361] = get_direction_array(0, -1);
-    static ref _W: [usize; 361] = get_direction_array(-1, 0);
-}
-
 /// Returns `$array[$nested[$index]]` without boundary checks
 macro_rules! nested_get_unchecked {
     ($array:expr, $nested:expr, $index:expr) => (unsafe {
-        *$array.get_unchecked(*$nested.get_unchecked($index))
+        *$array.get_unchecked(*$nested.get_unchecked($index as usize) as usize)
     })
 }
 
-macro_rules! N { ($array:expr, $index:expr) => (nested_get_unchecked!($array, _N, $index)) }
-macro_rules! E { ($array:expr, $index:expr) => (nested_get_unchecked!($array, _E, $index)) }
-macro_rules! S { ($array:expr, $index:expr) => (nested_get_unchecked!($array, _S, $index)) }
-macro_rules! W { ($array:expr, $index:expr) => (nested_get_unchecked!($array, _W, $index)) }
+macro_rules! N {
+    ($array:expr, $index:expr) => (nested_get_unchecked!($array, codegen::N, $index));
+    ($index:expr) => (unsafe { *codegen::N.get_unchecked($index as usize) as usize })
+}
+macro_rules! E {
+    ($array:expr, $index:expr) => (nested_get_unchecked!($array, codegen::E, $index));
+    ($index:expr) => (unsafe { *codegen::E.get_unchecked($index as usize) as usize })
+}
+macro_rules! S {
+    ($array:expr, $index:expr) => (nested_get_unchecked!($array, codegen::S, $index));
+    ($index:expr) => (unsafe { *codegen::S.get_unchecked($index as usize) as usize })
+}
+macro_rules! W {
+    ($array:expr, $index:expr) => (nested_get_unchecked!($array, codegen::W, $index));
+    ($index:expr) => (unsafe { *codegen::W.get_unchecked($index as usize) as usize })
+}
 
 pub struct Board {
     /// The color of the stone that is occupying each vertex. This array
@@ -521,10 +497,10 @@ impl Board {
         let mut current = index;
 
         loop {
-            liberties[_N[current]] = N!(vertices, current);
-            liberties[_E[current]] = E!(vertices, current);
-            liberties[_S[current]] = S!(vertices, current);
-            liberties[_W[current]] = W!(vertices, current);
+            liberties[N!(current)] = N!(vertices, current);
+            liberties[E!(current)] = E!(vertices, current);
+            liberties[S!(current)] = S!(vertices, current);
+            liberties[W!(current)] = W!(vertices, current);
 
             current = self.next_vertex[current] as usize;
             if current == index {
@@ -649,10 +625,10 @@ impl Board {
         if W!(vertices, index) == current { self.fill_liberties(&vertices, index - 1, &mut liberties); }
 
         // add direct liberties of the new stone
-        liberties[_N[index]] = N!(vertices, index);
-        liberties[_E[index]] = E!(vertices, index);
-        liberties[_S[index]] = S!(vertices, index);
-        liberties[_W[index]] = W!(vertices, index);
+        liberties[N!(index)] = N!(vertices, index);
+        liberties[E!(index)] = E!(vertices, index);
+        liberties[S!(index)] = S!(vertices, index);
+        liberties[W!(index)] = W!(vertices, index);
 
         asm::count_zeros(&liberties)
     }
@@ -669,7 +645,7 @@ impl Board {
 
         // find all of our stones and mark them as starting points
         let mut territory = [0xff; 368];
-        let mut probes = VecDeque::with_capacity(722);
+        let mut probes = VecDeque::with_capacity(512);
 
         for index in 0..361 {
             if self.vertices[index] == current {
@@ -688,10 +664,10 @@ impl Board {
             let index = probes.pop_front().unwrap();
             let t = territory[index] + 1;
 
-            if N!(self.vertices, index) == 0 && N!(territory, index) > t { probes.push_back(_N[index]); territory[_N[index]] = t; }
-            if E!(self.vertices, index) == 0 && E!(territory, index) > t { probes.push_back(_E[index]); territory[_E[index]] = t; }
-            if S!(self.vertices, index) == 0 && S!(territory, index) > t { probes.push_back(_S[index]); territory[_S[index]] = t; }
-            if W!(self.vertices, index) == 0 && W!(territory, index) > t { probes.push_back(_W[index]); territory[_W[index]] = t; }
+            if N!(self.vertices, index) == 0 && N!(territory, index) > t { probes.push_back(N!(index)); territory[N!(index)] = t; }
+            if E!(self.vertices, index) == 0 && E!(territory, index) > t { probes.push_back(E!(index)); territory[E!(index)] = t; }
+            if S!(self.vertices, index) == 0 && S!(territory, index) > t { probes.push_back(S!(index)); territory[S!(index)] = t; }
+            if W!(self.vertices, index) == 0 && W!(territory, index) > t { probes.push_back(W!(index)); territory[W!(index)] = t; }
         }
 
         territory
@@ -748,7 +724,7 @@ impl Board {
         let c_0: T = T::from(0.0);
         let c_1: T = T::from(1.0);
 
-        let mut features = vec! [ c_0; 34 * 361 ];
+        let mut features = vec! [c_0; 34 * 361];
         let symmetry_table = symmetry.get_table();
         let is_black = if color == Color::Black { c_1 } else { c_0 };
         let current = color as u8;

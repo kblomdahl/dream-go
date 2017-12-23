@@ -25,7 +25,8 @@ impl SmallSet {
         SmallSet { buf: [0; 8], count: 0 }
     }
 
-    /// Adds the given value to this set, removing the oldest value if the set overflows.
+    /// Adds the given value to this set, removing the oldest value if
+    /// the set overflows.
     /// 
     /// # Arguments
     /// 
