@@ -166,8 +166,8 @@ mod tests {
     /// 
     /// # Arguments
     /// 
-    /// * `a`
-    /// * `b`
+    /// * `a` - 
+    /// * `b` - 
     /// 
     fn array_eq(a: [u16; 361], b: [u16; 361]) -> bool {
         (0..361).all(|i| a[i] == b[i])

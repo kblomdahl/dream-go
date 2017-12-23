@@ -497,12 +497,16 @@ impl Board {
         let mut current = index;
 
         loop {
-            liberties[N!(current)] = N!(vertices, current);
-            liberties[E!(current)] = E!(vertices, current);
-            liberties[S!(current)] = S!(vertices, current);
-            liberties[W!(current)] = W!(vertices, current);
+            #![allow(unused_unsafe)]
+            unsafe {
+                *liberties.get_unchecked_mut(N!(current)) = N!(vertices, current);
+                *liberties.get_unchecked_mut(E!(current)) = E!(vertices, current);
+                *liberties.get_unchecked_mut(S!(current)) = S!(vertices, current);
+                *liberties.get_unchecked_mut(W!(current)) = W!(vertices, current);
 
-            current = self.next_vertex[current] as usize;
+                current = *self.next_vertex.get_unchecked(current) as usize;
+            }
+
             if current == index {
                 break
             }
