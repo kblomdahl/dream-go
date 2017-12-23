@@ -318,9 +318,8 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
     tf.summary.scalar('loss/regularization', reg_loss)
     tf.summary.scalar('loss', loss)
 
-    learning_rate_base = tf.constant(0, tf.int64)
     learning_rate = tf.train.piecewise_constant(
-        global_step - learning_rate_base,
+        global_step,
         [50000, 100000, 300000, 500000, 700000],
         [3e-2, 1e-2, 3e-3, 1e-3, 3e-4, 1e-4]
     )
@@ -355,7 +354,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
     summary_writer = tf.summary.FileWriter('logs/' + datetime.now().strftime('%Y%m%d.%H%M') + '/', graph=tf.get_default_graph())
     summary_op = tf.summary.merge_all()
     update_op = tf.group(*tf.get_collection(tf.GraphKeys.UPDATE_OPS))
-    saver_vars = tf.model_variables() + [global_step, epoch, learning_rate_base]
+    saver_vars = tf.model_variables() + [global_step, epoch]
     saver = tf.train.Saver(saver_vars, keep_checkpoint_every_n_hours=2)
 
     #
@@ -386,7 +385,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
                 sess.run([tf.variables_initializer(tf.get_collection(ValueHead.VARIABLES))])
         if reset_lr:
             print('Reset the learning rate')
-            sess.run([tf.assign(learning_rate_base, global_step, use_locking=True)])
+            sess.run([tf.assign(global_step, 0, use_locking=True)])
 
         sess.graph.finalize()
 
