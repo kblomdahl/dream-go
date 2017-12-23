@@ -33,7 +33,7 @@ import numpy as np
 class BatchNorm:
     """ Batch normalization layer. """
 
-    def __init__(self, num_features, suffix=None):
+    def __init__(self, num_features, suffix=None, collection=None):
         if suffix is None:
             suffix = ''
 
@@ -49,6 +49,10 @@ class BatchNorm:
         #tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._offset)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._mean)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._variance)
+
+        if collection:
+            tf.add_to_collection(collection, self._mean)
+            tf.add_to_collection(collection, self._variance)
 
     def __call__(self, x, is_training=True):
         if is_training:
@@ -93,7 +97,7 @@ class ResidualBlock:
     7. A rectifier non-linearity
     """
 
-    def __init__(self, num_features):
+    def __init__(self, num_features, collection=None):
         glorot_op = tf.glorot_normal_initializer()
 
         self._conv_1 = tf.get_variable('weights_1', (3, 3, num_features, num_features), tf.float32, glorot_op)
@@ -105,6 +109,10 @@ class ResidualBlock:
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._conv_2)
         tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._conv_1)
         tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._conv_2)
+
+        if collection:
+            tf.add_to_collection(collection, self._conv_1)
+            tf.add_to_collection(collection, self._conv_2)
 
     def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._conv_1, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -125,15 +133,17 @@ class ValueHead:
     4. A fully connected linear layer to a hidden layer of size 256
     5. A rectifier non-linearity
     6. A fully connected linear layer to a scalar
-    7. A tanh non-linearity outputting a scalar in the range [−1, 1]
+    7. A tanh non-linearity outputting a scalar in the range [-1, 1]
     """
+
+    VARIABLES = 'value_variables'
 
     def __init__(self, num_features):
         glorot_op = tf.glorot_normal_initializer()
         zeros_op = tf.zeros_initializer()
 
         self._downsample = tf.get_variable('downsample', (1, 1, num_features, 1), tf.float32, glorot_op)
-        self._bn = BatchNorm(1)
+        self._bn = BatchNorm(1, collection=ValueHead.VARIABLES)
         self._weights_1 = tf.get_variable('weights_1', (361, 256), tf.float32, glorot_op)
         self._weights_2 = tf.get_variable('weights_2', (256, 1), tf.float32, glorot_op)
         self._bias_1 = tf.get_variable('bias_1', (256,), tf.float32, zeros_op)
@@ -145,6 +155,12 @@ class ValueHead:
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias_1)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias_2)
         tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._downsample)
+
+        tf.add_to_collection(ValueHead.VARIABLES, self._downsample)
+        tf.add_to_collection(ValueHead.VARIABLES, self._weights_1)
+        tf.add_to_collection(ValueHead.VARIABLES, self._weights_2)
+        tf.add_to_collection(ValueHead.VARIABLES, self._bias_1)
+        tf.add_to_collection(ValueHead.VARIABLES, self._bias_2)
 
     def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -168,12 +184,14 @@ class PolicyHead:
        logit probabilities for all intersections and the pass move
     """
 
+    VARIABLES = 'policy_variables'
+
     def __init__(self, num_features):
         glorot_op = tf.glorot_normal_initializer()
         zeros_op = tf.zeros_initializer()
 
         self._downsample = tf.get_variable('downsample', (1, 1, num_features, 2), tf.float32, glorot_op)
-        self._bn = BatchNorm(2)
+        self._bn = BatchNorm(2, collection=PolicyHead.VARIABLES)
         self._weights = tf.get_variable('weights', (722, 362), tf.float32, glorot_op)
         self._bias = tf.get_variable('bias', (362,), tf.float32, zeros_op)
 
@@ -181,6 +199,10 @@ class PolicyHead:
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._weights)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias)
         tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._downsample)
+
+        tf.add_to_collection(PolicyHead.VARIABLES, self._downsample)
+        tf.add_to_collection(PolicyHead.VARIABLES, self._weights)
+        tf.add_to_collection(PolicyHead.VARIABLES, self._bias)
 
     def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -197,22 +219,25 @@ class Tower:
     positions.
     """
 
+    VARIABLES = 'tower_variables'
+
     def __init__(self, num_features=128):
         glorot_op = tf.glorot_normal_initializer()
 
         with tf.variable_scope('01_upsample'):
             self._upsample = tf.get_variable('weights', (3, 3, 34, num_features), tf.float32, glorot_op)
-            self._bn = BatchNorm(num_features)
+            self._bn = BatchNorm(num_features, collection=Tower.VARIABLES)
 
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._upsample)
         tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._upsample)
+        tf.add_to_collection(Tower.VARIABLES, self._upsample)
 
         # residual blocks
         self._residuals = []
 
         for i in range(19):
             with tf.variable_scope('{:02d}_residual'.format(2 + i)):
-                self._residuals += [ResidualBlock(num_features)]
+                self._residuals += [ResidualBlock(num_features, collection=Tower.VARIABLES)]
 
         # policy head
         with tf.variable_scope('21p_policy'):
@@ -222,31 +247,51 @@ class Tower:
         with tf.variable_scope('21v_value'):
             self._value = ValueHead(num_features)
 
-    def __call__(self, x, is_training=True):
+    def __call__(self, x, is_training=True, train_tower=True, train_policy=True, train_value=True):
         y = tf.nn.conv2d(x, self._upsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = self._bn(y, is_training)
+        y = self._bn(y, is_training and train_tower)
         y = tf.nn.relu(y)
 
         for resb in self._residuals:
-            y = resb(y, is_training)
+            y = resb(y, is_training and train_tower)
 
-        p = self._policy(y, is_training)
-        v = self._value(y, is_training)
+        p = self._policy(y, is_training and train_policy)
+        v = self._value(y, is_training and train_value)
 
         return v, p
 
-def main(args):
+def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False, only_value=False):
     """ Main function """
 
-    dataset = tf.data.FixedLengthRecordDataset(args, 25274)
+    dataset = tf.data.FixedLengthRecordDataset(files, 25274)
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
     dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
-    dataset = dataset.shuffle(8196)
+    dataset = dataset.shuffle(196704)
     dataset = dataset.batch(512 if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
     iterator = dataset.make_initializable_iterator()
 
-    #
+    # setup the forward pass while keeping track of what variables to train, which
+    # becomes more annoying because of batch normalization
+    train_all = not only_tower and not only_policy and not only_value
     tower = Tower()
+
+    original_trainable = set(tf.trainable_variables())
+
+    if not train_all:
+        tf.get_default_graph().clear_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+
+        if only_tower:
+            for var in tf.get_collection(Tower.VARIABLES):
+                if var in original_trainable:
+                    tf.add_to_collection(tf.GraphKeys.TRAINABLE_VARIABLES, var)
+        if only_policy:
+            for var in tf.get_collection(PolicyHead.VARIABLES):
+                if var in original_trainable:
+                    tf.add_to_collection(tf.GraphKeys.TRAINABLE_VARIABLES, var)
+        if only_value:
+            for var in tf.get_collection(ValueHead.VARIABLES):
+                if var in original_trainable:
+                    tf.add_to_collection(tf.GraphKeys.TRAINABLE_VARIABLES, var)
 
     with tf.device('cpu:0'):
         global_step = tf.train.create_global_step()
@@ -255,12 +300,17 @@ def main(args):
 
     features, value, policy = iterator.get_next()
     features = tf.reshape(features, (-1, 34, 19, 19))
-    value_hat, policy_hat = tower(features)
+    value_hat, policy_hat = tower(
+        features,
+        train_tower=train_all or only_tower,
+        train_policy=train_all or only_policy,
+        train_value=train_all or only_value
+    )
 
-    #
+    # setup the optimizer
     policy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=policy, logits=policy_hat))
     value_loss = tf.reduce_mean(tf.squared_difference(value, value_hat))
-    reg_loss = tf.reduce_sum([tf.nn.l2_loss(var) for var in tf.trainable_variables()])
+    reg_loss = tf.reduce_sum([tf.nn.l2_loss(var) for var in original_trainable])
     loss = policy_loss + 0.01 * value_loss + 1e-4 * reg_loss
 
     tf.summary.scalar('loss/policy', policy_loss)
@@ -268,18 +318,20 @@ def main(args):
     tf.summary.scalar('loss/regularization', reg_loss)
     tf.summary.scalar('loss', loss)
 
+    learning_rate_base = tf.constant(0, tf.int64)
     learning_rate = tf.train.piecewise_constant(
-        global_step,
+        global_step - learning_rate_base,
         [50000, 100000, 300000, 500000, 700000],
-        [1e-2, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5]
+        [3e-2, 1e-2, 3e-3, 1e-3, 3e-4, 1e-4]
     )
     optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
     optimizer_op = optimizer.minimize(loss, global_step=global_step)
 
-    # summaries
-    policy_accuracy_1 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=1), tf.float32)
-    policy_accuracy_3 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=3), tf.float32)
-    policy_accuracy_5 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=5), tf.float32)
+    # summaries for debugging purposes
+    policy_argmax = tf.argmax(policy, axis=1)
+    policy_accuracy_1 = tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=1), tf.float32)
+    policy_accuracy_3 = tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=3), tf.float32)
+    policy_accuracy_5 = tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=5), tf.float32)
     value_accuracy = tf.cast(tf.equal(tf.sign(value), tf.sign(value_hat)), tf.float32)
 
     tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_accuracy_1))
@@ -303,7 +355,7 @@ def main(args):
     summary_writer = tf.summary.FileWriter('logs/' + datetime.now().strftime('%Y%m%d.%H%M') + '/', graph=tf.get_default_graph())
     summary_op = tf.summary.merge_all()
     update_op = tf.group(*tf.get_collection(tf.GraphKeys.UPDATE_OPS))
-    saver_vars = tf.model_variables() + [global_step, epoch]
+    saver_vars = tf.model_variables() + [global_step, epoch, learning_rate_base]
     saver = tf.train.Saver(saver_vars, keep_checkpoint_every_n_hours=2)
 
     #
@@ -312,7 +364,6 @@ def main(args):
 
     with tf.Session(config=config) as sess:
         sess.run([tf.local_variables_initializer(), tf.global_variables_initializer()])
-        sess.graph.finalize()
 
         # restore model from checkpoint
         latest_checkpoint = tf.train.latest_checkpoint('models/')
@@ -321,6 +372,24 @@ def main(args):
 
             saver.restore(sess, latest_checkpoint)
 
+        # reset the relevant parts of the graph. This is mostly useful when re-training only
+        # parts of the graph
+        if reset:
+            if only_tower:
+                print('Reset intermediate tower variables')
+                sess.run([tf.variables_initializer(tf.get_collection(Tower.VARIABLES))])
+            if only_policy:
+                print('Reset policy head variables')
+                sess.run([tf.variables_initializer(tf.get_collection(PolicyHead.VARIABLES))])
+            if only_value:
+                print('Reset value head variables')
+                sess.run([tf.variables_initializer(tf.get_collection(ValueHead.VARIABLES))])
+        if reset_lr:
+            print('Reset the learning rate')
+            sess.run([tf.assign(learning_rate_base, global_step, use_locking=True)])
+
+        sess.graph.finalize()
+
         while True:
             sess.run(iterator.initializer)
 
@@ -328,7 +397,7 @@ def main(args):
                 while True:
                     global_step_hat, _, _ = sess.run([global_step, optimizer_op, update_op])
 
-                    if global_step_hat > 0 and global_step_hat % 10 == 0:
+                    if global_step_hat % 25 == 0:
                         summary_hat = sess.run(summary_op)
                         summary_writer.add_summary(summary_hat, global_step_hat)
                     if global_step_hat > 0 and global_step_hat % 1000 == 0:
@@ -357,9 +426,10 @@ def verify(args):
     features = tf.reshape(features, (-1, 34, 19, 19))
     value_hat, policy_hat = tower(features, is_training=False)
 
-    policy_accuracy_1 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=1), tf.float32)
-    policy_accuracy_3 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=3), tf.float32)
-    policy_accuracy_5 = tf.cast(tf.nn.in_top_k(policy_hat, tf.argmax(policy, axis=1), k=5), tf.float32)
+    policy_argmax = tf.argmax(policy, axis=1)
+    policy_accuracy_1 = tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=1), tf.float32)
+    policy_accuracy_3 = tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=3), tf.float32)
+    policy_accuracy_5 = tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=5), tf.float32)
     value_accuracy = tf.cast(tf.equal(tf.sign(value), tf.sign(value_hat)), tf.float32)
 
     # restore only model variables
@@ -460,13 +530,31 @@ def dump(args):
         json.dump(values, sys.stdout, sort_keys=True)
 
 if __name__ == '__main__':
-    if len(sys.argv) <= 1:
-        print('Usage: bootstrap.py <data...>')
-        quit()
+    options = [arg for arg in sys.argv[1:] if arg.startswith('--')]
+    rest = [arg for arg in sys.argv[1:] if not arg.startswith('--')]
 
-    if sys.argv[1] == '--verify':
-        verify(sys.argv[2:])
-    elif sys.argv[1] == '--dump':
-        dump(sys.argv[2:])
+    if '--dump' in options:
+        dump(rest)
+    elif not rest:
+        print('Usage: bootstrap.py [options] <data...>')
+        print()
+        print('    --dump         Dump the current weights to STDOUT')
+        print('    --verify       Dump the accuracy of the given data to STDOUT')
+        print('    --reset        Reset the weights to their initial value')
+        print('    --reset-lr     Reset the learning rate')
+        print('    --only-tower   Only train or reset the intermediate tower')
+        print('    --only-policy  Only train or reset the policy head')
+        print('    --only-value   Only train or reset the value head')
+        print()
+        quit()
+    elif '--verify' in options:
+        verify(rest)
     else:
-        main(sys.argv[1:])
+        main(
+            rest,  # dataset
+            reset=('--reset' in options),
+            reset_lr=('--reset-lr' in options),
+            only_tower=('--only-tower' in options),
+            only_policy=('--only-policy' in options),
+            only_value=('--only-value' in options)
+        )
