@@ -243,6 +243,8 @@ impl Gtp {
                 color
             );
 
+            eprintln!("{}", mcts::tree::to_pretty(&tree));
+
             self.search_tree = Some(tree);
 
             if value < -0.95 {  // 2.5% chance of winning
@@ -336,7 +338,7 @@ impl Gtp {
             Command::ShowBoard => {
                 let board = self.history.last().unwrap();
 
-                success!(id, &format!("{}", board));
+                success!(id, &format!("\n{}", board));
             },
             Command::GenMove(color) => {
                 let vertex = self.generate_move(id, color);

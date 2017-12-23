@@ -14,7 +14,7 @@ trace-cuda = []
 # whether to enable tensor-cores in the cuDNN routines
 tensor-core = []
 
-# dump all finished search tree's to stdout
+# dump all finished search tree's to stderr
 trace-mcts = []
 
 [profile.dev]

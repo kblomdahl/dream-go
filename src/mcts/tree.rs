@@ -18,6 +18,7 @@ use mcts::spin::Mutex;
 
 use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
+use std::fmt;
 use std::ptr;
 
 /// Mapping from 1D coordinate to letter used to represent that coordinate in
@@ -437,6 +438,83 @@ impl<E: Value> Node<E> {
         }
     }
 
+    #[cfg(feature = "trace-mcts")]
+    fn as_sgf<C: Param>(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        // annotate the top-10 moves to make it easier to navigate for the
+        // user.
+        let mut children = (0..362).collect::<Vec<usize>>();
+        children.sort_by_key(|&i| -self.count[i]);
+
+        for i in 0..10 {
+            let j = children[i];
+
+            if j != 361 && self.count[j] > 0 {
+                lazy_static! {
+                    static ref LABELS: Vec<&'static str> = vec! [
+                        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"
+                    ];
+                }
+
+                write!(fmt, "LB[{}{}:{}]",
+                    SGF_LETTERS[X[j] as usize],
+                    SGF_LETTERS[Y[j] as usize],
+                    LABELS[i]
+                )?;
+            }
+        }
+
+        // mark all valid moves with a triangle (for debugging the symmetry code)
+        /*
+        for i in 0..361 {
+            if self.prior[i].is_finite() {
+                write!(fmt, "TR[{}{}]",
+                    SGF_LETTERS[X[i] as usize],
+                    SGF_LETTERS[Y[i] as usize],
+                )?;
+            }
+        }
+        */
+
+        let mut uct = [::std::f32::NEG_INFINITY; 368];
+        E::get::<C, E>(self, &mut uct);
+
+        for i in children {
+            // do not output nodes that has not been visited to reduce the
+            // size of the final SGF file.
+            if self.count[i] == 0 {
+                continue;
+            }
+
+            write!(fmt, "(")?;
+            write!(fmt, ";{}[{}{}]",
+                if self.color == Color::Black { "B" } else { "W" },
+                if i == 361 { 't' } else { SGF_LETTERS[X[i] as usize] },
+                if i == 361 { 't' } else { SGF_LETTERS[Y[i] as usize] }
+            )?;
+            write!(fmt, "C[prior {:.4} value {:.4} (visits {} / total {}) amaf {:.4} (visits {}) uct {:.4}]",
+                self.prior[i],
+                self.value[i],
+                self.count[i],
+                self.total_count,
+                self.amaf[i],
+                self.amaf_count[i],
+                uct[i]
+            )?;
+
+            unsafe {
+                let child = self.children[i];
+
+                if !child.is_null() {
+                    (*child).as_sgf::<C>(fmt)?;
+                }
+            }
+
+            write!(fmt, ")")?;
+        }
+
+        Ok(())
+    }
+
     /// Returns the sub-tree that contains the exploration of the given move index.
     /// 
     /// # Argumnets
@@ -456,90 +534,6 @@ impl<E: Value> Node<E> {
                 ptr::read(child)
             })
         }
-    }
-
-    /// Returns a string that contains this entire search tree in SGF format. The tree
-    /// is formatted such that each node in the SGF file contains has a comment
-    /// that contains the properties of the sub-tree.
-    #[cfg(feature = "trace-mcts")]
-    pub fn as_sgf<C: Param>(&self) -> String {
-        use std::fmt::Write;
-
-        let mut out = String::new();
-
-        // annotate the top-10 moves to make it easier to navigate for the
-        // user.
-        let mut children = (0..362).collect::<Vec<usize>>();
-        children.sort_by_key(|&i| -self.count[i]);
-
-        for i in 0..10 {
-            let j = children[i];
-
-            if j != 361 && self.count[j] > 0 {
-                lazy_static! {
-                    static ref LABELS: Vec<&'static str> = vec! [
-                        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"
-                    ];
-                }
-
-                write!(out, "LB[{}{}:{}]",
-                    SGF_LETTERS[X[j] as usize],
-                    SGF_LETTERS[Y[j] as usize],
-                    LABELS[i]
-                ).unwrap();
-            }
-        }
-
-        // mark all valid moves with a triangle (for debugging the symmetry code)
-        /*
-        for i in 0..361 {
-            if self.prior[i].is_finite() {
-                write!(out, "TR[{}{}]",
-                    SGF_LETTERS[X[i] as usize],
-                    SGF_LETTERS[Y[i] as usize],
-                ).unwrap();
-            }
-        }
-        */
-
-        let mut uct = [::std::f32::NEG_INFINITY; 368];
-        E::get::<C, E>(self, &mut uct);
-
-        for i in 0..362 {
-            // do not output nodes that has not been visited to reduce the
-            // size of the final SGF file.
-            if self.count[i] == 0 {
-                continue;
-            }
-
-            write!(out, "(").unwrap();
-            write!(out, ";{}[{}{}]",
-                if self.color == Color::Black { "B" } else { "W" },
-                if i == 361 { 't' } else { SGF_LETTERS[X[i] as usize] },
-                if i == 361 { 't' } else { SGF_LETTERS[Y[i] as usize] }
-            ).unwrap();
-            write!(out, "C[prior {:.4} value {:.4} (visits {} / total {}) amaf {:.4} (visits {}) uct {:.4}]",
-                self.prior[i],
-                self.value[i],
-                self.count[i],
-                self.total_count,
-                self.amaf[i],
-                self.amaf_count[i],
-                uct[i]
-            ).unwrap();
-
-            unsafe {
-                let child = self.children[i];
-
-                if !child.is_null() {
-                    out += &(*child).as_sgf::<C>();
-                }
-            }
-
-            write!(out, ")").unwrap();
-        }
-
-        out
     }
 
     /// Returns the best move according to the current search tree. This is
@@ -714,7 +708,44 @@ pub unsafe fn insert<C, E>(trace: &NodeTrace<E>, color: Color, value: f32, prior
     E::update::<C, E>(trace, color, value);
 }
 
-/// Returns a SGF file that contains a pretty-print description of the given search tree.
+/// Type alias for `Node<E>` that acts as a wrapper for calling `as_sgf` from
+/// within a `write!` macro.
+#[cfg(feature = "trace-mcts")]
+pub struct ToSgf<'a, C: Param + 'a, E: Value + 'a> {
+    value_type: ::std::marker::PhantomData<C>,
+    starting_point: Board,
+    root: &'a Node<E>,
+}
+
+#[cfg(feature = "trace-mcts")]
+impl<'a, C: Param + 'a, E: Value + 'a> fmt::Display for ToSgf<'a, C, E> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        // add the standard SGF prefix
+        write!(fmt, "(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]PL[{}]",
+            if self.root.color == Color::Black { "B" } else { "W" }
+        )?;
+
+        // write the starting point to the SGF file as pre-set variables
+        for y in 0..19 {
+            for x in 0..19 {
+                match self.starting_point.at(x, y) {
+                    None => Ok(()),
+                    Some(Color::Black) => write!(fmt, "AB[{}{}]", SGF_LETTERS[x], SGF_LETTERS[y]),
+                    Some(Color::White) => write!(fmt, "AW[{}{}]", SGF_LETTERS[x], SGF_LETTERS[y])
+                }?
+            }
+        }
+
+        // write the actual search tree
+        self.root.as_sgf::<C>(fmt)?;
+
+        // add the standard SGF suffix
+        write!(fmt, ")")
+    }
+}
+
+/// Returns a marker that contains all the examined positions of the given
+/// search tree and can be displayed as an SGF file.
 /// 
 /// # Arguments
 /// 
@@ -722,32 +753,137 @@ pub unsafe fn insert<C, E>(trace: &NodeTrace<E>, color: Color, value: f32, prior
 /// * `starting_point` -
 /// 
 #[cfg(feature = "trace-mcts")]
-pub fn to_sgf<C, E>(root: &Node<E>, starting_point: &Board) -> String
+pub fn to_sgf<'a, C, E>(root: &'a Node<E>, starting_point: &Board) -> ToSgf<'a, C, E>
     where C: Param, E: Value
 {
-    use std::fmt::Write;
+    ToSgf {
+        value_type: ::std::marker::PhantomData::<C>,
+        starting_point: starting_point.clone(),
+        root: &root
+    }
+}
 
-    // write the starting point to the SGF file as pre-set variables
-    let mut initial_board = String::new();
+/// Type alias for pretty-printing an index based vertex.
+struct PrettyVertex {
+    inner: usize
+}
 
-    for y in 0..19 {
-        for x in 0..19 {
-            write!(initial_board, "{}",
-                match starting_point.at(x, y) {
-                    None => String::new(),
-                    Some(Color::Black) => format!("AB[{}{}]", SGF_LETTERS[x], SGF_LETTERS[y]),
-                    Some(Color::White) => format!("AW[{}{}]", SGF_LETTERS[x], SGF_LETTERS[y])
-                }
-            ).unwrap();
+impl fmt::Display for PrettyVertex {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        if self.inner == 361 {
+            fmt.pad("pass")
+        } else {
+            const LETTERS: [char; 19] = [
+                'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'j', 'k',
+                'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't'
+            ];
+
+            fmt.pad(&format!("{}{}",
+                LETTERS[X[self.inner] as usize],
+                Y[self.inner] + 1
+            ))
         }
     }
+}
 
-    // add standard SGF prefix and suffix
-    format!("(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]PL[{}]{}{})",
-        if root.color == Color::Black { "B" } else { "W" },
-        initial_board,
-        root.as_sgf::<C>()
-    )
+/// Iterator that traverse the most likely path down a search tree
+pub struct GreedyPath<'a, E: Value + 'a> {
+    current: &'a Node<E>,
+}
+
+impl<'a, E: Value + 'a> Iterator for GreedyPath<'a, E> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        let max_i = (0..362).max_by_key(|&i| self.current.count[i]).unwrap();
+
+        if self.current.count[max_i] == 0 {
+            None
+        } else {
+            unsafe {
+                self.current = &*self.current.children[max_i];
+            }
+
+            Some(max_i)
+        }
+    }
+}
+
+/// Type alias for `Node<E>` that acts as a wrapper for calling `as_sgf` from
+/// within a `write!` macro.
+pub struct ToPretty<'a, E: Value + 'a> {
+    root: &'a Node<E>,
+}
+
+impl<'a, E: Value + 'a> fmt::Display for ToPretty<'a, E> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let is_additional = (0..362).any(|i| self.root.amaf_count[i] > 0);
+        let mut children = (0..362).collect::<Vec<usize>>();
+        children.sort_by_key(|&i| -self.root.count[i]);
+
+        // print a summary containing the total tree size
+        let total_value: f32 = (0..362)
+            .map(|i| (self.root.count[i] as f32) * self.root.value[i])
+            .sum();
+        let norm_value = total_value / (self.root.total_count as f32);
+        let likely_path: String = GreedyPath { current: self.root }
+                .map(|i| PrettyVertex { inner: i })
+                .map(|v| format!("{}", v))
+                .collect::<Vec<String>>().join(" ");
+
+        write!(fmt, "Nodes: {}, Win: {:.1}%, PV: {}\n",
+            self.root.total_count,
+            50.0 * norm_value + 50.0,
+            likely_path
+        )?;
+
+        // print a summary of each move that we considered
+        for i in children {
+            if self.root.count[i] <= 1  {
+                continue;
+            }
+
+            let pretty_vertex = PrettyVertex { inner: i };
+            let child = unsafe { &*self.root.children[i] };
+            let likely_path: String = GreedyPath { current: child }
+                    .map(|i| PrettyVertex { inner: i })
+                    .map(|v| format!("{}", v))
+                    .collect::<Vec<String>>().join(" ");
+            let additional = if is_additional {
+                format!("(A: {:5.2}%: {:7}) ",
+                    50.0 * self.root.amaf[i] + 50.0,
+                    self.root.amaf_count[i],
+                )
+            } else {
+                String::new()
+            };
+
+            write!(fmt, "{: >5} -> {:7} (W: {:5.2}%) {}(N: {:5.2}%) PV: {} {}\n",
+                pretty_vertex,
+                child.total_count,
+                50.0 * self.root.value[i] + 50.0,
+                additional,
+                100.0 * self.root.prior[i],
+                pretty_vertex,
+                likely_path
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Returns a marker that contains all the examined positions of the given
+/// search tree and can be pretty-printed to something easily examined by
+/// a human.
+/// 
+/// # Arguments
+/// 
+/// * `root` -
+/// * `starting_point` -
+/// 
+pub fn to_pretty<'a, E: Value>(root: &'a Node<E>) -> ToPretty<'a, E> {
+    ToPretty { root: root }
 }
 
 #[cfg(test)]
