@@ -25,10 +25,10 @@ use gtp::vertex::*;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&'static str; 14] = [
+const KNOWN_COMMANDS: [&'static str; 15] = [
     "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove", "undo",
-    "quit"
+    "quit", "final_score"
 ];
 
 #[derive(Debug, PartialEq)]
@@ -45,6 +45,7 @@ enum Command {
     KnownCommand(String),  // tell whether a command is known
     ShowBoard,  // write the position to stdout
     GenMove(Color),  // generate and play the supposedly best move for either color
+    FinalScore,  // write the score to stdout
     RegGenMove(Color),  // generate the supposedly best move for either color
     Undo,  // undo one move
     Quit  // quit
@@ -155,6 +156,8 @@ impl Gtp {
                 error!(id, "syntax error");
                 Some((None, Command::Pass))
             }
+        } else if line == "final_score" {
+            Some((id, Command::FinalScore))
         } else if let Some(caps) = REG_GENMOVE.captures(line) {
             let color = caps[1].parse::<Color>();
 
@@ -352,6 +355,20 @@ impl Gtp {
                     });
                 }
             },
+            Command::FinalScore => {
+                let board = self.history.last().unwrap();
+                let (black, white) = board.get_score();
+                let black = black as f32;
+                let white = white as f32 + self.komi;
+
+                if black == white {
+                    success!(id, "0");
+                } else if black > white {
+                    success!(id, &format!("B+{:.1}", black - white));
+                } else if white > black {
+                    success!(id, &format!("W+{:.1}", white - black));
+                }
+            }
             Command::RegGenMove(color) => {
                 self.search_tree = None;
                 self.generate_move(id, color);
@@ -466,6 +483,12 @@ mod tests {
     fn genmove() {
         assert_eq!(Gtp::parse_line("1 genmove b"), Some((Some(1), Command::GenMove(Color::Black))));
         assert_eq!(Gtp::parse_line("genmove w"), Some((None, Command::GenMove(Color::White))));
+    }
+
+    #[test]
+    fn final_score() {
+        assert_eq!(Gtp::parse_line("1 final_score"), Some((Some(1), Command::FinalScore)));
+        assert_eq!(Gtp::parse_line("final_score"), Some((None, Command::FinalScore)));
     }
 
     #[test]

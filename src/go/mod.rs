@@ -826,6 +826,53 @@ impl Board {
 
         features.into_boxed_slice()
     }
+
+    /// Returns true if this game is fully scorable, a game is
+    /// defined as scorable if the following conditions hold:
+    /// 
+    /// * Both black and white has played at least one stone
+    /// * All empty vertices are only reachable from one color
+    /// 
+    pub fn is_scoreable(&self) -> bool {
+        let some_black = (0..361).any(|i| self.vertices[i] == Color::Black as u8);
+        let some_white = (0..361).any(|i| self.vertices[i] == Color::White as u8);
+
+        some_black && some_white && {
+            let black_distance = self.get_territory_distance(Color::Black);
+            let white_distance = self.get_territory_distance(Color::White);
+
+            (0..361).all(|i| black_distance[i] == 0xff || white_distance[i] == 0xff)
+        }
+    }
+
+    /// Returns the score for each player `(black, white)` of the
+    /// current board state according to the Tromp-Taylor rules.
+    /// 
+    /// This method does not take any komi into account, you will
+    /// need to add it yourself.
+    pub fn get_score(&self) -> (usize, usize) {
+        let mut black = 0;
+        let mut white = 0;
+
+        if self.zobrist_hash != 0 {  // at least one stone has been played
+            let black_distance = self.get_territory_distance(Color::Black);
+            let white_distance = self.get_territory_distance(Color::White);
+
+            for i in 0..361 {
+                if black_distance[i] == 0 as u8 {
+                    black += 1;  // black has stone at vertex
+                } else if white_distance[i] == 0 as u8 {
+                    white += 1;  // white has stone at vertex
+                } else if white_distance[i] == 0xff {
+                    black += 1;  // only reachable from black
+                } else if black_distance[i] == 0xff {
+                    white += 1;  // only reachable from white
+                }
+            }
+        }
+
+        (black, white)
+    }
 }
 
 impl fmt::Display for Board {
@@ -1002,5 +1049,38 @@ mod tests {
         board.place(Color::White, 0, 1);
 
         assert!(!board.is_valid(Color::Black, 0, 0));
+    }
+
+    #[test]
+    fn score_black() {
+        let mut board = Board::new();
+        board.place(Color::Black, 0, 0);
+
+        assert!(!board.is_scoreable());
+        assert_eq!(board.get_score(), (361, 0));
+    }
+
+    #[test]
+    fn score_white() {
+        let mut board = Board::new();
+        board.place(Color::White, 0, 0);
+
+        assert!(!board.is_scoreable());
+        assert_eq!(board.get_score(), (0, 361));
+    }
+
+    #[test]
+    fn score_black_white() {
+        let mut board = Board::new();
+        board.place(Color::White, 1, 0);
+        board.place(Color::White, 0, 1);
+        board.place(Color::White, 1, 1);
+        board.place(Color::Black, 2, 0);
+        board.place(Color::Black, 2, 1);
+        board.place(Color::Black, 0, 2);
+        board.place(Color::Black, 1, 2);
+
+        assert!(board.is_scoreable());
+        assert_eq!(board.get_score(), (357, 4));
     }
 }
