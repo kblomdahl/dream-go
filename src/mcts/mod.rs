@@ -497,6 +497,7 @@ pub fn self_play(network: &Network) -> GameResult {
     // limit the maximum number of moves to `2 * 19 * 19` to avoid the
     // engine playing pointless capture sequences at the end of the game
     // that does not change the final result.
+    let allow_resign = thread_rng().next_f32() < 0.95;
     let mut root = None;
 
     while count < 722 {
@@ -512,11 +513,12 @@ pub fn self_play(network: &Network) -> GameResult {
 
         let policy = tree.softmax();
         let (_, prior_index) = tree.prior();
+        let value_sgf = if current == Color::Black { value } else { -value };
 
-        if value < -0.9 {  // resign the game if the evaluation looks bad
+        if allow_resign && value < -0.9 {  // resign the game if the evaluation looks bad
             return GameResult::Resign(sgf, board, current.opposite(), -value);
         } else if index == 361 {  // passing move
-            sgf += &format!(";{}[]P[{}]", current, b85::encode(&policy));
+            sgf += &format!(";{}[]P[{}]V[{}]", current, b85::encode(&policy), value_sgf);
             pass_count += 1;
 
             if pass_count >= 2 {
@@ -527,10 +529,11 @@ pub fn self_play(network: &Network) -> GameResult {
         } else {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
-            sgf += &format!(";{}[{}{}]P[{}]",
+            sgf += &format!(";{}[{}{}]P[{}]V[{}]",
                 current,
                 SGF_LETTERS[x], SGF_LETTERS[y],
-                b85::encode(&policy)
+                b85::encode(&policy),
+                value_sgf
             );
             if prior_index != 361 {
                 sgf += &format!("TR[{}{}]",
