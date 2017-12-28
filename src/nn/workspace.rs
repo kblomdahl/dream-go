@@ -589,6 +589,11 @@ impl Workspace {
 
         w
     }
+
+    /// Returns true if this workspace stores its weights in half precision.
+    pub fn is_half(&self) -> bool {
+        self.shared.is_half()
+    }
 }
 
 impl Drop for Workspace {

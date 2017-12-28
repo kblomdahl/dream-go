@@ -18,6 +18,17 @@ extern crate time;
 use dream_go::{dataset, gtp, nn, mcts};
 use std::env;
 
+/// Returns the network weights, panics if it failed to load the weights.
+fn load_network() -> nn::Network {
+    match nn::Network::new() {
+        Some(network) => network,
+        None => {
+            println!("Could not load network weights!");
+            ::std::process::exit(1);
+        }
+    }
+}
+
 /// Main function.
 fn main() {
     // keep everything that is before the first "--" indicator as potential
@@ -49,38 +60,33 @@ fn main() {
             }
         }
     } else if args.iter().any(|arg| arg == "--self-play") {
-        let network = nn::Network::new()
-            .expect("no model found");
+        let network = load_network();
         let n = if remaining.len() > 0 {
             remaining[0].parse::<usize>().unwrap()
         } else {
             1
         };
+        let (receiver, server) = mcts::self_play(network, n);
 
-        for _ in 0..n {
-            let result = mcts::self_play(&network);
-
+        for result in receiver.iter().take(n) {
             println!("{}", result);
         }
-    } else if args.iter().any(|arg| arg == "--policy-play") {
-        let network = nn::Network::new()
-            .expect("no model found");
-        let receiver = mcts::policy_play(network);
 
-        let mut n = if remaining.len() > 0 {
+        mcts::parallel::Server::join(server);
+    } else if args.iter().any(|arg| arg == "--policy-play") {
+        let network = load_network();
+        let (receiver, server) = mcts::policy_play(network);
+        let n = if remaining.len() > 0 {
             remaining[0].parse::<usize>().unwrap()
         } else {
             ::std::usize::MAX
         };
 
-        while n > 0 {
-            match receiver.recv() {
-                Ok(result) => { println!("{}", result); },
-                _ => { unreachable!(); }
-            }
-
-            n -= 1;
+        for result in receiver.iter().take(n) {
+            println!("{}", result);
         }
+
+        mcts::parallel::Server::join(server);
     } else if args.iter().any(|arg| arg == "--gtp") || args.len() == 0 {
         gtp::run();
     } else {

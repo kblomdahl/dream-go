@@ -80,7 +80,7 @@ lazy_static! {
 }
 
 struct Gtp {
-    network: Option<Network>,
+    server: Option<mcts::parallel::Server>,
     search_tree: Option<mcts::tree::Node<mcts::tree::DefaultValue>>,
     history: Vec<Board>,
     komi: f32
@@ -216,18 +216,18 @@ impl Gtp {
     /// * `color` - the color to generate the move for
     /// 
     fn generate_move(&mut self, id: Option<usize>, color: Color) -> Option<Vertex> {
-        if self.network.is_none() {
+        if self.server.is_none() {
             match Network::new() {
                 None => {},
                 Some(network) => {
-                    self.network = Some(network);
+                    self.server = Some(mcts::parallel::Server::new::<mcts::param::Tournament>(network));
                 }
             }
         }
 
         let board = self.history.last().unwrap();
 
-        if let Some(ref network) = self.network {
+        if let Some(ref server) = self.server {
             let search_tree = self.search_tree.take().and_then(|tree| {
                 if tree.color != color {
                     mcts::tree::Node::forward(tree, 361)  // pass
@@ -237,7 +237,7 @@ impl Gtp {
             });
 
             let (value, index, tree) = mcts::predict::<mcts::param::Tournament, mcts::tree::DefaultValue>(
-                network,
+                server,
                 search_tree,
                 &board,
                 color
@@ -394,7 +394,7 @@ impl Gtp {
 pub fn run() {
     let mut rl = Editor::<()>::new();
     let mut gtp = Gtp {
-        network: None,
+        server: None,
         search_tree: None,
         history: vec! [Board::new()],
         komi: 7.5

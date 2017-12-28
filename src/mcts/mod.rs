@@ -14,6 +14,7 @@
 
 mod dirichlet;
 mod global_cache;
+pub mod parallel;
 pub mod param;
 mod spin;
 pub mod tree;
@@ -21,15 +22,17 @@ pub mod tree;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
 use std::fmt;
-use std::sync::atomic::{AtomicIsize, Ordering};
-use std::sync::mpsc::{Sender, Receiver, channel};
+use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, channel};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use time;
 
 use go::{symmetry, Board, Color};
+use mcts::parallel::{Server, ServerGuard};
 use mcts::param::*;
-use nn::{self, Network, WorkspaceGuard};
+use nn::Network;
+use util::array::*;
 use util::b85;
 use util::f16::*;
 
@@ -75,72 +78,6 @@ impl fmt::Display for GameResult {
     }
 }
 
-pub enum PolicyRequest<T: From<f32> + Clone> {
-    Ask(Box<[T]>, Sender<(T, Box<[T]>)>),
-    Wait(Sender<()>),
-    Done
-}
-
-/// An abstraction that hides the exact details of how a neural network forward
-/// pass is implemented. There are two main implementation `ImmediateForward` and
-/// `RemoteForward`, where the former performs the forward pass immediate with no
-/// batching and the second forwards it to another worker threads that performs
-/// the actual work.
-/// 
-/// All methods appears to be synchronous but may sleep due to communication with
-/// other threads.
-trait Forwarder<T: From<f32> + Clone> {
-    /// Perform a forward pass of a neural network with the given features
-    /// and returns the value and policy.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `features` -
-    /// 
-    fn forward(&mut self, features: Box<[T]>) -> (T, Box<[T]>);
-}
-
-/// An implementation of `Forwarder` that performs the forward pass immedietly on
-/// a local `nn::Workspace` with batch size `1`.
-struct ImmediateForward<'a> {
-    workspace: WorkspaceGuard<'a>
-}
-
-impl<'a> ImmediateForward<'a> {
-    fn new(network: &'a Network) -> ImmediateForward {
-        ImmediateForward {
-            workspace: network.get_workspace(1)
-        }
-    }
-}
-
-impl<'a, T: From<f32> + Clone> Forwarder<T> for ImmediateForward<'a> {
-    fn forward(&mut self, features: Box<[T]>) -> (T, Box<[T]>) {
-        let (values, mut policies) = nn::forward::<T>(&mut self.workspace, &vec! [features]);
-        let policy = policies.pop().unwrap();
-
-        (values[0].clone(), policy)
-    }
-}
-
-/// An implementation of `Forwarder` that sends the received features over a
-/// channel and relies on the remote endpoint performing the forward
-/// pass (presumably with some batching).
-struct RemoteForward<T: From<f32> + Clone> {
-    remote: Sender<PolicyRequest<T>>
-}
-
-impl<T: From<f32> + Clone> Forwarder<T> for RemoteForward<T> {
-    fn forward(&mut self, features: Box<[T]>) -> (T, Box<[T]>) {
-        let (sender, receiver) = channel();
-
-        self.remote.send(PolicyRequest::Ask(features, sender)).unwrap();
-        let (value, policy) = receiver.recv().unwrap();
-
-        (value, policy)
-    }
-}
-
 /// Performs a forward pass through the neural network for the given board
 /// position using a random symmetry to increase entropy.
 /// 
@@ -150,8 +87,8 @@ impl<T: From<f32> + Clone> Forwarder<T> for RemoteForward<T> {
 /// * `board` - the board position
 /// * `color` - the current player
 /// 
-fn forward<C, A, T>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f32]>)
-    where C: Param, A: Forwarder<T>, T: From<f32> + Copy, f32: From<T>
+fn forward<C>(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f32]>)
+    where C: Param
 {
     lazy_static! {
         static ref SYMM: Vec<symmetry::Transform> = vec! [
@@ -171,13 +108,16 @@ fn forward<C, A, T>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f3
         // to increase the entropy of the game slightly and to ensure the engine
         // learns the game is symmetric (which should help generalize)
         let t = *thread_rng().choose(&SYMM).unwrap();
-        let features = board.get_features::<T>(color, t);
 
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
-        let (value, mut original_policy) = agent.forward(features);
-
-        symmetry::apply(&mut original_policy, t.inverse());
+        let (value, original_policy) = server.send({
+            if server.is_half() {
+                Array::from_f16(board.get_features::<f16>(color, t))
+            } else {
+                Array::from_f32(board.get_features::<f32>(color, t))
+            }
+        });
 
         // copy the policy and replace any invalid moves in the suggested policy
         // with -Inf, while keeping the pass move (361) untouched so that there
@@ -185,12 +125,13 @@ fn forward<C, A, T>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f3
         let mut policy = vec! [0.0f32; 362];
 
         for i in 0..361 {
-            let (x, y) = (tree::X[i] as usize, tree::Y[i] as usize);
+            let j = t.inverse().apply(i);
+            let (x, y) = (tree::X[j] as usize, tree::Y[j] as usize);
 
             if !board.is_valid(color, x, y) {
-                policy[i] = ::std::f32::NEG_INFINITY;
+                policy[j] = ::std::f32::NEG_INFINITY;
             } else {
-                policy[i] = f32::from(original_policy[i]);
+                policy[j] = original_policy.get(i);
             }
         }
 
@@ -241,43 +182,37 @@ fn forward<C, A, T>(agent: &mut A, board: &Board, color: Color) -> (f32, Box<[f3
             }
         }
 
-        (f32::from(value), policy.into_boxed_slice())
+        (value.get(), policy.into_boxed_slice())
     })
 }
 
 /// The shared variables between the master and each worker thread in the `predict` function.
 #[derive(Clone)]
-struct ThreadContext<E: tree::Value + Clone, T: From<f32> + Copy> {
+struct ThreadContext<E: tree::Value + Clone + Send> {
     /// The root of the monte carlo tree.
     root: Arc<UnsafeCell<tree::Node<E>>>,
 
     /// The initial board position at the root the tree.
     starting_point: Board,
 
-    /// The channel to use when communicating features to the cuDNN worker thread.
-    sender: Sender<PolicyRequest<T>>,
-
     /// The number of probes that still needs to be done into the tree.
     remaining: Arc<AtomicIsize>,
 }
 
-unsafe impl<E: tree::Value + Clone, T: From<f32> + Copy> Send for ThreadContext<E, T> { }
+unsafe impl<E: tree::Value + Clone + Send> Send for ThreadContext<E> { }
 
 /// Worker that probes into the given monte carlo search tree until the context
 /// is exhausted.
 /// 
 /// # Arguments
 /// 
-/// * `context` -
+/// * `context` - 
+/// * `server` - 
 /// 
-fn predict_worker<C, E, T>(context: ThreadContext<E, T>)
+fn predict_worker<C, E>(context: ThreadContext<E>, server: ServerGuard)
     where C: Param + Clone + 'static,
-          E: tree::Value + Clone + 'static,
-          T: From<f32> + Copy + Default + 'static, f32: From<T>
+          E: tree::Value + Clone + Send + 'static
 {
-    let server = context.sender.clone();
-    let mut remote = RemoteForward::<T> { remote: context.sender };
-
     while context.remaining.fetch_sub(1, Ordering::SeqCst) > 0 {
         loop {
             let mut board = context.starting_point.clone();
@@ -286,93 +221,14 @@ fn predict_worker<C, E, T>(context: ThreadContext<E, T>)
             if let Some(trace) = trace {
                 let &(_, color, _) = trace.last().unwrap();
                 let next_color = color.opposite();
-                let (value, policy) = forward::<C, RemoteForward<T>, T>(&mut remote, &board, next_color);
+                let (value, policy) = forward::<C>(&server, &board, next_color);
 
                 unsafe {
                     tree::insert::<C, E>(&trace, next_color, value, policy);
                     break
                 }
             } else {
-                let (tx, rx) = channel();
-
-                server.send(PolicyRequest::Wait(tx)).unwrap();
-                rx.recv().unwrap();
-            }
-        }
-    }
-
-    server.send(PolicyRequest::Done).unwrap();
-}
-
-/// Worker that listens for requests to compute the neural network, collect them
-/// into batches as much as possible, and then evaluate and send the correct
-/// response back to each MCTS worker.
-/// 
-/// # Arguments
-/// 
-/// * `network` - the neural network to use for evaluations
-/// * `receiver` - the channel to listen for requests on
-/// 
-fn predict_serve<'a, C, T>(
-    network: &Network,
-    receiver: Receiver<PolicyRequest<T>>
-)
-    where C: Param + 'static,
-          T: From<f32> + Copy + 'static, f32: From<T>
-{
-    let mut workspaces = (0..C::batch_size())
-        .map(|s| network.get_workspace(s + 1))
-        .collect::<Vec<WorkspaceGuard>>();
-    let mut remaining_workers = C::thread_count();
-
-    while remaining_workers > 0 {
-        // collect a full batch worth of features from the workers, or if the
-        // workers gets stuck because they want to probe into a sub-tree that
-        // is currently being expanded get as large of a batch as possible.
-        let mut features_list = vec! [];
-        let mut sender_list = vec! [];
-        let mut waiting_list = vec! [];
-
-        while features_list.len() < C::batch_size() {
-            match receiver.recv().unwrap() {
-                PolicyRequest::Ask(features, sender) => {
-                    features_list.push(features);
-                    sender_list.push(sender);
-                }
-                PolicyRequest::Wait(sender) => {
-                    if features_list.is_empty() {
-                        // if we have no features, then this _should_
-                        // be about a request from the last evaluation.
-                        sender.send(()).unwrap();
-                    } else {
-                        waiting_list.push(sender);
-                    }
-                }
-                PolicyRequest::Done => {
-                    remaining_workers -= 1;
-                },
-            }
-
-            if remaining_workers == waiting_list.len() + features_list.len() {
-                break;
-            }
-        }
-
-        debug_assert!(features_list.len() == sender_list.len());
-
-        if !features_list.is_empty() {
-            // process the features and the send them back to the worker who
-            // sent it using the OneShot channel.
-            let workspace = &mut workspaces[features_list.len() - 1];
-            let (values, policies) = nn::forward::<T>(workspace, &features_list);
-
-            for ((value, policy), sender) in values.into_iter().zip(policies.into_iter()).zip(sender_list.into_iter()) {
-                sender.send((value, policy)).unwrap();
-            }
-
-            // awaken any workers waiting for updates before continuing
-            for waiting in waiting_list.into_iter() {
-                waiting.send(()).unwrap();
+                server.wait();
             }
         }
     }
@@ -383,19 +239,21 @@ fn predict_serve<'a, C, T>(
 /// 
 /// # Arguments
 /// 
-/// * `network` -
-/// * `starting_point` -
-/// * `starting_color` -
+/// * `server` - the server to use during evaluation
+/// * `num_workers` - 
+/// * `starting_tree` - 
+/// * `starting_point` - 
+/// * `starting_color` - 
 /// 
-pub fn predict_aux<C, E, T>(
-    network: &Network,
+fn predict_aux<C, E>(
+    server: &Server,
+    num_workers: usize,
     starting_tree: Option<tree::Node<E>>,
     starting_point: &Board,
     starting_color: Color
 ) -> (f32, usize, tree::Node<E>)
     where C: Param + Clone + 'static,
-          E: tree::Value + Clone + 'static,
-          T: From<f32> + Copy + Default + 'static, f32: From<T>
+          E: tree::Value + Clone + Send + 'static
 {
     // if we have a starting tree given, then re-use that tree (after some sanity
     // checks), otherwise we need to query the neural network about what the
@@ -405,12 +263,8 @@ pub fn predict_aux<C, E, T>(
 
         starting_tree
     } else {
-        let mut immediate = ImmediateForward::new(network);
-        let (_, mut policy) = forward::<C, ImmediateForward, T>(
-            &mut immediate,
-            starting_point,
-            starting_color
-        );
+        let server = server.lock();
+        let (_, mut policy) = forward::<C>(&server, starting_point, starting_color);
 
         tree::Node::new(starting_color, policy)
     };
@@ -421,22 +275,23 @@ pub fn predict_aux<C, E, T>(
 
     // start-up all of the worker threads, and then start listening for requests on the
     // channel we gave each thread.
-    let (sender, receiver) = channel();
-    let context: ThreadContext<E, T> = ThreadContext {
+    let context: ThreadContext<E> = ThreadContext {
         root: Arc::new(UnsafeCell::new(starting_tree)),
         starting_point: starting_point.clone(),
-        sender: sender,
 
         remaining: Arc::new(AtomicIsize::new(C::iteration_limit() as isize)),
     };
 
-    let handles = (0..C::thread_count()).map(|_| {
+    let handles = (0..num_workers).map(|_| {
         let context = context.clone();
+        let server = server.clone();
 
-        thread::spawn(move || { predict_worker::<C, E, T>(context) })
+        thread::spawn(move || {
+            let server = server.lock();
+
+            predict_worker::<C, E>(context, server)
+        })
     }).collect::<Vec<JoinHandle<()>>>();
-
-    predict_serve::<C, T>(network, receiver);
 
     // wait for all threads to terminate to avoid any zombie processes
     for handle in handles.into_iter() { handle.join().unwrap(); }
@@ -463,31 +318,36 @@ pub fn predict_aux<C, E, T>(
 /// 
 /// # Arguments
 /// 
-/// * `network` -
+/// * `server` - the server to use during evaluation
 /// * `starting_point` -
 /// * `starting_color` -
 /// 
-pub fn predict<C: Param + Clone + 'static, E: tree::Value + Clone + 'static>(
-    network: &Network,
+pub fn predict<C, E>(
+    server: &Server,
     starting_tree: Option<tree::Node<E>>,
     starting_point: &Board,
     starting_color: Color
 ) -> (f32, usize, tree::Node<E>)
+    where C: Param + Clone + 'static,
+          E: tree::Value + Clone + Send + 'static
 {
-    if network.is_half() {
-        predict_aux::<C, E, f16>(network, starting_tree, starting_point, starting_color)
-    } else {
-        predict_aux::<C, E, f32>(network, starting_tree, starting_point, starting_color)
-    }
+    let num_workers = C::thread_count();
+
+    predict_aux::<C, E>(&server, num_workers, starting_tree, starting_point, starting_color)
 }
 
 /// Play a game against the engine and return the result of the game.
 /// 
 /// # Arguments
 /// 
-/// * `network` - the neural network to use during evaluation
+/// * `server` - the server to use during evaluation
+/// * `num_parallel` - the number of games that are being played in parallel
 /// 
-pub fn self_play(network: &Network) -> GameResult {
+fn self_play_one<C: Param + Clone + 'static>(
+    server: &Server,
+    num_parallel: &Arc<AtomicUsize>
+) -> GameResult
+{
     let mut board = Board::new();
     let mut sgf = String::new();
     let mut current = Color::Black;
@@ -501,8 +361,10 @@ pub fn self_play(network: &Network) -> GameResult {
     let mut root = None;
 
     while count < 722 {
-        let (value, index, tree) = predict::<Standard, tree::DefaultValue>(
-            network,
+        let num_workers = C::thread_count() / num_parallel.load(Ordering::Acquire);
+        let (value, index, tree) = predict_aux::<C, tree::DefaultValue>(
+            &server,
+            num_workers,
             root,
             &board,
             current
@@ -554,108 +416,113 @@ pub fn self_play(network: &Network) -> GameResult {
     GameResult::Ended(sgf, board)
 }
 
-/// Play a game against the engine and return the results of the game over
-/// the returned channel. This is different from `send_play` because this
-/// method does not perform any search and only plays stochastically according
-/// to the policy network.
+/// Play games against the engine and return the result of the games
+/// over the channel.
 /// 
 /// # Arguments
 /// 
 /// * `network` - the neural network to use during evaluation
+/// * `num_games` - the number of games to generate
 /// 
-pub fn policy_play_aux<C, T>(
-    network: Network
-) -> Receiver<GameResult>
-    where C: Param + 'static,
-          T: From<f32> + Copy + Send + 'static, f32: From<T>
-{
+pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, Server) {
+    let server = Server::new::<Standard>(network);
     let (sender, receiver) = channel();
 
     // spawn the worker threads that generate the self-play games
-    let (policy_sender, policy_receiver) = channel();
+    let num_parallel = ::std::cmp::min(num_games, Standard::batch_size());
+    let num_workers = Arc::new(AtomicUsize::new(num_parallel));
+    let processed = Arc::new(AtomicUsize::new(0));
 
-    for _ in 0..(C::thread_count()) {
-        let policy_sender = policy_sender.clone();
+    for _ in 0..num_parallel {
+        let num_workers = num_workers.clone();
+        let processed = processed.clone();
         let sender = sender.clone();
+        let server = server.clone();
 
         thread::spawn(move || {
-            let mut remote = RemoteForward::<T> { remote: policy_sender };
+            while processed.fetch_add(1, Ordering::SeqCst) < num_games {
+                let result = self_play_one::<Standard>(&server, &num_workers);
 
-            loop {
-                let mut board = Board::new();
-                let mut sgf = String::new();
-                let mut current = Color::Black;
-                let mut pass_count = 0;
-                let mut count = 0;
-
-                while pass_count < 2 && count < 722 && !board.is_scoreable() {
-                    let (_, policy) = forward::<C, RemoteForward<T>, T>(
-                        &mut remote,
-                        &board,
-                        current
-                    );
-
-                    // pick a move stochastically according to its prior value, we
-                    // do not need to compute the sum because `forward` always
-                    // returns a normalized vector of prior values
-                    let index = {
-                        let threshold = thread_rng().next_f32();
-                        let mut so_far = 0.0f32;
-                        let mut best = None;
-
-                        for i in 0..362 {
-                            if policy[i].is_finite() {
-                                so_far += policy[i];
-
-                                if so_far >= threshold {
-                                    best = Some(i);
-                                    break
-                                }
-                            }
-                        }
-
-                        best  // if nothing, then pass
-                    };
-
-                    if let Some(index) = index {
-                        if index == 361 {  // pass
-                            sgf += &format!(";{}[]", current);
-                            pass_count += 1;
-                        } else {  // normal move
-                            let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
-
-                            sgf += &format!(";{}[{}{}]", current, SGF_LETTERS[x], SGF_LETTERS[y]);
-                            pass_count = 0;
-                            board.place(current, x, y);
-                        }
-                    } else {  // no valid moves remaining
-                        sgf += &format!(";{}[]", current);
-                        pass_count += 1;
-                    }
-
-                    // continue with the next turn
-                    current = current.opposite();
-                    count += 1;
-                }
-
-                // if the receiver has terminated then quit
-                if sender.send(GameResult::Ended(sgf, board)).is_err() {
-                    break;
+                if sender.send(result).is_err() {
+                    break
                 }
             }
 
-            remote.remote.send(PolicyRequest::Done).unwrap();
+            num_workers.fetch_sub(1, Ordering::Release);
         });
     }
 
-    // spawn the server thread that computes the policies for the workers
-    thread::spawn(move || { predict_serve::<C, T>(&network, policy_receiver) });
-
-    receiver
+    (receiver, server)
 }
 
-/// Play a game against the engine and return the results of the game over
-/// the returned channel. This is different from `send_play` because this
+/// Play a game against the engine and return the result of the game.
+/// This is different from `self_play` because this method does not
+/// perform any search and only plays stochastically according
+/// to the policy network.
+/// 
+/// # Arguments
+/// 
+/// * `server` - the server to use during evaluation
+/// 
+fn policy_play_one<C: Param + 'static>(server: &ServerGuard) -> GameResult {
+    let mut board = Board::new();
+    let mut sgf = String::new();
+    let mut current = Color::Black;
+    let mut pass_count = 0;
+    let mut count = 0;
+
+    while pass_count < 2 && count < 722 && !board.is_scoreable() {
+        let (_, policy) = forward::<C>(&server, &board, current);
+
+        // pick a move stochastically according to its prior value, we
+        // do not need to compute the sum because `forward` always
+        // returns a normalized vector of prior values
+        let index = {
+            let threshold = thread_rng().next_f32();
+            let mut so_far = 0.0f32;
+            let mut best = None;
+
+            for i in 0..362 {
+                if policy[i].is_finite() {
+                    so_far += policy[i];
+
+                    if so_far >= threshold {
+                        best = Some(i);
+                        break
+                    }
+                }
+            }
+
+            best  // if nothing, then pass
+        };
+
+        if let Some(index) = index {
+            if index == 361 {  // pass
+                sgf += &format!(";{}[]", current);
+                pass_count += 1;
+            } else {  // normal move
+                let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
+
+                sgf += &format!(";{}[{}{}]", current, SGF_LETTERS[x], SGF_LETTERS[y]);
+                pass_count = 0;
+                board.place(current, x, y);
+            }
+        } else {  // no valid moves remaining
+            sgf += &format!(";{}[]", current);
+            pass_count += 1;
+        }
+
+        // continue with the next turn
+        current = current.opposite();
+        count += 1;
+    }
+
+    // if the receiver has terminated then quit
+    GameResult::Ended(sgf, board)
+}
+
+/// Play games against the engine and return the results of the game over
+/// the returned channel. This is different from `self_play` because this
 /// method does not perform any search and only plays stochastically according
 /// to the policy network.
 /// 
@@ -663,12 +530,29 @@ pub fn policy_play_aux<C, T>(
 /// 
 /// * `network` - the neural network to use during evaluation
 /// 
-pub fn policy_play(network: Network) -> Receiver<GameResult> {
-    let is_half = network.is_half();
+pub fn policy_play(network: Network) -> (Receiver<GameResult>, Server) {
+    let server = Server::new::<Standard>(network);
+    let (sender, receiver) = channel();
 
-    if is_half {
-        policy_play_aux::<Standard, f16>(network)
-    } else {
-        policy_play_aux::<Standard, f32>(network)
+    // spawn the worker threads that generate the self-play games
+    let num_parallel = Standard::thread_count();
+
+    for _ in 0..num_parallel {
+        let sender = sender.clone();
+        let server = server.clone();
+
+        thread::spawn(move || {
+            let server = server.lock();
+
+            loop {
+                let result = policy_play_one::<Standard>(&server);
+
+                if sender.send(result).is_err() {
+                    break
+                }
+            }
+        });
     }
+
+    (receiver, server)
 }

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod array;
 pub mod b85;
 pub mod f16;
 pub mod q8;
+pub mod singleton;
