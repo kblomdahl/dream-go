@@ -48,6 +48,7 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     where f32: From<T>
 {
     let mut handle: cudnn::Handle = ptr::null_mut();
+    const BATCH_SIZE: usize = 1;
 
     assert!(cudnn::cudnnCreate(&mut handle).is_ok());
 
@@ -59,7 +60,7 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
         inout_desc,
         tensor_format,
         data_type,
-        1, num_features as i32, 19, 19
+        BATCH_SIZE as i32, num_features as i32, 19, 19
     ).is_ok());
 
     // the a convolutional description that match the given configuration
@@ -108,7 +109,7 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
 
     // allocate the `input` array and initialize it with ones.
     let mut input = ptr::null_mut();
-    let input_size = num_features * 361;
+    let input_size = BATCH_SIZE * num_features * 361;
 
     assert!(cuda::cudaMalloc(&mut input, data_type.size() * input_size).is_ok());
     assert!(cuda::cudaMemcpy(
@@ -133,7 +134,7 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     // allocate the `output` array, but leave it uninitialized since
     // we will never read into it until after the convolution.
     let mut output = ptr::null_mut();
-    let output_size = num_features * 361;
+    let output_size = BATCH_SIZE * num_features * 361;
 
     assert!(cuda::cudaMalloc(&mut output, data_type.size() * output_size).is_ok());
 
@@ -159,12 +160,12 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     // from the value the host array was initialized with. We do thing
     // instead of a more complicated check due to the varying precision
     // of the different types.
-    let not_zero = vec! [T::from(0.0); num_features * 361];
+    let not_zero = vec! [T::from(0.0); output_size];
 
     assert!(cuda::cudaMemcpy(
         not_zero.as_ptr() as *mut c_void,
         output,
-        data_type.size() * num_features * 361,
+        data_type.size() * output_size,
         cuda::MemcpyKind::DeviceToHost
     ).is_ok());
 
@@ -172,7 +173,7 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     assert!(cuda::cudaFree(output).is_ok());
     assert!(cuda::cudaFree(weights).is_ok());
 
-    for value in not_zero.iter() {
+    for value in not_zero.into_iter() {
         let value = f32::from(value.clone());
 
         assert!(value != 0.0, "{}", value);
