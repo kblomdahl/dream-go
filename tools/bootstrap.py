@@ -23,7 +23,6 @@ Usage: ./bootstrap.py <dataset...>
 """
 
 from datetime import datetime
-from math import nan, isnan
 import sys
 import os
 
@@ -66,11 +65,12 @@ class BatchNorm:
                 is_training=True
             )
 
-            update_mean_op = tf.assign_sub(self._mean, 0.01 * (self._mean - b_mean))
-            update_variance_op = tf.assign_sub(self._variance, 0.01 * (self._variance - b_variance))
+            with tf.device(None):
+                update_mean_op = tf.assign_sub(self._mean, 0.01 * (self._mean - b_mean), use_locking=True)
+                update_variance_op = tf.assign_sub(self._variance, 0.01 * (self._variance - b_variance), use_locking=True)
 
-            tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, update_mean_op)
-            tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, update_variance_op)
+                tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, update_mean_op)
+                tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, update_variance_op)
         else:
             y, _, _ = tf.nn.fused_batch_norm(
                 x,
@@ -260,6 +260,15 @@ class Tower:
 
         return v, p
 
+def list_local_devices():
+    """ Returns a generator of all local GPU devices on this machine. """
+    from tensorflow.python.client import device_lib
+
+    local_device_protos = device_lib.list_local_devices()
+
+    return [dev.name for dev in local_device_protos if dev.device_type == 'GPU']
+
+
 def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False, only_value=False):
     """ Main function """
 
@@ -298,20 +307,57 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
         epoch = tf.get_variable('epoch', (), tf.int64, tf.zeros_initializer(), trainable=False)
         epoch_op = tf.assign_add(epoch, 1)
 
-    features, value, policy = iterator.get_next()
-    features = tf.reshape(features, (-1, 34, 19, 19))
-    value_hat, policy_hat = tower(
-        features,
-        train_tower=train_all or only_tower,
-        train_policy=train_all or only_policy,
-        train_value=train_all or only_value
-    )
+    # distribute the work over all of the local GPU's
+    value_losses, policy_losses = [], []
+    policy_accuracy_1s, policy_accuracy_3s, policy_accuracy_5s, value_accuracies = [], [], [], []
 
-    # setup the optimizer
-    policy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=policy, logits=policy_hat))
-    value_loss = tf.reduce_mean(tf.squared_difference(value, value_hat))
+    for (i, dev) in enumerate(list_local_devices()):
+        var_scope = tf.get_variable_scope()
+        name_scope = 'gpu_' + str(i)
+
+        with tf.variable_scope(var_scope, reuse=True), tf.device(dev), tf.name_scope(name_scope):
+            # re-use the variable that were created in the beginning instead of re-allocating
+            # them for each tower
+            tower = Tower()
+
+            # create a local model and the put it away
+            with tf.device(None):
+                features, value, policy = iterator.get_next()
+
+            features = tf.reshape(features, (-1, 34, 19, 19))
+            value_hat, policy_hat = tower(
+                features,
+                train_tower=train_all or only_tower,
+                train_policy=train_all or only_policy,
+                train_value=train_all or only_value
+            )
+
+            with tf.device(None):
+                if i == 0:
+                    # log the result of the forward pass only from the first GPU since
+                    # we are not interested in exact results anyway
+                    tf.summary.histogram('value', value)
+                    tf.summary.histogram('value_hat', value_hat)
+                    tf.summary.histogram('policy', policy)
+                    tf.summary.histogram('policy_hat', policy_hat)
+
+                policy_argmax = tf.argmax(policy, axis=1)
+                policy_accuracy_1s.append(tf.reduce_mean(tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=1), tf.float32)))
+                policy_accuracy_3s.append(tf.reduce_mean(tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=3), tf.float32)))
+                policy_accuracy_5s.append(tf.reduce_mean(tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=5), tf.float32)))
+                value_accuracies.append(tf.reduce_mean(tf.cast(tf.equal(tf.sign(value), tf.sign(value_hat)), tf.float32)))
+
+            # setup the loss for the local model
+            policy_losses.append(tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=policy, logits=policy_hat)))
+            value_losses.append(tf.reduce_mean(tf.squared_difference(value, value_hat)))
+
+    # gather the losses and variables from all of the tower into a single loss function
+    # that gets forwarded to the optimizer
+    policy_loss = tf.reduce_mean(policy_losses)
+    value_loss = tf.reduce_mean(value_losses)
     reg_loss = tf.reduce_sum([tf.nn.l2_loss(var) for var in original_trainable])
-    loss = policy_loss + 0.01 * value_loss + 1e-4 * reg_loss
+
+    loss = policy_loss + value_loss + 2e-4 * reg_loss
 
     tf.summary.scalar('loss/policy', policy_loss)
     tf.summary.scalar('loss/value', value_loss)
@@ -320,31 +366,25 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
 
     learning_rate = tf.train.piecewise_constant(
         global_step,
-        [50000, 100000, 300000, 500000, 700000],
-        [3e-2, 1e-2, 3e-3, 1e-3, 3e-4, 1e-4]
+        [12000, 27000, 45000, 66000, 90000],
+        [3e-3, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5]
     )
-    optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
-    optimizer_op = optimizer.minimize(loss, global_step=global_step)
+    optimizer = tf.train.AdamOptimizer(learning_rate)
+    optimizer_op = optimizer.minimize(
+        loss,
+        global_step=global_step,
+        aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
+        colocate_gradients_with_ops=True
+    )
 
     # summaries for debugging purposes
-    policy_argmax = tf.argmax(policy, axis=1)
-    policy_accuracy_1 = tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=1), tf.float32)
-    policy_accuracy_3 = tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=3), tf.float32)
-    policy_accuracy_5 = tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=5), tf.float32)
-    value_accuracy = tf.cast(tf.equal(tf.sign(value), tf.sign(value_hat)), tf.float32)
-
-    tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_accuracy_1))
-    tf.summary.scalar('accuracy/policy_3', tf.reduce_mean(policy_accuracy_3))
-    tf.summary.scalar('accuracy/policy_5', tf.reduce_mean(policy_accuracy_5))
-    tf.summary.scalar('accuracy/value', tf.reduce_mean(value_accuracy))
+    tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_accuracy_1s))
+    tf.summary.scalar('accuracy/policy_3', tf.reduce_mean(policy_accuracy_3s))
+    tf.summary.scalar('accuracy/policy_5', tf.reduce_mean(policy_accuracy_5s))
+    tf.summary.scalar('accuracy/value', tf.reduce_mean(value_accuracies))
 
     for var in tf.model_variables():
         tf.summary.histogram(var.name, var)
-
-    tf.summary.histogram('value', value)
-    tf.summary.histogram('value_hat', value_hat)
-    tf.summary.histogram('policy', policy)
-    tf.summary.histogram('policy_hat', policy_hat)
 
     tf.summary.scalar('learning_rate', learning_rate)
     tf.summary.scalar('global_step', global_step)
@@ -410,6 +450,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
         # save the model
         saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
 
+
 def verify(args):
     """ Retrieve accuracy for a verification test-set. """
 
@@ -455,10 +496,11 @@ def verify(args):
         # loop over the entire data-set
         sess.run(iterator.initializer)
 
-        accuracy_p1 = nan
-        accuracy_p3 = nan
-        accuracy_p5 = nan
-        accuracy_v = nan
+        accuracy_p1 = 0
+        accuracy_p3 = 0
+        accuracy_p5 = 0
+        accuracy_v = 0
+        count = 0
 
         while True:
             try:
@@ -469,10 +511,11 @@ def verify(args):
                     value_accuracy
                 ])
 
-                accuracy_p1 = policy_1 if isnan(accuracy_p1) else 0.97 * accuracy_p1 + 0.03 * policy_1
-                accuracy_p3 = policy_3 if isnan(accuracy_p3) else 0.97 * accuracy_p3 + 0.03 * policy_3
-                accuracy_p5 = policy_5 if isnan(accuracy_p5) else 0.97 * accuracy_p5 + 0.03 * policy_5
-                accuracy_v = value_1 if isnan(accuracy_v) else 0.97 * accuracy_v + 0.03 * value_1
+                count += 1
+                accuracy_p1 = accuracy_p1 + (policy_1 - accuracy_p1) / count
+                accuracy_p3 = accuracy_p3 + (policy_3 - accuracy_p3) / count
+                accuracy_p5 = accuracy_p5 + (policy_5 - accuracy_p5) / count
+                accuracy_v = accuracy_v + (value_1 - accuracy_v) / count
             except (tf.errors.OutOfRangeError, KeyboardInterrupt):
                 break
 
@@ -484,6 +527,7 @@ def verify(args):
         print('value: {:.1f}%'.format(
             100.0 * np.asscalar(accuracy_v)
         ))
+
 
 def dump(args):
     """
@@ -527,6 +571,7 @@ def dump(args):
             values[var.name] = base64.b85encode(serialized, pad=True).decode('ascii')
 
         json.dump(values, sys.stdout, sort_keys=True)
+
 
 if __name__ == '__main__':
     options = [arg for arg in sys.argv[1:] if arg.startswith('--')]
