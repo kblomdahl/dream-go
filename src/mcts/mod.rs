@@ -182,7 +182,7 @@ fn forward<C>(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f
             }
         }
 
-        (value.get(), policy.into_boxed_slice())
+        (0.5 * value.get() + 0.5, policy.into_boxed_slice())
     })
 }
 
@@ -370,14 +370,14 @@ fn self_play_one<C: Param + Clone + 'static>(
             current
         );
 
-        debug_assert!(-1.0 <= value && value <= 1.0);
+        debug_assert!(0.0 <= value && value <= 1.0);
         debug_assert!(index < 362);
 
         let policy = tree.softmax();
         let (_, prior_index) = tree.prior();
-        let value_sgf = if current == Color::Black { value } else { -value };
+        let value_sgf = if current == Color::Black { 2.0 * value - 1.0 } else { -2.0 * value + 1.0 };
 
-        if allow_resign && value < -0.9 {  // resign the game if the evaluation looks bad
+        if allow_resign && value < 0.05 {  // resign the game if the evaluation looks bad
             return GameResult::Resign(sgf, board, current.opposite(), -value);
         } else if index == 361 {  // passing move
             sgf += &format!(";{}[]P[{}]V[{}]", current, b85::encode(&policy), value_sgf);

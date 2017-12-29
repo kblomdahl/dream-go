@@ -59,7 +59,7 @@ impl Value for RAVE {
         PUCT::update::<C, E>(trace, color, value);
 
         for (i, &(node, node_color, index)) in trace.iter().enumerate() {
-            let value_ = if color == (*node).color { value } else { -value };
+            let value_ = if color == (*node).color { value } else { 1.0 - value };
 
             for &(other, other_color, _) in trace.iter().take(i) {
                 if node_color == other_color {
@@ -194,7 +194,7 @@ impl Value for PUCT {
     #[inline]
     unsafe fn update<C: Param, E: Value>(trace: &NodeTrace<E>, color: Color, value: f32) {
         for &(node, _, index) in trace.iter() {
-            let value_ = if color == (*node).color { value } else { -value };
+            let value_ = if color == (*node).color { value } else { 1.0 - value };
 
             // incremental update of the average value
             let _guard = (*node).lock.lock();
@@ -833,7 +833,7 @@ impl<'a, E: Value + 'a> fmt::Display for ToPretty<'a, E> {
 
         write!(fmt, "Nodes: {}, Win: {:.1}%, PV: {}\n",
             self.root.total_count,
-            50.0 * norm_value + 50.0,
+            100.0 * norm_value,
             likely_path
         )?;
 
@@ -851,7 +851,7 @@ impl<'a, E: Value + 'a> fmt::Display for ToPretty<'a, E> {
                     .collect::<Vec<String>>().join(" ");
             let additional = if is_additional {
                 format!("(A: {:5.2}%: {:7}) ",
-                    50.0 * self.root.amaf[i] + 50.0,
+                    100.0 * self.root.amaf[i],
                     self.root.amaf_count[i],
                 )
             } else {
@@ -861,7 +861,7 @@ impl<'a, E: Value + 'a> fmt::Display for ToPretty<'a, E> {
             write!(fmt, "{: >5} -> {:7} (W: {:5.2}%) {}(N: {:5.2}%) PV: {} {}\n",
                 pretty_vertex,
                 child.total_count,
-                50.0 * self.root.value[i] + 50.0,
+                100.0 * self.root.value[i],
                 additional,
                 100.0 * self.root.prior[i],
                 pretty_vertex,

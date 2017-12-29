@@ -126,7 +126,7 @@ impl Param for Standard {
     #[inline] fn exploration_rate() -> f32 {
         lazy_static! {
             static ref EXPLORATION_RATE: f32 = {
-                let rate = env_or_default("EXPLORATION_RATE", 2.23822);
+                let rate = env_or_default("EXPLORATION_RATE", 1.283165);
 
                 assert!(rate >= 0.0,
                     "The exploration rate ({}) must be at least zero",
@@ -143,7 +143,7 @@ impl Param for Standard {
     #[inline] fn rave_bias() -> f32 {
         lazy_static! {
             static ref RAVE_BIAS: f32 = {
-                let bias = env_or_default("RAVE_BIAS", 0.4);
+                let bias = env_or_default("RAVE_BIAS", 0.705811);
 
                 assert!(bias >= 0.0,
                     "The RAVE bias ({}) must be at least zero",
