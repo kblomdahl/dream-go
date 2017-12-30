@@ -938,8 +938,8 @@ mod tests {
 
         for t in 0..800 {
             let mut board = Board::new();
-            let mut dst_ref = [0.0f32; 362];
-            let mut dst_asm = [0.0f32; 362];
+            let mut dst_ref = [0.0f32; 368];
+            let mut dst_asm = [0.0f32; 368];
 
             // check so that the reference and asm implementation gives back the same
             // value
@@ -971,7 +971,7 @@ mod tests {
         let root = test::black_box(root);
 
         b.iter(|| {
-            let mut dst = [0.0f32; 362];
+            let mut dst = test::black_box([0.0f32; 368]);
 
             E::get::<C, E>(&root, &mut dst);
             dst
