@@ -467,9 +467,8 @@ extern {
     /// crosscorrelations of `cudnnConvolutionForward()`, returning results in
     /// `y`. The full computation follows the equation
     /// 
-    /// ```
-    /// y = act ( alpha1 * conv(x) + alpha2 * z + bias )
-    /// ```
+    /// `y = act ( alpha1 * convDesc(x) + alpha2 * z + bias )`
+    /// 
     /// 
     /// # Arguments
     /// 
