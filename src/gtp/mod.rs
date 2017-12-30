@@ -194,7 +194,9 @@ impl Gtp {
             }
         };
 
-        if let Some(caps) = ID_PREFIX.captures(&line) {
+        if line.is_empty() {
+            Some((None, Command::Pass))
+        } else if let Some(caps) = ID_PREFIX.captures(&line) {
             let id = caps[1].parse::<usize>().unwrap();
             let rest = &caps[2];
 
@@ -509,5 +511,10 @@ mod tests {
     fn quit() {
         assert_eq!(Gtp::parse_line("1 quit"), Some((Some(1), Command::Quit)));
         assert_eq!(Gtp::parse_line("quit"), Some((None, Command::Quit)));
+    }
+
+    #[test]
+    fn empty() {
+        assert_eq!(Gtp::parse_line(""), Some((None, Command::Pass)));
     }
 }
