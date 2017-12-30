@@ -463,6 +463,59 @@ extern {
         y: *mut c_void
     ) -> Status;
 
+    /// This function applies a bias and then an activation to the convolutions or
+    /// crosscorrelations of `cudnnConvolutionForward()`, returning results in
+    /// `y`. The full computation follows the equation
+    /// 
+    /// ```
+    /// y = act ( alpha1 * conv(x) + alpha2 * z + bias )
+    /// ```
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - Handle to a previously created cuDNN context.
+    /// * `alpha1` - Pointers to scaling factors (in host memory).
+    /// * `xDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `x` - Data pointer to GPU memory associated with the tensor descriptor `xDesc`.
+    /// * `wDesc` - Handle to a previously initialized filter descriptor.
+    /// * `w` - Data pointer to GPU memory associated with the filter descriptor `wDesc`.
+    /// * `convDesc` - Previously initialized convolution descriptor.
+    /// * `algo` - Enumerant that specifies which convolution algorithm shoud be used to
+    ///   compute the results
+    /// * `workSpace` - Data pointer to GPU memory to a workspace needed to able to execute the
+    ///   specified algorithm.
+    /// * `workSpaceSizeInBytes` -  Specifies the size in bytes of the provided `workSpace`.
+    /// * `alpha2` - Pointers to scaling factors (in host memory).
+    /// * `zDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `z` - Data pointer to GPU memory associated with the tensor descriptor `zDesc`.
+    /// * `biasDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `bias` -  Data pointer to GPU memory associated with the tensor descriptor `biasDesc`.
+    /// * `activationDesc` - Handle to a previously initialized activation descriptor.
+    /// * `yDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `y` - Data pointer to GPU memory associated with the tensor descriptor
+    ///   `yDesc` that carries the result of the convolution.
+    /// 
+    pub fn cudnnConvolutionBiasActivationForward(
+        handle: Handle,
+        alpha1: *const f32,
+        xDesc: TensorDescriptor,
+        x: *const c_void,
+        wDesc: FilterDescriptor,
+        w: *const c_void,
+        convDesc: ConvolutionDescriptor,
+        algo: ConvolutionFwdAlgo,
+        workSpace: *mut c_void,
+        workSpaceSizeInBytes: size_t,
+        alpha2: *const f32,
+        zDesc: TensorDescriptor,
+        z: *const c_void,
+        biasDesc: TensorDescriptor,
+        bias: *const c_void,
+        activationDesc: ActivationDescriptor,
+        yDesc: TensorDescriptor,
+        y: *mut c_void
+    ) -> Status;
+
     /// This routine computes the softmax function.
     /// 
     /// # Arguments

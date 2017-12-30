@@ -53,6 +53,48 @@ class BatchNorm:
             tf.add_to_collection(collection, self._mean)
             tf.add_to_collection(collection, self._variance)
 
+    def dump(self, sess, weights, into=None):
+        """
+        Returns a dictionary that contains this batch normalization layer folded
+        into the given convolution weights.
+
+        The convolution weights will also get transposed to the format expected
+        by cuDNN.
+        """
+
+        if into is None:
+            into = {}
+
+        # fix the weights so that they appear in the _correct_ order according
+        # to cuDNN.
+        #
+        # tensorflow: [h, w, in, out]
+        # cudnn:      [out, in, h, w]
+        weights_ = np.transpose(sess.run(weights), [3, 2, 0, 1])
+
+        # fold the batch normalization into the convolutional weights and one
+        # additional bias term. By scaling the weights and the mean by the
+        # term `1 / sqrt(variance + 0.001)`.
+        #
+        # Also multiply the mean by -1 since the bias term uses addition, while
+        # batch normalization assumes subtraction.
+        #
+        # The weights are scaled using broadcasting, where all input weights for
+        # a given output feature are scaled by that features term.
+        #
+        [mean, variance] = sess.run([self._mean, self._variance])
+
+        assert weights_.shape[0] == mean.shape[0]
+        assert variance.shape[0] == mean.shape[0]
+
+        into[self._offset] = -mean / np.sqrt(variance + 0.001)
+        into[weights] = np.multiply(
+            weights_,
+            np.reshape(1.0 / np.sqrt(variance + 0.001), (weights_.shape[0], 1, 1, 1))
+        )
+
+        return into
+
     def __call__(self, x, is_training=True):
         if is_training:
             y, b_mean, b_variance = tf.nn.fused_batch_norm(
@@ -107,12 +149,21 @@ class ResidualBlock:
 
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._conv_1)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._conv_2)
-        tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._conv_1)
-        tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._conv_2)
 
         if collection:
             tf.add_to_collection(collection, self._conv_1)
             tf.add_to_collection(collection, self._conv_2)
+
+    def dump(self, sess, into=None):
+        """ Returns a dictionary that contains all model variables of this block. """
+
+        if into is None:
+            into = {}
+
+        self._bn_1.dump(sess, self._conv_1, into=into)
+        self._bn_2.dump(sess, self._conv_2, into=into)
+
+        return into
 
     def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._conv_1, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -154,13 +205,27 @@ class ValueHead:
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._weights_2)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias_1)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias_2)
-        tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._downsample)
 
         tf.add_to_collection(ValueHead.VARIABLES, self._downsample)
         tf.add_to_collection(ValueHead.VARIABLES, self._weights_1)
         tf.add_to_collection(ValueHead.VARIABLES, self._weights_2)
         tf.add_to_collection(ValueHead.VARIABLES, self._bias_1)
         tf.add_to_collection(ValueHead.VARIABLES, self._bias_2)
+
+    def dump(self, sess, into=None):
+        """ Returns a dictionary that contains all model variables of this head. """
+
+        if into is None:
+            into = {}
+
+        self._bn.dump(sess, self._downsample, into=into)
+
+        into[self._weights_1] = sess.run(self._weights_1)
+        into[self._weights_2] = sess.run(self._weights_2)
+        into[self._bias_1] = sess.run(self._bias_1)
+        into[self._bias_2] = sess.run(self._bias_2)
+
+        return into
 
     def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -198,11 +263,23 @@ class PolicyHead:
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._downsample)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._weights)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._bias)
-        tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._downsample)
 
         tf.add_to_collection(PolicyHead.VARIABLES, self._downsample)
         tf.add_to_collection(PolicyHead.VARIABLES, self._weights)
         tf.add_to_collection(PolicyHead.VARIABLES, self._bias)
+
+    def dump(self, sess, into=None):
+        """ Returns a dictionary that contains all model variables of this head. """
+
+        if into is None:
+            into = {}
+
+        self._bn.dump(sess, self._downsample, into=into)
+
+        into[self._weights] = sess.run(self._weights)
+        into[self._bias] = sess.run(self._bias)
+
+        return into
 
     def __call__(self, x, is_training=True):
         y = tf.nn.conv2d(x, self._downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -229,7 +306,6 @@ class Tower:
             self._bn = BatchNorm(num_features, collection=Tower.VARIABLES)
 
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._upsample)
-        tf.add_to_collection(tf.GraphKeys.WEIGHTS, self._upsample)
         tf.add_to_collection(Tower.VARIABLES, self._upsample)
 
         # residual blocks
@@ -246,6 +322,21 @@ class Tower:
         # value head
         with tf.variable_scope('21v_value'):
             self._value = ValueHead(num_features)
+
+    def dump(self, sess, into=None):
+        """ Returns a dictionary that contains all model variables of this tower. """
+
+        if into is None:
+            into = {}
+
+        self._bn.dump(sess, self._upsample, into=into)
+
+        for residual in self._residuals:
+            residual.dump(sess, into=into)
+        self._policy.dump(sess, into=into)
+        self._value.dump(sess, into=into)
+
+        return into
 
     def __call__(self, x, is_training=True, train_tower=True, train_policy=True, train_value=True):
         y = tf.nn.conv2d(x, self._upsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -534,7 +625,7 @@ def dump(args):
     Dump the given (or latest if none is given) checkpoint as a JSON file that
     is readable by dream-go
     """
-    _tower = Tower()
+    tower = Tower()
 
     # restore only model variables
     saver_vars = tf.model_variables()
@@ -559,15 +650,10 @@ def dump(args):
         import json
 
         values = {}
-        saver_vals = sess.run(saver_vars)
 
-        for (var, value) in zip(saver_vars, saver_vals):
-            if var in tf.get_collection(tf.GraphKeys.WEIGHTS):
-                # tensorflow: [h, w, in, out]
-                # cudnn:      [out, in, h, w]
-                value = np.transpose(value, [3, 2, 0, 1])
-
+        for (var, value) in tower.dump(sess).items():
             serialized = value.flatten().astype(np.float16).tostring()
+
             values[var.name] = base64.b85encode(serialized, pad=True).decode('ascii')
 
         json.dump(values, sys.stdout, sort_keys=True)

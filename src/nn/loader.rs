@@ -93,9 +93,7 @@ pub fn load(path: &Path, data_type: DataType) -> Option<HashMap<String, *const c
             // value of the tensor
             let value = skip_until(&mut iter, '"');
             let tensor = {
-                let force_f32 = name.contains("/mean") || name.contains("/variance");
-
-                if data_type == DataType::Float || force_f32 {
+                if data_type == DataType::Float {
                     Tensor::Float(b85::decode::<f32>(&value).unwrap())
                 } else {
                     assert_eq!(data_type, DataType::Half);

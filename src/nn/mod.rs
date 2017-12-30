@@ -23,7 +23,7 @@ use self::ffi::cublas::*;
 use self::ffi::cuda::*;
 use self::ffi::cudnn::*;
 pub use self::network::{Network, WorkspaceGuard};
-pub use self::workspace::Workspace;
+pub use self::workspace::{NUM_FEATURES, Workspace};
 use util::f16::*;
 
 /// Returns the value and policy tensors obtained from a forward pass
@@ -42,7 +42,6 @@ pub fn forward<T: From<f32> + Clone>(
     assert_eq!(w.batch_size, features.len());
     assert_eq!(::std::mem::size_of::<T>(), w.shared.data_type.size());
 
-    let epsilon: f64 = 0.001;  // tensorflow default
     let c_0 = 0.0f32;
     let c_1 = 1.0f32;
     let ch_0 = f16::from(c_0);
@@ -69,111 +68,51 @@ pub fn forward<T: From<f32> + Clone>(
             ));
         }
 
-        // up-sample the input features to the 256-wide internal representation
-        check!(cudnnConvolutionForward(
+        // up-sample the input features to the 128-wide internal representation
+        check!(cudnnConvolutionBiasActivationForward(
             w.handle_dnn,
-            &c_1,  // alpha
+            &c_1,
             w.input_t, w.input,  // input
             w.shared.up_f, w.shared.weights["01_upsample/weights:0"],  // weights
             w.shared.conv2d_3,  // convolution
             w.shared.get_convolution_algo(3),  // algo
             w.scratch_1, w.scratch_size,  // workspace
             &c_0,  // beta
-            w.residual_t, w.residual_1,  // output
-        ), w, "01_upsample/up", w.residual_1, w.batch_size, NUM_FEATURES, 361);
-
-        check!(cudnnBatchNormalizationForwardInference(
-            w.handle_dnn,
-            BatchNormMode::Spatial,
-            &c_1,  // alpha
-            &c_0,  // beta
-            w.residual_t, w.residual_1,  // input
-            w.residual_t, w.residual_2,  // output
-            w.residual_bn_t,
-            w.shared.ones, w.shared.zeros,  // scale, bias
-            w.shared.weights["01_upsample/mean:0"],
-            w.shared.weights["01_upsample/variance:0"],
-            epsilon
-        ), w, "01_upsample/up_bn", w.residual_2, w.batch_size, NUM_FEATURES, 361);
-
-        check!(cudnnActivationForward(
-            w.handle_dnn,
+            w.residual_t, w.residual_1,  // blend
+            w.residual_bn_t, w.shared.weights["01_upsample/offset:0"],  // bias
             w.shared.relu,
-            &c_1,  // alpha
-            w.residual_t, w.residual_2,  // input
-            &c_0,  // beta
             w.residual_t, w.residual_1,  // output
         ), w, "01_upsample/up_relu", w.residual_1, w.batch_size, NUM_FEATURES, 361);
 
         // apply all of the residual blocks
         for i in 2..21 {
-            check!(cudnnConvolutionForward(
+            check!(cudnnConvolutionBiasActivationForward(
                 w.handle_dnn,
-                &c_1,  // alpha
+                &c_1,
                 w.residual_t, w.residual_1,  // input
                 w.shared.residual_f, w.shared.weights[&format!("{:02}_residual/weights_1:0", i)],  // weights
                 w.shared.conv2d_3,  // convolution
                 w.shared.get_convolution_algo(3),  // algo
                 w.scratch_1, w.scratch_size,  // workspace
                 &c_0,  // beta
-                w.residual_t, w.residual_2,  // output
-            ), w, &format!("{:02}_residual/conv_1", i), w.residual_2, w.batch_size, NUM_FEATURES, 361);
-
-            check!(cudnnBatchNormalizationForwardInference(
-                w.handle_dnn,
-                BatchNormMode::Spatial,
-                &c_1,  // alpha
-                &c_0,  // beta
-                w.residual_t, w.residual_2,  // input
-                w.residual_t, w.residual_3,  // output
-                w.residual_bn_t,
-                w.shared.ones, w.shared.zeros,  // scale, bias
-                w.shared.weights[&format!("{:02}_residual/mean_1:0", i)],
-                w.shared.weights[&format!("{:02}_residual/variance_1:0", i)],
-                epsilon
-            ), w, &format!("{:02}_residual/conv_bn_1", i), w.residual_3, w.batch_size, NUM_FEATURES, 361);
-
-            check!(cudnnActivationForward(
-                w.handle_dnn,
+                w.residual_t, w.residual_2,  // blend
+                w.residual_bn_t, w.shared.weights[&format!("{:02}_residual/offset_1:0", i)],  // bias
                 w.shared.relu,
-                &c_1,  // alpha
-                w.residual_t, w.residual_3,  // input
-                &c_0,  // beta
-                w.residual_t, w.residual_3,  // output
-            ), w, &format!("{:02}_residual/conv_relu_1", i), w.residual_3, w.batch_size, NUM_FEATURES, 361);
+                w.residual_t, w.residual_2,  // output
+            ), w, &format!("{:02}_residual/conv_relu_1", i), w.residual_2, w.batch_size, NUM_FEATURES, 361);
 
-            check!(cudnnConvolutionForward(
+            check!(cudnnConvolutionBiasActivationForward(
                 w.handle_dnn,
-                &c_1,  // alpha
-                w.residual_t, w.residual_3,  // input
+                &c_1,
+                w.residual_t, w.residual_2,  // input
                 w.shared.residual_f, w.shared.weights[&format!("{:02}_residual/weights_2:0", i)],  // weights
                 w.shared.conv2d_3,  // convolution
                 w.shared.get_convolution_algo(3),  // algo
                 w.scratch_1, w.scratch_size,  // workspace
-                &c_0,  // beta
-                w.residual_t, w.residual_2,  // output
-            ), w, &format!("{:02}_residual/conv_2", i), w.residual_2, w.batch_size, NUM_FEATURES, 361);
-
-            check!(cudnnBatchNormalizationForwardInference(
-                w.handle_dnn,
-                BatchNormMode::Spatial,
-                &c_1,  // alpha
                 &c_1,  // beta
-                w.residual_t, w.residual_2,  // input
-                w.residual_t, w.residual_1,  // output
-                w.residual_bn_t,
-                w.shared.ones, w.shared.zeros,  // scale, bias
-                w.shared.weights[&format!("{:02}_residual/mean_2:0", i)],
-                w.shared.weights[&format!("{:02}_residual/variance_2:0", i)],
-                epsilon
-            ), w, &format!("{:02}_residual/conv_bn_2", i), w.residual_1, w.batch_size, NUM_FEATURES, 361);
-
-            check!(cudnnActivationForward(
-                w.handle_dnn,
+                w.residual_t, w.residual_1,  // blend
+                w.residual_bn_t, w.shared.weights[&format!("{:02}_residual/offset_2:0", i)],  // bias
                 w.shared.relu,
-                &c_1,  // alpha
-                w.residual_t, w.residual_1,  // input
-                &c_0,  // beta
                 w.residual_t, w.residual_1,  // output
             ), w, &format!("{:02}_residual/conv_relu_2", i), w.residual_1, w.batch_size, NUM_FEATURES, 361);
         }
@@ -185,38 +124,19 @@ pub fn forward<T: From<f32> + Clone>(
         // policy head (21p_policy)
         check!(cudnnSetStream(w.handle_dnn, w.policy_s));
         check!(cublasSetStream_v2(w.handle_blas, w.policy_s));
-        check!(cudnnConvolutionForward(
+
+        check!(cudnnConvolutionBiasActivationForward(
             w.handle_dnn,
-            &c_1,  // alpha
+            &c_1,
             w.residual_t, w.residual_1,  // input
             w.shared.policy_f, w.shared.weights["21p_policy/downsample:0"],  // weights
             w.shared.conv2d_1,  // convolution
             w.shared.get_convolution_algo(1),  // algo
             w.scratch_1, w.scratch_size,  // workspace
             &c_0,  // beta
-            w.policy_t, w.policy_1,  // output
-        ), w, "21p_policy/down", w.policy_1, w.batch_size, 2, 361);
-
-        check!(cudnnBatchNormalizationForwardInference(
-            w.handle_dnn,
-            BatchNormMode::Spatial,
-            &c_1,  // alpha
-            &c_0,  // beta
-            w.policy_t, w.policy_1,  // input
-            w.policy_t, w.policy_2,  // output
-            w.policy_bn_t,
-            w.shared.ones, w.shared.zeros,  // scale, bias
-            w.shared.weights["21p_policy/mean:0"],
-            w.shared.weights["21p_policy/variance:0"],
-            epsilon
-        ), w, "21p_policy/down_bn", w.policy_2, w.batch_size, 2, 361);
-
-        check!(cudnnActivationForward(
-            w.handle_dnn,
+            w.policy_t, w.policy_2,  // blend
+            w.policy_bn_t, w.shared.weights["21p_policy/offset:0"],  // bias
             w.shared.relu,
-            &c_1,  // alpha
-            w.policy_t, w.policy_2,  // input
-            &c_0,  // beta
             w.policy_t, w.policy_2,  // output
         ), w, "21p_policy/down_relu", w.policy_2, w.batch_size, 2, 361);
 
@@ -279,40 +199,21 @@ pub fn forward<T: From<f32> + Clone>(
         // value head (21v_value)
         check!(cudnnSetStream(w.handle_dnn, w.value_s));
         check!(cublasSetStream_v2(w.handle_blas, w.value_s));
-        check!(cudnnConvolutionForward(
+
+        check!(cudnnConvolutionBiasActivationForward(
             w.handle_dnn,
-            &c_1,  // alpha
+            &c_1,
             w.residual_t, w.residual_1,  // input
             w.shared.value_f, w.shared.weights["21v_value/downsample:0"],  // weights
             w.shared.conv2d_1,  // convolution
             w.shared.get_convolution_algo(1),  // algo
             w.scratch_2, w.scratch_size,  // workspace
             &c_0,  // beta
-            w.value_t, w.value_1  // output
-        ), w, "21v_value/down", w.value_1, w.batch_size, 361);
-
-        check!(cudnnBatchNormalizationForwardInference(
-            w.handle_dnn,
-            BatchNormMode::Spatial,
-            &c_1,  // alpha
-            &c_0,  // beta
-            w.value_t, w.value_1,  // input
             w.value_t, w.value_2,  // output
-            w.value_bn_t,
-            w.shared.ones, w.shared.zeros,  // scale, bias
-            w.shared.weights["21v_value/mean:0"],
-            w.shared.weights["21v_value/variance:0"],
-            epsilon
-        ), w, "21v_value/down_bn", w.value_2, w.batch_size, 361);
-
-        check!(cudnnActivationForward(
-            w.handle_dnn,
+            w.value_bn_t, w.shared.weights["21v_value/offset:0"],  // bias
             w.shared.relu,
-            &c_1,  // alpha
-            w.value_t, w.value_2,  // input
-            &c_0,  // beta
             w.value_t, w.value_2,  // output
-        ), w, "21v_value/down_relu", w.value_2, w.batch_size, 361);
+        ), w, "21v_value/down_relu", w.value_2, w.batch_size, 1, 361);
 
         if w.shared.is_half() {
             check!(cublasHgemm(

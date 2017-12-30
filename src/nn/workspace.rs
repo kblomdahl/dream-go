@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use libc::{c_void};
 use std::collections::HashMap;
 use std::path::Path;
@@ -69,8 +68,8 @@ fn should_use_half() -> bool {
 /// Returns whether we should use tensor cores on the current device.
 /// 
 /// There is currently no flag that NVIDIA expose to determine this,
-/// so it is mostly determined by the CUDA version (>= 9), CUDNN
-/// version (>= 7), and CUBLAS version (>= ).
+/// so it is determined by the CUDA version (>= 9) and the compute
+/// capabilities (7.0).
 fn should_use_tensor_core() -> bool {
     #[cfg(feature = "tensor-core")] {
         let (major, minor) = compute_capability();
@@ -193,7 +192,7 @@ impl Shared {
                 check!(cudnnSetActivationDescriptor(
                     n.relu,
                     ActivationMode::Relu,
-                    NanPropagation::PropagateNan,
+                    NanPropagation::NotPropagateNan,
                     0.0
                 ));
 
@@ -376,7 +375,6 @@ pub struct Workspace {
     pub(super) input: *mut c_void,
     pub(super) residual_1: *mut c_void,
     pub(super) residual_2: *mut c_void,
-    pub(super) residual_3: *mut c_void,
     pub(super) policy_1: *mut c_void,
     pub(super) policy_2: *mut c_void,
     pub(super) value_1: *mut c_void,
@@ -425,7 +423,6 @@ impl Workspace {
             input: ptr::null_mut(),
             residual_1: ptr::null_mut(),
             residual_2: ptr::null_mut(),
-            residual_3: ptr::null_mut(),
             policy_1: ptr::null_mut(),
             policy_2: ptr::null_mut(),
             value_1: ptr::null_mut(),
@@ -528,7 +525,6 @@ impl Workspace {
             check!(cudaMalloc(&mut w.input, batch_size * shared.data_type.size() * 12274));
             check!(cudaMalloc(&mut w.residual_1, batch_size * shared.data_type.size() * 92416));
             check!(cudaMalloc(&mut w.residual_2, batch_size * shared.data_type.size() * 92416));
-            check!(cudaMalloc(&mut w.residual_3, batch_size * shared.data_type.size() * 92416));
             check!(cudaMalloc(&mut w.policy_1, batch_size * shared.data_type.size() * 722));
             check!(cudaMalloc(&mut w.policy_2, batch_size * shared.data_type.size() * 722));
             check!(cudaMalloc(&mut w.value_1, batch_size * shared.data_type.size() * 361));
@@ -605,7 +601,6 @@ impl Drop for Workspace {
             check!(cudaFree(self.input));
             check!(cudaFree(self.residual_1));
             check!(cudaFree(self.residual_2));
-            check!(cudaFree(self.residual_3));
             check!(cudaFree(self.value_1));
             check!(cudaFree(self.value_2));
             check!(cudaFree(self.policy_1));

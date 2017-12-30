@@ -28,19 +28,21 @@ macro_rules! check {
 
         #[cfg(feature = "trace-cuda")]
         {
+            use std::fmt::Write;
+
             // copy the memory from the device back to the host so
             // that we can look at it
             let mut vec = vec! [[0.0f32; $n]; $batch_size];
 
             check!(cudaDeviceSynchronize());
 
-            if $workspace.network.is_half() {
+            if $workspace.is_half() {
                 let mut other = vec! [[f16::default(); $n]; $batch_size];
 
                 check!(cudaMemcpy(
                     other.as_mut_ptr() as *mut c_void,
                     $result,
-                    $workspace.network.data_type.size() * $batch_size * $n,
+                    $workspace.shared.data_type.size() * $batch_size * $n,
                     MemcpyKind::DeviceToHost
                 ));
 
@@ -53,44 +55,61 @@ macro_rules! check {
                 check!(cudaMemcpy(
                     vec.as_mut_ptr() as *mut c_void,
                     $result,
-                    $workspace.network.data_type.size() * $batch_size * $n,
+                    $workspace.shared.data_type.size() * $batch_size * $n,
                     MemcpyKind::DeviceToHost
                 ));
             }
 
-            // pretty-print the array and then output the debugging
-            // information
-            let mut s = String::new();
-            let mut sum = 0.0f32;
+            // pretty-print the first eight elements of each batch in the array,
+            // so that exact results can be compared with some external source.
+            let mut pretty = String::new();
 
             for i in 0..$batch_size {
-                if i > 0 { s += ", "; }
-                s += "[";
+                if i > 0 { pretty += ", "; }
+                pretty += "[";
 
                 if $n < 8 {
                     for j in 0..$n {
-                        if j > 0 { s += ", "; }
+                        if j > 0 { pretty += ", "; }
 
-                        sum += vec[i][j];
-                        s += &format!("{:.4}", vec[i][j]);
+                        write!(pretty, "{:.4}", vec[i][j]).unwrap();
                     }
                 } else {
-                    for j in 0..$n {
-                        sum += vec[i][j];
-                    }
-
                     for j in 0..8 {
-                        s += &format!("{:.4}, ", vec[i][j]);
+                        write!(pretty, "{:.4}, ", vec[i][j]).unwrap();
                     }
 
-                    s += "...";
+                    pretty += "...";
                 }
 
-                s += "]";
+                pretty += "]";
             }
 
-            println!("sum(`{}`) == {}", $name, sum);
-            println!("eval(`{}`) == [{}]", $name, s);
+            // compute some statistics that may (or may not) come in handy during
+            // debugging
+            let sum = vec.iter().flat_map(|s| s.iter()).map(|&v| v as f64).sum::<f64>();
+            let average = sum / ($batch_size + $n) as f64;
+            let stddev = (vec.iter()
+                .flat_map(|s| s.iter())
+                .map(|&v| {
+                    let d = v as f64 - average;
+
+                    d*d
+                })
+                .sum::<f64>() / ($batch_size + $n - 1) as f64).sqrt();
+
+            // lock standard error during writing to avoid mangled output because multiple
+            // threads are writing at the same time.
+            {
+                use std::io::{self, Write};
+
+                let stderr = io::stderr();
+                let mut handle = stderr.lock();
+
+                write!(handle, "sum(`{}`) == {}\n", $name, sum).unwrap();
+                write!(handle, "average(`{}`) == {} +/- {}\n", $name, average, stddev).unwrap();
+                write!(handle, "eval(`{}`) == [{}]\n", $name, pretty).unwrap();
+            }
         }
     });
 
