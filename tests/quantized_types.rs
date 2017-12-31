@@ -98,6 +98,42 @@ unsafe fn create_filter() -> (cudnn::FilterDescriptor, *const c_void) {
     (filter_desc, filter_data)
 }
 
+/// Create an offset tensor with the following values:
+/// 
+///   0.2  0.1  0.0  -0.1
+unsafe fn create_offset() -> (cudnn::TensorDescriptor, *const c_void) {
+    let output_total = vec! [
+        127.0 * 0.2f32 / OUTPUT_SCALE,
+        127.0 * 0.1f32 / OUTPUT_SCALE,
+        127.0 * 0.0f32 / OUTPUT_SCALE,
+        127.0 *-0.1f32 / OUTPUT_SCALE
+    ];
+
+    // copy the tensor to the GPU
+    let mut offset_data: *mut c_void = ptr::null_mut();
+
+    assert!(cuda::cudaMalloc(&mut offset_data, 4 * 4).is_ok());
+    assert!(cuda::cudaMemcpy(
+        offset_data,
+        output_total.as_ptr() as *const c_void,
+        4 * 4,
+        cuda::MemcpyKind::HostToDevice
+    ).is_ok());
+
+    // create the cuDNN descriptor for the input tensor
+    let mut offset_desc: cudnn::TensorDescriptor = ptr::null_mut();
+
+    assert!(cudnn::cudnnCreateTensorDescriptor(&mut offset_desc).is_ok());
+    assert!(cudnn::cudnnSetTensor4dDescriptor(
+        offset_desc,
+        cudnn::TensorFormat::NHWC,
+        cudnn::DataType::Float,
+        1, 4, 1, 1
+    ).is_ok());
+
+    (offset_desc, offset_data)
+}
+
 /// Create an input tensor with 4 planes, where each plane is a 5x5
 /// matrix with the following values:
 /// 
@@ -225,6 +261,20 @@ unsafe fn create_cross_correlation(
     (conv_desc, workspace_data, workspace_size)
 }
 
+unsafe fn create_relu() -> cudnn::ActivationDescriptor {
+    let mut relu_desc: cudnn::ActivationDescriptor = ptr::null_mut();
+
+    assert!(cudnn::cudnnCreateActivationDescriptor(&mut relu_desc).is_ok());
+    assert!(cudnn::cudnnSetActivationDescriptor(
+        relu_desc,
+        cudnn::ActivationMode::Relu,
+        cudnn::NanPropagation::NotPropagateNan,
+        0.0
+    ).is_ok());
+
+    relu_desc
+}
+
 /// Check that 2 * 0.1 = 0.2
 unsafe fn __2x0_1() {
     let mut handle: cudnn::Handle = ptr::null_mut();
@@ -234,8 +284,10 @@ unsafe fn __2x0_1() {
     // create the I/O, weights, and convolution
     let (filter_desc, filter_data) = create_filter();
     let (input_desc, input_data) = create_input();
+    let (offset_desc, offset_data) = create_offset();
     let (output_desc, output_data) = create_output();
     let (conv_desc, workspace_data, workspace_size) = create_cross_correlation(handle, input_desc, output_desc, filter_desc);
+    let relu_desc = create_relu();
 
     // perform the convolution
     let mut input = vec! [0i8; 4 * 25];
@@ -243,7 +295,7 @@ unsafe fn __2x0_1() {
     let mut output = vec! [0i8; 4 * 25];
     let (c_0, c_1) = (0.0f32, (FILTER_SCALE * INPUT_SCALE) / (OUTPUT_SCALE * 127.0));
 
-    assert!(cudnn::cudnnConvolutionForward(
+    assert!(cudnn::cudnnConvolutionBiasActivationForward(
         handle,
         &c_1,
         input_desc, input_data,
@@ -251,7 +303,10 @@ unsafe fn __2x0_1() {
         conv_desc, cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
         workspace_data, workspace_size,
         &c_0,
-        output_desc, output_data
+        output_desc, output_data,
+        offset_desc, offset_data,
+        relu_desc,
+        output_desc, output_data,
     ).is_ok());
 
     assert!(cuda::cudaMemcpy(
@@ -308,24 +363,24 @@ unsafe fn __2x0_1() {
     let mut max_error = OrderedFloat(0.0f32);
 
     let plane_1_1 = 0.01*0.1 + 0.01*0.2 + 0.01*0.3 + 0.01*0.4;
-    let plane_1_4 = 4.0 * plane_1_1;  // corner
-    let plane_1_6 = 6.0 * plane_1_1;  // side
-    let plane_1_9 = 9.0 * plane_1_1;  // middle
+    let plane_1_4 = 0.2 + 4.0 * plane_1_1;  // corner
+    let plane_1_6 = 0.2 + 6.0 * plane_1_1;  // side
+    let plane_1_9 = 0.2 + 9.0 * plane_1_1;  // middle
 
     let plane_2_1 = 0.03*0.1 + 0.03*0.2 + 0.03*0.3 + 0.03*0.4;
-    let plane_2_4 = 4.0 * plane_2_1;  // corner
-    let plane_2_6 = 6.0 * plane_2_1;  // side
-    let plane_2_9 = 9.0 * plane_2_1;  // middle
+    let plane_2_4 = 0.1 + 4.0 * plane_2_1;  // corner
+    let plane_2_6 = 0.1 + 6.0 * plane_2_1;  // side
+    let plane_2_9 = 0.1 + 9.0 * plane_2_1;  // middle
 
     let plane_3_1 = 0.06*0.1 + 0.06*0.2 + 0.06*0.3 + 0.06*0.4;
-    let plane_3_4 = 4.0 * plane_3_1;  // corner
-    let plane_3_6 = 6.0 * plane_3_1;  // side
-    let plane_3_9 = 9.0 * plane_3_1;  // middle
+    let plane_3_4 = 0.0 + 4.0 * plane_3_1;  // corner
+    let plane_3_6 = 0.0 + 6.0 * plane_3_1;  // side
+    let plane_3_9 = 0.0 + 9.0 * plane_3_1;  // middle
 
     let plane_4_1 = 0.09*0.1 + 0.09*0.2 + 0.09*0.3 + 0.09*0.4;
-    let plane_4_4 = 4.0 * plane_4_1;  // corner
-    let plane_4_6 = 6.0 * plane_4_1;  // side
-    let plane_4_9 = 9.0 * plane_4_1;  // middle
+    let plane_4_4 = -0.1 + 4.0 * plane_4_1;  // corner
+    let plane_4_6 = -0.1 + 6.0 * plane_4_1;  // side
+    let plane_4_9 = -0.1 + 9.0 * plane_4_1;  // middle
 
     for c in vec! [0, 4, 20, 24].into_iter() {
         assert!(plane_1[c] >= plane_1_4 - eps && plane_1[c] <= plane_1_4 + eps, "plane_1[{}] = {}, should be {}", c, plane_1[c], plane_1_4);
