@@ -12,11 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// 16-bit floating point numbers as defined in IEEE 754-2008.
+pub const RANGE: f32 = 1.0;
+
+/// 8-bit quantized number in the range [-RANGE, RANGE].
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, PartialEq)]
 #[repr(C)]
 pub struct q8(i8);
+
+impl q8 {
+    /// Returns an unscaled (not divided by `RANGE`) quantized value. This
+    /// is useful if you want to do your own scaling.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `value` - 
+    /// 
+    pub fn unscaled(value: f32) -> q8 {
+        if value > RANGE {
+            q8(127)
+        } else if value < -RANGE {
+            q8(-127)
+        } else {
+            q8((127.0 * value) as i8)
+        }
+    }
+}
 
 impl Default for q8 {
     fn default() -> q8 { q8(0) }
@@ -32,20 +53,18 @@ impl From<q8> for f32 {
     fn from(value: q8) -> f32 {
         let q8(quan) = value;
 
-        (quan as f32) / 127.0
+        RANGE * (quan as f32) / 127.0
     }
 }
 
 impl From<f32> for q8 {
     fn from(value: f32) -> q8 {
-        let quan = (127.0 * value) as i32;
-
-        if quan > 127 {
+        if value > RANGE {
             q8(127)
-        } else if quan < -127 {
+        } else if value < -RANGE {
             q8(-127)
         } else {
-            q8(quan as i8)
+            q8((127.0 * value / RANGE) as i8)
         }
     }
 }
