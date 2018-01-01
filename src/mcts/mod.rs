@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use time;
 
-use go::{symmetry, Board, Color};
+use go::{symmetry, Board, Color, CHW};
 use mcts::parallel::{Server, ServerGuard};
 use mcts::param::*;
 use nn::Network;
@@ -113,9 +113,9 @@ fn forward<C>(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f
         // and when we are done undo it using the opposite.
         let (value, original_policy) = server.send({
             if server.is_half() {
-                Array::from_f16(board.get_features::<f16>(color, t))
+                Array::from_f16(board.get_features::<f16, CHW>(color, t))
             } else {
-                Array::from_f32(board.get_features::<f32>(color, t))
+                Array::from_f32(board.get_features::<f32, CHW>(color, t))
             }
         });
 

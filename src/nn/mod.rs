@@ -54,10 +54,10 @@ pub fn forward<T: From<f32> + Clone>(
         check!(cudnnSetStream(w.handle_dnn, w.tower_s));
 
         for (i, ref feature) in features.iter().enumerate() {
-            assert_eq!(feature.len(), 12274);
+            assert_eq!(feature.len(), 11552);
             assert_eq!(1, ::std::mem::size_of::<c_void>());
 
-            let element_size = 12274 * w.shared.data_type.size();
+            let element_size = 11552 * w.shared.data_type.size();
 
             check!(cudaMemcpyAsync(
                 w.input.offset((i * element_size) as isize),

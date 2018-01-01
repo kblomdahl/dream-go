@@ -68,6 +68,30 @@ impl fmt::Display for Color {
     }
 }
 
+/// Utility function for determining the data format of the array returned by
+/// `get_features`.
+pub trait Order {
+    fn index(c: usize, i: usize) -> usize;
+}
+
+/// Implementation of `Order` for the data format `NCHW`.
+pub struct CHW;
+
+impl Order for CHW {
+    fn index(c: usize, i: usize) -> usize {
+        c * 361 + i
+    }
+}
+
+/// Implementation of `Order` for the data format `NHWC`.
+pub struct HWC;
+
+impl Order for HWC {
+    fn index(c: usize, i: usize) -> usize {
+        i * 32 + c
+    }
+}
+
 /// Returns `$array[$nested[$index]]` without boundary checks
 macro_rules! nested_get_unchecked {
     ($array:expr, $nested:expr, $index:expr) => (unsafe {
@@ -694,32 +718,30 @@ impl Board {
     /// 12. Our liberties after move (4)
     /// 13. Our liberties after move (5)
     /// 14. Our liberties after move (6+)
-    /// 15. Our territory (closest to our vertex)
-    /// 16. Our vertices (now)
-    /// 17. Our vertices (now-1)
-    /// 18. Our vertices (now-2)
-    /// 19. Our vertices (now-3)
-    /// 20. Our vertices (now-4)
-    /// 21. Our vertices (now-5)
-    /// 22. Opponent liberties (1)
-    /// 23. Opponent liberties (2)
-    /// 24. Opponent liberties (3)
-    /// 25. Opponent liberties (4)
-    /// 26. Opponent liberties (5)
-    /// 27. Opponent liberties (6+)
-    /// 28. Opponent territory (closest to opponent vertex)
-    /// 29. Opponent vertices (now)
-    /// 30. Opponent vertices (now-1)
-    /// 31. Opponent vertices (now-2)
-    /// 32. Opponent vertices (now-3)
-    /// 33. Opponent vertices (now-4)
-    /// 34. Opponent vertices (now-5)
+    /// 15. Our vertices (now)
+    /// 16. Our vertices (now-1)
+    /// 17. Our vertices (now-2)
+    /// 18. Our vertices (now-3)
+    /// 19. Our vertices (now-4)
+    /// 20. Our vertices (now-5)
+    /// 21. Opponent liberties (1)
+    /// 22. Opponent liberties (2)
+    /// 23. Opponent liberties (3)
+    /// 24. Opponent liberties (4)
+    /// 25. Opponent liberties (5)
+    /// 26. Opponent liberties (6+)
+    /// 27. Opponent vertices (now)
+    /// 28. Opponent vertices (now-1)
+    /// 29. Opponent vertices (now-2)
+    /// 30. Opponent vertices (now-3)
+    /// 31. Opponent vertices (now-4)
+    /// 32. Opponent vertices (now-5)
     ///
     /// # Arguments
     ///
     /// * `color` - the color of the current player
     ///
-    pub fn get_features<T: From<f32> + Copy>(
+    pub fn get_features<T: From<f32> + Copy, O: Order>(
         &self,
         color: Color,
         symmetry: symmetry::Transform
@@ -728,7 +750,7 @@ impl Board {
         let c_0: T = T::from(0.0);
         let c_1: T = T::from(1.0);
 
-        let mut features = vec! [c_0; 34 * 361];
+        let mut features = vec! [c_0; 32 * 361];
         let symmetry_table = symmetry.get_table();
         let is_black = if color == Color::Black { c_1 } else { c_0 };
         let current = color as u8;
@@ -739,8 +761,8 @@ impl Board {
         for index in 0..361 {
             let other = symmetry_table[index] as usize;
 
-            features[0 * 361 + other] = c_1;
-            features[1 * 361 + other] = is_black;
+            features[O::index(0, other)] = c_1;
+            features[O::index(1, other)] = is_black;
 
             if self.vertices[index] != 0 {
                 let num_liberties = ::std::cmp::min(
@@ -753,11 +775,11 @@ impl Board {
                     if self.vertices[index] == current {
                         1 + num_liberties
                     } else {
-                        20 + num_liberties
+                        19 + num_liberties
                     }
                 };
 
-                features[l * 361 + other] = c_1;
+                features[O::index(l, other)] = c_1;
             } else if self._is_valid_memoize(color, index, &mut liberties) {
                 let num_liberties = ::std::cmp::min(
                     self.get_num_liberties_if(color, index, &mut liberties),
@@ -765,23 +787,7 @@ impl Board {
                 );
                 let l = 7 + num_liberties;
 
-                features[l * 361 + other] = c_1;
-            }
-        }
-
-        // set the territory planes
-        let our_territory = self.get_territory_distance(color);
-        let opponent_territory = self.get_territory_distance(color.opposite());
-
-        for index in 0..361 {
-            let other = symmetry_table[index] as usize;
-
-            if self.vertices[index] != 0 {
-                // pass
-            } else if our_territory[index] < opponent_territory[index] {
-                features[14 * 361 + other] = c_1;
-            } else if opponent_territory[index] < our_territory[index] {
-                features[27 * 361 + other] = c_1;
+                features[O::index(l, other)] = c_1;
             }
         }
 
@@ -793,13 +799,13 @@ impl Board {
                 if vertices[index] == 0 {
                     // pass
                 } else if vertices[index] == current {
-                    let p = 15 + i;
+                    let p = 14 + i;
 
-                    features[p * 361 + other] = c_1;
+                    features[O::index(p, other)] = c_1;
                 } else { // opponent
-                    let p = 28 + i;
+                    let p = 26 + i;
 
-                    features[p * 361 + other] = c_1;
+                    features[O::index(p, other)] = c_1;
                 }
             }
         }

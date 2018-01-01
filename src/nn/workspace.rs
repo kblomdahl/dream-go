@@ -209,7 +209,7 @@ impl Shared {
                     n.up_f,
                     n.data_type,
                     TensorFormat::NCHW,
-                    NUM_FEATURES as i32, 34, 3, 3
+                    NUM_FEATURES as i32, 32, 3, 3
                 ));
 
                 check!(cudnnCreateFilterDescriptor(&mut n.residual_f));
@@ -447,7 +447,7 @@ impl Workspace {
                 w.input_t,
                 TensorFormat::NCHW,
                 shared.data_type,
-                batch_size as i32, 34, 19, 19
+                batch_size as i32, 32, 19, 19
             ));
 
             check!(cudnnCreateTensorDescriptor(&mut w.residual_t));
@@ -522,7 +522,7 @@ impl Workspace {
                 batch_size as i32, 362, 1, 1
             ));
 
-            check!(cudaMalloc(&mut w.input, batch_size * shared.data_type.size() * 12274));
+            check!(cudaMalloc(&mut w.input, batch_size * shared.data_type.size() * 11552));
             check!(cudaMalloc(&mut w.residual_1, batch_size * shared.data_type.size() * 92416));
             check!(cudaMalloc(&mut w.residual_2, batch_size * shared.data_type.size() * 92416));
             check!(cudaMalloc(&mut w.policy_1, batch_size * shared.data_type.size() * 722));

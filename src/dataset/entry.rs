@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use go::{Board, Color, symmetry};
+use go::{Board, Color, symmetry, CHW};
 use mcts::parallel::Server;
 use mcts;
 use util::b85;
@@ -72,7 +72,7 @@ impl<'a> Iterator for EntryIterator<'a> {
     fn next(&mut self) -> Option<Entry> {
         self.entries.pop()
             .map(|((ref board, current_color, ref policy), &s)| {
-                let features = board.get_features::<f16>(current_color, s);
+                let features = board.get_features::<f16, CHW>(current_color, s);
                 let mut policy: Box<[f16]> = if self.server.is_some() && policy.is_partial() {
                     let (_, _, tree) = mcts::predict::<mcts::param::Standard, mcts::tree::DefaultValue>(
                         self.server.as_ref().unwrap(),
