@@ -582,19 +582,16 @@ impl<E: Value> Node<E> {
 
     /// Returns a vector containing the _correct_ normalized probability that each move
     /// should be played given the current search tree.
-    pub fn softmax(&self) -> Box<[f32]> {
-        let mut s = vec! [0.0f32; 362];
+    pub fn softmax<T: From<f32> + Clone>(&self) -> Box<[T]> {
+        let mut s = vec! [T::from(0.0f32); 362];
         let mut s_total = 0.0f32;
 
         for i in 0..362 {
-            let count = self.count[i] as f32;
-
-            s[i] = count;
-            s_total += count;
+            s_total += self.count[i] as f32;
         }
 
         for i in 0..362 {
-            s[i] /= s_total;
+            s[i] = T::from(self.count[i] as f32 / s_total);
         }
 
         s.into_boxed_slice()

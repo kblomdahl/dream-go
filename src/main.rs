@@ -51,13 +51,24 @@ fn main() {
     }
 
     if args.iter().any(|arg| arg == "--dataset") {
+        let server = if args.iter().any(|arg| arg == "--exit") {
+            let network = load_network();
+
+            Some(mcts::parallel::Server::new::<mcts::param::Standard>(network))
+        } else {
+            None
+        };
         let stdout = std::io::stdout();
         let mut handle = stdout.lock();
 
-        for entry in dataset::of(&remaining) {
+        for entry in dataset::of(&remaining, server.as_ref()) {
             if entry.write_into(&mut handle).is_err() {
                 break
             }
+        }
+
+        if let Some(server) = server {
+            mcts::parallel::Server::join(server)
         }
     } else if args.iter().any(|arg| arg == "--self-play") {
         let network = load_network();
@@ -93,6 +104,7 @@ fn main() {
         println!("Usage: ./dream-go [options]");
         println!("");
         println!("  --dataset <files...>  Extract a dataset for training from the given SGF files");
+        println!("  --exit                When combined with --dataset perform search on any partial policies");
         println!("  --self-play <n>       Extract a dataset from self-play containing n examples");
         println!("  --policy-play <n>     Extract a dataset from self-play using only the policy network");
         println!("  --gtp                 Run GTP client (default)");

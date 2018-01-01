@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use go::{Board, Color, symmetry};
-use util::b85;
-use util::f16::*;
+mod entry;
 
 use std::env;
 use std::fs::File;
-use std::mem::transmute;
-use std::io::prelude::*;
-use std::io::{self, BufReader, Cursor};
+use std::io::{self, BufReader, BufRead};
 use std::thread::{self, JoinHandle};
+use std::marker::PhantomData;
 use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
 
-use rand::{self, Rng};
-use regex::Regex;
+pub use self::entry::Entry;
+use mcts::parallel::Server;
 
 enum SamplingStrategy {
     Percent(f32),
@@ -52,131 +49,39 @@ impl ::std::str::FromStr for SamplingStrategy {
     }
 }
 
-#[derive(Clone)]
-enum PolicyEntry {
-    Full(String),
-    Partial(usize)
+/// Iterator over all positions within a single SGF collection, the SGF
+/// collection should contain exactly one full game tree per line.
+pub struct Dataset<'a> {
+    /// The channel where finish entries are delivered by the worker
+    /// threads.
+    receiver: Receiver<Entry>,
+
+    /// The lifetime of the server that each worker thread holds
+    lifetime: PhantomData<&'a usize>
 }
 
-impl PolicyEntry {
-    /// Returns a slice containing the full policy of this entry.
-    fn to_slice(&self) -> Box<[f16]> {
-        match *self {
-            PolicyEntry::Full(ref input) => b85::decode(input).unwrap(),
-            PolicyEntry::Partial(index) => {
-                let mut policy = vec! [f16::from(0.0); 362];
-                policy[index] = f16::from(1.0);
-                policy.into_boxed_slice()
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct Entry {
-    /// The current board state.
-    pub features: Box<[u8]>,
-
-    /// The winner for the given features, `1.0` if the current player won
-    /// and `-1.0` if the current player lost.
-    pub winner: Box<[u8]>,
-
-    /// The probabilities that each move should be played for the given
-    /// features, encoded in HW format with one additional element at the
-    /// end for the `pass` move.
-    pub policy: Box<[u8]>
-}
-
-impl Entry {
-    /// Returns all entries that can be extracted from the SGF file contained
-    /// in the given string. If the given game contains invalid moves, or does
-    /// not have a recorded winner then `None` is returned.
+impl<'a> Dataset<'a> {
+    /// Returns an iterator over all positions in the given SGF collection.
     ///
     /// # Arguments
     ///
-    /// * `src` - the SGF game
+    /// * `src` - the path to the SGF collection
+    /// * `server` - the server to use to transform partial policies to
+    ///   full policies, if no server is given the partial policies are
+    ///   emitted
     ///
-    fn all(src: &String) -> Option<Vec<Entry>> {
-        lazy_static! {
-            static ref LETTERS: [char; 26] = [
-                'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
-                'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
-                'w', 'x', 'y', 'z'
-            ];
-            static ref WINNER: Regex = Regex::new(r"RE\[([^\]]*)\]").unwrap();
-            static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
-            static ref MOVE: Regex = Regex::new(r";([BW])\[([a-z]*)\](?:P\[([^\]]*)\])?").unwrap();
-        }
+    pub fn new(src: &str, server: Option<&'a Server>) -> Result<Dataset<'a>, io::Error> {
+        let handle = File::open(src)?;
 
-        let winner = {
-            if let Some(caps) = WINNER.captures(src) {
-                match caps[1].chars().nth(0) {
-                    Some('B') => Color::Black,
-                    Some('W') => Color::White,
-                    _   => { return None; }
+        // determine what strategy we should use during sampling
+        lazy_static! {
+            static ref NUM_THREADS: usize = {
+                match env::var("NUM_THREADS") {
+                    Ok(value) => value.parse::<usize>()
+                                      .expect(&format!("NUM_THREADS must be a number, got {}", value)),
+                    _ => 32
                 }
-            } else {
-                return None
-            }
-        };
-
-        let mut entries: Vec<(Board, Color, PolicyEntry)> = vec! [];
-        let mut board = Board::new();
-        let mut pass_count = 0;
-        let size = board.size();
-
-        for moves in MOVE.captures_iter(src) {
-            let current_color = match &moves[1] {
-                "B" => Color::Black,
-                "W" => Color::White,
-                _   => unreachable!()
             };
-            let x = moves[2].chars().nth(0)
-                .and_then(|x| LETTERS.binary_search(&x).ok())
-                .unwrap_or(size);
-            let y = moves[2].chars().nth(1)
-                .and_then(|y| LETTERS.binary_search(&y).ok())
-                .unwrap_or(size);
-            let policy = moves.get(3)
-                .map(|input| { PolicyEntry::Full(input.as_str().to_string()) })
-                .unwrap_or_else(|| {
-                    let index = size*y + x;
-
-                    PolicyEntry::Partial(::std::cmp::min(361, index))
-                });
-
-            if x >= size || y >= size {
-                entries.push((board.clone(), current_color, policy));
-                pass_count += 1;
-            } else if board.is_valid(current_color, x, y) {
-                entries.push((board.clone(), current_color, policy));
-                board.place(current_color, x, y);
-                pass_count = 0;
-            } else {
-                return None;  // invalid game
-            }
-        }
-
-        // if the game was scored, then add two pass moves at the end of the game
-        // since they are missing from a lot of SGF files and we want to engine
-        // to learn that one should pass when the game has finished
-        if SCORED.is_match(src) && pass_count < 2 {
-            let last_color = entries.last().map(|&(_, color, _)| color).unwrap_or(Color::Black);
-
-            if pass_count == 1 && last_color == Color::Black {
-                entries.push((board.clone(), Color::White, PolicyEntry::Partial(361)));
-            } else if pass_count == 1 && last_color == Color::White {
-                entries.push((board.clone(), Color::Black, PolicyEntry::Partial(361)));
-            } else {
-                entries.push((board.clone(), Color::Black, PolicyEntry::Partial(361)));
-                entries.push((board.clone(), Color::White, PolicyEntry::Partial(361)));
-            }
-        }
-
-        // pluck the specified amount of samples from the game, where each sample
-        // is randomly transformed according to one of the symmetries in an attempt
-        // to use more samples per file without overfitting
-        lazy_static! {
             static ref STRATEGY: SamplingStrategy = {
                 match env::var("NUM_SAMPLES") {
                     Ok(value) => {
@@ -186,151 +91,23 @@ impl Entry {
                     _ => SamplingStrategy::Fixed(1)
                 }
             };
-            static ref SYMMETRIES: Vec<symmetry::Transform> = vec! [
-                symmetry::Transform::Identity,
-                symmetry::Transform::FlipLR,
-                symmetry::Transform::FlipUD,
-                symmetry::Transform::Transpose,
-                symmetry::Transform::TransposeAnti,
-                symmetry::Transform::Rot90,
-                symmetry::Transform::Rot180,
-                symmetry::Transform::Rot270
-            ];
         }
-
-        let num_samples = ::std::cmp::max(1, match *STRATEGY {
-            SamplingStrategy::Percent(pct) => (pct * (entries.len() as f32)) as usize,
-            SamplingStrategy::Fixed(f) => f
-        });
-
-        // instead of plucking `num_samples` examples randomly, just shuffle the
-        // list and take the first elements from the array. This avoids picking the
-        // same element twice, and automatically handles the case where there are less
-        // entries than `num_samples`.
-        let mut entries: Vec<(&(Board, Color, PolicyEntry), &symmetry::Transform)> = entries.iter()
-            .flat_map(|e| ::std::iter::repeat(e).zip(SYMMETRIES.iter()))
-            .filter(|&(&(ref board, _, _), &s)| {
-                s == symmetry::Transform::Identity || !symmetry::is_symmetric(board, s)
-            })
-            .collect();
-
-        rand::thread_rng().shuffle(&mut entries);
-
-        let examples: Vec<Entry> = entries.into_iter()
-            .take(num_samples)
-            .map(|(&(ref board, current_color, ref policy), &s)| {
-                let features = board.get_features(current_color, s);
-                let mut policy = policy.to_slice();
-
-                symmetry::apply(&mut policy, s);
-
-                Entry::new(
-                    &features,
-                    f16::from(if current_color == winner { 1.0 } else { -1.0 }),
-                    &policy
-                )
-            })
-            .collect();
-
-        Some(examples)
-    }
-
-    /// Returns an entry with the given values stored as compressed FP16
-    /// buffers.
-    ///
-    /// # Arguments
-    ///
-    /// * `features` - the features of the board state
-    /// * `winner` - the winner
-    /// * `policy` - the policy vector
-    ///
-    fn new(features: &[f16], winner: f16, policy: &[f16]) -> Entry {
-        Entry {
-            features: f16_to_bytes(features),
-            winner: f16_to_bytes(&[winner]),
-            policy: f16_to_bytes(policy)
-        }
-    }
-
-    /// Write a binary representation of this entry to the given formatter.
-    ///
-    /// # Arguments
-    ///
-    /// * `f` - the formatter to write this entry to
-    ///
-    pub fn write_into<T>(&self, f: &mut T) -> io::Result<()>
-        where T: io::Write
-    {
-        f.write_all(&self.features)?;
-        f.write_all(&self.winner)?;
-        f.write_all(&self.policy)
-    }
-}
-
-/// Write the given 32-bit floating point number to the given formatter
-/// in the platform endianess.
-///
-/// # Arguments
-///
-/// * `f` - the formatter to write to
-/// * `value` - the value to write
-///
-fn write_f16<T>(f: &mut T, value: f16) -> io::Result<()>
-    where T: io::Write
-{
-    unsafe {
-        let bytes = transmute::<_, [u8; 2]>(value.to_bits());
-
-        f.write_all(&bytes)
-    }
-}
-
-/// Returns an array of floating point serialized (and compressed) as
-/// a byte array of FP16.
-///
-/// # Arguments
-///
-/// * `array` - the array of 16-bit floating point numbers to serialize
-///
-fn f16_to_bytes(array: &[f16]) -> Box<[u8]> {
-    let mut cursor = Cursor::new(vec! [0u8; 2 * array.len()]);
-
-    for &value in array {
-        write_f16(&mut cursor, value).unwrap();
-    }
-
-    cursor.into_inner().into_boxed_slice()
-}
-
-/// Iterator over all positions within a single SGF collection, the SGF
-/// collection should contain exactly one full game tree per line.
-pub struct Dataset {
-    /// The channel where finish entries are delivered by the worker
-    /// threads.
-    receiver: Receiver<Entry>
-}
-
-impl Dataset {
-    /// Returns an iterator over all positions in the given SGF collection.
-    ///
-    /// # Arguments
-    ///
-    /// * `src` - the path to the SGF collection
-    ///
-    pub fn new(src: &str) -> Result<Dataset, io::Error> {
-        let handle = File::open(src)?;
 
         // spawn the worker threads
-        const NUM_THREADS: usize = 32;
-
-        let (t_entry, r_entry) = sync_channel(NUM_THREADS);
-        let workers = (0..NUM_THREADS).map(|_| {
-            let (t_line, r_line) = sync_channel(NUM_THREADS);
+        let (t_entry, r_entry) = sync_channel(*NUM_THREADS);
+        let workers = (0..*NUM_THREADS).map(|_| {
+            let (t_line, r_line) = sync_channel(*NUM_THREADS);
             let t_entry = t_entry.clone();
+            let server = server.map(|&ref server| server.clone());
             let worker = thread::spawn(move || {
                 for line in r_line.iter() {
-                    if let Some(entries) = Entry::all(&line) {
-                        for entry in entries {
+                    if let Some(entries) = Entry::all(&line, &server) {
+                        let num_samples = ::std::cmp::max(1, match *STRATEGY {
+                            SamplingStrategy::Percent(pct) => (pct * (entries.original_len() as f32)) as usize,
+                            SamplingStrategy::Fixed(f) => f
+                        });
+
+                        for entry in entries.take(num_samples) {
                             t_entry.send(entry).unwrap();
                         }
                     }
@@ -363,12 +140,13 @@ impl Dataset {
         });
 
         Ok(Dataset {
-            receiver: r_entry
+            receiver: r_entry,
+            lifetime: PhantomData
         })
     }
 }
 
-impl Iterator for Dataset {
+impl<'a> Iterator for Dataset<'a> {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Entry> {
@@ -376,15 +154,15 @@ impl Iterator for Dataset {
     }
 }
 
-pub struct Datasets {
+pub struct Datasets<'a> {
     /// The sets to chain over
-    sets: Vec<Dataset>,
+    sets: Vec<Dataset<'a>>,
 
     /// The index of the current set we are iterating over
     current: usize
 }
 
-impl Iterator for Datasets {
+impl<'a> Iterator for Datasets<'a> {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Entry> {
@@ -408,12 +186,15 @@ impl Iterator for Datasets {
 /// # Arguments
 ///
 /// * `src` - the path to the SGF files
+/// * `server` - the server to use to transform partial policies to
+///   full policies, if no server is given the partial policies are
+///   emitted
 ///
-pub fn of(src: &[String]) -> Datasets {
+pub fn of<'a>(src: &[String], server: Option<&'a Server>) -> Datasets<'a> {
     Datasets {
         sets: src.iter()
             .filter_map(|f| {
-                let result = Dataset::new(f);
+                let result = Dataset::new(f, server);
 
                 result.ok()
             })
