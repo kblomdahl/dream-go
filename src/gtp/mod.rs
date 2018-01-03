@@ -73,7 +73,7 @@ lazy_static! {
     static ref ID_PREFIX: Regex = Regex::new(r"^([0-9]+)(?: +(.*)$|$)").unwrap();
     static ref BOARD_SIZE: Regex = Regex::new(r"^boardsize +([0-9]+)").unwrap();
     static ref KOMI: Regex = Regex::new(r"^komi +([0-9\.]+)").unwrap();
-    static ref PLAY: Regex = Regex::new(r"^play +([bBwW]) +([a-z][0-9]+)").unwrap();
+    static ref PLAY: Regex = Regex::new(r"^play +([bBwW]) +([a-z][0-9]+|pass)").unwrap();
     static ref KNOWN_COMMAND: Regex = Regex::new(r"^known_command +([^ ]+)").unwrap();
     static ref GENMOVE: Regex = Regex::new(r"^genmove +([bw])").unwrap();
     static ref REG_GENMOVE: Regex = Regex::new(r"^reg_genmove +([bBwW])").unwrap();
@@ -301,7 +301,13 @@ impl Gtp {
 
                     if vertex.is_pass() {
                         self.search_tree = self.search_tree.take().and_then(|tree| {
-                            mcts::tree::Node::forward(tree, 361)
+                            if tree.color == color {
+                                mcts::tree::Node::forward(tree, 361)
+                            } else if let Some(tree) = mcts::tree::Node::forward(tree, 361) {
+                                mcts::tree::Node::forward(tree, 361)
+                            } else {
+                                None
+                            }
                         });
 
                         Some(board.clone())
@@ -309,7 +315,17 @@ impl Gtp {
                         let mut other = board.clone();
                         other.place(color, vertex.x, vertex.y);
                         self.search_tree = self.search_tree.take().and_then(|tree| {
-                            mcts::tree::Node::forward(tree, 19 * vertex.y + vertex.x)
+                            let index = 19 * vertex.y + vertex.x;
+
+                            if tree.color == color {
+                                mcts::tree::Node::forward(tree, index)
+                            } else if let Some(tree) = mcts::tree::Node::forward(tree, 361) {
+                                // if it is not that players turn, then there is an implied
+                                // passing move from the opponent
+                                mcts::tree::Node::forward(tree, index)
+                            } else {
+                                None
+                            }
                         });
 
                         Some(other)

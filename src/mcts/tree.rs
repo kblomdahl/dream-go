@@ -367,6 +367,9 @@ pub struct Node<E: Value> {
     /// The color of each edge.
     pub color: Color,
 
+    /// The number of consecutive passes to reach this node.
+    pub pass_count: i32,
+
     /// The total number of times any edge has been traversed.
     total_count: i32,
 
@@ -427,6 +430,7 @@ impl<E: Value> Node<E> {
         Node {
             lock: Mutex::new(),
             color: color,
+            pass_count: 0,
             total_count: 0,
             count: [0; 368],
             prior: prior_padding,
@@ -526,7 +530,17 @@ impl<E: Value> Node<E> {
         let child = self.children[index];
 
         if child.is_null() {
-            None
+            if index == 361 {
+                // we need to record that were was a pass so that we have the correct
+                // pass count in the root node.
+                let prior = vec! [0.0f32; 362].into_boxed_slice();
+                let mut next = Node::new(self.color.opposite(), prior);
+                next.pass_count = self.pass_count + 1;
+
+                Some(next)
+            } else {
+                None
+            }
         } else {
             Some(unsafe {
                 self.children[index] = ptr::null_mut();
@@ -654,6 +668,8 @@ pub unsafe fn probe<C, E>(root: &mut Node<E>, board: &mut Board) -> Option<NodeT
 
                 debug_assert!(board.is_valid(current.color, x, y));
                 board.place(current.color, x, y);
+            } else if current.pass_count >= 1 {
+                break;  // at least two consecutive passes
             }
 
             //
@@ -695,11 +711,20 @@ pub unsafe fn insert<C, E>(trace: &NodeTrace<E>, color: Color, value: f32, prior
     where C: Param, E: Value
 {
     if let Some(&(node, _, index)) = trace.last() {
-        let next = Box::new(Node::new(color, prior));
+        let mut next = Box::new(Node::new(color, prior));
+        if index == 361 {
+            next.pass_count = (*node).pass_count + 1;
+        }
 
-        debug_assert!((*node).children[index].is_null());
+        if (*node).children[index].is_null() {
+            (*node).children[index] = Box::into_raw(next);
+        } else {
+            debug_assert!(index == 361);
 
-        (*node).children[index] = Box::into_raw(next);
+            // since we stop probing into a tree once two consecutive passes has
+            // occured we can double-expand those nodes. This is too prevent that
+            // from causing memory leaks.
+        }
     }
 
     E::update::<C, E>(trace, color, value);

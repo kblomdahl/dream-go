@@ -87,9 +87,7 @@ impl fmt::Display for GameResult {
 /// * `board` - the board position
 /// * `color` - the current player
 /// 
-fn forward<C>(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f32]>)
-    where C: Param
-{
+fn forward(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f32]>) {
     lazy_static! {
         static ref SYMM: Vec<symmetry::Transform> = vec! [
             symmetry::Transform::Identity,
@@ -123,6 +121,7 @@ fn forward<C>(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f
         // with -Inf, while keeping the pass move (361) untouched so that there
         // is always at least one valid move.
         let mut policy = vec! [0.0f32; 362];
+        policy[361] = original_policy.get(361);  // copy passing move
 
         for i in 0..361 {
             let j = t.inverse().apply(i);
@@ -174,7 +173,7 @@ fn forward<C>(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f
         // we have performed.
         let policy_sum: f32 = policy.iter().filter(|p| p.is_finite()).sum();
 
-        if policy_sum > 1e-4 {  // do not divide by zero
+        if policy_sum > 1e-6 {  // do not divide by zero
             let policy_recip = policy_sum.recip();
 
             for i in 0..362 {
@@ -184,6 +183,34 @@ fn forward<C>(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f
 
         (0.5 * value.get() + 0.5, policy.into_boxed_slice())
     })
+}
+
+/// Like `forward`, but instead of using the neural network to determine the score
+/// use the Tromp-Taylor rules to score the game and output a value based on that
+/// score. This function can replace `forward` if the game is over.
+/// 
+/// # Arguments
+/// 
+/// * `server` -
+/// * `board` -
+/// * `color` -
+/// 
+fn score(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f32]>) {
+    let (_, policy) = forward(server, board, color);
+    let value = {
+        let (black, white) = board.get_score();
+        let black = black as f32;
+        let white = white as f32 + 7.5;
+        let winner = if black > white { Color::Black } else { Color::White };
+
+        if winner == color {
+            1.0
+        } else {
+            0.0
+        }
+    };
+
+    (value, policy)
 }
 
 /// The shared variables between the master and each worker thread in the `predict` function.
@@ -200,6 +227,20 @@ struct ThreadContext<E: tree::Value + Clone + Send> {
 }
 
 unsafe impl<E: tree::Value + Clone + Send> Send for ThreadContext<E> { }
+
+/// Returns true if the final position in the given trace is over according to
+/// the Tromp-Taylor rule set. This can only happend if two consecutive passes
+/// has occured.
+/// 
+/// # Arguments
+/// 
+/// * `trace` -
+/// 
+fn is_game_over<E: tree::Value>(trace: &tree::NodeTrace<E>) -> bool {
+    let &(node, _, index) = trace.last().unwrap();
+
+    index == 361 && unsafe { (*node).pass_count >= 1 }
+}
 
 /// Worker that probes into the given monte carlo search tree until the context
 /// is exhausted.
@@ -221,7 +262,11 @@ fn predict_worker<C, E>(context: ThreadContext<E>, server: ServerGuard)
             if let Some(trace) = trace {
                 let &(_, color, _) = trace.last().unwrap();
                 let next_color = color.opposite();
-                let (value, policy) = forward::<C>(&server, &board, next_color);
+                let (value, policy) = if is_game_over(&trace) {
+                    score(&server, &board, next_color)
+                } else {
+                    forward(&server, &board, next_color)
+                };
 
                 unsafe {
                     tree::insert::<C, E>(&trace, next_color, value, policy);
@@ -261,10 +306,24 @@ fn predict_aux<C, E>(
     let mut starting_tree = if let Some(mut starting_tree) = starting_tree {
         assert_eq!(starting_tree.color, starting_color);
 
+        if starting_tree.prior.iter().sum::<f32>() < 1e-4 {
+            // we are missing the prior distribution, this can happend if we
+            // fast-forwarded a passing move, but the pass move had not been
+            // expanded (since we still need to create the node to record
+            // that it was a pass so that we do not lose count of the number
+            // of consecutive passes).
+            let server = server.lock();
+            let (_, policy) = forward(&server, starting_point, starting_color);
+
+            for i in 0..362 {
+                starting_tree.prior[i] = policy[i];
+            }
+        }
+
         starting_tree
     } else {
         let server = server.lock();
-        let (_, mut policy) = forward::<C>(&server, starting_point, starting_color);
+        let (_, mut policy) = forward(&server, starting_point, starting_color);
 
         tree::Node::new(starting_color, policy)
     };
@@ -472,7 +531,7 @@ fn policy_play_one<C: Param + 'static>(server: &ServerGuard) -> GameResult {
     let mut count = 0;
 
     while pass_count < 2 && count < 722 && !board.is_scoreable() {
-        let (_, policy) = forward::<C>(&server, &board, current);
+        let (_, policy) = forward(&server, &board, current);
 
         // pick a move stochastically according to its prior value, we
         // do not need to compute the sum because `forward` always
