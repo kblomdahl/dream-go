@@ -378,11 +378,13 @@ fn predict_aux<C, E>(
 /// # Arguments
 /// 
 /// * `server` - the server to use during evaluation
+/// * `num_workers` - 
 /// * `starting_point` -
 /// * `starting_color` -
 /// 
 pub fn predict<C, E>(
     server: &Server,
+    num_workers: Option<usize>,
     starting_tree: Option<tree::Node<E>>,
     starting_point: &Board,
     starting_color: Color
@@ -390,7 +392,7 @@ pub fn predict<C, E>(
     where C: Param + Clone + 'static,
           E: tree::Value + Clone + Send + 'static
 {
-    let num_workers = C::thread_count();
+    let num_workers = num_workers.unwrap_or(C::thread_count());
 
     predict_aux::<C, E>(&server, num_workers, starting_tree, starting_point, starting_color)
 }

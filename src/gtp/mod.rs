@@ -240,6 +240,7 @@ impl Gtp {
 
             let (value, index, tree) = mcts::predict::<mcts::param::Tournament, mcts::tree::DefaultValue>(
                 server,
+                None,
                 search_tree,
                 &board,
                 color

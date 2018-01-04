@@ -76,6 +76,7 @@ impl<'a> Iterator for EntryIterator<'a> {
                 let mut policy: Box<[f16]> = if self.server.is_some() && policy.is_partial() {
                     let (_, _, tree) = mcts::predict::<mcts::param::Standard, mcts::tree::DefaultValue>(
                         self.server.as_ref().unwrap(),
+                        Some(1),
                         None,
                         board,
                         current_color
