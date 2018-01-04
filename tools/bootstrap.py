@@ -45,11 +45,12 @@ class BatchNorm:
         self._variance = tf.get_variable('variance'+suffix, (num_features,), tf.float32, ones_op, trainable=False)
 
         #tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._scale)
-        #tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._offset)
+        tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._offset)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._mean)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._variance)
 
         if collection:
+            tf.add_to_collection(collection, self._offset)
             tf.add_to_collection(collection, self._mean)
             tf.add_to_collection(collection, self._variance)
 
@@ -82,12 +83,12 @@ class BatchNorm:
         # The weights are scaled using broadcasting, where all input weights for
         # a given output feature are scaled by that features term.
         #
-        [mean, variance] = sess.run([self._mean, self._variance])
+        [mean, variance, offset] = sess.run([self._mean, self._variance, self._offset])
 
         assert weights_.shape[0] == mean.shape[0]
         assert variance.shape[0] == mean.shape[0]
 
-        into[self._offset] = -mean / np.sqrt(variance + 0.001)
+        into[self._offset] = offset - mean / np.sqrt(variance + 0.001)
         into[weights] = np.multiply(
             weights_,
             np.reshape(1.0 / np.sqrt(variance + 0.001), (weights_.shape[0], 1, 1, 1))
@@ -302,7 +303,7 @@ class Tower:
         glorot_op = tf.glorot_normal_initializer()
 
         with tf.variable_scope('01_upsample'):
-            self._upsample = tf.get_variable('weights', (3, 3, 34, num_features), tf.float32, glorot_op)
+            self._upsample = tf.get_variable('weights', (3, 3, 32, num_features), tf.float32, glorot_op)
             self._bn = BatchNorm(num_features, collection=Tower.VARIABLES)
 
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._upsample)
@@ -363,17 +364,22 @@ def list_local_devices():
 def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False, only_value=False):
     """ Main function """
 
-    dataset = tf.data.FixedLengthRecordDataset(files, 25274)
+    dataset = tf.data.FixedLengthRecordDataset(files, 23830)
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
-    dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
+    dataset = dataset.map(lambda x: tf.split(x, (11552, 1, 362)))
     dataset = dataset.shuffle(196704)
     dataset = dataset.batch(512 if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
     iterator = dataset.make_initializable_iterator()
 
+    with tf.device('cpu:0'):
+        global_step = tf.train.create_global_step()
+        epoch = tf.get_variable('epoch', (), tf.int64, tf.zeros_initializer(), trainable=False)
+        epoch_op = tf.assign_add(epoch, 1)
+
     # setup the forward pass while keeping track of what variables to train, which
     # becomes more annoying because of batch normalization
     train_all = not only_tower and not only_policy and not only_value
-    tower = Tower()
+    _tower = Tower()
 
     original_trainable = set(tf.trainable_variables())
 
@@ -393,11 +399,6 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
                 if var in original_trainable:
                     tf.add_to_collection(tf.GraphKeys.TRAINABLE_VARIABLES, var)
 
-    with tf.device('cpu:0'):
-        global_step = tf.train.create_global_step()
-        epoch = tf.get_variable('epoch', (), tf.int64, tf.zeros_initializer(), trainable=False)
-        epoch_op = tf.assign_add(epoch, 1)
-
     # distribute the work over all of the local GPU's
     value_losses, policy_losses = [], []
     policy_accuracy_1s, policy_accuracy_3s, policy_accuracy_5s, value_accuracies = [], [], [], []
@@ -415,7 +416,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
             with tf.device(None):
                 features, value, policy = iterator.get_next()
 
-            features = tf.reshape(features, (-1, 34, 19, 19))
+            features = tf.reshape(features, (-1, 32, 19, 19))
             value_hat, policy_hat = tower(
                 features,
                 train_tower=train_all or only_tower,
@@ -427,10 +428,11 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
                 if i == 0:
                     # log the result of the forward pass only from the first GPU since
                     # we are not interested in exact results anyway
-                    tf.summary.histogram('value', value)
-                    tf.summary.histogram('value_hat', value_hat)
-                    tf.summary.histogram('policy', policy)
-                    tf.summary.histogram('policy_hat', policy_hat)
+                    #tf.summary.histogram('value', value)
+                    #tf.summary.histogram('value_hat', value_hat)
+                    #tf.summary.histogram('policy', policy)
+                    #tf.summary.histogram('policy_hat', policy_hat)
+                    pass
 
                 policy_argmax = tf.argmax(policy, axis=1)
                 policy_accuracy_1s.append(tf.reduce_mean(tf.cast(tf.nn.in_top_k(policy_hat, policy_argmax, k=1), tf.float32)))
@@ -448,7 +450,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
     value_loss = tf.reduce_mean(value_losses)
     reg_loss = tf.reduce_sum([tf.nn.l2_loss(var) for var in original_trainable])
 
-    loss = policy_loss + value_loss + 2e-4 * reg_loss
+    loss = policy_loss + 0.1 * value_loss + 2e-4 * reg_loss
 
     tf.summary.scalar('loss/policy', policy_loss)
     tf.summary.scalar('loss/value', value_loss)
@@ -457,10 +459,10 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
 
     learning_rate = tf.train.piecewise_constant(
         global_step,
-        [12000, 27000, 45000, 66000, 90000],
-        [3e-3, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5]
+        [24000, 48000, 65000, 84000, 105000, 384000],
+        [1e-2, 3e-3, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5]
     )
-    optimizer = tf.train.AdamOptimizer(learning_rate)
+    optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
     optimizer_op = optimizer.minimize(
         loss,
         global_step=global_step,
@@ -474,8 +476,8 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
     tf.summary.scalar('accuracy/policy_5', tf.reduce_mean(policy_accuracy_5s))
     tf.summary.scalar('accuracy/value', tf.reduce_mean(value_accuracies))
 
-    for var in tf.model_variables():
-        tf.summary.histogram(var.name, var)
+    #for var in tf.model_variables():
+    #    tf.summary.histogram(var.name, var)
 
     tf.summary.scalar('learning_rate', learning_rate)
     tf.summary.scalar('global_step', global_step)
@@ -545,16 +547,16 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
 def verify(args):
     """ Retrieve accuracy for a verification test-set. """
 
-    dataset = tf.data.FixedLengthRecordDataset(args, 25274)
+    dataset = tf.data.FixedLengthRecordDataset(args, 23830)
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
-    dataset = dataset.map(lambda x: tf.split(x, (12274, 1, 362)))
+    dataset = dataset.map(lambda x: tf.split(x, (11552, 1, 362)))
     dataset = dataset.batch(1)
     iterator = dataset.make_initializable_iterator()
 
     # get the answer from the data-set and the prediction
     tower = Tower()
     features, value, policy = iterator.get_next()
-    features = tf.reshape(features, (-1, 34, 19, 19))
+    features = tf.reshape(features, (-1, 32, 19, 19))
     value_hat, policy_hat = tower(features, is_training=False)
 
     policy_argmax = tf.argmax(policy, axis=1)
