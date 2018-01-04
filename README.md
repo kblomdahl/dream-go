@@ -107,6 +107,9 @@ For the values provided in this example, which generate 2,000,000 examples for t
 ## Roadmap
 
 * 1.0.0 - _Public Release_
+* 0.6.0 - _Emergent_
+  * First version with a network trained from self-play games
+  * [DP4A](https://devblogs.nvidia.com/parallelforall/mixed-precision-programming-cuda-8/) implementation
 * 0.5.0 - _Assessment_
   * Optimize the monte carlo tree search parameters against other engines
   * Optimize neural network size for _best_ performance vs speed ratio
