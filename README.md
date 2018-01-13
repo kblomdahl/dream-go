@@ -15,7 +15,7 @@ Dream Go is an independent implementation of the algorithms and concepts present
 If you want to run the supervised or reinforcement learning programs to improve the quality of the weights or help development of the agent then you will need the following:
 
 * [Python 3.6](https://www.python.org/) with [Tensorflow](https://tensorflow.org/)
-* [Rust](https://www.rust-lang.org) (stable)
+* [Rust](https://www.rust-lang.org) (nightly)
 
 ## Training
 
