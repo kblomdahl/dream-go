@@ -26,7 +26,6 @@ pub fn count_zeros(array: &[u8]) -> usize {
     let count: usize;
 
     if cfg!(target_arch = "x86_64") {
-        #[cfg(target_arch = "x86_64")]
         unsafe {
             // 256-bit AVX2 implementation of the following algorithm, where
             // the main _trick_ is the use of the `movemask` and `popcnt` in

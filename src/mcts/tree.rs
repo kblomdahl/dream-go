@@ -109,7 +109,6 @@ impl Value for RAVE {
             let sqrt_n = ((1 + node.total_count) as f32).sqrt();
             let b_sqr = C::rave_bias() * C::rave_bias();
 
-            #[cfg(target_arch = "x86_64")]
             unsafe {
                 const ONE: f32 = 1.0f32;
 
@@ -226,7 +225,6 @@ impl Value for PUCT {
         if cfg!(target_arch = "x86_64") {
             let sqrt_n = ((1 + node.total_count) as f32).sqrt();
 
-            #[cfg(target_arch = "x86_64")]
             unsafe {
                 const ONE: i32 = 1;
 
@@ -287,10 +285,9 @@ pub type DefaultValue = PUCT;
 #[inline(never)]
 fn argmax(array: &[f32]) -> Option<usize> {
     // This function is `inline(never)` to avoid LLVM from performing dead
-    // code elimination on the inline assembly.
+    // code elimination (?) on the inline assembly.
 
     if cfg!(target_arch = "x86_64") {
-        #[cfg(target_arch = "x86_64")]
         unsafe {
             const NEG_INFINITY: [f32; 8] = [
                 ::std::f32::NEG_INFINITY, ::std::f32::NEG_INFINITY, ::std::f32::NEG_INFINITY, ::std::f32::NEG_INFINITY,
