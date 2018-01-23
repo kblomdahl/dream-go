@@ -212,6 +212,32 @@ impl Board {
         }
     }
 
+    /// Returns the index of the first liberty found for the given group.
+    ///
+    /// # Arguments
+    ///
+    /// * `vertices` -
+    /// * `next_vertex` -
+    /// * `index` -
+    /// 
+    fn get_one_liberty(vertices: &[u8], next_vertex: &[u16], index: usize) -> Option<usize> {
+        let mut current = index;
+
+        loop {
+            if N!(vertices, current) == 0 { return Some(current + 19); }
+            if E!(vertices, current) == 0 { return Some(current + 1); }
+            if S!(vertices, current) == 0 { return Some(current - 19); }
+            if W!(vertices, current) == 0 { return Some(current - 1); }
+
+            current = next_vertex[current] as usize;
+            if current == index {
+                break
+            }
+        }
+
+        None
+    }
+
     /// Returns true iff the group at the given index at least one liberty.
     ///
     /// # Arguments
@@ -219,21 +245,7 @@ impl Board {
     /// * `index` - the index of a stone in the group to check
     ///
     fn has_one_liberty(&self, index: usize) -> bool {
-        let mut current = index;
-
-        loop {
-            if N!(self.vertices, current) == 0 { return true; }
-            if E!(self.vertices, current) == 0 { return true; }
-            if S!(self.vertices, current) == 0 { return true; }
-            if W!(self.vertices, current) == 0 { return true; }
-
-            current = self.next_vertex[current] as usize;
-            if current == index {
-                break
-            }
-        }
-
-        false
+        Board::get_one_liberty(&self.vertices, &self.next_vertex, index).is_some()
     }
 
     /// Returns true iff the group at the given index has at least two
@@ -244,6 +256,19 @@ impl Board {
     /// * `index` - the index of a stone in the group to check
     ///
     fn has_two_liberties(&self, index: usize) -> bool {
+        Board::_has_two_liberties(&self.vertices, &self.next_vertex, index)
+    }
+
+    /// Returns true iff the group at the given index has at least two
+    /// liberties in the given `vertices` and `next_vertex` arrays.
+    ///
+    /// # Arguments
+    ///
+    /// * `vertices` -
+    /// * `next_vertex` -
+    /// * `index` - the index of a stone in the group to check
+    ///
+    fn _has_two_liberties(vertices: &[u8], next_vertex: &[u16], index: usize) -> bool {
         let mut current = index;
         let mut previous = 0xffff;
 
@@ -258,12 +283,12 @@ impl Board {
                 })
             }
 
-            if N!(self.vertices, current) == 0 { check_two_liberties!(current + 19); }
-            if E!(self.vertices, current) == 0 { check_two_liberties!(current + 1); }
-            if S!(self.vertices, current) == 0 { check_two_liberties!(current - 19); }
-            if W!(self.vertices, current) == 0 { check_two_liberties!(current - 1); }
+            if N!(vertices, current) == 0 { check_two_liberties!(current + 19); }
+            if E!(vertices, current) == 0 { check_two_liberties!(current + 1); }
+            if S!(vertices, current) == 0 { check_two_liberties!(current - 19); }
+            if W!(vertices, current) == 0 { check_two_liberties!(current - 1); }
 
-            current = self.next_vertex[current] as usize;
+            current = next_vertex[current] as usize;
             if current == index {
                 break
             }
@@ -344,10 +369,11 @@ impl Board {
     ///
     /// # Arguments
     ///
-    /// * `index` - The first chain to connect
-    /// * `other` - The second chain to connect
+    /// * `next_vertex` - the array containing the next vertices
+    /// * `index` - the first chain to connect
+    /// * `other` - the second chain to connect
     ///
-    fn join_vertices(&mut self, index: usize, other: usize) {
+    fn join_vertices(next_vertex: &mut [u16], index: usize, other: usize) {
         // check so that other is not already in the chain starting
         // at index since that would lead to a corrupted chain.
         let mut current = index;
@@ -357,7 +383,7 @@ impl Board {
                 return;
             }
 
-            current = self.next_vertex[current] as usize;
+            current = next_vertex[current] as usize;
             if current == index {
                 break;
             }
@@ -372,11 +398,11 @@ impl Board {
         //
         //   a -> 2 -> 3 -> 1 -> b -> c -> a
         //
-        let index_prev = self.next_vertex[index];
-        let other_prev = self.next_vertex[other];
+        let index_prev = next_vertex[index];
+        let other_prev = next_vertex[other];
 
-        self.next_vertex[other] = index_prev;
-        self.next_vertex[index] = other_prev;
+        next_vertex[other] = index_prev;
+        next_vertex[index] = other_prev;
     }
 
     /// Returns whether the given move is valid according to the
@@ -462,6 +488,36 @@ impl Board {
         self._is_valid(color, index) && !self._is_ko(color, index)
     }
 
+    /// Place the given stone on the board without checking if it is legal, and
+    /// without capturing any of the opponents stones.
+    ///
+    /// # Arguments
+    ///
+    /// * `vertices` -
+    /// * `next_vertex` -
+    /// * `color` - the color of the move
+    /// * `index` - the index of the move
+    ///
+    fn place_no_capture(
+        vertices: &mut [u8],
+        next_vertex: &mut [u16],
+        color: Color,
+        index: usize
+    ) {
+        let player = color as u8;
+
+        // place the stone on the board regardless of whether it is legal
+        // or not.
+        vertices[index] = color as u8;
+        next_vertex[index] = index as u16;
+
+        // connect this stone to any neighbouring groups
+        if N!(vertices, index) == player { Board::join_vertices(next_vertex, index, index + 19); }
+        if E!(vertices, index) == player { Board::join_vertices(next_vertex, index, index + 1); }
+        if S!(vertices, index) == player { Board::join_vertices(next_vertex, index, index - 19); }
+        if W!(vertices, index) == player { Board::join_vertices(next_vertex, index, index - 1); }
+    }
+
     /// Place the given stone on the board without checking if it is legal, the
     /// board is then updated according to the Tromp-Taylor rules with the
     /// except that ones own color is not cleared.
@@ -477,18 +533,10 @@ impl Board {
 
         // place the stone on the board regardless of whether it is legal
         // or not.
-        self.vertices[index] = color as u8;
-        self.next_vertex[index] = index as u16;
+        Board::place_no_capture(&mut self.vertices, &mut self.next_vertex, color, index);
+
         self.count += 1;
         self.zobrist_hash ^= zobrist::TABLE[color as usize][index];
-
-        // connect this stone to any neighbouring groups
-        let player = color as u8;
-
-        if N!(self.vertices, index) == player { self.join_vertices(index, index + 19); }
-        if E!(self.vertices, index) == player { self.join_vertices(index, index + 1); }
-        if S!(self.vertices, index) == player { self.join_vertices(index, index - 19); }
-        if W!(self.vertices, index) == player { self.join_vertices(index, index - 1); }
 
         // clear the opponents color
         let opponent = color.opposite() as u8;
@@ -506,6 +554,179 @@ impl Board {
         //    keep track of the initial board state.
         self.history.push(&self.vertices);
         self.zobrist_history.push(self.zobrist_hash);
+    }
+
+    /// Returns true if playing a stone at the given index successfully
+    /// captures some stones in a serie of ataris.
+    ///
+    /// # Arguments
+    ///
+    /// * `vertices` - the `vertices` of the board to check
+    /// * `next_vertex` - the `next_vertex` of the board to check
+    /// * `color` - the color of the current player
+    /// * `index` - the index of the vertex to check
+    ///
+    fn _is_ladder_capture(
+        vertices: &mut [u8],
+        next_vertex: &mut [u16],
+        color: Color,
+        index: usize
+    ) -> bool
+    {
+        Board::place_no_capture(vertices, next_vertex, color, index);
+
+        // if any of the neighbouring opponent groups were reduced to one
+        // liberty then extend into that liberty. if no such group exists
+        // then this is not a ladder capturing move.
+        let opponent = color.opposite() as u8;
+        let opponent_index = {
+            macro_rules! check {
+                ($dir:ident) => ({
+                    if $dir!(vertices, index) == opponent {
+                        if Board::_has_two_liberties(vertices, next_vertex, $dir!(index)) {
+                            None
+                        } else {
+                            Board::get_one_liberty(vertices, next_vertex, $dir!(index))
+                        }
+                    } else {
+                        None
+                    }
+                })
+            }
+
+            if let Some(other_index) = check!(N) {
+                other_index
+            } else if let Some(other_index) = check!(E) {
+                other_index
+            } else if let Some(other_index) = check!(S) {
+                other_index
+            } else if let Some(other_index) = check!(W) {
+                other_index
+            } else {
+                return false;
+            }
+        };
+
+        Board::place_no_capture(vertices, next_vertex, color.opposite(), opponent_index);
+
+        // check the number of liberties after extending the group that was put in atari
+        //
+        // * If one liberty, then this group can be captured.
+        // * If two liberties, keep searching.
+        // * If more than two liberties, then this group can not be captured.
+        //
+        let opponent_count = if N!(vertices, opponent_index) == 0 { 1 } else { 0 }
+            + if E!(vertices, opponent_index) == 0 { 1 } else { 0 }
+            + if S!(vertices, opponent_index) == 0 { 1 } else { 0 }
+            + if W!(vertices, opponent_index) == 0 { 1 } else { 0 };
+
+        if opponent_count < 2 {
+            return true;
+        } else if opponent_count > 2 {
+            return false;
+        }
+
+        // if playing `opponent_vertex` put any of my stones into atari
+        // then this is not a ladder capturing move.
+        let player = color as u8;
+
+        if N!(vertices, opponent_index) == player && !Board::_has_two_liberties(vertices, next_vertex, opponent_index + 19) { return false; }
+        if E!(vertices, opponent_index) == player && !Board::_has_two_liberties(vertices, next_vertex, opponent_index + 1) { return false; }
+        if S!(vertices, opponent_index) == player && !Board::_has_two_liberties(vertices, next_vertex, opponent_index - 19) { return false; }
+        if W!(vertices, opponent_index) == player && !Board::_has_two_liberties(vertices, next_vertex, opponent_index - 1) { return false; }
+
+        // try capturing the new group by playing _ladder capturing moves_
+        // in all of its liberties, if we succeed with either then this
+        // is a ladder capturing move
+        macro_rules! check_recursive {
+            ($dir:ident) => ({
+                if $dir!(vertices, opponent_index) == 0 {
+                    let mut vertices_ = [0; 368];
+                    let mut next_vertex_ = [0; 361];
+
+                    vertices_.copy_from_slice(vertices);
+                    next_vertex_.copy_from_slice(next_vertex);
+
+                    Board::_is_ladder_capture(&mut vertices_, &mut next_vertex_, color, $dir!(opponent_index))
+                } else {
+                    false
+                }
+            })
+        }
+
+        if check_recursive!(N) { return true; }
+        if check_recursive!(E) { return true; }
+        if check_recursive!(S) { return true; }
+        if check_recursive!(W) { return true; }
+
+        false
+    }
+
+    /// Returns true if playing a stone at the given index allows us to
+    /// capture some of the opponents stones with a ladder (sequence of
+    /// ataris).
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the current player
+    /// * `index` - the index of the stone to check
+    ///
+    #[allow(unused)]
+    fn is_ladder_capture(&self, color: Color, index: usize) -> bool {
+        debug_assert!(self._is_valid(color, index));
+
+        // clone only the minimum parts of the board that is necessary
+        // to play out the ladder.
+        let mut vertices = self.vertices.clone();
+        let mut next_vertex = self.next_vertex.clone();
+
+        Board::_is_ladder_capture(&mut vertices, &mut next_vertex, color, index)
+    }
+
+    /// Returns true if playing a stone at the given index allows us to
+    /// escape using a ladder (sequence of ataris).
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the current player
+    /// * `index` - the index of the stone to check
+    #[allow(unused)]
+    fn is_ladder_escape(&self, color: Color, index: usize) -> bool {
+        debug_assert!(self._is_valid(color, index));
+
+        // clone only the minimum parts of the board that is necessary
+        // to play out the ladder.
+        let mut vertices = self.vertices.clone();
+        let mut next_vertex = self.next_vertex.clone();
+
+        Board::place_no_capture(&mut vertices, &mut next_vertex, color, index);
+
+        // check if we have exactly two liberties
+        let liberty_count = if N!(vertices, index) == 0 { 1 } else { 0 }
+            + if E!(vertices, index) == 0 { 1 } else { 0 }
+            + if S!(vertices, index) == 0 { 1 } else { 0 }
+            + if W!(vertices, index) == 0 { 1 } else { 0 };
+
+        if liberty_count != 2 {
+            return false;
+        }
+
+        //
+        macro_rules! check_ladder {
+            ($dir:ident) => ({
+                let mut vertices_ = vertices.clone();
+                let mut next_vertex_ = next_vertex.clone();
+
+                Board::_is_ladder_capture(&mut vertices_, &mut next_vertex_, color, $dir!(index))
+            })
+        }
+
+        if check_ladder!(N) { return false; }
+        if check_ladder!(E) { return false; }
+        if check_ladder!(S) { return false; }
+        if check_ladder!(W) { return false; }
+
+        true
     }
 
     /// Fills the given array with all liberties of in the provided array of vertices
@@ -1068,5 +1289,61 @@ mod tests {
 
         assert!(board.is_scoreable());
         assert_eq!(board.get_score(), (357, 4));
+    }
+
+    #[test]
+    fn ladder_capture() {
+        // test the following (as 19x19 board), and check
+        // that any atari move is a ladder capture
+        //
+        // X . . . X
+        // . . . . .
+        // . . . . .
+        // . . . . .
+        // X . . . X
+        //
+        let mut board = Board::new();
+        board.place(Color::Black,  0,  0);
+        board.place(Color::Black,  0, 18);
+        board.place(Color::Black, 18,  0);
+        board.place(Color::Black, 18, 18);
+
+        for x in 0..19 {
+            for y in 0..19 {
+                let is_ladder = (x == 1 && y == 0)
+                    || (x ==  0 && y ==  1)
+                    || (x == 18 && y == 17)
+                    || (x == 17 && y == 18)
+                    || (x ==  1 && y == 18)
+                    || (x == 18 && y ==  1)
+                    || (x ==  0 && y == 17)
+                    || (x == 17 && y ==  0);
+                let index = 19 * y + x;
+
+                assert_eq!(board.is_ladder_capture(Color::White, index), is_ladder);
+            }
+        }
+    }
+
+    #[test]
+    fn ladder_escape() {
+        // test a standard ladder pattern with a stone on the diagonal
+        let mut board = Board::new();
+        board.place(Color::White, 3, 3);
+        board.place(Color::White, 15, 15);
+        board.place(Color::Black, 2, 3);
+        board.place(Color::Black, 3, 2);
+        board.place(Color::Black, 4, 2);
+        board.place(Color::Black, 3, 4);
+
+        for x in 0..19 {
+            for y in 0..19 {
+                let is_ladder = x == 3 && y == 4;
+                let index = 19 * y + x;
+
+                assert!(!board.is_ladder_capture(Color::Black, index));
+                assert_eq!(board.is_ladder_escape(Color::White, index), is_ladder);
+            }
+        }
     }
 }
