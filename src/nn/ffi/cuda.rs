@@ -16,6 +16,15 @@ use libc::{c_void, c_int};
 
 #[repr(i32)]
 #[derive(Debug, PartialEq, Eq)]
+pub enum DataType {
+    R16F = 2,  // real as half
+    R32F = 0,  // real as float
+    R8I = 3,  // real as signed char
+    R32I = 10,  // real as signed int
+}
+
+#[repr(i32)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DeviceAttr {
     ComputeCapabilityMajor = 75,
     ComputeCapabilityMinor = 76
@@ -119,7 +128,6 @@ extern {
 
     #[cfg(feature = "trace-cuda")]
     pub fn cudaDeviceSynchronize() -> Error;
-    #[cfg(feature = "tensor-core")]
     pub fn cudaRuntimeGetVersion(version: *mut c_int) -> Error;
     pub fn cudaDeviceGetAttribute(value: *mut c_int, attr: DeviceAttr, device: c_int) -> Error;
 

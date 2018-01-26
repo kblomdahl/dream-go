@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use libc::{c_double, c_int, c_void, size_t};
-use nn::ffi::cuda::Stream;
+use nn::ffi::cuda::{self, Stream};
 
 #[repr(i32)]
 #[allow(dead_code)]
@@ -46,6 +46,15 @@ pub enum ConvolutionFwdAlgo {
 #[repr(i32)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[allow(dead_code)]
+pub enum ConvolutionFwdPreference {
+    NoWorkspace = 0,
+    PreferFastest = 1,
+    SpecifyWorkspaceLimit = 2
+}
+
+#[repr(i32)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[allow(dead_code)]
 pub enum DataType {
     Float = 0,
     Half = 2,
@@ -64,6 +73,23 @@ impl DataType {
             DataType::Int8x4 => 1
         }
     }
+
+    pub fn to_cuda(&self) -> cuda::DataType {
+        match *self {
+            DataType::Float => cuda::DataType::R32F,
+            DataType::Half => cuda::DataType::R16F,
+            DataType::Int8 => cuda::DataType::R8I,
+            DataType::Int32 => cuda::DataType::R32I,
+            DataType::Int8x4 => panic!()
+        }
+    }
+}
+
+#[repr(i32)]
+#[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum OpTensorOp {
+    Add = 0
 }
 
 #[repr(i32)]
@@ -132,6 +158,7 @@ pub type ActivationDescriptor = *const c_void;
 pub type ConvolutionDescriptor = *const c_void;
 pub type FilterDescriptor = *const c_void;
 pub type Handle = *const c_void;
+pub type OpTensorDescriptor = *const c_void;
 pub type TensorDescriptor = *const c_void;
 
 #[link(name = "cudnn")]
@@ -328,6 +355,22 @@ extern {
         C: *mut c_void
     ) -> Status;
 
+    /// This function scale all the elements of a tensor by a given factor.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - Handle to a previously created cuDNN context.
+    /// * `yDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `y` - Pointer to data of the tensor described by the `yDesc` descriptor.
+    /// * `alpha` - 
+    /// 
+    pub fn cudnnScaleTensor(
+        handle: Handle,
+        yDesc: TensorDescriptor,
+        Y: *mut c_void,
+        alpha: *const f32
+    ) -> Status;
+
     /// This routine applies a specified neuron activation function element-wise over each input
     /// value.
     /// 
@@ -353,45 +396,32 @@ extern {
         dest: *mut c_void,
     ) -> Status;
 
-    /// This function performs the forward BatchNormalization layer computation for inference
-    /// phase. This layer is based on the paper "Batch Normalization: Accelerating Deep Network
-    /// Training by Reducing Internal Covariate Shift", S. Ioffe, C. Szegedy, 2015.
+    /// This function serves as a heuristic for obtaining the best suited algorithm for
+    /// `cudnnConvolutionForward` for the given layer specifications. Based on the input
+    /// preference, this function will either return the fastest algorithm or the fastest algorithm
+    /// within a given memory limit. For an exhaustive search for the fastest algorithm, please
+    /// use `cudnnFindConvolutionForwardAlgorithm`.
     /// 
     /// # Arguments
     /// 
-    /// * `handle` - Input. Handle to a previously created cuDNN library descriptor.
-    /// * `mode` - Input. Mode of operation (spatial or per-activation).
-    /// * `alpha` -
-    /// * `beta` -
-    /// * `xDesc` - Tensor descriptors and pointers in device memory for the layer's x and y data.
-    /// * `x` - Tensor descriptors and pointers in device memory for the layer's x and y data.
-    /// * `yDesc` - Tensor descriptors and pointers in device memory for the layer's x and y data.
-    /// * `y` - Tensor descriptors and pointers in device memory for the layer's x and y data.
-    /// * `bnScaleBiasMeanVarDesc` - Tensor descriptor and pointers in device memory for the batch
-    ///    normalization scale and bias parameters
-    /// * `bnScale` - Tensor descriptor and pointers in device memory for the batch
-    ///    normalization scale and bias parameters
-    /// * `bnBias` - Tensor descriptor and pointers in device memory for the batch
-    ///    normalization scale and bias parameters
-    /// * `estimatedMean` - Mean tensors
-    /// * `estimatedVariance` - Variance tensors
-    /// * `epsilon` -  Epsilon value used in the batch normalization formula.
-    ///
-    pub fn cudnnBatchNormalizationForwardInference(
+    /// * `handle` -
+    /// * `xDesc` -
+    /// * `wDesc` -
+    /// * `convDesc` -
+    /// * `yDesc` -
+    /// * `preference` -
+    /// * `memorySizeInBytes` -
+    /// * `algo` -
+    /// 
+    pub fn cudnnGetConvolutionForwardAlgorithm(
         handle: Handle,
-        mode: BatchNormMode,
-        alpha: *const f32,
-        beta: *const f32,
         xDesc: TensorDescriptor,
-        x: *const c_void,
+        wDesc: FilterDescriptor,
+        convDesc: ConvolutionDescriptor,
         yDesc: TensorDescriptor,
-        y: *mut c_void,
-        bnScaleBiasMeanVarDesc: TensorDescriptor,
-        bnScale: *const c_void,
-        bnBias: *const c_void,
-        estimatedMean: *const c_void,
-        estimatedVariance: *const c_void,
-        epsilon: c_double
+        preference: ConvolutionFwdPreference,
+        memorySizeInBytes: size_t,
+        algo: *mut ConvolutionFwdAlgo
     ) -> Status;
 
     /// This function returns the amount of GPU memory workspace the user needs

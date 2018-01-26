@@ -16,7 +16,7 @@ use go::{Board, Color, symmetry, CHW};
 use mcts::parallel::Server;
 use mcts;
 use util::b85;
-use util::f16::*;
+use util::types::*;
 
 use std::mem::transmute;
 use std::io::{self, Cursor};

@@ -23,7 +23,7 @@ use test::Bencher;
 use libc::{c_void};
 
 use dream_go::nn::ffi::*;
-use dream_go::util::*;
+use dream_go::util::types::*;
 
 /// Benchmark the given cuDNN configuration using a single convolutional
 /// layer.
@@ -268,7 +268,7 @@ fn f16_256_winogradnonfused(b: &mut Bencher) {
     if !supports_f16() { return }
 
     unsafe {
-        bench_conv::<f16::f16>(
+        bench_conv::<f16>(
             b,
             256,
             cudnn::TensorFormat::NCHW,
@@ -284,7 +284,7 @@ fn f16_256_implicitprecompgemm(b: &mut Bencher) {
     if !supports_f16() { return }
 
     unsafe {
-        bench_conv::<f16::f16>(
+        bench_conv::<f16>(
             b,
             256,
             cudnn::TensorFormat::NCHW,
@@ -298,7 +298,7 @@ fn f16_256_implicitprecompgemm(b: &mut Bencher) {
 #[bench]
 fn p16_256_winograd(b: &mut Bencher) {
     unsafe {
-        bench_conv::<f16::f16>(
+        bench_conv::<f16>(
             b,
             256,
             cudnn::TensorFormat::NCHW,
@@ -312,7 +312,7 @@ fn p16_256_winograd(b: &mut Bencher) {
 #[bench]
 fn p16_256_implicitprecompgemm(b: &mut Bencher) {
     unsafe {
-        bench_conv::<f16::f16>(
+        bench_conv::<f16>(
             b,
             256,
             cudnn::TensorFormat::NCHW,
@@ -328,7 +328,7 @@ fn i8_256_implicitprecompgemm(b: &mut Bencher) {
     if !supports_i8() { return }
 
     unsafe {
-        bench_conv::<q8::q8>(
+        bench_conv::<q8>(
             b,
             256,
             cudnn::TensorFormat::NHWC,
@@ -344,7 +344,7 @@ fn i8x4_256_implicitprecompgemm(b: &mut Bencher) {
     if !supports_i8() { return }
 
     unsafe {
-        bench_conv::<q8::q8>(
+        bench_conv::<q8>(
             b,
             256,
             cudnn::TensorFormat::NCHWVECTC,
@@ -374,7 +374,7 @@ fn f16_128_winogradnonfused(b: &mut Bencher) {
     if !supports_f16() { return }
 
     unsafe {
-        bench_conv::<f16::f16>(
+        bench_conv::<f16>(
             b,
             128,
             cudnn::TensorFormat::NCHW,
@@ -390,7 +390,7 @@ fn f16_128_implicitprecompgemm(b: &mut Bencher) {
     if !supports_f16() { return }
 
     unsafe {
-        bench_conv::<f16::f16>(
+        bench_conv::<f16>(
             b,
             128,
             cudnn::TensorFormat::NCHW,
@@ -404,7 +404,7 @@ fn f16_128_implicitprecompgemm(b: &mut Bencher) {
 #[bench]
 fn p16_128_winograd(b: &mut Bencher) {
     unsafe {
-        bench_conv::<f16::f16>(
+        bench_conv::<f16>(
             b,
             128,
             cudnn::TensorFormat::NCHW,
@@ -418,7 +418,7 @@ fn p16_128_winograd(b: &mut Bencher) {
 #[bench]
 fn p16_128_implicitprecompgemm(b: &mut Bencher) {
     unsafe {
-        bench_conv::<f16::f16>(
+        bench_conv::<f16>(
             b,
             128,
             cudnn::TensorFormat::NCHW,
@@ -434,7 +434,7 @@ fn i8_128_implicitprecompgemm(b: &mut Bencher) {
     if !supports_i8() { return }
 
     unsafe {
-        bench_conv::<q8::q8>(
+        bench_conv::<q8>(
             b,
             128,
             cudnn::TensorFormat::NHWC,
@@ -450,7 +450,7 @@ fn i8x4_128_implicitprecompgemm(b: &mut Bencher) {
     if !supports_i8() { return }
 
     unsafe {
-        bench_conv::<q8::q8>(
+        bench_conv::<q8>(
             b,
             128,
             cudnn::TensorFormat::NCHWVECTC,

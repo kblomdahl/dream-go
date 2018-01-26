@@ -22,7 +22,7 @@ use test::Bencher;
 use rand::{Rng, thread_rng};
 
 use dream_go::nn::*;
-use dream_go::util::f16::*;
+use dream_go::util::types::*;
 
 thread_local! {
     static NETWORK: Network = Network::new().unwrap();
@@ -56,7 +56,7 @@ fn bench_batch_size_aux<T>(
     }).collect();
 
     b.iter(move || {
-        forward(&mut workspace, &features)
+        forward::<T, T>(&mut workspace, &features)
     });
 }
 

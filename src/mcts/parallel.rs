@@ -21,8 +21,8 @@ use threadpool::ThreadPool;
 use mcts::param::Param;
 use nn::{self, Network, Workspace};
 use util::array::*;
-use util::f16::*;
 use util::singleton::*;
+use util::types::*;
 
 pub enum PredictRequest {
     /// Shutdown the server thread.
@@ -52,7 +52,7 @@ pub enum PredictRequest {
 /// * `features_list` - 
 /// 
 fn forward_f32(workspace: &mut Workspace, features_list: Vec<Array>) -> (Vec<Singleton>, Vec<Array>) {
-    let (value_list, policy_list) = nn::forward::<f32>(
+    let (value_list, policy_list) = nn::forward::<f32, _>(
         workspace,
         &features_list.into_iter()
             .map(|feature| {
@@ -86,7 +86,7 @@ fn forward_f32(workspace: &mut Workspace, features_list: Vec<Array>) -> (Vec<Sin
 /// * `features_list` - 
 /// 
 fn forward_f16(workspace: &mut Workspace, features_list: Vec<Array>) -> (Vec<Singleton>, Vec<Array>) {
-    let (value_list, policy_list) = nn::forward::<f16>(
+    let (value_list, policy_list) = nn::forward::<f16, _>(
         workspace,
         &features_list.into_iter()
             .map(|feature| {
@@ -105,6 +105,40 @@ fn forward_f16(workspace: &mut Workspace, features_list: Vec<Array>) -> (Vec<Sin
         .collect();
     let policy_list = policy_list.into_iter()
         .map(|policy| Array::from_f16(policy))
+        .collect();
+
+    (value_list, policy_list)
+}
+
+/// Run the `nn::forward` function for the given features and wrap the
+/// results into `Array` elements. This version assumes the neural network
+/// use `i8` weights.
+/// 
+/// # Arguments
+/// 
+/// * `workspace` - 
+/// * `features_list` - 
+/// 
+fn forward_i8(workspace: &mut Workspace, features_list: Vec<Array>) -> (Vec<Singleton>, Vec<Array>) {
+    let (value_list, policy_list) = nn::forward::<q8, f32>(
+        workspace,
+        &features_list.into_iter()
+            .map(|feature| {
+                match feature {
+                    Array::Int8(inner) => inner,
+                    _ => panic!()
+                }
+            })
+            .collect()
+    );
+
+    // wrap the results in `Array` so that we can avoid having to pass
+    // generics everywhere
+    let value_list = value_list.into_iter()
+        .map(|value| Singleton::from_f32(value))
+        .collect();
+    let policy_list = policy_list.into_iter()
+        .map(|policy| Array::from_f32(policy))
         .collect();
 
     (value_list, policy_list)
@@ -142,7 +176,9 @@ fn server_aux<C: Param>(
         for msg in receiver.iter() {
             match msg {
                 PredictRequest::Shutdown => {
-                    break 'a
+                    debug_assert!(worker_count == 0);
+
+                    break 'a;
                 },
                 PredictRequest::Increase => {
                     worker_count += 1;
@@ -191,7 +227,9 @@ fn server_aux<C: Param>(
             pending_count.fetch_add(1, Ordering::Release);
             pool.execute(move || {
                 let mut workspace = network.get_workspace(features_list.len());
-                let (value_list, policy_list) = if workspace.is_half() {
+                let (value_list, policy_list) = if workspace.is_int8() {
+                    forward_i8(&mut workspace, features_list)
+                } else if workspace.is_half() {
                     forward_f16(&mut workspace, features_list)
                 } else {
                     forward_f32(&mut workspace, features_list)
@@ -226,7 +264,6 @@ fn server_aux<C: Param>(
     }
 
     // wait for all of the neural network workers to terminate
-    drop(receiver);
     pool.join();
 
     // signal that the server is no longer running
@@ -242,7 +279,8 @@ pub struct Server {
     handle: Option<Arc<thread::JoinHandle<()>>>,
     sender: Sender<PredictRequest>,
     is_running: Arc<(Mutex<bool>, Condvar)>,
-    is_half: bool
+    is_half: bool,
+    is_int8: bool
 }
 
 impl Drop for Server {
@@ -268,6 +306,7 @@ impl Server {
         let (sender, receiver) = channel();
         let is_running = Arc::new((Mutex::new(true), Condvar::new()));
         let is_half = network.is_half();
+        let is_int8 = network.is_int8();
         let handle = {
             let is_running = is_running.clone();
 
@@ -278,7 +317,8 @@ impl Server {
             handle: Some(Arc::new(handle)),
             sender: sender,
             is_running: is_running,
-            is_half: is_half
+            is_half: is_half,
+            is_int8: is_int8
         }
     }
 
@@ -305,27 +345,24 @@ impl Server {
     pub fn lock<'a>(&'a self) -> ServerGuard<'a> {
         ServerGuard::new(self)
     }
-
-    /// Returns true if this server expects input and output in half precision.
-    pub fn is_half(&self) -> bool {
-        self.is_half
-    }
 }
 
 pub struct ServerGuard<'a> {
     sender: Sender<PredictRequest>,
     is_half: bool,
+    is_int8: bool,
 
     lifetime: ::std::marker::PhantomData<&'a usize>
 }
 
 impl<'a> Clone for ServerGuard<'a> {
-    fn clone(&self) -> ServerGuard<'a> {
+    fn clone(self: &ServerGuard<'a>) -> ServerGuard<'a> {
         self.sender.send(PredictRequest::Increase).unwrap();
 
         ServerGuard {
             sender: self.sender.clone(),
             is_half: self.is_half,
+            is_int8: self.is_int8,
 
             lifetime: ::std::marker::PhantomData::<&'a usize>::default()
         }
@@ -346,6 +383,7 @@ impl<'a> ServerGuard<'a> {
         ServerGuard {
             sender: server.sender.clone(),
             is_half: server.is_half,
+            is_int8: server.is_int8,
 
             lifetime: ::std::marker::PhantomData::<&'a usize>::default()
         }
@@ -354,6 +392,11 @@ impl<'a> ServerGuard<'a> {
     /// Returns true if this server expects input and output in half precision.
     pub fn is_half(&self) -> bool {
         self.is_half
+    }
+
+    /// Returns true if this server expects input and output in int8 quantized precision.
+    pub fn is_int8(&self) -> bool {
+        self.is_int8
     }
 
     /// Sends a request to the server for computing the value and policy for

@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,37 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod array;
-pub mod b85;
-pub mod types;
-pub mod singleton;
+mod fp16;
+mod fp8;
 
-/// Returns the smallest of `x` and `y`.
-/// 
-/// # Arguments
-/// 
-/// * `x` -
-/// * `y` -
-/// 
-pub fn min(x: f32, y: f32) -> f32 {
-    if x < y {
-        x
-    } else {
-        y
-    }
-}
-
-/// Returns the largest of `x` and `y`.
-/// 
-/// # Arguments
-/// 
-/// * `x` -
-/// * `y` -
-/// 
-pub fn max(x: f32, y: f32) -> f32 {
-    if x > y {
-        x
-    } else {
-        y
-    }
-}
+pub use self::fp16::*;
+pub use self::fp8::*;

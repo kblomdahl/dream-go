@@ -12,47 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use libc::{c_void};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
-use std::ptr;
 
-use nn::ffi::cuda::*;
-use nn::ffi::cudnn::*;
+use nn::ops::Tensor;
 use util::b85;
-use util::f16::*;
+use util::types::*;
 
-enum Tensor {
-    Float(Box<[f32]>),
-    Half(Box<[f16]>)
+struct JsonTensor {
+    scale: f32,
+    values: Option<Box<[f16]>>
 }
 
-impl Tensor {
-    unsafe fn as_ptr(&self) -> *const c_void {
-        match *self {
-            Tensor::Float(ref b) => b.as_ptr() as *const c_void,
-            Tensor::Half(ref b) => b.as_ptr() as *const c_void
-        }
-    }
-
-    fn size_in_bytes(&self) -> usize {
-        match *self {
-            Tensor::Float(ref b) => 4 * b.len(),
-            Tensor::Half(ref b) => 2 * b.len()
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    fn as_vec(&self) -> Vec<f32> {
-        match *self {
-            Tensor::Float(ref b) => b.iter().map(|&v| v).collect(),
-            Tensor::Half(ref b) => b.iter().map(|&v| f32::from(v)).collect()
-        }
-    }
-}
-
+/// Step the iterator forward until the character given `stop` character is
+/// encountered. The character `stop` is also skipped.
+/// 
+/// # Arguments
+/// 
+/// * `iter` - the iterator to step forward
+/// * `stop` - the character to step until
+/// 
 fn skip_until<I>(iter: &mut I, stop: char) -> String
     where I: Iterator<Item=char>
 {
@@ -71,59 +52,89 @@ fn skip_until<I>(iter: &mut I, stop: char) -> String
     out
 }
 
-pub fn load(path: &Path, data_type: DataType) -> Option<HashMap<String, *const c_void>> {
-    if let Ok(file) = File::open(path) {
-        let mut iter = BufReader::new(file).chars().map(|ch| ch.unwrap());
-        let mut out: HashMap<String, *const c_void> = HashMap::new();
+/// An iterator that parse entries with the following format:
+/// 
+/// `"name": { "t": "...", v: "..." }`
+/// 
+struct JsonEntryIter<I: Iterator<Item=char>> {
+    iter: I
+}
 
-        // parse entries of the format -- "name": "value"
+impl<I: Iterator<Item=char>> Iterator for JsonEntryIter<I> {
+    type Item = (String, JsonTensor);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // skip until the quote before the name
+        skip_until(&mut self.iter, '"');
+
+        let name = skip_until(&mut self.iter, '"');
+        if name.is_empty() {
+            return None;
+        }
+
+        // skip until the next `{` and then parse the interior of the
+        // object by iterating over the properties
+        skip_until(&mut self.iter, '{');
+
+        let mut tensor = JsonTensor {
+            scale: 1.0,
+            values: None
+        };
+
         loop {
-            // skip until next quote
-            skip_until(&mut iter, '"');
+            skip_until(&mut self.iter, '"');
+            let key = skip_until(&mut self.iter, '"');
 
-            // name of the tensor
-            let name = skip_until(&mut iter, '"');
-            if name.is_empty() {
+            skip_until(&mut self.iter, '"');
+            let value = skip_until(&mut self.iter, '"');
+
+            if key == "s" {
+                let array = b85::decode::<f16>(&value).unwrap();
+
+                tensor.scale = f32::from(array[0]);
+            } else if key == "v" {
+                tensor.values = b85::decode::<f16>(&value);
+            } else {
                 break
             }
 
-            // skip until next quote
-            skip_until(&mut iter, '"');            
+            // check if the object terminated
+            let more = skip_until(&mut self.iter, ',');
+            if more.contains('}') {
+                break
+            }
+        };
 
-            // value of the tensor
-            let value = skip_until(&mut iter, '"');
-            let tensor = {
-                if data_type == DataType::Float {
-                    Tensor::Float(b85::decode::<f32>(&value).unwrap())
-                } else {
-                    assert_eq!(data_type, DataType::Half);
+        Some((name, tensor))
+    }
+}
 
-                    Tensor::Half(b85::decode::<f16>(&value).unwrap())
-                }
-            };
+/// Load all tensors in the given file and returns a map from
+/// their name to description. If we failed to load any tensors
+/// from the given file then `None` is returned.
+/// 
+/// # Arguments
+/// 
+/// * `path` -
+/// 
+pub fn load(path: &Path) -> Option<HashMap<String, Tensor>> {
+    if let Ok(file) = File::open(path) {
+        let mut out: HashMap<String, Tensor> = HashMap::new();
+        let mut iter = JsonEntryIter {
+            iter: BufReader::new(file).chars().map(|ch| ch.unwrap())
+        };
 
-            #[cfg(debug_assertions)]
-            for (i, element) in tensor.as_vec().iter().enumerate() {
-                if !element.is_finite() {
-                    eprintln!("{}: element {} is not finite -- {}", name, i, element);
-                }
+        for (name, mut json) in iter {
+            debug_assert!(json.scale > 0.0);
+
+            let mut t = Tensor::default();
+
+            t.set_scale(json.scale);
+            if let Some(host) = json.values.take() {
+                t.set_host(host);
             }
 
-            // copy the value of this tensor to the device
-            unsafe {
-                let mut w = ptr::null_mut();
-                let size = tensor.size_in_bytes();
-
-                assert!(cudaMalloc(&mut w, size).is_ok());
-                assert!(cudaMemcpy(
-                    w,
-                    tensor.as_ptr(),
-                    size,
-                    MemcpyKind::HostToDevice
-                ).is_ok());
-
-                out.insert(name, w as *const c_void);
-            }
+            out.insert(name, t);
         }
 
         Some(out)

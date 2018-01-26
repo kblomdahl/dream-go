@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use util::f16::*;
+use util::types::*;
 
 /// A typeless container that can contain either a single or half precision
 /// value without a generic.

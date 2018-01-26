@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -72,7 +72,7 @@ impl From<f32> for f16 {
 #[cfg(test)]
 mod tests {
     use test::{self, Bencher};
-    use util::f16::*;
+    use util::types::*;
 
     #[test]
     fn from_f16_to_f32() {

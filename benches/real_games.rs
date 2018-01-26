@@ -21,7 +21,7 @@ use test::Bencher;
 
 use dream_go::go::{Board, Color, CHW, HWC};
 use dream_go::go::symmetry::Transform;
-use dream_go::util::f16::*;
+use dream_go::util::types::*;
 
 /// Benchmark the full playout of a game as a serie of `is_valid` and `place` calls.
 #[bench]

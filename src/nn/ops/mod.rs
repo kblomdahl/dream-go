@@ -12,37 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod array;
-pub mod b85;
-pub mod types;
-pub mod singleton;
+mod convolution;
+mod linear;
+mod operator;
+mod tensor;
 
-/// Returns the smallest of `x` and `y`.
-/// 
-/// # Arguments
-/// 
-/// * `x` -
-/// * `y` -
-/// 
-pub fn min(x: f32, y: f32) -> f32 {
-    if x < y {
-        x
-    } else {
-        y
-    }
-}
-
-/// Returns the largest of `x` and `y`.
-/// 
-/// # Arguments
-/// 
-/// * `x` -
-/// * `y` -
-/// 
-pub fn max(x: f32, y: f32) -> f32 {
-    if x > y {
-        x
-    } else {
-        y
-    }
-}
+pub use self::convolution::*;
+pub use self::linear::*;
+pub use self::operator::*;
+pub use self::tensor::Tensor;

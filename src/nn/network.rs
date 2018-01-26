@@ -20,19 +20,20 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use nn::workspace::{Shared, Workspace};
+use nn::graph;
+use nn::loader;
 
-type WorkspaceQueue = Rc<RefCell<Vec<Rc<Workspace>>>>;
+type WorkspaceQueue = Rc<RefCell<Vec<Rc<graph::Workspace>>>>;
 
 /// Wrapper around a `Workspace` that when dropped returns it to the
 /// pool it was acquired from.
 pub struct WorkspaceGuard<'a> {
-    workspace: Rc<Workspace>,
+    workspace: Rc<graph::Workspace>,
     pool: &'a Mutex<HashMap<usize, WorkspaceQueue>>
 }
 
 impl<'a> Deref for WorkspaceGuard<'a> {
-    type Target = Workspace;
+    type Target = graph::Workspace;
 
     fn deref(&self) -> &Self::Target { &self.workspace }
 }
@@ -54,7 +55,7 @@ impl<'a> Drop for WorkspaceGuard<'a> {
 
 /// Pool of workspaces that can be used for network evaluations.
 pub struct Network {
-    shared: Arc<Shared>,
+    builder: Arc<graph::Builder>,
     workspaces: Arc<Mutex<HashMap<usize, WorkspaceQueue>>>
 }
 
@@ -81,10 +82,10 @@ impl Network {
         }
 
         PATHS.iter()
-            .filter_map(|path| Shared::new(Path::new(path)))
+            .filter_map(|path| loader::load(Path::new(path)))
             .next()
-            .map(|shared| Network {
-                shared: Arc::new(shared),
+            .map(|weights| Network {
+                builder: Arc::new(graph::Builder::new(weights)),
                 workspaces: Arc::new(Mutex::new(HashMap::new()))
             })
     }
@@ -104,7 +105,7 @@ impl Network {
                 pool: &self.workspaces
             },
             None => WorkspaceGuard {
-                workspace: Rc::new(Workspace::new(&self.shared, batch_size)),
+                workspace: Rc::new(self.builder.get_workspace(batch_size)),
                 pool: &self.workspaces
             }
         };
@@ -114,7 +115,7 @@ impl Network {
 }
 
 impl Deref for Network {
-    type Target = Shared;
+    type Target = graph::Builder;
 
-    fn deref(&self) -> &Self::Target { &self.shared }
+    fn deref(&self) -> &Self::Target { &self.builder }
 }

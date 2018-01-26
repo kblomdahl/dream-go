@@ -28,13 +28,13 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use time;
 
-use go::{symmetry, Board, Color, CHW};
+use go::{symmetry, Board, Color, CHW, HWC};
 use mcts::parallel::{Server, ServerGuard};
 use mcts::param::*;
 use nn::Network;
 use util::array::*;
 use util::b85;
-use util::f16::*;
+use util::types::*;
 
 /// Mapping from 1D coordinate to letter used to represent that coordinate in
 /// the SGF file format.
@@ -110,7 +110,9 @@ fn forward(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f32]
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
         let (value, original_policy) = server.send({
-            if server.is_half() {
+            if server.is_int8() {
+                Array::from_q8(board.get_features::<q8, HWC>(color, t))
+            } else if server.is_half() {
                 Array::from_f16(board.get_features::<f16, CHW>(color, t))
             } else {
                 Array::from_f32(board.get_features::<f32, CHW>(color, t))

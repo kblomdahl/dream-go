@@ -12,16 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use util::f16::*;
+use util::types::*;
 
 /// A typeless array that can contain either a single or half precision
 /// array without a generic.
 pub enum Array {
     Single(Box<[f32]>),
-    Half(Box<[f16]>)
+    Half(Box<[f16]>),
+    Int8(Box<[q8]>)
 }
 
 impl Array {
+    pub fn from_q8(src: Box<[q8]>) -> Array {
+        Array::Int8(src)
+    }
+
     pub fn from_f16(src: Box<[f16]>) -> Array {
         Array::Half(src)
     }
@@ -33,15 +38,16 @@ impl Array {
     /// Returns true if this array contains an array of `f16`.
     pub fn is_half(&self) -> bool {
         match *self {
-            Array::Single(_) => false,
-            Array::Half(_) => true
+            Array::Half(_) => true,
+            _ => false
         }
     }
 
     pub fn get(&self, index: usize) -> f32 {
         match *self {
             Array::Single(ref src) => src[index],
-            Array::Half(ref src) => f32::from(src[index])
+            Array::Half(ref src) => f32::from(src[index]),
+            Array::Int8(ref src) => f32::from(src[index])
         }
     }
 }

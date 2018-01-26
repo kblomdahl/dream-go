@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const RANGE: f32 = 1.0;
+const RANGE: f32 = 1.0;
 
 /// 8-bit quantized number in the range [-RANGE, RANGE].
 #[allow(non_camel_case_types)]
@@ -29,12 +29,12 @@ impl q8 {
     /// * `value` - 
     /// 
     pub fn unscaled(value: f32) -> q8 {
-        if value > RANGE {
+        if value > 127.0 {
             q8(127)
-        } else if value < -RANGE {
-            q8(-127)
+        } else if value < -128.0 {
+            q8(-128)
         } else {
-            q8((127.0 * value) as i8)
+            q8(value.round() as i8)
         }
     }
 }
@@ -62,9 +62,10 @@ impl From<f32> for q8 {
         if value > RANGE {
             q8(127)
         } else if value < -RANGE {
-            q8(-127)
+            q8(-128)
         } else {
             q8((127.0 * value / RANGE) as i8)
         }
     }
 }
+

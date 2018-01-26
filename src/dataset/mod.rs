@@ -98,7 +98,7 @@ impl<'a> Dataset<'a> {
         let workers = (0..*NUM_THREADS).map(|_| {
             let (t_line, r_line) = sync_channel(*NUM_THREADS);
             let t_entry = t_entry.clone();
-            let server = server.map(|&ref server| server.clone());
+            let server = server.cloned();
             let worker = thread::spawn(move || {
                 for line in r_line.iter() {
                     if let Some(entries) = Entry::all(&line, &server) {

@@ -18,7 +18,7 @@ extern crate ordered_float;
 use dream_go::go::symmetry::Transform;
 use dream_go::go::{Board, Color, CHW};
 use dream_go::nn;
-use dream_go::util::f16::*;
+use dream_go::util::types::*;
 use ordered_float::OrderedFloat;
 
 thread_local! {
@@ -29,8 +29,8 @@ fn predict(moves: &[(Color, usize, usize)], next_color: Color) -> (f32, Box<[f32
     // place each stone on a fresh board to re-produce the board state
     let mut board = Board::new();
 
-    for &(color, x, y) in moves.iter() {
-        assert!(board.is_valid(color, x, y));
+    for (i, &(color, x, y)) in moves.iter().enumerate() {
+        assert!(board.is_valid(color, x, y), "move {} is not valid ({}, {})", i, x, y);
 
         board.place(color, x, y);
     }
@@ -41,7 +41,7 @@ fn predict(moves: &[(Color, usize, usize)], next_color: Color) -> (f32, Box<[f32
 
         if network.is_half() {
             let features = board.get_features::<f16, CHW>(next_color, Transform::Identity);
-            let (value, policy) = nn::forward(&mut workspace, &vec! [features]);
+            let (value, policy) = nn::forward::<f16, f16>(&mut workspace, &vec! [features]);
             let policy = policy[0].iter()
                 .map(|&p| f32::from(p))
                 .collect::<Vec<f32>>();
@@ -49,7 +49,7 @@ fn predict(moves: &[(Color, usize, usize)], next_color: Color) -> (f32, Box<[f32
             (f32::from(value[0]), policy.into_boxed_slice())
         } else {
             let features = board.get_features::<f32, CHW>(next_color, Transform::Identity);
-            let (value, policy) = nn::forward(&mut workspace, &vec! [features]);
+            let (value, policy) = nn::forward::<f32, f32>(&mut workspace, &vec! [features]);
 
             (value[0], policy[0].clone())
         }
@@ -208,8 +208,7 @@ fn dead_dragon_1() {
         (Color::Black, 10,  0), (Color::White,  2,  4), (Color::Black,  5,  3), (Color::White,  5, 14),
         (Color::Black,  2, 14), (Color::White,  1, 12), (Color::Black,  1, 13), (Color::White,  0, 16),
         (Color::Black,  0, 13), (Color::White,  0, 15), (Color::Black,  0, 14), (Color::White,  2, 15),
-        (Color::Black,  1, 14), (Color::Black,  5,  0), (Color::White,  0,  0), (Color::Black,  7,  0),
-        (Color::White,  2,  0)
+        (Color::Black,  1, 14)
     ];
 
     // black should win by 38.5 points

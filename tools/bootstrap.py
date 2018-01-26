@@ -23,8 +23,9 @@ Usage: ./bootstrap.py <dataset...>
 """
 
 from datetime import datetime
-import sys
+import math
 import os
+import sys
 
 import tensorflow as tf
 import numpy as np
@@ -170,10 +171,14 @@ class ResidualBlock:
         y = tf.nn.conv2d(x, self._conv_1, (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = self._bn_1(y, is_training)
         y = tf.nn.relu(y)
+        tf.add_to_collection(tf.GraphKeys.ACTIVATIONS, tf.identity(y, 'output_1'))
+
         y = tf.nn.conv2d(y, self._conv_2, (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = self._bn_2(y, is_training)
+        y = tf.nn.relu(y + x)
+        tf.add_to_collection(tf.GraphKeys.ACTIVATIONS, tf.identity(y, 'output_2'))
 
-        return tf.nn.relu(y + x)
+        return y
 
 class ValueHead:
     """
@@ -232,6 +237,8 @@ class ValueHead:
         y = tf.nn.conv2d(x, self._downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = self._bn(y, is_training)
         y = tf.nn.relu(y)
+        tf.add_to_collection(tf.GraphKeys.ACTIVATIONS, tf.identity(y, 'output_1'))
+
         y = tf.reshape(y, (-1, 361))
         y = tf.matmul(y, self._weights_1) + self._bias_1
         y = tf.nn.relu(y)
@@ -286,6 +293,8 @@ class PolicyHead:
         y = tf.nn.conv2d(x, self._downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = self._bn(y, is_training)
         y = tf.nn.relu(y)
+        tf.add_to_collection(tf.GraphKeys.ACTIVATIONS, tf.identity(y, 'output_1'))
+
         y = tf.reshape(y, (-1, 722))
         y = tf.matmul(y, self._weights) + self._bias
 
@@ -302,7 +311,7 @@ class Tower:
     def __init__(self, num_features=128):
         glorot_op = tf.glorot_normal_initializer()
 
-        with tf.variable_scope('01_upsample'):
+        with tf.variable_scope('01_upsample') as self._upsample_scope:
             self._upsample = tf.get_variable('weights', (3, 3, 32, num_features), tf.float32, glorot_op)
             self._bn = BatchNorm(num_features, collection=Tower.VARIABLES)
 
@@ -310,18 +319,19 @@ class Tower:
         tf.add_to_collection(Tower.VARIABLES, self._upsample)
 
         # residual blocks
+        self._residual_scopes = [None] * 19
         self._residuals = []
 
         for i in range(19):
-            with tf.variable_scope('{:02d}_residual'.format(2 + i)):
+            with tf.variable_scope('{:02d}_residual'.format(2 + i)) as self._residual_scopes[i]:
                 self._residuals += [ResidualBlock(num_features, collection=Tower.VARIABLES)]
 
         # policy head
-        with tf.variable_scope('21p_policy'):
+        with tf.variable_scope('21p_policy') as self._policy_scope:
             self._policy = PolicyHead(num_features)
 
         # value head
-        with tf.variable_scope('21v_value'):
+        with tf.variable_scope('21v_value') as self._value_scope:
             self._value = ValueHead(num_features)
 
     def dump(self, sess, into=None):
@@ -340,15 +350,22 @@ class Tower:
         return into
 
     def __call__(self, x, is_training=True, train_tower=True, train_policy=True, train_value=True):
-        y = tf.nn.conv2d(x, self._upsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = self._bn(y, is_training and train_tower)
-        y = tf.nn.relu(y)
+        with tf.name_scope(self._upsample_scope.original_name_scope):
+            y = tf.nn.conv2d(x, self._upsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
+            y = self._bn(y, is_training and train_tower)
+            y = tf.nn.relu(y)
 
-        for resb in self._residuals:
-            y = resb(y, is_training and train_tower)
+            tf.add_to_collection(tf.GraphKeys.ACTIVATIONS, tf.identity(y, 'output'))
 
-        p = self._policy(y, is_training and train_policy)
-        v = self._value(y, is_training and train_value)
+        for (i, resb) in enumerate(self._residuals):
+            with tf.name_scope(self._residual_scopes[i].original_name_scope):
+                y = resb(y, is_training and train_tower)
+
+        with tf.name_scope(self._policy_scope.original_name_scope):
+            p = self._policy(y, is_training and train_policy)
+
+        with tf.name_scope(self._value_scope.original_name_scope):
+            v = self._value(y, is_training and train_value)
 
         return v, p
 
@@ -360,16 +377,48 @@ def list_local_devices():
 
     return [dev.name for dev in local_device_protos if dev.device_type == 'GPU']
 
+def cosine_decay_restarts(learning_rate, global_step, first_decay_steps, alpha=0.0):
+    """
+    Applies cosine decay with restarts to the learning rate.
 
-def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False, only_value=False):
-    """ Main function """
+    See [Loshchilov & Hutter, ICLR2016], SGDR: Stochastic Gradient Descent
+    with Warm Restarts. https://arxiv.org/abs/1608.03983
+    """
+    with tf.name_scope(None, "SGDRDecay", [learning_rate, global_step]):
+        global_step = tf.cast(global_step, tf.float32)
+        first_decay_steps = tf.cast(first_decay_steps, tf.float32)
+        alpha = tf.cast(alpha, tf.float32)
+        t_mul = 1.4  # used to derive the number of iterations in the i-th period
+        m_mul = 0.7  # used to derive the initial learning rate of the i-th period:
+
+        completed_fraction = global_step / first_decay_steps
+        i_restart = tf.floor(tf.log(1.0 - completed_fraction * (1.0 - t_mul)) / tf.log(t_mul))
+
+        sum_r = (1.0 - t_mul ** i_restart) / (1.0 - t_mul)
+        completed_fraction = (completed_fraction - sum_r) / t_mul ** i_restart
+
+        m_fac = m_mul ** i_restart
+        cosine_decayed = 0.5 * m_fac * (1.0 + tf.cos(math.pi * completed_fraction))
+        decayed = (1 - alpha) * cosine_decayed + alpha
+
+        return learning_rate * decayed
+
+def make_dataset_iterator(files, batch_size=1):
+    """ Returns a tf.DataSet initializable iterator over the given files """
 
     dataset = tf.data.FixedLengthRecordDataset(files, 23830)
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
     dataset = dataset.map(lambda x: tf.split(x, (11552, 1, 362)))
     dataset = dataset.shuffle(196704)
-    dataset = dataset.batch(512 if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
-    iterator = dataset.make_initializable_iterator()
+    dataset = dataset.batch(batch_size if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
+
+    return dataset.make_initializable_iterator()
+
+
+def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False, only_value=False):
+    """ Main function """
+
+    iterator = make_dataset_iterator(files, batch_size=512)
 
     with tf.device('cpu:0'):
         global_step = tf.train.create_global_step()
@@ -457,11 +506,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
     tf.summary.scalar('loss/regularization', reg_loss)
     tf.summary.scalar('loss', loss)
 
-    learning_rate = tf.train.piecewise_constant(
-        global_step,
-        [24000, 48000, 65000, 84000, 105000, 384000],
-        [1e-2, 3e-3, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5]
-    )
+    learning_rate = cosine_decay_restarts(0.1, global_step, 3000)
     optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
     optimizer_op = optimizer.minimize(
         loss,
@@ -487,7 +532,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
     summary_writer = tf.summary.FileWriter('logs/' + datetime.now().strftime('%Y%m%d.%H%M') + '/', graph=tf.get_default_graph())
     summary_op = tf.summary.merge_all()
     update_op = tf.group(*tf.get_collection(tf.GraphKeys.UPDATE_OPS))
-    saver_vars = tf.model_variables() + [global_step, epoch]
+    saver_vars = list(set(tf.model_variables() + [global_step, epoch]))
     saver = tf.train.Saver(saver_vars, keep_checkpoint_every_n_hours=2)
 
     #
@@ -547,11 +592,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
 def verify(args):
     """ Retrieve accuracy for a verification test-set. """
 
-    dataset = tf.data.FixedLengthRecordDataset(args, 23830)
-    dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
-    dataset = dataset.map(lambda x: tf.split(x, (11552, 1, 362)))
-    dataset = dataset.batch(1)
-    iterator = dataset.make_initializable_iterator()
+    iterator = make_dataset_iterator(args, batch_size=1)
 
     # get the answer from the data-set and the prediction
     tower = Tower()
@@ -621,6 +662,135 @@ def verify(args):
             100.0 * np.asscalar(accuracy_v)
         ))
 
+def calibrate(sess, tower, files):
+    """
+    Calculate the optimal scaling of each activation using cross-entropy
+    cost. This scale is used for int8 weights and activations.
+    """
+
+    # setup the iterator over all features in the gives files
+    iterator = make_dataset_iterator(files, batch_size=32)
+    features, _value, _policy = iterator.get_next()
+    features = tf.reshape(features, (-1, 32, 19, 19))
+    _value_hat, _policy_hat = tower(features, is_training=False)
+
+    # pre-allocate the dictionaries containing all activations
+    histogram = {}
+    min_boundary = {}
+    max_boundary = {}
+
+    try:
+        import base64
+        from scipy import stats
+
+        # loop over the entire dataset to collect [min, max] of each activation
+        min_ops = {}
+        max_ops = {}
+
+        for act in tf.get_collection(tf.GraphKeys.ACTIVATIONS):
+            min_ops[act.name] = tf.reduce_min(act)
+            max_ops[act.name] = tf.reduce_max(act)
+
+        sess.run(iterator.initializer)
+
+        while True:
+            try:
+                [min_hat, max_hat] = sess.run([min_ops, max_ops])
+
+                for (name, v) in min_hat.items():
+                    min_boundary[name] = min(min_boundary.get(name, math.inf), v)
+                for (name, v) in max_hat.items():
+                    max_boundary[name] = max(max_boundary.get(name, -math.inf), v + 1e-2)
+            except tf.errors.OutOfRangeError:
+                break
+
+        # loop over the entire dataset to collect the histograms, where each
+        # histogram is within the minimum and maximum we just collected
+        histogram_ops = {}
+        num_bins = 65536
+
+        for act in tf.get_collection(tf.GraphKeys.ACTIVATIONS):
+            assert min_boundary[act.name] == 0.0
+
+            histogram_ops[act.name] = tf.histogram_fixed_width(
+                act,
+                [0.0, max_boundary[act.name]],
+                nbins=num_bins + 2,
+                dtype=tf.int64
+            )
+
+        sess.run(iterator.initializer)
+
+        while True:
+            try:
+                histogram_hat = sess.run(histogram_ops)
+
+                for (name, h) in histogram_hat.items():
+                    histogram[name] = histogram.get(name, 0) + h
+            except tf.errors.OutOfRangeError:
+                break
+
+        # normalize the histograms (in double precision), we throw away
+        # the first and the last elements so that the histogram cover
+        # the correct range.
+        for name in histogram:
+            h = histogram[name][1:-1].astype('f8')  # cast to double
+
+            histogram[name] = h / np.linalg.norm(h, 1)
+
+        # find the optimal scale for each variable by using the
+        # kullback–leibler divergence
+        values = {}
+
+        def _quantize(x, num_bins):
+            if len(x) == num_bins:
+                return np.array(x, copy=True)
+
+            assert len(x) % num_bins == 0
+
+            factor = len(x) // num_bins
+            z = np.reshape(x, [num_bins, factor])
+            z = np.sum(z, axis=1) / (np.count_nonzero(z, axis=1) + 1e-8)  # avoid (cosmetic) division by zero
+            z = np.repeat(z, factor) * (np.asarray(x) > 0)
+
+            return z
+
+        def _entropy_calibrate(original, i):
+            reference = np.array(original[:i], copy=True)
+            reference[i-1] += np.sum(original[i:])
+            candidate = _quantize(original[:i], 128)
+
+            # normalize both distributions so that they are valid
+            # probability distributions
+            reference = reference / np.linalg.norm(reference, 1)
+            candidate = candidate / np.linalg.norm(candidate, 1)
+
+            # avoid log(0) because we do not include outliers in the
+            # candidate distribution.
+            if candidate[i-1] == 0 and reference[i-1] > 0:
+                candidate[i-1] = 1e-4
+
+            return stats.entropy(reference, candidate)
+
+        for name in histogram:
+            best_i = min(
+                range(128, num_bins + 128, 128),
+                key=lambda i: _entropy_calibrate(histogram[name], i)
+            )
+
+            scale = (best_i + 0.5) * (max_boundary[name] / num_bins)
+            scale = np.asarray(scale, 'f2').tostring()
+
+            values[name] = {
+                's': base64.b85encode(scale, pad=True).decode('ascii')
+            }
+
+            # print a dot as a status message
+            print('.', end='', flush=True, file=sys.stderr)
+
+        return values
+    except KeyboardInterrupt:
+        return {}
 
 def dump(args):
     """
@@ -639,24 +809,35 @@ def dump(args):
     with tf.Session(config=config) as sess:
         sess.run([tf.local_variables_initializer(), tf.global_variables_initializer()])
 
-        if args == []:
+        checkpoints = [arg for arg in args if not arg.endswith('.bin')]
+
+        if not checkpoints:
             latest_checkpoint = tf.train.latest_checkpoint('models/')
             if latest_checkpoint is not None:
                 saver.restore(sess, latest_checkpoint)
         else:
-            saver.restore(sess, args[0])
+            saver.restore(sess, checkpoints[0])
+
+        # gather histograms over all of the activations for int8 calibration
+        files = [arg for arg in args if arg.endswith('.bin')]
+        values = {}
+
+        if files:
+            values = calibrate(sess, tower, files)
 
         # dump the variables to JSON in half precision in order to save
         # save disk space.
         import base64
         import json
 
-        values = {}
-
         for (var, value) in tower.dump(sess).items():
-            serialized = value.flatten().astype(np.float16).tostring()
+            serialized = value.flatten().astype('f2').tostring()
+            scale = np.linalg.norm(value.flatten(), math.inf).astype('f2').tostring()
 
-            values[var.name] = base64.b85encode(serialized, pad=True).decode('ascii')
+            values[var.name] = {
+                's': base64.b85encode(scale, pad=True).decode('ascii'),
+                'v': base64.b85encode(serialized, pad=True).decode('ascii')
+            }
 
         json.dump(values, sys.stdout, sort_keys=True)
 
