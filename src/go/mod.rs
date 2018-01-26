@@ -694,6 +694,17 @@ impl Board {
     fn is_ladder_escape(&self, color: Color, index: usize) -> bool {
         debug_assert!(self._is_valid(color, index));
 
+        // check if we are connected to a stone with one liberty
+        let player = color as u8;
+        let connected_to_one = (N!(self.vertices, index) == player && !self.has_two_liberties(index + 19))
+            || (E!(self.vertices, index) == player && !self.has_two_liberties(index + 1))
+            || (S!(self.vertices, index) == player && !self.has_two_liberties(index - 19))
+            || (W!(self.vertices, index) == player && !self.has_two_liberties(index - 1));
+
+        if !connected_to_one {
+            return false;
+        }
+
         // clone only the minimum parts of the board that is necessary
         // to play out the ladder.
         let mut vertices = self.vertices.clone();
@@ -711,13 +722,17 @@ impl Board {
             return false;
         }
 
-        //
+        // check that we cannot be captured in a ladder from either direction
         macro_rules! check_ladder {
             ($dir:ident) => ({
-                let mut vertices_ = vertices.clone();
-                let mut next_vertex_ = next_vertex.clone();
+                let next_index = $dir!(index);
 
-                Board::_is_ladder_capture(&mut vertices_, &mut next_vertex_, color, $dir!(index))
+                next_index < 361 && {
+                    let mut vertices_ = vertices.clone();
+                    let mut next_vertex_ = next_vertex.clone();
+
+                    Board::_is_ladder_capture(&mut vertices_, &mut next_vertex_, color, next_index)
+                }
             })
         }
 
@@ -1310,17 +1325,19 @@ mod tests {
 
         for x in 0..19 {
             for y in 0..19 {
-                let is_ladder = (x == 1 && y == 0)
-                    || (x ==  0 && y ==  1)
-                    || (x == 18 && y == 17)
-                    || (x == 17 && y == 18)
-                    || (x ==  1 && y == 18)
-                    || (x == 18 && y ==  1)
-                    || (x ==  0 && y == 17)
-                    || (x == 17 && y ==  0);
-                let index = 19 * y + x;
+                if board.is_valid(Color::White, x, y) {
+                    let is_ladder = (x == 1 && y == 0)
+                        || (x ==  0 && y ==  1)
+                        || (x == 18 && y == 17)
+                        || (x == 17 && y == 18)
+                        || (x ==  1 && y == 18)
+                        || (x == 18 && y ==  1)
+                        || (x ==  0 && y == 17)
+                        || (x == 17 && y ==  0);
+                    let index = 19 * y + x;
 
-                assert_eq!(board.is_ladder_capture(Color::White, index), is_ladder);
+                    assert_eq!(board.is_ladder_capture(Color::White, index), is_ladder);
+                }
             }
         }
     }
@@ -1338,11 +1355,13 @@ mod tests {
 
         for x in 0..19 {
             for y in 0..19 {
-                let is_ladder = x == 3 && y == 4;
-                let index = 19 * y + x;
+                if board.is_valid(Color::White, x, y) {
+                    let is_ladder = x == 4 && y == 3;
+                    let index = 19 * y + x;
 
-                assert!(!board.is_ladder_capture(Color::Black, index));
-                assert_eq!(board.is_ladder_escape(Color::White, index), is_ladder);
+                    assert!(!board.is_ladder_capture(Color::Black, index));
+                    assert_eq!(board.is_ladder_escape(Color::White, index), is_ladder, "({}, {}) is a ladder escape = {}", x, y, is_ladder);
+                }
             }
         }
     }
