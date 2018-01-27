@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use regex::Regex;
-use rustyline::Editor;
+use std::io::BufRead;
 
 use go::{Board, Color};
 use mcts;
@@ -411,7 +411,8 @@ impl Gtp {
 /// and writes to standard output. This client implements the minimum
 /// necessary feature-set of a GTP client.
 pub fn run() {
-    let mut rl = Editor::<()>::new();
+    let stdin = ::std::io::stdin();
+    let stdin_lock = stdin.lock();
     let mut gtp = Gtp {
         server: None,
         search_tree: None,
@@ -419,8 +420,8 @@ pub fn run() {
         komi: 7.5
     };
 
-    loop {
-        if let Ok(line) = rl.readline("") {
+    for line in stdin_lock.lines() {
+        if let Ok(line) = line {
             match Gtp::parse_line(&line) {
                 Some((id, Command::Quit)) => {
                     success!(id, "");

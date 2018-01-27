@@ -21,7 +21,6 @@ extern crate libc;
 extern crate ordered_float;
 extern crate rand;
 extern crate regex;
-extern crate rustyline;
 #[cfg(test)] extern crate test;
 extern crate threadpool;
 extern crate time;
