@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![feature(asm)]
-#![feature(io)]
 #![feature(link_llvm_intrinsics)]
 #![feature(test)]
 

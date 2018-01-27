@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
+use std::char;
 
 use nn::ops::Tensor;
 use util::b85;
@@ -35,18 +36,22 @@ struct JsonTensor {
 /// * `stop` - the character to step until
 /// 
 fn skip_until<I>(iter: &mut I, stop: char) -> String
-    where I: Iterator<Item=char>
+    where I: Iterator<Item=u8>
 {
     let mut out: String = String::new();
 
     loop {
-        let ch = iter.next();
+        if let Some(ch) = iter.next() {
+            let ch = char::from_u32(ch as u32).unwrap();
 
-        if ch.is_none() || ch == Some(stop) {
+            if ch == stop {
+                break
+            }
+
+            out.push(ch);
+        } else {
             break
         }
-
-        out.push(ch.unwrap());
     }
 
     out
@@ -56,11 +61,11 @@ fn skip_until<I>(iter: &mut I, stop: char) -> String
 /// 
 /// `"name": { "t": "...", v: "..." }`
 /// 
-struct JsonEntryIter<I: Iterator<Item=char>> {
+struct JsonEntryIter<I: Iterator<Item=u8>> {
     iter: I
 }
 
-impl<I: Iterator<Item=char>> Iterator for JsonEntryIter<I> {
+impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
     type Item = (String, JsonTensor);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -121,7 +126,7 @@ pub fn load(path: &Path) -> Option<HashMap<String, Tensor>> {
     if let Ok(file) = File::open(path) {
         let mut out: HashMap<String, Tensor> = HashMap::new();
         let mut iter = JsonEntryIter {
-            iter: BufReader::new(file).chars().map(|ch| ch.unwrap())
+            iter: BufReader::new(file).bytes().map(|ch| ch.unwrap())
         };
 
         for (name, mut json) in iter {
