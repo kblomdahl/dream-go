@@ -442,7 +442,7 @@ impl<E: Value> Node<E> {
     }
 
     #[cfg(feature = "trace-mcts")]
-    fn as_sgf<C: Param>(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn as_sgf(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         // annotate the top-10 moves to make it easier to navigate for the
         // user.
         let mut children = (0..362).collect::<Vec<usize>>();
@@ -479,7 +479,7 @@ impl<E: Value> Node<E> {
         */
 
         let mut uct = [::std::f32::NEG_INFINITY; 368];
-        E::get::<C, E>(self, &mut uct);
+        E::get::<E>(self, &mut uct);
 
         for i in children {
             // do not output nodes that has not been visited to reduce the
@@ -508,7 +508,7 @@ impl<E: Value> Node<E> {
                 let child = self.children[i];
 
                 if !child.is_null() {
-                    (*child).as_sgf::<C>(fmt)?;
+                    (*child).as_sgf(fmt)?;
                 }
             }
 
@@ -732,14 +732,13 @@ pub unsafe fn insert<E>(trace: &NodeTrace<E>, color: Color, value: f32, prior: B
 /// Type alias for `Node<E>` that acts as a wrapper for calling `as_sgf` from
 /// within a `write!` macro.
 #[cfg(feature = "trace-mcts")]
-pub struct ToSgf<'a, C: Param + 'a, E: Value + 'a> {
-    value_type: ::std::marker::PhantomData<C>,
+pub struct ToSgf<'a, E: Value + 'a> {
     starting_point: Board,
     root: &'a Node<E>,
 }
 
 #[cfg(feature = "trace-mcts")]
-impl<'a, C: Param + 'a, E: Value + 'a> fmt::Display for ToSgf<'a, C, E> {
+impl<'a, E: Value + 'a> fmt::Display for ToSgf<'a, E> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         // add the standard SGF prefix
         write!(fmt, "(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]PL[{}]",
@@ -758,7 +757,7 @@ impl<'a, C: Param + 'a, E: Value + 'a> fmt::Display for ToSgf<'a, C, E> {
         }
 
         // write the actual search tree
-        self.root.as_sgf::<C>(fmt)?;
+        self.root.as_sgf(fmt)?;
 
         // add the standard SGF suffix
         write!(fmt, ")")
@@ -774,11 +773,10 @@ impl<'a, C: Param + 'a, E: Value + 'a> fmt::Display for ToSgf<'a, C, E> {
 /// * `starting_point` -
 /// 
 #[cfg(feature = "trace-mcts")]
-pub fn to_sgf<'a, C, E>(root: &'a Node<E>, starting_point: &Board) -> ToSgf<'a, C, E>
-    where C: Param, E: Value
+pub fn to_sgf<'a, E>(root: &'a Node<E>, starting_point: &Board) -> ToSgf<'a, E>
+    where E: Value
 {
     ToSgf {
-        value_type: ::std::marker::PhantomData::<C>,
         starting_point: starting_point.clone(),
         root: &root
     }
