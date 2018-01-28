@@ -23,18 +23,6 @@ pub enum Array {
 }
 
 impl Array {
-    pub fn from_q8(src: Box<[q8]>) -> Array {
-        Array::Int8(src)
-    }
-
-    pub fn from_f16(src: Box<[f16]>) -> Array {
-        Array::Half(src)
-    }
-
-    pub fn from_f32(src: Box<[f32]>) -> Array {
-        Array::Single(src)
-    }
-
     /// Returns true if this array contains an array of `f16`.
     pub fn is_half(&self) -> bool {
         match *self {
@@ -48,6 +36,51 @@ impl Array {
             Array::Single(ref src) => src[index],
             Array::Half(ref src) => f32::from(src[index]),
             Array::Int8(ref src) => f32::from(src[index])
+        }
+    }
+}
+
+impl From<Box<[f32]>> for Array {
+    fn from(other: Box<[f32]>) -> Array {
+        Array::Single(other)
+    }
+}
+
+impl From<Box<[f16]>> for Array {
+    fn from(other: Box<[f16]>) -> Array {
+        Array::Half(other)
+    }
+}
+
+impl From<Box<[q8]>> for Array {
+    fn from(other: Box<[q8]>) -> Array {
+        Array::Int8(other)
+    }
+}
+
+impl From<Array> for Box<[f32]> {
+    fn from(other: Array) -> Box<[f32]> {
+        match other {
+            Array::Single(b) => b,
+            _ => unreachable!()
+        }
+    }
+}
+
+impl From<Array> for Box<[f16]> {
+    fn from(other: Array) -> Box<[f16]> {
+        match other {
+            Array::Half(b) => b,
+            _ => unreachable!()
+        }
+    }
+}
+
+impl From<Array> for Box<[q8]> {
+    fn from(other: Array) -> Box<[q8]> {
+        match other {
+            Array::Int8(b) => b,
+            _ => unreachable!()
         }
     }
 }

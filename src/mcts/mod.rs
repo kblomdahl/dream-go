@@ -14,8 +14,7 @@
 
 mod dirichlet;
 mod global_cache;
-pub mod parallel;
-pub mod param;
+pub mod predict;
 mod spin;
 pub mod tree;
 
@@ -29,11 +28,11 @@ use std::thread::{self, JoinHandle};
 use time;
 
 use go::{symmetry, Board, Color, CHW, HWC};
-use mcts::parallel::{Server, ServerGuard};
-use mcts::param::*;
-use nn::Network;
+use mcts::predict::{PredictService, PredictGuard, PredictRequest};
+use nn::{Network, Type, TYPE};
 use util::array::*;
 use util::b85;
+use util::config;
 use util::types::*;
 
 /// Mapping from 1D coordinate to letter used to represent that coordinate in
@@ -87,7 +86,7 @@ impl fmt::Display for GameResult {
 /// * `board` - the board position
 /// * `color` - the current player
 /// 
-fn forward(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f32]>) {
+fn forward(server: &PredictGuard, board: &Board, color: Color) -> (f32, Box<[f32]>) {
     lazy_static! {
         static ref SYMM: Vec<symmetry::Transform> = vec! [
             symmetry::Transform::Identity,
@@ -109,15 +108,13 @@ fn forward(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f32]
 
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
-        let (value, original_policy) = server.send({
-            if server.is_int8() {
-                Array::from_q8(board.get_features::<q8, HWC>(color, t))
-            } else if server.is_half() {
-                Array::from_f16(board.get_features::<f16, CHW>(color, t))
-            } else {
-                Array::from_f32(board.get_features::<f32, CHW>(color, t))
+        let (value, original_policy) = server.send(PredictRequest::Ask({
+            match *TYPE {
+                Type::Int8 => Array::from(board.get_features::<q8, HWC>(color, t)),
+                Type::Half => Array::from(board.get_features::<f16, CHW>(color, t)),
+                Type::Single => Array::from(board.get_features::<f32, CHW>(color, t))
             }
-        });
+        })).unwrap();
 
         // copy the policy and replace any invalid moves in the suggested policy
         // with -Inf, while keeping the pass move (361) untouched so that there
@@ -197,7 +194,7 @@ fn forward(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f32]
 /// * `board` -
 /// * `color` -
 /// 
-fn score(server: &ServerGuard, board: &Board, color: Color) -> (f32, Box<[f32]>) {
+fn score(server: &PredictGuard, board: &Board, color: Color) -> (f32, Box<[f32]>) {
     let (_, policy) = forward(server, board, color);
     let value = {
         let (black, white) = board.get_score();
@@ -252,14 +249,13 @@ fn is_game_over<E: tree::Value>(trace: &tree::NodeTrace<E>) -> bool {
 /// * `context` - 
 /// * `server` - 
 /// 
-fn predict_worker<C, E>(context: ThreadContext<E>, server: ServerGuard)
-    where C: Param + Clone + 'static,
-          E: tree::Value + Clone + Send + 'static
+fn predict_worker<E>(context: ThreadContext<E>, server: PredictGuard)
+    where E: tree::Value + Clone + Send + 'static
 {
     while context.remaining.fetch_sub(1, Ordering::SeqCst) > 0 {
         loop {
             let mut board = context.starting_point.clone();
-            let trace = unsafe { tree::probe::<C, E>(&mut *context.root.get(), &mut board) };
+            let trace = unsafe { tree::probe::<E>(&mut *context.root.get(), &mut board) };
 
             if let Some(trace) = trace {
                 let &(_, color, _) = trace.last().unwrap();
@@ -271,11 +267,11 @@ fn predict_worker<C, E>(context: ThreadContext<E>, server: ServerGuard)
                 };
 
                 unsafe {
-                    tree::insert::<C, E>(&trace, next_color, value, policy);
+                    tree::insert::<E>(&trace, next_color, value, policy);
                     break
                 }
             } else {
-                server.wait();
+                server.send(PredictRequest::Wait);
             }
         }
     }
@@ -292,15 +288,14 @@ fn predict_worker<C, E>(context: ThreadContext<E>, server: ServerGuard)
 /// * `starting_point` - 
 /// * `starting_color` - 
 /// 
-fn predict_aux<C, E>(
-    server: &Server,
+fn predict_aux<E>(
+    server: &PredictGuard,
     num_workers: usize,
     starting_tree: Option<tree::Node<E>>,
     starting_point: &Board,
     starting_color: Color
 ) -> (f32, usize, tree::Node<E>)
-    where C: Param + Clone + 'static,
-          E: tree::Value + Clone + Send + 'static
+    where E: tree::Value + Clone + Send + 'static
 {
     // if we have a starting tree given, then re-use that tree (after some sanity
     // checks), otherwise we need to query the neural network about what the
@@ -314,7 +309,7 @@ fn predict_aux<C, E>(
             // expanded (since we still need to create the node to record
             // that it was a pass so that we do not lose count of the number
             // of consecutive passes).
-            let server = server.lock();
+            let server = server.clone();
             let (_, policy) = forward(&server, starting_point, starting_color);
 
             for i in 0..362 {
@@ -324,7 +319,7 @@ fn predict_aux<C, E>(
 
         starting_tree
     } else {
-        let server = server.lock();
+        let server = server.clone();
         let (_, mut policy) = forward(&server, starting_point, starting_color);
 
         tree::Node::new(starting_color, policy)
@@ -332,7 +327,7 @@ fn predict_aux<C, E>(
 
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
-    dirichlet::add::<C>(&mut starting_tree.prior, 0.03);
+    dirichlet::add(&mut starting_tree.prior, 0.03);
 
     // start-up all of the worker threads, and then start listening for requests on the
     // channel we gave each thread.
@@ -340,18 +335,14 @@ fn predict_aux<C, E>(
         root: Arc::new(UnsafeCell::new(starting_tree)),
         starting_point: starting_point.clone(),
 
-        remaining: Arc::new(AtomicIsize::new(C::iteration_limit() as isize)),
+        remaining: Arc::new(AtomicIsize::new(*config::NUM_ROLLOUT as isize)),
     };
 
     let handles = (0..num_workers).map(|_| {
         let context = context.clone();
-        let server = server.clone();
+        let server = server.clone_static();
 
-        thread::spawn(move || {
-            let server = server.lock();
-
-            predict_worker::<C, E>(context, server)
-        })
+        thread::spawn(move || predict_worker::<E>(context, server))
     }).collect::<Vec<JoinHandle<()>>>();
 
     // wait for all threads to terminate to avoid any zombie processes
@@ -362,7 +353,7 @@ fn predict_aux<C, E>(
     unsafe {
         let root = UnsafeCell::into_inner(Arc::try_unwrap(context.root).ok().expect(""));
         let (value, index) = root.best(if starting_point.count() < 8 {
-            C::temperature()
+            *config::TEMPERATURE
         } else {
             0.0
         });
@@ -381,22 +372,22 @@ fn predict_aux<C, E>(
 /// 
 /// * `server` - the server to use during evaluation
 /// * `num_workers` - 
+/// * `starting_tree` -
 /// * `starting_point` -
 /// * `starting_color` -
 /// 
-pub fn predict<C, E>(
-    server: &Server,
+pub fn predict<E>(
+    server: &PredictGuard,
     num_workers: Option<usize>,
     starting_tree: Option<tree::Node<E>>,
     starting_point: &Board,
     starting_color: Color
 ) -> (f32, usize, tree::Node<E>)
-    where C: Param + Clone + 'static,
-          E: tree::Value + Clone + Send + 'static
+    where E: tree::Value + Clone + Send + 'static
 {
-    let num_workers = num_workers.unwrap_or(C::thread_count());
+    let num_workers = num_workers.unwrap_or(*config::NUM_THREADS);
 
-    predict_aux::<C, E>(&server, num_workers, starting_tree, starting_point, starting_color)
+    predict_aux::<E>(server, num_workers, starting_tree, starting_point, starting_color)
 }
 
 /// Play a game against the engine and return the result of the game.
@@ -406,10 +397,7 @@ pub fn predict<C, E>(
 /// * `server` - the server to use during evaluation
 /// * `num_parallel` - the number of games that are being played in parallel
 /// 
-fn self_play_one<C: Param + Clone + 'static>(
-    server: &Server,
-    num_parallel: &Arc<AtomicUsize>
-) -> GameResult
+fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> GameResult
 {
     let mut board = Board::new();
     let mut sgf = String::new();
@@ -424,8 +412,8 @@ fn self_play_one<C: Param + Clone + 'static>(
     let mut root = None;
 
     while count < 722 {
-        let num_workers = C::thread_count() / num_parallel.load(Ordering::Acquire);
-        let (value, index, tree) = predict_aux::<C, tree::DefaultValue>(
+        let num_workers = *config::NUM_THREADS / num_parallel.load(Ordering::Acquire);
+        let (value, index, tree) = predict_aux::<tree::DefaultValue>(
             &server,
             num_workers,
             root,
@@ -487,12 +475,12 @@ fn self_play_one<C: Param + Clone + 'static>(
 /// * `network` - the neural network to use during evaluation
 /// * `num_games` - the number of games to generate
 /// 
-pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, Server) {
-    let server = Server::new::<Standard>(network);
+pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, PredictService) {
+    let server = predict::service(network);
     let (sender, receiver) = channel();
 
     // spawn the worker threads that generate the self-play games
-    let num_parallel = ::std::cmp::min(num_games, Standard::batch_size());
+    let num_parallel = ::std::cmp::min(num_games, *config::NUM_GAMES);
     let num_workers = Arc::new(AtomicUsize::new(num_parallel));
     let processed = Arc::new(AtomicUsize::new(0));
 
@@ -500,11 +488,11 @@ pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, S
         let num_workers = num_workers.clone();
         let processed = processed.clone();
         let sender = sender.clone();
-        let server = server.clone();
+        let server = server.lock().clone_static();
 
         thread::spawn(move || {
             while processed.fetch_add(1, Ordering::SeqCst) < num_games {
-                let result = self_play_one::<Standard>(&server, &num_workers);
+                let result = self_play_one(&server, &num_workers);
 
                 if sender.send(result).is_err() {
                     break
@@ -527,7 +515,7 @@ pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, S
 /// 
 /// * `server` - the server to use during evaluation
 /// 
-fn policy_play_one<C: Param + 'static>(server: &ServerGuard) -> GameResult {
+fn policy_play_one(server: &PredictGuard) -> GameResult {
     let mut board = Board::new();
     let mut sgf = String::new();
     let mut current = Color::Black;
@@ -592,23 +580,22 @@ fn policy_play_one<C: Param + 'static>(server: &ServerGuard) -> GameResult {
 /// # Arguments
 /// 
 /// * `network` - the neural network to use during evaluation
+/// * `num_games` - 
 /// 
-pub fn policy_play(network: Network) -> (Receiver<GameResult>, Server) {
-    let server = Server::new::<Standard>(network);
+pub fn policy_play(network: Network, num_games: usize) -> (Receiver<GameResult>, PredictService) {
+    let server = predict::service(network);
     let (sender, receiver) = channel();
 
     // spawn the worker threads that generate the self-play games
-    let num_parallel = Standard::thread_count();
+    let num_games = ::std::cmp::min(*config::NUM_GAMES, num_games);
 
-    for _ in 0..num_parallel {
+    for _ in 0..num_games {
         let sender = sender.clone();
-        let server = server.clone();
+        let server = server.lock().clone_static();
 
         thread::spawn(move || {
-            let server = server.lock();
-
             loop {
-                let result = policy_play_one::<Standard>(&server);
+                let result = policy_play_one(&server);
 
                 if sender.send(result).is_err() {
                     break

@@ -14,7 +14,6 @@
 
 mod entry;
 
-use std::env;
 use std::fs::File;
 use std::io::{self, BufReader, BufRead};
 use std::thread::{self, JoinHandle};
@@ -22,32 +21,8 @@ use std::marker::PhantomData;
 use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
 
 pub use self::entry::Entry;
-use mcts::parallel::Server;
-
-enum SamplingStrategy {
-    Percent(f32),
-    Fixed(usize)
-}
-
-impl ::std::str::FromStr for SamplingStrategy {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, ()> {
-        let s = s.trim();
-
-        if s.ends_with("%") {
-            let s = s.trim_right_matches("%");
-
-            s.parse::<f32>()
-                .map_err(|_| ())
-                .map(|p| SamplingStrategy::Percent(p / 100.0))
-        } else {
-            s.parse::<usize>()
-                .map_err(|_| ())
-                .map(|f| SamplingStrategy::Fixed(f))
-        }
-    }
-}
+use mcts::predict::PredictService;
+use util::config;
 
 /// Iterator over all positions within a single SGF collection, the SGF
 /// collection should contain exactly one full game tree per line.
@@ -70,41 +45,24 @@ impl<'a> Dataset<'a> {
     ///   full policies, if no server is given the partial policies are
     ///   emitted
     ///
-    pub fn new(src: &str, server: Option<&'a Server>) -> Result<Dataset<'a>, io::Error> {
+    pub fn new(src: &str, server: Option<&'a PredictService>) -> Result<Dataset<'a>, io::Error> {
         let handle = File::open(src)?;
 
-        // determine what strategy we should use during sampling
-        lazy_static! {
-            static ref NUM_THREADS: usize = {
-                match env::var("NUM_THREADS") {
-                    Ok(value) => value.parse::<usize>()
-                                      .expect(&format!("NUM_THREADS must be a number, got {}", value)),
-                    _ => 32
-                }
-            };
-            static ref STRATEGY: SamplingStrategy = {
-                match env::var("NUM_SAMPLES") {
-                    Ok(value) => {
-                        value.parse::<SamplingStrategy>().ok()
-                            .expect(&format!("NUM_SAMPLES must be a number or a percentage, e.g. \"3\" or \"5%\", got {}", value))
-                    },
-                    _ => SamplingStrategy::Fixed(1)
-                }
-            };
-        }
-
         // spawn the worker threads
-        let (t_entry, r_entry) = sync_channel(*NUM_THREADS);
-        let workers = (0..*NUM_THREADS).map(|_| {
-            let (t_line, r_line) = sync_channel(*NUM_THREADS);
+        let num_games = *config::NUM_GAMES;
+        let (t_entry, r_entry) = sync_channel(num_games);
+        let workers = (0..num_games).map(|_| {
+            let (t_line, r_line) = sync_channel(num_games);
             let t_entry = t_entry.clone();
-            let server = server.cloned();
+            let server = server.map(|s| s.lock().clone_static());
             let worker = thread::spawn(move || {
                 for line in r_line.iter() {
+                    // parse the game, and then send the samples back to the
+                    // receivers
                     if let Some(entries) = Entry::all(&line, &server) {
-                        let num_samples = ::std::cmp::max(1, match *STRATEGY {
-                            SamplingStrategy::Percent(pct) => (pct * (entries.original_len() as f32)) as usize,
-                            SamplingStrategy::Fixed(f) => f
+                        let num_samples = ::std::cmp::max(1, match *config::NUM_SAMPLES {
+                            config::SamplingStrategy::Percent(pct) => (pct * (entries.original_len() as f32)) as usize,
+                            config::SamplingStrategy::Fixed(f) => f
                         });
 
                         for entry in entries.take(num_samples) {
@@ -190,7 +148,7 @@ impl<'a> Iterator for Datasets<'a> {
 ///   full policies, if no server is given the partial policies are
 ///   emitted
 ///
-pub fn of<'a>(src: &[String], server: Option<&'a Server>) -> Datasets<'a> {
+pub fn of<'a>(src: &[String], server: Option<&'a PredictService>) -> Datasets<'a> {
     Datasets {
         sets: src.iter()
             .filter_map(|f| {

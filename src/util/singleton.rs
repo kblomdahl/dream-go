@@ -22,26 +22,22 @@ pub enum Singleton {
 }
 
 impl Singleton {
-    pub fn from_f16(src: f16) -> Singleton {
-        Singleton::Half(src)
-    }
-
-    pub fn from_f32(src: f32) -> Singleton {
-        Singleton::Single(src)
-    }
-
-    /// Returns true if this singletons contains an `f16`.
-    pub fn is_half(&self) -> bool {
-        match *self {
-            Singleton::Single(_) => false,
-            Singleton::Half(_) => true
-        }
-    }
-
     pub fn get(&self) -> f32 {
         match *self {
             Singleton::Single(src) => src,
             Singleton::Half(src) => f32::from(src)
         }
+    }
+}
+
+impl From<f32> for Singleton {
+    fn from(other: f32) -> Singleton {
+        Singleton::Single(other)
+    }
+}
+
+impl From<f16> for Singleton {
+    fn from(other: f16) -> Singleton {
+        Singleton::Half(other)
     }
 }

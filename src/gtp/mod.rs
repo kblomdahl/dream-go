@@ -16,6 +16,7 @@ use regex::Regex;
 use std::io::BufRead;
 
 use go::{Board, Color};
+use mcts::predict::{self, PredictService};
 use mcts;
 use nn::Network;
 
@@ -80,7 +81,7 @@ lazy_static! {
 }
 
 struct Gtp {
-    server: Option<mcts::parallel::Server>,
+    server: Option<PredictService>,
     search_tree: Option<mcts::tree::Node<mcts::tree::DefaultValue>>,
     history: Vec<Board>,
     komi: f32
@@ -222,7 +223,7 @@ impl Gtp {
             match Network::new() {
                 None => {},
                 Some(network) => {
-                    self.server = Some(mcts::parallel::Server::new::<mcts::param::Tournament>(network));
+                    self.server = Some(predict::service(network));
                 }
             }
         }
@@ -238,8 +239,8 @@ impl Gtp {
                 }
             });
 
-            let (value, index, tree) = mcts::predict::<mcts::param::Tournament, mcts::tree::DefaultValue>(
-                server,
+            let (value, index, tree) = mcts::predict::<mcts::tree::DefaultValue>(
+                &server.lock(),
                 None,
                 search_tree,
                 &board,

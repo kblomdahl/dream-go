@@ -16,7 +16,7 @@ extern crate dream_go;
 extern crate time;
 
 use dream_go::{dataset, gtp, nn, mcts};
-use std::env;
+use dream_go::util::config::{self, Procedure};
 
 /// Returns the network weights, panics if it failed to load the weights.
 fn load_network() -> nn::Network {
@@ -31,82 +31,62 @@ fn load_network() -> nn::Network {
 
 /// Main function.
 fn main() {
-    // keep everything that is before the first "--" indicator as potential
-    // program arguments
-    let args = env::args()
-        .skip(1)
-        .take_while(|arg| arg != "--")
-        .collect::<Vec<String>>();
+    let remaining = config::get_args();
 
-    // everything after "--" and anything in the potential program arguments
-    // that does not begin with a "-"
-    let mut remaining = env::args()
-        .skip(args.len() + 2)
-        .collect::<Vec<String>>();
+    match *config::PROCEDURE {
+        Procedure::Help => {
+            println!("Usage: ./dream-go [options]");
+            println!("");
+            println!("  --extract <files...>  Extract a dataset for training from the given SGF files");
+            println!("  --ex-it               When combined with --dataset perform search on any partial policies");
+            println!("  --self-play <n>       Extract a dataset from self-play containing n examples");
+            println!("  --policy-play <n>     Extract a dataset from self-play using only the policy network");
+            println!("  --gtp                 Run GTP client (default)");
+            println!("");
+            println!("Advanced options:");
+            println!("  --num-rollout <n>     The number of rollouts to add to the search tree for every move");
+            println!("  --num-games <n>       The number of games to play or extract in parallel");
+            println!("  --num-threads <n>     The number of search threads to use in total");
+            println!("  --num-samples <n>     The number of games to extract from each game record");
+            println!("  --batch-size <n>      The number parallel rollouts to perform on the GPU");
+        },
 
-    for arg in &args {
-        if !arg.starts_with("-") {
-            remaining.push(arg.clone());
-        }
-    }
+        Procedure::Extract(ex_it) => {
+            let server = if ex_it {
+                Some(mcts::predict::service(load_network()))
+            } else {
+                None
+            };
 
-    if args.iter().any(|arg| arg == "--dataset") {
-        let server = if args.iter().any(|arg| arg == "--exit") {
-            let network = load_network();
+            // write any received policies to standard output
+            let stdout = std::io::stdout();
+            let mut handle = stdout.lock();
 
-            Some(mcts::parallel::Server::new::<mcts::param::Standard>(network))
-        } else {
-            None
-        };
-        let stdout = std::io::stdout();
-        let mut handle = stdout.lock();
-
-        for entry in dataset::of(&remaining, server.as_ref()) {
-            if entry.write_into(&mut handle).is_err() {
-                break
+            for entry in dataset::of(&remaining, server.as_ref()) {
+                if entry.write_into(&mut handle).is_err() {
+                    break
+                }
             }
+        },
+
+        Procedure::SelfPlay(n) => {
+            let (receiver, _server) = mcts::self_play(load_network(), n);
+
+            for result in receiver.iter().take(n) {
+                println!("{}", result);
+            }
+        },
+
+        Procedure::PolicyPlay(n) => {
+            let (receiver, _server) = mcts::policy_play(load_network(), n);
+
+            for result in receiver.iter().take(n) {
+                println!("{}", result);
+            }
+        },
+
+        Procedure::Gtp => {
+            gtp::run()
         }
-
-        if let Some(server) = server {
-            mcts::parallel::Server::join(server)
-        }
-    } else if args.iter().any(|arg| arg == "--self-play") {
-        let network = load_network();
-        let n = if remaining.len() > 0 {
-            remaining[0].parse::<usize>().unwrap()
-        } else {
-            1
-        };
-        let (receiver, server) = mcts::self_play(network, n);
-
-        for result in receiver.iter().take(n) {
-            println!("{}", result);
-        }
-
-        mcts::parallel::Server::join(server);
-    } else if args.iter().any(|arg| arg == "--policy-play") {
-        let network = load_network();
-        let (receiver, server) = mcts::policy_play(network);
-        let n = if remaining.len() > 0 {
-            remaining[0].parse::<usize>().unwrap()
-        } else {
-            ::std::usize::MAX
-        };
-
-        for result in receiver.iter().take(n) {
-            println!("{}", result);
-        }
-
-        mcts::parallel::Server::join(server);
-    } else if args.iter().any(|arg| arg == "--gtp") || args.len() == 0 {
-        gtp::run();
-    } else {
-        println!("Usage: ./dream-go [options]");
-        println!("");
-        println!("  --dataset <files...>  Extract a dataset for training from the given SGF files");
-        println!("  --exit                When combined with --dataset perform search on any partial policies");
-        println!("  --self-play <n>       Extract a dataset from self-play containing n examples");
-        println!("  --policy-play <n>     Extract a dataset from self-play using only the policy network");
-        println!("  --gtp                 Run GTP client (default)");
     }
 }

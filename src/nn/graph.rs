@@ -20,74 +20,7 @@ use nn::ffi::cublas;
 use nn::ffi::cuda;
 use nn::ffi::cudnn;
 use nn::ops::*;
-
-/// Returns the version of the CUDA Runtime library.
-fn runtime_version() -> i32 {
-    let mut runtime_version: i32 = 0;
-
-    unsafe {
-        check!(cuda::cudaRuntimeGetVersion(&mut runtime_version));
-    }
-
-    runtime_version
-}
-
-/// Returns the major and minor version (in that order) of the CUDA
-/// Compute Capability for the currently selected device.
-fn compute_capability() -> (i32, i32) {
-    let mut version_major: i32 = 0;
-    let mut version_minor: i32 = 0;
-
-    unsafe {
-        check!(cuda::cudaDeviceGetAttribute(&mut version_major, cuda::DeviceAttr::ComputeCapabilityMajor, 0));
-        check!(cuda::cudaDeviceGetAttribute(&mut version_minor, cuda::DeviceAttr::ComputeCapabilityMinor, 0));
-    }
-
-    (version_major, version_minor)
-}
-
-/// Returns whether we should use half precision on the current device.
-/// 
-/// See the (CUDA Programmers Guide)[http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#arithmetic-instructions]
-/// for an exhaustive list of what each compute capability means.
-fn should_use_half() -> bool {
-    let (major, minor) = compute_capability();
-
-    major == 6 && (minor == 0 || minor == 2) ||
-    major == 7 && minor == 0
-}
-
-/// Returns whether we should use tensor cores on the current device.
-/// 
-/// There is no flag that NVIDIA expose to determine this, so we
-/// determine this by the CUDA version (>= 9) and the compute
-/// capabilities (7.0).
-fn should_use_tensor_core() -> bool {
-    if cfg!(feature = "tensor-core") {
-        let (major, minor) = compute_capability();
-        let version = runtime_version();
-
-        version >= 9000 && major == 7 && minor == 0
-    } else {
-        false
-    }
-}
-
-/// Returns whether we should use DP4A on the current device.
-/// 
-/// There is no flag that NVIDIA expose to determine this, so we
-/// determine this by the CUDA version (>= 8) and the compute
-/// capabilities (6.1+).
-fn should_use_dp4a() -> bool {
-    if cfg!(feature = "dp4a") {
-        let (major, minor) = compute_capability();
-        let version = runtime_version();
-
-        version >= 8000 && (major == 6 && minor >= 1 || major >= 7)
-    } else {
-        false
-    }
-}
+use nn::{Type, TYPE};
 
 pub trait Graph {
     /// Returns a pointer to the memory on the GPU that should contain the
@@ -798,12 +731,10 @@ impl Builder {
         };
 
         // add the placeholder tensor that represents the input
-        let (data_type, format) = if should_use_half() || should_use_tensor_core() {
-            (cudnn::DataType::Half, cudnn::TensorFormat::NCHW)
-        } else if should_use_dp4a() {
-            (cudnn::DataType::Int8, cudnn::TensorFormat::NHWC)
-        } else {
-            (cudnn::DataType::Float, cudnn::TensorFormat::NCHW)
+        let (data_type, format) = match *TYPE {
+            Type::Half => (cudnn::DataType::Half, cudnn::TensorFormat::NCHW),
+            Type::Int8 => (cudnn::DataType::Int8, cudnn::TensorFormat::NHWC),
+            Type::Single => (cudnn::DataType::Float, cudnn::TensorFormat::NCHW)
         };
 
         g.tensors.insert("00_input/output:0".to_string(), Tensor::default()
@@ -968,24 +899,6 @@ impl Builder {
                 }
             }
         }
-    }
-
-    pub fn is_half(&self) -> bool {
-        self.tensors["00_input/output:0"].get_data_type() == cudnn::DataType::Half
-    }
-
-    pub fn is_int8(&self) -> bool {
-        self.tensors["00_input/output:0"].get_data_type() == cudnn::DataType::Int8
-    }
-}
-
-impl Workspace {
-    pub fn is_half(&self) -> bool {
-        self.tensors["00_input/output:0"].get_data_type() == cudnn::DataType::Half
-    }
-
-    pub fn is_int8(&self) -> bool {
-        self.tensors["00_input/output:0"].get_data_type() == cudnn::DataType::Int8
     }
 }
 

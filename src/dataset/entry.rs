@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use go::{Board, Color, symmetry, CHW};
-use mcts::parallel::Server;
+use mcts::predict::PredictGuard;
 use mcts;
 use util::b85;
+use util::config;
 use util::types::*;
 
 use std::mem::transmute;
@@ -56,11 +57,12 @@ pub struct EntryIterator<'a> {
     entries: Vec<((Board, Color, PolicyEntry), &'static symmetry::Transform)>,
     original_size: usize,
     winner: Color,
-    server: &'a Option<Server>
+    server: &'a Option<PredictGuard<'a>>
 }
 
 impl<'a> EntryIterator<'a> {
-    /// Returns the number of moves that was played in the game pre-augmentation.
+    /// Returns the number of moves that was played in this game
+    /// pre-augmentation.
     pub fn original_len(&self) -> usize {
         self.original_size
     }
@@ -74,9 +76,15 @@ impl<'a> Iterator for EntryIterator<'a> {
             .map(|((ref board, current_color, ref policy), &s)| {
                 let features = board.get_features::<f16, CHW>(current_color, s);
                 let mut policy: Box<[f16]> = if self.server.is_some() && policy.is_partial() {
-                    let (_, _, tree) = mcts::predict::<mcts::param::Standard, mcts::tree::DefaultValue>(
+                    // if this is a partial policy then perform a search at this
+                    // board position and output the result as the policy
+                    let num_threads = ::std::cmp::max(
+                        *config::NUM_THREADS / *config::NUM_GAMES,
+                        1
+                    );
+                    let (_, _, tree) = mcts::predict::<mcts::tree::DefaultValue>(
                         self.server.as_ref().unwrap(),
-                        Some(1),
+                        Some(num_threads),
                         None,
                         board,
                         current_color
@@ -87,6 +95,7 @@ impl<'a> Iterator for EntryIterator<'a> {
                     policy.to_slice()
                 };
 
+                // transform the policy using the same symmetry as the features
                 symmetry::apply(&mut policy, s);
 
                 Entry::new(
@@ -131,7 +140,7 @@ impl Entry {
     ///   full policies. If no server is given then it will emit partial
     ///   policies.
     ///
-    pub fn all<'a>(src: &String, server: &'a Option<Server>) -> Option<EntryIterator<'a>> {
+    pub fn all<'a>(src: &String, server: &'a Option<PredictGuard>) -> Option<EntryIterator<'a>> {
         lazy_static! {
             static ref LETTERS: [char; 26] = [
                 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',

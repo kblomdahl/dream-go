@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use go::{Board, Color};
-use mcts::param::Param;
 use mcts::spin::Mutex;
+use util::config;
 
 use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
@@ -39,9 +39,9 @@ lazy_static! {
 }
 
 pub trait Value {
-    unsafe fn update<C: Param, E: Value>(trace: &NodeTrace<E>, color: Color, value: f32);
-    fn get<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]);
-    fn get_ref<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]);
+    unsafe fn update<E: Value>(trace: &NodeTrace<E>, color: Color, value: f32);
+    fn get<E: Value>(node: &Node<E>, dst: &mut [f32]);
+    fn get_ref<E: Value>(node: &Node<E>, dst: &mut [f32]);
 }
 
 /// An implementation of the _Rapid Action Value Estimation_ heuristic
@@ -55,8 +55,8 @@ pub struct RAVE;
 
 impl Value for RAVE {
     #[inline]
-    unsafe fn update<C: Param, E: Value>(trace: &NodeTrace<E>, color: Color, value: f32) {
-        PUCT::update::<C, E>(trace, color, value);
+    unsafe fn update<E: Value>(trace: &NodeTrace<E>, color: Color, value: f32) {
+        PUCT::update::<E>(trace, color, value);
 
         for (i, &(node, node_color, index)) in trace.iter().enumerate() {
             let value_ = if color == (*node).color { value } else { 1.0 - value };
@@ -80,9 +80,10 @@ impl Value for RAVE {
     /// * `dst` - output array for the UCT value
     /// 
     #[inline]
-    fn get_ref<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
+    fn get_ref<E: Value>(node: &Node<E>, dst: &mut [f32]) {
         let sqrt_n = ((1 + node.total_count) as f32).sqrt();
-        let b_sqr = C::rave_bias() * C::rave_bias();
+        let b_sqr = *config::RAVE_BIAS * *config::RAVE_BIAS;
+        let uct_exp = *config::UCT_EXP;
 
         for i in 0..362 {
             let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
@@ -99,15 +100,15 @@ impl Value for RAVE {
                 (1.0f32 - beta) * node.value[i] + beta * node.amaf[i]
             };
 
-            dst[i] = value + node.prior[i] * C::exploration_rate() * exp_bonus
+            dst[i] = value + node.prior[i] * uct_exp * exp_bonus
         }
     }
 
     #[inline]
-    fn get<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
+    fn get<E: Value>(node: &Node<E>, dst: &mut [f32]) {
         if cfg!(target_arch = "x86_64") {
             let sqrt_n = ((1 + node.total_count) as f32).sqrt();
-            let b_sqr = C::rave_bias() * C::rave_bias();
+            let b_sqr = *config::RAVE_BIAS * *config::RAVE_BIAS;
 
             unsafe {
                 const ONE: f32 = 1.0f32;
@@ -168,7 +169,7 @@ impl Value for RAVE {
                       "{r13}"(dst.as_ptr()),
                       "{rax}"(&sqrt_n),
                       "{rbx}"(&(4.0f32 * b_sqr)),
-                      "{rcx}"(&C::exploration_rate()),
+                      "{rcx}"(&*config::UCT_EXP),
                       "{rdx}"(&ONE)
                     : "memory", "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", "ymm5", "ymm6",
                       "ymm7", "ymm8", "ymm9", "ymm11", "ymm12", "ymm13", "ymm14", "ymm15"
@@ -176,7 +177,7 @@ impl Value for RAVE {
                 );
             }
         } else {
-            RAVE::get_ref::<C, E>(node, dst);
+            RAVE::get_ref::<E>(node, dst);
         }
     }
 }
@@ -191,7 +192,7 @@ pub struct PUCT;
 
 impl Value for PUCT {
     #[inline]
-    unsafe fn update<C: Param, E: Value>(trace: &NodeTrace<E>, color: Color, value: f32) {
+    unsafe fn update<E: Value>(trace: &NodeTrace<E>, color: Color, value: f32) {
         for &(node, _, index) in trace.iter() {
             let value_ = if color == (*node).color { value } else { 1.0 - value };
 
@@ -210,18 +211,19 @@ impl Value for PUCT {
     /// * `dst` - output array for the UCT value
     /// 
     #[inline]
-    fn get_ref<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
+    fn get_ref<E: Value>(node: &Node<E>, dst: &mut [f32]) {
         let sqrt_n = ((1 + node.total_count) as f32).sqrt();
+        let uct_exp = *config::UCT_EXP;
 
         for i in 0..362 {
             let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
 
-            dst[i] = node.value[i] + node.prior[i] * C::exploration_rate() * exp_bonus
+            dst[i] = node.value[i] + node.prior[i] * uct_exp * exp_bonus
         }
     }
 
     #[inline]
-    fn get<C: Param, E: Value>(node: &Node<E>, dst: &mut [f32]) {
+    fn get<E: Value>(node: &Node<E>, dst: &mut [f32]) {
         if cfg!(target_arch = "x86_64") {
             let sqrt_n = ((1 + node.total_count) as f32).sqrt();
 
@@ -260,7 +262,7 @@ impl Value for PUCT {
                       "{r9}"(node.value.as_ptr()),
                       "{r10}"(node.prior.as_ptr()),
                       "{r11}"(dst.as_ptr()),
-                      "{r12}"(&C::exploration_rate()),
+                      "{r12}"(&*config::UCT_EXP),
                       "{r13}"(&sqrt_n),
                       "{r14}"(&ONE)
                     : "memory", "rcx", "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", "ymm5"
@@ -268,7 +270,7 @@ impl Value for PUCT {
                 );
             }
         } else {
-            PUCT::get_ref::<C, E>(node, dst);
+            PUCT::get_ref::<E>(node, dst);
         }
     }
 }
@@ -610,12 +612,12 @@ impl<E: Value> Node<E> {
 
     /// Returns the child with the maximum UCT value, and increase its visit count
     /// by one.
-    fn select<'a, C: Param>(&'a mut self) -> Option<usize> {
+    fn select<'a>(&'a mut self) -> Option<usize> {
         // compute all UCB1 values for each node before trying to figure out which
         // to pick to make it possible to do it with SIMD.
         let mut uct = [::std::f32::NEG_INFINITY; 368];
 
-        E::get::<C, E>(self, &mut uct);
+        E::get::<E>(self, &mut uct);
 
         // greedy selection based on the maximum ucb1 value, failing if someone else
         // is already expanding the node we want to expand.
@@ -650,14 +652,14 @@ pub type NodeTrace<E> = Vec<(*mut Node<E>, Color, usize)>;
 /// * `root` - the search tree to probe into
 /// * `board` - the board to update with the traversed moves
 /// 
-pub unsafe fn probe<C, E>(root: &mut Node<E>, board: &mut Board) -> Option<NodeTrace<E>>
-    where C: Param, E: Value
+pub unsafe fn probe<E>(root: &mut Node<E>, board: &mut Board) -> Option<NodeTrace<E>>
+    where E: Value
 {
     let mut trace = vec! [];
     let mut current = root;
 
     loop {
-        if let Some(next_child) = current.select::<C>() {
+        if let Some(next_child) = current.select() {
             trace.push((current as *mut Node<E>, current.color, next_child));
 
             if next_child != 361 {  // not a passing move
@@ -704,8 +706,8 @@ pub unsafe fn probe<C, E>(root: &mut Node<E>, board: &mut Board) -> Option<NodeT
 /// * `value` -
 /// * `prior` -
 /// 
-pub unsafe fn insert<C, E>(trace: &NodeTrace<E>, color: Color, value: f32, prior: Box<[f32]>)
-    where C: Param, E: Value
+pub unsafe fn insert<E>(trace: &NodeTrace<E>, color: Color, value: f32, prior: Box<[f32]>)
+    where E: Value
 {
     if let Some(&(node, _, index)) = trace.last() {
         let mut next = Box::new(Node::new(color, prior));
@@ -724,7 +726,7 @@ pub unsafe fn insert<C, E>(trace: &NodeTrace<E>, color: Color, value: f32, prior
         }
     }
 
-    E::update::<C, E>(trace, color, value);
+    E::update::<E>(trace, color, value);
 }
 
 /// Type alias for `Node<E>` that acts as a wrapper for calling `as_sgf` from

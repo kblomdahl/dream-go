@@ -163,11 +163,6 @@ impl Tensor {
         self
     }
 
-    pub fn set_scale_like(&self, other: &Tensor) -> &Tensor {
-        *self.scale.borrow_mut() = other.get_scale();
-        self
-    }
-
     pub fn get_shape(&self) -> Vec<i32> {
         self.shape.borrow().clone()
     }

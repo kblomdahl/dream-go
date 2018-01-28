@@ -113,9 +113,3 @@ impl Network {
         guard
     }
 }
-
-impl Deref for Network {
-    type Target = graph::Builder;
-
-    fn deref(&self) -> &Self::Target { &self.builder }
-}

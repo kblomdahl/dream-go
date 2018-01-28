@@ -21,7 +21,6 @@ extern crate ordered_float;
 extern crate rand;
 extern crate regex;
 #[cfg(test)] extern crate test;
-extern crate threadpool;
 extern crate time;
 
 pub mod dataset;
@@ -29,4 +28,5 @@ pub mod go;
 pub mod gtp;
 pub mod mcts;
 pub mod nn;
+pub mod parallel;
 pub mod util;

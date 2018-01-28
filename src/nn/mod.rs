@@ -20,12 +20,99 @@ mod loader;
 mod network;
 mod ops;
 
-use self::ffi::cublas::*;
-use self::ffi::cuda::*;
-use self::ffi::cudnn::*;
+use self::ffi::cublas;
+use self::ffi::cuda;
+use self::ffi::cudnn;
 use self::graph::Graph;
 pub use self::graph::Workspace;
 pub use self::network::{Network, WorkspaceGuard};
+
+/// Returns the version of the CUDA Runtime library.
+fn runtime_version() -> i32 {
+    let mut runtime_version: i32 = 0;
+
+    unsafe {
+        check!(cuda::cudaRuntimeGetVersion(&mut runtime_version));
+    }
+
+    runtime_version
+}
+
+/// Returns the major and minor version (in that order) of the CUDA
+/// Compute Capability for the currently selected device.
+fn compute_capability() -> (i32, i32) {
+    let mut version_major: i32 = 0;
+    let mut version_minor: i32 = 0;
+
+    unsafe {
+        check!(cuda::cudaDeviceGetAttribute(&mut version_major, cuda::DeviceAttr::ComputeCapabilityMajor, 0));
+        check!(cuda::cudaDeviceGetAttribute(&mut version_minor, cuda::DeviceAttr::ComputeCapabilityMinor, 0));
+    }
+
+    (version_major, version_minor)
+}
+
+/// Returns whether we should use half precision on the current device.
+/// 
+/// See the (CUDA Programmers Guide)[http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#arithmetic-instructions]
+/// for an exhaustive list of what each compute capability means.
+fn should_use_half() -> bool {
+    let (major, minor) = compute_capability();
+
+    major == 6 && (minor == 0 || minor == 2) ||
+    major == 7 && minor == 0
+}
+
+/// Returns whether we should use tensor cores on the current device.
+/// 
+/// There is no flag that NVIDIA expose to determine this, so we
+/// determine this by the CUDA version (>= 9) and the compute
+/// capabilities (7.0).
+fn should_use_tensor_core() -> bool {
+    if cfg!(feature = "tensor-core") {
+        let (major, minor) = compute_capability();
+        let version = runtime_version();
+
+        version >= 9000 && major == 7 && minor == 0
+    } else {
+        false
+    }
+}
+
+/// Returns whether we should use DP4A on the current device.
+/// 
+/// There is no flag that NVIDIA expose to determine this, so we
+/// determine this by the CUDA version (>= 8) and the compute
+/// capabilities (6.1+).
+fn should_use_dp4a() -> bool {
+    if cfg!(feature = "dp4a") {
+        let (major, minor) = compute_capability();
+        let version = runtime_version();
+
+        version >= 8000 && (major == 6 && minor >= 1 || major >= 7)
+    } else {
+        false
+    }
+}
+
+/// The supported types for inference.
+pub enum Type {
+    Int8,
+    Half,
+    Single
+}
+
+lazy_static! {
+    /// The type that is expected as input to `forward`. This is determined
+    /// based on the _Compute Capability_ of the users GPU.
+    pub static ref TYPE: Type = if should_use_half() || should_use_tensor_core() {
+        Type::Half
+    } else if should_use_dp4a() {
+        Type::Int8
+    } else {
+        Type::Single
+    };
+}
 
 /// Returns the value and policy tensors obtained from a forward pass
 /// through the neural network.
@@ -48,8 +135,8 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
     let mut value = vec! [R::from(0.0f32); batch_size];
 
     unsafe {
-        check!(cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
-        check!(cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
+        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
 
         for (i, ref feature) in features.iter().enumerate() {
             assert_eq!(feature.len(), 11552);
@@ -59,11 +146,11 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
             let input = workspace.get_input(None)
                 .offset((i * element_size) as isize);
 
-            check!(cudaMemcpyAsync(
+            check!(cuda::cudaMemcpyAsync(
                 input,
                 feature.as_ptr() as *const c_void,
                 element_size,
-                MemcpyKind::HostToDevice,
+                cuda::MemcpyKind::HostToDevice,
                 workspace.tower_stream
             ));
         }
@@ -72,14 +159,14 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
 
         // fix the synchronization, so that the policy and value head needs to
         // wait for the tower to complete before they can start.
-        check!(cudaEventRecord(workspace.tower_event, workspace.tower_stream));
+        check!(cuda::cudaEventRecord(workspace.tower_event, workspace.tower_stream));
 
-        check!(cudaStreamWaitEvent(workspace.policy_stream, workspace.tower_event, 0));
-        check!(cudaStreamWaitEvent(workspace.value_stream, workspace.tower_event, 0));
+        check!(cuda::cudaStreamWaitEvent(workspace.policy_stream, workspace.tower_event, 0));
+        check!(cuda::cudaStreamWaitEvent(workspace.value_stream, workspace.tower_event, 0));
 
         // policy head (21p_policy)
-        check!(cudnnSetStream(workspace.handle_dnn, workspace.policy_stream));
-        check!(cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream));
+        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.policy_stream));
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream));
 
         graph::policy::<graph::Runtime, _>(workspace);
 
@@ -88,32 +175,32 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
             let output = workspace.get_policy_output(None)
                 .offset((i * element_size) as isize);
 
-            check!(cudaMemcpyAsync(
+            check!(cuda::cudaMemcpyAsync(
                 softmax[i].as_mut_ptr() as *mut c_void,
                 output,
                 element_size,
-                MemcpyKind::DeviceToHost,
+                cuda::MemcpyKind::DeviceToHost,
                 workspace.policy_stream
             ));
         }
 
         // value head (21v_value)
-        check!(cudnnSetStream(workspace.handle_dnn, workspace.value_stream));
-        check!(cublasSetStream_v2(workspace.handle_blas, workspace.value_stream));
+        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.value_stream));
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.value_stream));
 
         graph::value::<graph::Runtime, _>(workspace);
 
-        check!(cudaMemcpyAsync(
+        check!(cuda::cudaMemcpyAsync(
             value.as_mut_ptr() as *mut c_void,
             workspace.get_value_output(None),
             batch_size * ::std::mem::size_of::<R>(),
-            MemcpyKind::DeviceToHost,
+            cuda::MemcpyKind::DeviceToHost,
             workspace.value_stream
         ));
 
         // wait for both the value and policy head to finish
-        check!(cudaStreamSynchronize(workspace.policy_stream));
-        check!(cudaStreamSynchronize(workspace.value_stream));
+        check!(cuda::cudaStreamSynchronize(workspace.policy_stream));
+        check!(cuda::cudaStreamSynchronize(workspace.value_stream));
     }
 
     (value, softmax.into_iter().map(|s| s.into_boxed_slice()).collect())

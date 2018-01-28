@@ -1307,7 +1307,7 @@ mod tests {
     }
 
     #[test]
-    fn ladder_capture() {
+    fn ladder_corner_capture() {
         // test the following (as 19x19 board), and check
         // that any atari move is a ladder capture
         //
@@ -1343,6 +1343,34 @@ mod tests {
     }
 
     #[test]
+    fn ladder_capture() {
+        // test that the most standard ladder capture is detected correctly:
+        //
+        // . . . . .
+        // . . X X .
+        // . X O . .
+        // . . . . .
+        // . . . . .
+        //
+        let mut board = Board::new();
+        board.place(Color::White, 3, 3);
+        board.place(Color::Black, 2, 3);
+        board.place(Color::Black, 3, 2);
+        board.place(Color::Black, 4, 2);
+
+        for x in 0..19 {
+            for y in 0..19 {
+                if board.is_valid(Color::Black, x, y) {
+                    let is_ladder = x == 3 && y == 4;
+                    let index = 19 * y + x;
+
+                    assert_eq!(board.is_ladder_capture(Color::Black, index), is_ladder);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn ladder_escape() {
         // test a standard ladder pattern with a stone on the diagonal
         let mut board = Board::new();
@@ -1356,11 +1384,11 @@ mod tests {
         for x in 0..19 {
             for y in 0..19 {
                 if board.is_valid(Color::White, x, y) {
-                    let is_ladder = x == 4 && y == 3;
+                    let is_escape = x == 4 && y == 3;
                     let index = 19 * y + x;
 
                     assert!(!board.is_ladder_capture(Color::Black, index));
-                    assert_eq!(board.is_ladder_escape(Color::White, index), is_ladder, "({}, {}) is a ladder escape = {}", x, y, is_ladder);
+                    assert_eq!(board.is_ladder_escape(Color::White, index), is_escape, "({}, {}) is a ladder escape = {}", x, y, is_escape);
                 }
             }
         }
