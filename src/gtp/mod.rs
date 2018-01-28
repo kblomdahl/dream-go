@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use ordered_float::*;
 use regex::Regex;
 use std::io::BufRead;
 
@@ -26,10 +27,10 @@ use gtp::vertex::*;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&'static str; 15] = [
+const KNOWN_COMMANDS: [&'static str; 16] = [
     "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove", "undo",
-    "quit", "final_score"
+    "quit", "final_score", "heatmap"
 ];
 
 #[derive(Debug, PartialEq)]
@@ -40,6 +41,7 @@ enum Command {
     Version,  // report the version number of the program
     BoardSize(usize),  // set the board size to NxN
     ClearBoard,  // clear the board
+    Heatmap(Color),  // sabaki heatmap for the given color
     Komi(f32),  // set the komi
     Play(Color, Vertex),  // play a stone of the given color at the given vertex
     ListCommands,  // list all available commands
@@ -73,6 +75,7 @@ macro_rules! error {
 lazy_static! {
     static ref ID_PREFIX: Regex = Regex::new(r"^([0-9]+)(?: +(.*)$|$)").unwrap();
     static ref BOARD_SIZE: Regex = Regex::new(r"^boardsize +([0-9]+)").unwrap();
+    static ref HEATMAP: Regex = Regex::new(r"^heatmap +([bw])").unwrap();
     static ref KOMI: Regex = Regex::new(r"^komi +([0-9\.]+)").unwrap();
     static ref PLAY: Regex = Regex::new(r"^play +([bBwW]) +([a-z][0-9]+|pass)").unwrap();
     static ref KNOWN_COMMAND: Regex = Regex::new(r"^known_command +([^ ]+)").unwrap();
@@ -116,6 +119,15 @@ impl Gtp {
             }
         } else if line == "clear_board" {
             Some((id, Command::ClearBoard))
+        } else if let Some(caps) = HEATMAP.captures(line) {
+            let color = caps[1].parse::<Color>();
+
+            if let Ok(color) = color {
+                Some((id, Command::Heatmap(color)))
+            } else {
+                error!(id, "syntax error");
+                Some((None, Command::Pass))
+            }
         } else if let Some(caps) = KOMI.captures(line) {
             let komi = caps[1].parse::<f32>();
 
@@ -207,6 +219,21 @@ impl Gtp {
         }
     }
 
+    /// Create the `PredictService` if it does not exist, and then returns the
+    /// current service.
+    fn open_service(&mut self) -> &Option<PredictService> {
+        if self.server.is_none() {
+            match Network::new() {
+                None => {},
+                Some(network) => {
+                    self.server = Some(predict::service(network));
+                }
+            }
+        }
+
+        &self.server
+    }
+
     /// Generate a move using the monte carlo tree search engine for the given
     /// color, using the stored search tree if available.
     /// 
@@ -219,18 +246,10 @@ impl Gtp {
     /// * `color` - the color to generate the move for
     /// 
     fn generate_move(&mut self, id: Option<usize>, color: Color) -> Option<Vertex> {
-        if self.server.is_none() {
-            match Network::new() {
-                None => {},
-                Some(network) => {
-                    self.server = Some(predict::service(network));
-                }
-            }
-        }
-
-        let board = self.history.last().unwrap();
+        self.open_service();
 
         if let Some(ref server) = self.server {
+            let board = self.history.last().unwrap();
             let search_tree = self.search_tree.take().and_then(|tree| {
                 if tree.color != color {
                     mcts::tree::Node::forward(tree, 361)  // pass
@@ -273,6 +292,59 @@ impl Gtp {
         }
     }
 
+    /// Generate a move using the engine and then output an Sabaki GTP extension
+    /// string that allows us to draw the heatmap directly on the board.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `id` -
+    /// * `color` -
+    /// 
+    fn heatmap(&mut self, id: Option<usize>, color: Color) {
+        self.open_service();
+
+        if let Some(ref server) = self.server {
+            let board = self.history.last().unwrap();
+            let (_value, _index, tree) = mcts::predict::<mcts::tree::DefaultValue>(
+                &server.lock(),
+                None,
+                None,
+                &board,
+                color
+            );
+
+            // format the flat softmax policy as a nested list (in JSON), where
+            // each list correspond to one row on the board. The elements in the
+            // inner list is the heat of each vertex, discretized to an integer
+            // in `0..9`.
+            let mut json = String::new();
+            let softmax = tree.softmax::<f32>();
+            let max_heat = softmax.iter().take(361)
+                .max_by_key(|&&v| OrderedFloat(v))
+                .unwrap();
+
+            for (index, &heat) in softmax.iter().take(361).enumerate() {
+                if index % 19 == 0 {
+                    if index > 0 {
+                        json += "],";
+                    }
+
+                    json += "[";
+                }
+
+                if index % 19 > 0 {
+                    json += ",";
+                }
+
+                json += &format!("{}", (9.9 * heat / max_heat).floor());
+            }
+
+            success!(id, &format!("#sabaki{{\"heatmap\":[{}]]}}", json));
+        } else {
+            error!(id, "unable to load network weights");
+        }
+    }
+
     fn process(&mut self, id: Option<usize>, cmd: Command) {
         match cmd {
             Command::Quit => {}
@@ -296,6 +368,9 @@ impl Gtp {
             Command::Komi(komi) => {
                 self.komi = komi;
                 success!(id, "");
+            },
+            Command::Heatmap(color) => {
+                self.heatmap(id, color);
             },
             Command::Play(color, vertex) => {
                 let next_board = {
