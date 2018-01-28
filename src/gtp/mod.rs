@@ -292,6 +292,49 @@ impl Gtp {
         }
     }
 
+    /// Returns a Sabaki heatmap that represents the given softmax policy.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `softmax` -
+    /// 
+    fn to_heatmap(softmax: &[f32]) -> String {
+        // format the flat softmax policy as a nested list (in JSON), where
+        // each list correspond to one row on the board. The elements in the
+        // inner list is the heat of each vertex, discretized to an integer
+        // in `0..9`.
+        let mut json = String::new();
+        let max_heat = softmax.iter().take(361)
+            .max_by_key(|&&v| OrderedFloat(v))
+            .unwrap();
+
+        for (index, _heat) in softmax.iter().take(361).enumerate() {
+            let y = index / 19;
+            let x = index % 19;
+
+            if x == 0 {
+                if y > 0 {
+                    json += "],";
+                }
+
+                json += "[";
+            }
+
+            if x > 0 {
+                json += ",";
+            }
+
+            // the GTP coordinates go from the bottom-left to the top-right, but
+            // Sabaki heatmap coordinates go from the top-left to the
+            // bottom-right (...) so inverse the y-axis.
+            let other = softmax[19 * (18 - y) + x];
+
+            json += &format!("{}", (9.0 * other / max_heat).ceil());
+        }
+
+        format!("{{\"heatmap\":[{}]]}}", json)
+    }
+
     /// Generate a move using the engine and then output an Sabaki GTP extension
     /// string that allows us to draw the heatmap directly on the board.
     /// 
@@ -313,33 +356,12 @@ impl Gtp {
                 color
             );
 
-            // format the flat softmax policy as a nested list (in JSON), where
-            // each list correspond to one row on the board. The elements in the
-            // inner list is the heat of each vertex, discretized to an integer
-            // in `0..9`.
-            let mut json = String::new();
-            let softmax = tree.softmax::<f32>();
-            let max_heat = softmax.iter().take(361)
-                .max_by_key(|&&v| OrderedFloat(v))
-                .unwrap();
+            eprintln!("{}", mcts::tree::to_pretty(&tree));
 
-            for (index, &heat) in softmax.iter().take(361).enumerate() {
-                if index % 19 == 0 {
-                    if index > 0 {
-                        json += "],";
-                    }
+            // output the heatmap in Sabaki format
+            let json = Gtp::to_heatmap(&tree.softmax());
 
-                    json += "[";
-                }
-
-                if index % 19 > 0 {
-                    json += ",";
-                }
-
-                json += &format!("{}", (9.9 * heat / max_heat).floor());
-            }
-
-            success!(id, &format!("#sabaki{{\"heatmap\":[{}]]}}", json));
+            success!(id, &format!("#sabaki{}", json));
         } else {
             error!(id, "unable to load network weights");
         }
