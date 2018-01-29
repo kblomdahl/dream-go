@@ -433,6 +433,11 @@ impl<E: Value> Node<E> {
         }
     }
 
+    /// Returns the total size of this search tree.
+    pub fn size(&self) -> usize {
+        self.total_count as usize
+    }
+
     fn as_sgf<S: SgfCoordinate>(&self, fmt: &mut fmt::Formatter, meta: bool) -> fmt::Result {
         // annotate the top-10 moves to make it easier to navigate for the
         // user.

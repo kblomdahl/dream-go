@@ -64,7 +64,7 @@ lazy_static! {
     };
 
     /// The target number of rollouts for each search tree.
-    pub static ref NUM_ROLLOUT: usize = get_opt("--num-rollout").unwrap_or(800);
+    pub static ref NUM_ROLLOUT: usize = get_opt("--num-rollout").unwrap_or(1600);
 
     /// The maximum batch size to forward to the neural network. A larger batch
     /// size typically result in a faster program but requires more GPU memory.

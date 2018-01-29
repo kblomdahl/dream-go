@@ -324,11 +324,16 @@ fn predict_aux<E>(
 
     // start-up all of the worker threads, and then start listening for requests on the
     // channel we gave each thread.
+    let remaining = if *config::NUM_ROLLOUT > starting_tree.size() {
+        (*config::NUM_ROLLOUT - starting_tree.size()) as isize
+    } else {
+        0
+    };
     let context: ThreadContext<E> = ThreadContext {
         root: Arc::new(UnsafeCell::new(starting_tree)),
         starting_point: starting_point.clone(),
 
-        remaining: Arc::new(AtomicIsize::new(*config::NUM_ROLLOUT as isize)),
+        remaining: Arc::new(AtomicIsize::new(remaining)),
     };
 
     let handles = (0..num_workers).map(|_| {
