@@ -27,6 +27,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use time;
 
+use go::sgf::*;
 use go::{symmetry, Board, Color, CHW, HWC};
 use mcts::predict::{PredictService, PredictGuard, PredictRequest};
 use nn::{Network, Type, TYPE};
@@ -34,14 +35,6 @@ use util::array::*;
 use util::b85;
 use util::config;
 use util::types::*;
-
-/// Mapping from 1D coordinate to letter used to represent that coordinate in
-/// the SGF file format.
-const SGF_LETTERS: [char; 26] = [
-    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
-    'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
-    'w', 'x', 'y', 'z'
-];
 
 pub enum GameResult {
     Resign(String, Board, Color, f32),
@@ -359,7 +352,7 @@ fn predict_aux<E>(
         });
 
         #[cfg(feature = "trace-mcts")]
-        eprintln!("{}", tree::to_sgf::<E>(&root, starting_point));
+        eprintln!("{}", tree::to_sgf::<CGoban, E>(&root, starting_point, true));
 
         (value, index, root)
     }
@@ -442,16 +435,18 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
         } else {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
-            sgf += &format!(";{}[{}{}]P[{}]V[{}]",
+            sgf += &format!(";{}[{}]P[{}]V[{}]",
                 current,
-                SGF_LETTERS[x], SGF_LETTERS[y],
+                CGoban::to_sgf(x, y),
                 b85::encode(&policy),
                 value_sgf
             );
             if prior_index != 361 {
-                sgf += &format!("TR[{}{}]",
-                    SGF_LETTERS[tree::X[prior_index] as usize],
-                    SGF_LETTERS[tree::Y[prior_index] as usize]
+                sgf += &format!("TR[{}]",
+                    CGoban::to_sgf(
+                        tree::X[prior_index] as usize,
+                        tree::Y[prior_index] as usize
+                    )
                 );
             };
 
@@ -554,7 +549,7 @@ fn policy_play_one(server: &PredictGuard) -> GameResult {
             } else {  // normal move
                 let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
-                sgf += &format!(";{}[{}{}]", current, SGF_LETTERS[x], SGF_LETTERS[y]);
+                sgf += &format!(";{}[{}]", current, CGoban::to_sgf(x, y));
                 pass_count = 0;
                 board.place(current, x, y);
             }

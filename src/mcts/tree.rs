@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use go::sgf::SgfCoordinate;
 use go::{Board, Color};
 use mcts::spin::Mutex;
 use util::config;
@@ -20,15 +21,6 @@ use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
 use std::fmt;
 use std::ptr;
-
-/// Mapping from 1D coordinate to letter used to represent that coordinate in
-/// the SGF file format.
-#[cfg(feature = "trace-mcts")]
-const SGF_LETTERS: [char; 26] = [
-    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
-    'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
-    'w', 'x', 'y', 'z'
-];
 
 lazy_static! {
     /// Mapping from policy index to the `x` coordinate it represents.
@@ -441,42 +433,41 @@ impl<E: Value> Node<E> {
         }
     }
 
-    #[cfg(feature = "trace-mcts")]
-    fn as_sgf(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn as_sgf<S: SgfCoordinate>(&self, fmt: &mut fmt::Formatter, meta: bool) -> fmt::Result {
         // annotate the top-10 moves to make it easier to navigate for the
         // user.
         let mut children = (0..362).collect::<Vec<usize>>();
         children.sort_by_key(|&i| -self.count[i]);
 
-        for i in 0..10 {
-            let j = children[i];
+        if meta {
+            for i in 0..10 {
+                let j = children[i];
 
-            if j != 361 && self.count[j] > 0 {
-                lazy_static! {
-                    static ref LABELS: Vec<&'static str> = vec! [
-                        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"
-                    ];
+                if j != 361 && self.count[j] > 0 {
+                    lazy_static! {
+                        static ref LABELS: Vec<&'static str> = vec! [
+                            "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"
+                        ];
+                    }
+
+                    write!(fmt, "LB[{}:{}]",
+                        S::to_sgf(X[j] as usize, Y[j] as usize),
+                        LABELS[i]
+                    )?;
                 }
-
-                write!(fmt, "LB[{}{}:{}]",
-                    SGF_LETTERS[X[j] as usize],
-                    SGF_LETTERS[Y[j] as usize],
-                    LABELS[i]
-                )?;
             }
-        }
 
-        // mark all valid moves with a triangle (for debugging the symmetry code)
-        /*
-        for i in 0..361 {
-            if self.prior[i].is_finite() {
-                write!(fmt, "TR[{}{}]",
-                    SGF_LETTERS[X[i] as usize],
-                    SGF_LETTERS[Y[i] as usize],
-                )?;
+            // mark all valid moves with a triangle (for debugging the symmetry code)
+            /*
+            for i in 0..361 {
+                if self.prior[i].is_finite() {
+                    write!(fmt, "TR[{}]",
+                        S::to_sgf(X[j] as usize, Y[j] as usize),
+                    )?;
+                }
             }
+            */
         }
-        */
 
         let mut uct = [::std::f32::NEG_INFINITY; 368];
         E::get::<E>(self, &mut uct);
@@ -489,10 +480,9 @@ impl<E: Value> Node<E> {
             }
 
             write!(fmt, "(")?;
-            write!(fmt, ";{}[{}{}]",
+            write!(fmt, ";{}[{}]",
                 if self.color == Color::Black { "B" } else { "W" },
-                if i == 361 { 't' } else { SGF_LETTERS[X[i] as usize] },
-                if i == 361 { 't' } else { SGF_LETTERS[Y[i] as usize] }
+                if i == 361 { "tt".to_string() } else { S::to_sgf(X[i] as usize, Y[i] as usize) },
             )?;
             write!(fmt, "C[prior {:.4} value {:.4} (visits {} / total {}) amaf {:.4} (visits {}) uct {:.4}]",
                 self.prior[i],
@@ -508,7 +498,7 @@ impl<E: Value> Node<E> {
                 let child = self.children[i];
 
                 if !child.is_null() {
-                    (*child).as_sgf(fmt)?;
+                    (*child).as_sgf::<S>(fmt, meta)?;
                 }
             }
 
@@ -731,36 +721,41 @@ pub unsafe fn insert<E>(trace: &NodeTrace<E>, color: Color, value: f32, prior: B
 
 /// Type alias for `Node<E>` that acts as a wrapper for calling `as_sgf` from
 /// within a `write!` macro.
-#[cfg(feature = "trace-mcts")]
-pub struct ToSgf<'a, E: Value + 'a> {
+pub struct ToSgf<'a, S: SgfCoordinate, E: Value + 'a> {
+    _coordinate_format: ::std::marker::PhantomData<S>,
     starting_point: Board,
     root: &'a Node<E>,
+    meta: bool
 }
 
-#[cfg(feature = "trace-mcts")]
-impl<'a, E: Value + 'a> fmt::Display for ToSgf<'a, E> {
+impl<'a, S: SgfCoordinate, E: Value + 'a> fmt::Display for ToSgf<'a, S, E> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        // add the standard SGF prefix
-        write!(fmt, "(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]PL[{}]",
-            if self.root.color == Color::Black { "B" } else { "W" }
-        )?;
+        if self.meta {
+            // add the standard SGF prefix
+            write!(fmt, "(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]PL[{}]",
+                if self.root.color == Color::Black { "B" } else { "W" }
+            )?;
 
-        // write the starting point to the SGF file as pre-set variables
-        for y in 0..19 {
-            for x in 0..19 {
-                match self.starting_point.at(x, y) {
-                    None => Ok(()),
-                    Some(Color::Black) => write!(fmt, "AB[{}{}]", SGF_LETTERS[x], SGF_LETTERS[y]),
-                    Some(Color::White) => write!(fmt, "AW[{}{}]", SGF_LETTERS[x], SGF_LETTERS[y])
-                }?
+            // write the starting point to the SGF file as pre-set variables
+            for y in 0..19 {
+                for x in 0..19 {
+                    match self.starting_point.at(x, y) {
+                        None => Ok(()),
+                        Some(Color::Black) => write!(fmt, "AB[{}", S::to_sgf(x, y)),
+                        Some(Color::White) => write!(fmt, "AW[{}]", S::to_sgf(x, y))
+                    }?
+                }
             }
+
+            // write the actual search tree
+            self.root.as_sgf::<S>(fmt, self.meta)?;
+
+            // add the standard SGF suffix
+            write!(fmt, ")")
+        } else {
+            // write the actual search tree
+            self.root.as_sgf::<S>(fmt, self.meta)
         }
-
-        // write the actual search tree
-        self.root.as_sgf(fmt)?;
-
-        // add the standard SGF suffix
-        write!(fmt, ")")
     }
 }
 
@@ -771,14 +766,17 @@ impl<'a, E: Value + 'a> fmt::Display for ToSgf<'a, E> {
 /// 
 /// * `root` -
 /// * `starting_point` -
+/// * `meta` - whether to include the SGF meta data (rules, etc.)
 /// 
-#[cfg(feature = "trace-mcts")]
-pub fn to_sgf<'a, E>(root: &'a Node<E>, starting_point: &Board) -> ToSgf<'a, E>
-    where E: Value
+pub fn to_sgf<'a, S, E>(root: &'a Node<E>, starting_point: &Board, meta: bool) -> ToSgf<'a, S, E>
+    where S: SgfCoordinate,
+          E: Value
 {
     ToSgf {
+        _coordinate_format: ::std::marker::PhantomData::default(),
         starting_point: starting_point.clone(),
-        root: &root
+        root: &root,
+        meta: meta
     }
 }
 

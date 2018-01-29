@@ -16,6 +16,7 @@ use ordered_float::*;
 use regex::Regex;
 use std::io::BufRead;
 
+use go::sgf::*;
 use go::{Board, Color};
 use mcts::predict::{self, PredictService};
 use mcts;
@@ -27,10 +28,10 @@ use gtp::vertex::*;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&'static str; 16] = [
+const KNOWN_COMMANDS: [&'static str; 17] = [
     "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove", "undo",
-    "quit", "final_score", "heatmap"
+    "quit", "final_score", "heatmap", "sabaki-genmovelog"
 ];
 
 #[derive(Debug, PartialEq)]
@@ -48,6 +49,7 @@ enum Command {
     KnownCommand(String),  // tell whether a command is known
     ShowBoard,  // write the position to stdout
     GenMove(Color),  // generate and play the supposedly best move for either color
+    GenMoveLog,  // output all variations considered by the most recent search
     FinalScore,  // write the score to stdout
     RegGenMove(Color),  // generate the supposedly best move for either color
     Undo,  // undo one move
@@ -84,8 +86,9 @@ lazy_static! {
 }
 
 struct Gtp {
-    server: Option<PredictService>,
+    service: Option<PredictService>,
     search_tree: Option<mcts::tree::Node<mcts::tree::DefaultValue>>,
+    last_log: String,
     history: Vec<Board>,
     komi: f32
 }
@@ -169,6 +172,8 @@ impl Gtp {
                 error!(id, "syntax error");
                 Some((None, Command::Pass))
             }
+        } else if line == "sabaki-genmovelog" {
+            Some((id, Command::GenMoveLog))
         } else if line == "final_score" {
             Some((id, Command::FinalScore))
         } else if let Some(caps) = REG_GENMOVE.captures(line) {
@@ -222,16 +227,16 @@ impl Gtp {
     /// Create the `PredictService` if it does not exist, and then returns the
     /// current service.
     fn open_service(&mut self) -> &Option<PredictService> {
-        if self.server.is_none() {
+        if self.service.is_none() {
             match Network::new() {
                 None => {},
                 Some(network) => {
-                    self.server = Some(predict::service(network));
+                    self.service = Some(predict::service(network));
                 }
             }
         }
 
-        &self.server
+        &self.service
     }
 
     /// Generate a move using the monte carlo tree search engine for the given
@@ -248,7 +253,7 @@ impl Gtp {
     fn generate_move(&mut self, id: Option<usize>, color: Color) -> Option<Vertex> {
         self.open_service();
 
-        if let Some(ref server) = self.server {
+        if let Some(ref service) = self.service {
             let board = self.history.last().unwrap();
             let search_tree = self.search_tree.take().and_then(|tree| {
                 if tree.color != color {
@@ -259,7 +264,7 @@ impl Gtp {
             });
 
             let (value, index, tree) = mcts::predict::<mcts::tree::DefaultValue>(
-                &server.lock(),
+                &service.lock(),
                 None,
                 search_tree,
                 &board,
@@ -268,6 +273,7 @@ impl Gtp {
 
             eprintln!("{}", mcts::tree::to_pretty(&tree));
 
+            self.last_log = format!("{}", mcts::tree::to_sgf::<Sabaki, _>(&tree, &board, false));
             self.search_tree = Some(tree);
 
             if value < 0.025 {  // 2.5% chance of winning
@@ -290,6 +296,17 @@ impl Gtp {
 
             None
         }
+    }
+
+    /// Output all variations that were considered in the most recent search
+    /// tree.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `id` -
+    /// 
+    fn generate_move_log(&mut self, id: Option<usize>) {
+        success!(id, &format!("#sabaki{{\"variations\":\"{}\"}}", self.last_log));
     }
 
     /// Returns a Sabaki heatmap that represents the given softmax policy.
@@ -346,12 +363,19 @@ impl Gtp {
     fn heatmap(&mut self, id: Option<usize>, color: Color) {
         self.open_service();
 
-        if let Some(ref server) = self.server {
+        if let Some(ref service) = self.service {
             let board = self.history.last().unwrap();
+            let search_tree = self.search_tree.take().and_then(|tree| {
+                if tree.color != color {
+                    mcts::tree::Node::forward(tree, 361)  // pass
+                } else {
+                    Some(tree)
+                }
+            });
             let (_value, _index, tree) = mcts::predict::<mcts::tree::DefaultValue>(
-                &server.lock(),
+                &service.lock(),
                 None,
-                None,
+                search_tree,
                 &board,
                 color
             );
@@ -474,6 +498,9 @@ impl Gtp {
                     });
                 }
             },
+            Command::GenMoveLog => {
+                self.generate_move_log(id);
+            },
             Command::FinalScore => {
                 let board = self.history.last().unwrap();
                 let (black, white) = board.get_score();
@@ -512,8 +539,9 @@ pub fn run() {
     let stdin = ::std::io::stdin();
     let stdin_lock = stdin.lock();
     let mut gtp = Gtp {
-        server: None,
+        service: None,
         search_tree: None,
+        last_log: "{}".to_string(),
         history: vec! [Board::new()],
         komi: 7.5
     };

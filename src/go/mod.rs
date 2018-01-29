@@ -16,6 +16,7 @@ mod asm;
 mod circular_buf;
 mod codegen;
 mod small_set;
+pub mod sgf;
 pub mod symmetry;
 mod zobrist;
 
