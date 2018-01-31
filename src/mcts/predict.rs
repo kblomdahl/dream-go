@@ -17,6 +17,7 @@ use std::sync::{Mutex, MutexGuard};
 use parallel::{self, OneSender};
 use nn::{self, Network, Type, TYPE, Workspace};
 use util::array::*;
+use util::config;
 use util::singleton::*;
 use util::types::*;
 
@@ -157,7 +158,7 @@ impl PredictState {
 
     fn check(&self, mut shared: MutexGuard<PredictShared>, has_more: bool) {
         let num_requests = shared.features_list.len();
-        let batch_size = 64;  // FIXME: read from config
+        let batch_size = *config::BATCH_SIZE;
 
         if num_requests >= batch_size {
             // the batch is full, start an evaluation
@@ -196,7 +197,7 @@ impl parallel::ServiceImpl for PredictState {
     type Response = Option<(Singleton, Array)>;
 
     fn get_thread_count() -> usize {
-        2  // num_threads / batch_size
+        ::std::cmp::max(2, *config::NUM_THREADS / *config::BATCH_SIZE)
     }
 
     fn process(state: &Self::State, req: Self::Request, sender: OneSender<Self::Response>, has_more: bool) {
