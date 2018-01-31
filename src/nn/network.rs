@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 
 use nn::graph;
 use nn::loader;
+use nn::slots;
 
 type WorkspaceQueue = Rc<RefCell<Vec<Rc<graph::Workspace>>>>;
 
@@ -56,6 +57,7 @@ impl<'a> Drop for WorkspaceGuard<'a> {
 /// Pool of workspaces that can be used for network evaluations.
 pub struct Network {
     builder: Arc<graph::Builder>,
+    slots: slots::Slots,
     workspaces: Arc<Mutex<HashMap<usize, WorkspaceQueue>>>
 }
 
@@ -86,6 +88,7 @@ impl Network {
             .next()
             .map(|weights| Network {
                 builder: Arc::new(graph::Builder::new(weights)),
+                slots: slots::Slots::new(),
                 workspaces: Arc::new(Mutex::new(HashMap::new()))
             })
     }
@@ -105,7 +108,7 @@ impl Network {
                 pool: &self.workspaces
             },
             None => WorkspaceGuard {
-                workspace: Rc::new(self.builder.get_workspace(batch_size)),
+                workspace: Rc::new(self.builder.get_workspace(batch_size, self.slots.clone())),
                 pool: &self.workspaces
             }
         };

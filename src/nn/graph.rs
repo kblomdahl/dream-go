@@ -20,6 +20,7 @@ use nn::ffi::cublas;
 use nn::ffi::cuda;
 use nn::ffi::cudnn;
 use nn::ops::*;
+use nn::slots::*;
 use nn::{Type, TYPE};
 
 pub trait Graph {
@@ -30,25 +31,7 @@ pub trait Graph {
     /// 
     /// * `size_in_bytes` - the minimum required size of the allocated area
     /// 
-    fn get_input(&mut self, size_in_bytes: Option<usize>) -> *mut c_void;
-
-    /// Returns a pointer to the memory on the GPU that should contain the
-    /// final output policy.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `size_in_bytes` - the minimum required size of the allocated area
-    /// 
-    fn get_policy_output(&mut self, size_in_bytes: Option<usize>) -> *mut c_void;
-
-    /// Returns a pointer to the memory on the GPU that should contain the
-    /// final output value.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `size_in_bytes` - the minimum required size of the allocated area
-    /// 
-    fn get_value_output(&mut self, size_in_bytes: Option<usize>) -> *mut c_void;
+    fn get_input(&mut self, size_in_bytes: Option<usize>) -> SlotGuard;
 
     /// Returns a pointer to a named additional variable. If two variables
     /// shares the same name, then their pointers may alias.
@@ -57,7 +40,7 @@ pub trait Graph {
     /// 
     /// * `name` - the name of the variable
     /// * `size_in_bytes` - the minimum required size of the allocated area
-    fn get_slot(&mut self, name: &'static str, size_in_bytes: usize) -> *mut c_void;
+    fn get_slot(&mut self, name: &'static str, size_in_bytes: usize) -> SlotGuard;
 
     /// Returns the batch size of this graph.
     fn get_batch_size(&self) -> usize;
@@ -157,7 +140,7 @@ pub trait Ops<G: Graph> {
     /// * `name` - the name of the variable
     /// * `size_in_bytes` - the minimum required size for the given slot
     /// 
-    fn get_slot(graph: &mut G, name: &'static str, size_in_bytes: usize) -> *mut c_void;
+    fn get_slot(graph: &mut G, name: &'static str, size_in_bytes: usize) -> SlotGuard;
 }
 
 pub struct Calibrate;
@@ -288,8 +271,8 @@ impl Ops<Builder> for Calibrate {
         graph.tensors.insert(output.clone(), output_);
     }
 
-    fn get_slot(_graph: &mut Builder, _name: &'static str, _size_in_bytes: usize) -> *mut c_void {
-        ptr::null_mut()
+    fn get_slot(_graph: &mut Builder, _name: &'static str, _size_in_bytes: usize) -> SlotGuard {
+        SlotGuard::null()
     }
 }
 
@@ -438,9 +421,9 @@ impl Ops<Workspace> for Allocate {
         workspace.operators.insert(output.clone(), Tanh::new());
     }
 
-    fn get_slot(graph: &mut Workspace, name: &'static str, size_in_bytes: usize) -> *mut c_void {
+    fn get_slot(graph: &mut Workspace, name: &'static str, size_in_bytes: usize) -> SlotGuard {
         if size_in_bytes == 0 {
-            ptr::null_mut()  // unknown size, need to wait until runtime
+            SlotGuard::null()  // unknown size, need to wait until runtime
         } else {
             graph.get_slot(name, size_in_bytes)
         }
@@ -623,7 +606,7 @@ impl Ops<Workspace> for Runtime {
         eprintln!("{} <- tanh({})\n= {:?}", output_name, input_name, workspace.tensors[&output_name].fmt_ptr(output_data));
     }
 
-    fn get_slot(graph: &mut Workspace, name: &'static str, size_in_bytes: usize) -> *mut c_void {
+    fn get_slot(graph: &mut Workspace, name: &'static str, size_in_bytes: usize) -> SlotGuard {
         graph.get_slot(name, size_in_bytes)
     }
 }
@@ -649,7 +632,8 @@ pub struct Workspace {
     pub(super) tanh: cudnn::ActivationDescriptor,
 
     // workspaces and slots for additional variables
-    pub(super) slots: HashMap<String, *mut c_void>,
+    pub(super) slots: Slots,
+    pub(super) slots_c: HashMap<String, SlotGuard>,
     pub(super) workspace_size: usize,
     pub(super) batch_size: usize,
 
@@ -661,20 +645,12 @@ pub struct Workspace {
 }
 
 impl Graph for Builder {
-    fn get_input(&mut self, _size_in_bytes: Option<usize>) -> *mut c_void {
-        ptr::null_mut()
+    fn get_input(&mut self, _size_in_bytes: Option<usize>) -> SlotGuard {
+        SlotGuard::null()
     }
 
-    fn get_policy_output(&mut self, _size_in_bytes: Option<usize>) -> *mut c_void {
-        ptr::null_mut()
-    }
-
-    fn get_value_output(&mut self, _size_in_bytes: Option<usize>) -> *mut c_void {
-        ptr::null_mut()
-    }
-
-    fn get_slot(&mut self, _name: &'static str, _size_in_bytes: usize) -> *mut c_void {
-        ptr::null_mut()
+    fn get_slot(&mut self, _name: &'static str, _size_in_bytes: usize) -> SlotGuard {
+        SlotGuard::null()
     }
 
     fn get_batch_size(&self) -> usize {
@@ -687,32 +663,21 @@ impl Graph for Builder {
 }
 
 impl Graph for Workspace {
-    fn get_input(&mut self, size_in_bytes: Option<usize>) -> *mut c_void {
+    fn get_input(&mut self, size_in_bytes: Option<usize>) -> SlotGuard {
         self.get_slot("00_input/features:0", size_in_bytes.unwrap_or(0))
     }
 
-    fn get_policy_output(&mut self, size_in_bytes: Option<usize>) -> *mut c_void {
-        self.get_slot("99_output/policy:0", size_in_bytes.unwrap_or(0))
-    }
+    fn get_slot(&mut self, name: &'static str, size_in_bytes: usize) -> SlotGuard {
+        let name_str = name.to_string();
 
-    fn get_value_output(&mut self, size_in_bytes: Option<usize>) -> *mut c_void {
-        self.get_slot("99_output/value:0", size_in_bytes.unwrap_or(0))
-    }
+        if self.slots_c.contains_key(&name_str) {
+            self.slots_c[&name_str].clone()
+        } else {
+            let slot = self.slots.get_slot(name, size_in_bytes);
 
-    fn get_slot(&mut self, name: &'static str, size_in_bytes: usize) -> *mut c_void {
-        let entry = self.slots.entry(name.to_string());
-
-        *entry.or_insert_with(|| {
-            let mut pointer: *mut c_void = ptr::null_mut();
-
-            unsafe {
-                assert!(size_in_bytes > 0, "missing slot -- {}", name);
-
-                check!(cuda::cudaMalloc(&mut pointer, size_in_bytes));
-            }
-
-            pointer
-        })
+            self.slots_c.insert(name_str, slot.clone());
+            slot
+        }
     }
 
     fn get_batch_size(&self) -> usize {
@@ -746,9 +711,9 @@ impl Builder {
 
         // perform the calibration of every tensor so that we can acquire
         // the correct scaling factors, and types.
-        tower::<Calibrate, _>(&mut g);
-        value::<Calibrate, _>(&mut g);
-        policy::<Calibrate, _>(&mut g);
+        tower::<Calibrate, _>(&mut g, &SlotGuard::null());
+        value::<Calibrate, _>(&mut g, &SlotGuard::null());
+        policy::<Calibrate, _>(&mut g, &SlotGuard::null());
 
         // if the entire graph is float-based then force the scale to 1.0
         // since floating types does the scaling internally (better than we
@@ -789,7 +754,7 @@ impl Builder {
     /// 
     /// * `batch_size` - 
     /// 
-    pub fn get_workspace(&self, batch_size: usize) -> Workspace {
+    pub fn get_workspace(&self, batch_size: usize, slots: Slots) -> Workspace {
         let mut w = Workspace {
             tensors: HashMap::new(),
 
@@ -803,7 +768,8 @@ impl Builder {
             relu: ptr::null(),
             tanh: ptr::null(),
 
-            slots: HashMap::new(),
+            slots: slots,
+            slots_c: HashMap::new(),
             workspace_size: 0,
             batch_size: batch_size,
 
@@ -866,9 +832,9 @@ impl Builder {
             check!(cuda::cudaEventCreate(&mut w.tower_event));
         }
 
-        tower::<Allocate, _>(&mut w);
-        value::<Allocate, _>(&mut w);
-        policy::<Allocate, _>(&mut w);
+        tower::<Allocate, _>(&mut w, &SlotGuard::null());
+        value::<Allocate, _>(&mut w, &SlotGuard::null());
+        policy::<Allocate, _>(&mut w, &SlotGuard::null());
 
         // determine the maximum observed workspace size
         let conv_workspace = w.convolutions.values()
@@ -902,13 +868,17 @@ impl Builder {
     }
 }
 
+impl Workspace {
+    /// Release (to the memory pool) any temporary memory that was allocated for
+    /// this workspace during the last run.
+    pub fn clear(&mut self) {
+        self.slots_c.clear();
+    }
+}
+
 impl Drop for Workspace {
     fn drop(&mut self) {
         unsafe {
-            for slot in self.slots.values() {
-                check!(cuda::cudaFree(*slot));
-            }
-
             check!(cuda::cudaEventDestroy(self.tower_event));
             check!(cuda::cudaStreamDestroy(self.value_stream));
             check!(cuda::cudaStreamDestroy(self.policy_stream));
@@ -924,9 +894,8 @@ impl Drop for Workspace {
 }
 
 /// 
-pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G) {
+pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard {
     let batch_size = graph.get_batch_size();
-    let input = graph.get_input(Some(4 * batch_size * 11552));
     let residual_1 = O::get_slot(graph, "residual_1", 4 * batch_size * 46208);
     let residual_2 = O::get_slot(graph, "residual_2", 4 * batch_size * 46208);
     let workspace_size = graph.get_workspace_size();
@@ -942,12 +911,12 @@ pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G) {
 
     O::convolution(
         graph,
-        "00_input/output:0".to_string(), input,
+        "00_input/output:0".to_string(), **input,
         128, 32, 3, 3,
         "01_upsample/weights:0".to_string(),
         "01_upsample/offset:0".to_string(),
-        "01_upsample/output:0".to_string(), residual_1,
-        workspace_1, workspace_size
+        "01_upsample/output:0".to_string(), *residual_1,
+        *workspace_1, workspace_size
     );
 
     for i in 2..21 {
@@ -959,103 +928,107 @@ pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G) {
 
         O::residual_block(
             graph,
-            input_name, residual_1,
+            input_name, *residual_1,
             128, 128, 3, 3,
             format!("{:02}_residual/weights_1:0", i),
             format!("{:02}_residual/weights_2:0", i),
             format!("{:02}_residual/offset_1:0", i),
             format!("{:02}_residual/offset_2:0", i),
-            format!("{:02}_residual/output_1:0", i), residual_2,
-            format!("{:02}_residual/output_2:0", i), residual_1,
-            workspace_1, workspace_size
+            format!("{:02}_residual/output_1:0", i), *residual_2,
+            format!("{:02}_residual/output_2:0", i), *residual_1,
+            *workspace_1, workspace_size
         );
     }
+
+    residual_1
 }
 
 /// 
-pub fn policy<O: Ops<G>, G: Graph>(graph: &mut G) {
+pub fn policy<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> SlotGuard {
     let batch_size = graph.get_batch_size();
-    let residual_1 = O::get_slot(graph, "residual_1", 4 * batch_size * 46208);
     let policy_1 = O::get_slot(graph, "policy_1", 4 * batch_size * 362);
-    let policy_out = graph.get_policy_output(Some(4 * batch_size * 722));
+    let policy_out = graph.get_slot("99_output/policy:0", 4 * batch_size * 722);
     let workspace_size = graph.get_workspace_size();
     let workspace_1 = O::get_slot(graph, "workspace_1", workspace_size);
 
     O::convolution(
         graph,
-        "20_residual/output_2:0".to_string(), residual_1,
+        "20_residual/output_2:0".to_string(), **residual_1,
         2, 128, 1, 1,
         "21p_policy/downsample:0".to_string(),
         "21p_policy/offset:0".to_string(),
-        "21p_policy/output_1:0".to_string(), policy_out,
-        workspace_1, workspace_size
+        "21p_policy/output_1:0".to_string(), *policy_out,
+        *workspace_1, workspace_size
     );
 
     O::linear(
         graph,
-        "21p_policy/output_1:0".to_string(), policy_out,
+        "21p_policy/output_1:0".to_string(), *policy_out,
         362, 722,
         "21p_policy/weights:0".to_string(),
         "21p_policy/bias:0".to_string(),
-        "21p_policy/output_2:0".to_string(), policy_1,
-        workspace_1, workspace_size
+        "21p_policy/output_2:0".to_string(), *policy_1,
+        *workspace_1, workspace_size
     );
 
     O::softmax(
         graph,
-        "21p_policy/output_2:0".to_string(), policy_1,
-        "21p_policy/output_3:0".to_string(), policy_out
+        "21p_policy/output_2:0".to_string(), *policy_1,
+        "21p_policy/output_3:0".to_string(), *policy_out
     );
+
+    policy_out
 }
 
 /// 
-pub fn value<O: Ops<G>, G: Graph>(graph: &mut G) {
+pub fn value<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> SlotGuard {
     let batch_size = graph.get_batch_size();
-    let residual_1 = O::get_slot(graph, "residual_1", 4 * batch_size * 46208);
     let value_1 = O::get_slot(graph, "value_1", 4 * batch_size * 361);
-    let value_out = graph.get_value_output(Some(4 * batch_size * 256));
+    let value_out = graph.get_slot("99_output/value:0", 4 * batch_size * 256);
     let workspace_size = graph.get_workspace_size();
     let workspace_2 = O::get_slot(graph, "workspace_2", workspace_size);
 
     O::convolution(
         graph,
-        "20_residual/output_2:0".to_string(), residual_1,
+        "20_residual/output_2:0".to_string(), **residual_1,
         1, 128, 1, 1,
         "21v_value/downsample:0".to_string(),
         "21v_value/offset:0".to_string(),
-        "21v_value/output_1:0".to_string(), value_1,
-        workspace_2, workspace_size
+        "21v_value/output_1:0".to_string(), *value_1,
+        *workspace_2, workspace_size
     );
 
     O::linear(
         graph,
-        "21v_value/output_1:0".to_string(), value_1,
+        "21v_value/output_1:0".to_string(), *value_1,
         256, 361,
         "21v_value/weights_1:0".to_string(),
         "21v_value/bias_1:0".to_string(),
-        "21v_value/output_2:0".to_string(), value_out,
-        workspace_2, workspace_size
+        "21v_value/output_2:0".to_string(), *value_out,
+        *workspace_2, workspace_size
     );
 
     O::relu(
         graph,
-        "21v_value/output_2:0".to_string(), value_out,
-        "21v_value/output_3:0".to_string(), value_out
+        "21v_value/output_2:0".to_string(), *value_out,
+        "21v_value/output_3:0".to_string(), *value_out
     );
 
     O::linear(
         graph,
-        "21v_value/output_3:0".to_string(), value_out,
+        "21v_value/output_3:0".to_string(), *value_out,
         1, 256,
         "21v_value/weights_2:0".to_string(),
         "21v_value/bias_2:0".to_string(),
-        "21v_value/output_4:0".to_string(), value_1,
-        workspace_2, workspace_size
+        "21v_value/output_4:0".to_string(), *value_1,
+        *workspace_2, workspace_size
     );
 
     O::tanh(
         graph,
-        "21v_value/output_4:0".to_string(), value_1,
-        "21v_value/output_5:0".to_string(), value_out
+        "21v_value/output_4:0".to_string(), *value_1,
+        "21v_value/output_5:0".to_string(), *value_out
     );
+
+    value_out
 }

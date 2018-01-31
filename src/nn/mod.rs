@@ -19,6 +19,7 @@ mod graph;
 mod loader;
 mod network;
 mod ops;
+mod slots;
 
 use self::ffi::cublas;
 use self::ffi::cuda;
@@ -138,16 +139,16 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
 
+        let input = workspace.get_input(Some(4 * batch_size * 11552));
+
         for (i, ref feature) in features.iter().enumerate() {
             assert_eq!(feature.len(), 11552);
             assert_eq!(1, ::std::mem::size_of::<c_void>());
 
             let element_size = ::std::mem::size_of::<T>() * 11552;
-            let input = workspace.get_input(None)
-                .offset((i * element_size) as isize);
 
             check!(cuda::cudaMemcpyAsync(
-                input,
+                input.offset((i * element_size) as isize),
                 feature.as_ptr() as *const c_void,
                 element_size,
                 cuda::MemcpyKind::HostToDevice,
@@ -155,7 +156,7 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
             ));
         }
 
-        graph::tower::<graph::Runtime, _>(workspace);
+        let tower = graph::tower::<graph::Runtime, _>(workspace, &input);
 
         // fix the synchronization, so that the policy and value head needs to
         // wait for the tower to complete before they can start.
@@ -168,12 +169,11 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.policy_stream));
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream));
 
-        graph::policy::<graph::Runtime, _>(workspace);
+        let policy_output = graph::policy::<graph::Runtime, _>(workspace, &tower);
 
         for i in 0..batch_size {
             let element_size = ::std::mem::size_of::<R>() * 362;
-            let output = workspace.get_policy_output(None)
-                .offset((i * element_size) as isize);
+            let output = (*policy_output).offset((i * element_size) as isize);
 
             check!(cuda::cudaMemcpyAsync(
                 softmax[i].as_mut_ptr() as *mut c_void,
@@ -188,11 +188,11 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.value_stream));
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.value_stream));
 
-        graph::value::<graph::Runtime, _>(workspace);
+        let value_output = graph::value::<graph::Runtime, _>(workspace, &tower);
 
         check!(cuda::cudaMemcpyAsync(
             value.as_mut_ptr() as *mut c_void,
-            workspace.get_value_output(None),
+            *value_output,
             batch_size * ::std::mem::size_of::<R>(),
             cuda::MemcpyKind::DeviceToHost,
             workspace.value_stream
@@ -201,6 +201,9 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
         // wait for both the value and policy head to finish
         check!(cuda::cudaStreamSynchronize(workspace.policy_stream));
         check!(cuda::cudaStreamSynchronize(workspace.value_stream));
+
+        // de-allocate temporary memory
+        workspace.clear();
     }
 
     (value, softmax.into_iter().map(|s| s.into_boxed_slice()).collect())
