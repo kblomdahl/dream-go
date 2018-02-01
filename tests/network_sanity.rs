@@ -223,12 +223,73 @@ fn dead_dragon_1() {
     // black should win by 38.5 points
     let (value, _policy) = predict(&moves, Color::Black);
 
-    assert!(value >= 0.0, "Black should win by 38.5 -- {}", value);
+    assert!(value > 0.0, "Black should win by 38.5 -- {}", value);
 }
 
-/// Test that the engine correctly detects that a large black dragon is
-/// dead.
+/// Test that the engine correctly detects that white has won the game.
 #[test]
-fn dead_dragon_2() {
-    // pass
+fn end_1() {
+    let moves = [
+        (Color::Black,  3, 16), (Color::White,  2,  3), (Color::Black, 16, 15), (Color::White, 15,  3),
+        (Color::Black,  2, 13), (Color::White, 14, 15), (Color::Black, 14, 16), (Color::White, 13, 16),
+        (Color::Black, 15, 16), (Color::White, 13, 15), (Color::Black, 16, 13), (Color::White,  9, 16),
+        (Color::Black,  7, 16), (Color::White,  4,  2), (Color::Black, 11, 16), (Color::White, 11, 15),
+        (Color::Black, 11, 17), (Color::White, 15, 15), (Color::Black, 16, 16), (Color::White, 10, 15),
+        (Color::Black, 13, 17), (Color::White, 14, 12), (Color::Black, 13,  2), (Color::White, 10,  2),
+        (Color::Black, 16,  2), (Color::White, 15,  2), (Color::Black, 16,  3), (Color::White, 15,  4),
+        (Color::Black, 15,  1), (Color::White, 14,  1), (Color::Black, 16,  1), (Color::White, 14,  2),
+        (Color::Black, 16,  5), (Color::White,  2,  8), (Color::Black,  4,  4), (Color::White,  2, 11),
+        (Color::Black,  2,  4), (Color::White,  3,  3), (Color::Black, 17, 18), (Color::White,  3,  4),
+        (Color::Black,  9,  3), (Color::White, 10,  3), (Color::Black,  9,  4), (Color::White, 10,  4),
+        (Color::Black,  1,  3), (Color::White,  2,  5), (Color::Black,  9,  5), (Color::White,  9,  2),
+        (Color::Black,  8,  2), (Color::White,  7,  2), (Color::Black,  7,  3), (Color::White,  8,  1),
+        (Color::Black,  8,  3), (Color::White,  6,  2), (Color::Black, 10,  5), (Color::White, 11,  5),
+        (Color::Black, 11,  6), (Color::White, 12,  6), (Color::Black, 11,  7), (Color::White, 13,  5),
+        (Color::Black, 12,  7), (Color::White,  5, 16), (Color::Black,  3, 14), (Color::White,  3, 17),
+        (Color::Black,  2, 17), (Color::White,  4, 16), (Color::Black,  3, 15), (Color::White,  7, 15),
+        (Color::Black,  4, 17), (Color::White,  5, 17), (Color::Black,  3, 18), (Color::White,  9,  7),
+        (Color::Black,  8,  7), (Color::White,  8,  8), (Color::Black,  7,  7), (Color::White,  9,  8),
+        (Color::Black,  9,  6), (Color::White,  7,  8), (Color::Black,  6,  7), (Color::White, 11,  9),
+        (Color::Black,  6,  8), (Color::White,  6,  9), (Color::Black,  5,  9), (Color::White,  6, 10),
+        (Color::Black,  6, 15), (Color::White,  6, 16), (Color::Black,  7, 14), (Color::White,  8, 15),
+        (Color::Black,  6, 13), (Color::White,  5, 14), (Color::Black,  5, 13), (Color::White,  6, 14),
+        (Color::Black,  4, 14), (Color::White,  5, 15), (Color::Black,  5, 10), (Color::White,  7, 12),
+        (Color::Black,  6, 11), (Color::White,  7, 11), (Color::Black, 15, 11), (Color::White, 13, 10),
+        (Color::Black,  7, 13), (Color::White,  8, 13), (Color::Black,  8, 14), (Color::White,  9, 14),
+        (Color::Black,  8, 12), (Color::White,  9, 13), (Color::Black,  6, 12), (Color::White,  7, 10),
+        (Color::Black,  2,  6), (Color::White,  3,  6), (Color::Black,  1,  5), (Color::White,  1,  4),
+        (Color::Black,  3,  7), (Color::White,  2,  7), (Color::Black,  1,  6), (Color::White,  1,  7),
+        (Color::Black,  4,  6), (Color::White,  3,  5), (Color::Black,  0,  4), (Color::White,  2,  4),
+        (Color::Black,  2,  2), (Color::White,  1,  2), (Color::Black,  4,  5), (Color::White,  5,  3),
+        (Color::Black,  4,  3), (Color::White,  3,  2), (Color::Black,  5,  4), (Color::White,  6,  3),
+        (Color::Black,  6,  4), (Color::White,  1, 12), (Color::Black,  1, 13), (Color::White,  0, 13),
+        (Color::Black,  0, 14), (Color::White,  0, 12), (Color::Black,  1, 14), (Color::White, 16,  6),
+        (Color::Black, 17,  5), (Color::White, 15,  5), (Color::Black, 17,  6), (Color::White, 16,  7),
+        (Color::Black, 17,  7), (Color::White, 16,  9), (Color::Black, 13,  6), (Color::White, 12,  5),
+        (Color::Black, 12,  9), (Color::White, 12, 10), (Color::Black, 10,  9), (Color::White, 10,  8),
+        (Color::Black, 11,  8), (Color::White, 11, 10), (Color::Black,  8, 10), (Color::White,  8, 11),
+        (Color::Black,  9, 11), (Color::White,  9, 12), (Color::Black,  7,  9), (Color::White,  8,  9),
+        (Color::Black,  2, 10), (Color::White,  1, 10), (Color::Black,  3, 10), (Color::White,  2,  9),
+        (Color::Black,  3, 11), (Color::White,  2, 12), (Color::Black,  3, 12), (Color::White,  1,  9),
+        (Color::Black,  3,  8), (Color::White,  3,  9), (Color::Black,  4,  9), (Color::White, 17, 11),
+        (Color::Black, 15, 12), (Color::White, 17,  8), (Color::Black, 14, 13), (Color::White, 13, 13),
+        (Color::Black, 14, 11), (Color::White, 13, 12), (Color::Black, 17, 12), (Color::White, 16, 11),
+        (Color::Black, 15,  8), (Color::White, 16,  8), (Color::Black, 14,  6), (Color::White, 15,  6),
+        (Color::Black,  9, 17), (Color::White,  8, 17), (Color::Black, 10, 17), (Color::White, 12, 16),
+        (Color::Black, 12, 17), (Color::White, 14, 14), (Color::Black, 15, 13), (Color::White, 13,  7),
+        (Color::Black, 14,  7), (Color::White, 13,  8), (Color::Black, 13,  9), (Color::White, 14,  9),
+        (Color::Black, 12,  8), (Color::White, 14,  8), (Color::Black, 15,  9), (Color::White, 14, 10),
+        (Color::Black, 15, 10), (Color::White, 15,  7), (Color::Black, 10,  6), (Color::White, 18, 11),
+        (Color::Black, 13, 11), (Color::White, 12, 11), (Color::Black, 14,  0), (Color::White, 13,  0),
+        (Color::Black, 15,  0), (Color::White, 13,  1), (Color::Black, 18, 12), (Color::White, 16,  4),
+        (Color::Black, 17,  4), (Color::White,  9, 18), (Color::Black, 10, 18), (Color::White,  8, 18),
+        (Color::Black, 16, 10), (Color::White, 17, 10), (Color::Black, 15, 14), (Color::White, 16, 12),
+        (Color::Black, 17, 13), (Color::White, 18,  7), (Color::Black, 18,  6), (Color::White, 18,  8),
+        (Color::Black,  5, 18), (Color::White,  6, 18), (Color::Black,  4, 18), (Color::White, 10, 16)
+    ];
+
+    // white should win by 48.5 points
+    let (value, _policy) = predict(&moves, Color::Black);
+
+    assert!(value < 0.0, "White should win by 48.5 -- {}", value);
 }
