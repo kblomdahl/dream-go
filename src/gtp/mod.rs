@@ -365,17 +365,10 @@ impl Gtp {
 
         if let Some(ref service) = self.service {
             let board = self.history.last().unwrap();
-            let search_tree = self.search_tree.take().and_then(|tree| {
-                if tree.color != color {
-                    mcts::tree::Node::forward(tree, 361)  // pass
-                } else {
-                    Some(tree)
-                }
-            });
             let (_value, _index, tree) = mcts::predict::<mcts::tree::DefaultValue>(
                 &service.lock(),
                 None,
-                search_tree,
+                None,
                 &board,
                 color
             );
