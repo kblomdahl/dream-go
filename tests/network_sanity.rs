@@ -16,7 +16,7 @@ extern crate dream_go;
 extern crate ordered_float;
 
 use dream_go::go::symmetry::Transform;
-use dream_go::go::{Board, Color, CHW};
+use dream_go::go::{Board, Color, CHW, HWC};
 use dream_go::nn;
 use dream_go::util::types::*;
 use ordered_float::OrderedFloat;
@@ -39,19 +39,28 @@ fn predict(moves: &[(Color, usize, usize)], next_color: Color) -> (f32, Box<[f32
     NETWORK.with(|network| {
         let mut workspace = network.get_workspace(1);
 
-        if network.is_half() {
-            let features = board.get_features::<f16, CHW>(next_color, Transform::Identity);
-            let (value, policy) = nn::forward::<f16, f16>(&mut workspace, &vec! [features]);
-            let policy = policy[0].iter()
-                .map(|&p| f32::from(p))
-                .collect::<Vec<f32>>();
+        match *nn::TYPE {
+            nn::Type::Single => {
+                let features = board.get_features::<f32, CHW>(next_color, Transform::Identity);
+                let (value, policy) = nn::forward::<f32, f32>(&mut workspace, &vec! [features]);
 
-            (f32::from(value[0]), policy.into_boxed_slice())
-        } else {
-            let features = board.get_features::<f32, CHW>(next_color, Transform::Identity);
-            let (value, policy) = nn::forward::<f32, f32>(&mut workspace, &vec! [features]);
+                (value[0], policy[0].clone())
+            },
+            nn::Type::Half => {
+                let features = board.get_features::<f16, CHW>(next_color, Transform::Identity);
+                let (value, policy) = nn::forward::<f16, f16>(&mut workspace, &vec! [features]);
+                let policy = policy[0].iter()
+                    .map(|&p| f32::from(p))
+                    .collect::<Vec<f32>>();
 
-            (value[0], policy[0].clone())
+                (f32::from(value[0]), policy.into_boxed_slice())
+            },
+            nn::Type::Int8 => {
+                let features = board.get_features::<q8, HWC>(next_color, Transform::Identity);
+                let (value, policy) = nn::forward::<q8, f32>(&mut workspace, &vec! [features]);
+
+                (value[0], policy[0].clone())
+            }
         }
     })
 }

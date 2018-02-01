@@ -276,13 +276,13 @@ pub fn add(x: &mut [f32], shape: f32) {
 #[cfg(test)]
 mod tests {
     use mcts::dirichlet::*;
-    use mcts::param::*;
+    use util::config;
 
     #[test]
     fn dirichlet() {
         let mut x = vec! [0.0; 256];
         let mut s = 0.0;
-        add::<Standard>(&mut x, 0.03);
+        add(&mut x, 0.03);
 
         for &v in x.iter() {
             assert!(v.is_finite());
@@ -291,6 +291,6 @@ mod tests {
             s += v;
         }
 
-        assert!(s >= Standard::dirichlet_noise() - 0.01 && s <= Standard::dirichlet_noise() + 0.01, "{}", s);
+        assert!(s >= *config::DIRICHLET_NOISE - 0.01 && s <= *config::DIRICHLET_NOISE + 0.01, "{}", s);
     }
 }
