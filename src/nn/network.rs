@@ -12,53 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use nn::graph;
 use nn::loader;
 use nn::slots;
 
-type WorkspaceQueue = Rc<RefCell<Vec<Rc<graph::Workspace>>>>;
+type WorkspaceQueue = Mutex<Vec<graph::Workspace>>;
 
 /// Wrapper around a `Workspace` that when dropped returns it to the
 /// pool it was acquired from.
 pub struct WorkspaceGuard<'a> {
-    workspace: Rc<graph::Workspace>,
-    pool: &'a Mutex<HashMap<usize, WorkspaceQueue>>
+    workspace: Option<graph::Workspace>,
+    pool: *mut WorkspaceQueue,
+
+    lifetime: ::std::marker::PhantomData<&'a ()>
 }
 
 impl<'a> Deref for WorkspaceGuard<'a> {
     type Target = graph::Workspace;
 
-    fn deref(&self) -> &Self::Target { &self.workspace }
+    fn deref(&self) -> &Self::Target { self.workspace.as_ref().unwrap() }
 }
 
 impl<'a> DerefMut for WorkspaceGuard<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target { Rc::get_mut(&mut self.workspace).unwrap() }
+    fn deref_mut(&mut self) -> &mut Self::Target { self.workspace.as_mut().unwrap() }
 }
 
 impl<'a> Drop for WorkspaceGuard<'a> {
     fn drop(&mut self) {
-        let workspace = self.workspace.clone();
-        let batch_size = workspace.batch_size;
-        let workspaces = self.pool.lock().unwrap();
-        let mut candidates = workspaces[&batch_size].borrow_mut();
+        unsafe {
+            let workspace = self.workspace.take().unwrap();
+            let mut pool = (*self.pool).lock().unwrap();
 
-        candidates.push(workspace);
+            pool.push(workspace);
+        }
     }
 }
 
 /// Pool of workspaces that can be used for network evaluations.
+#[derive(Clone)]
 pub struct Network {
     builder: Arc<graph::Builder>,
     slots: slots::Slots,
-    workspaces: Arc<Mutex<HashMap<usize, WorkspaceQueue>>>
+    workspaces: Arc<Mutex<HashMap<usize, Box<WorkspaceQueue>>>>
 }
 
 unsafe impl Send for Network { }  // this is safe because the Rc<...> is guarded by a Mutex and/or Arc
@@ -101,15 +102,18 @@ impl Network {
     /// 
     pub fn get_workspace<'a>(&'a self, batch_size: usize) -> WorkspaceGuard<'a> {
         let mut workspaces = self.workspaces.lock().unwrap();
-        let candidates = workspaces.entry(batch_size).or_insert_with(|| Rc::new(RefCell::new(vec! [])));
-        let guard = match candidates.borrow_mut().pop() {
+        let candidates = workspaces.entry(batch_size).or_insert_with(|| Box::new(Mutex::new(vec! [])));
+        let candidates_ptr = &mut **candidates as *mut WorkspaceQueue;
+        let guard = match candidates.lock().unwrap().pop() {
             Some(workspace) => WorkspaceGuard {
-                workspace: workspace.clone(),
-                pool: &self.workspaces
+                workspace: Some(workspace),
+                pool: candidates_ptr,
+                lifetime: ::std::marker::PhantomData::default()
             },
             None => WorkspaceGuard {
-                workspace: Rc::new(self.builder.get_workspace(batch_size, self.slots.clone())),
-                pool: &self.workspaces
+                workspace: Some(self.builder.get_workspace(batch_size, self.slots.clone())),
+                pool: candidates_ptr,
+                lifetime: ::std::marker::PhantomData::default()
             }
         };
 
