@@ -66,9 +66,14 @@ impl<T> OneReceiver<T> {
         }
     }
 
-    /// Wait until a message arrives on this channel and then returns that
+    /// Waits until a message arrives on this channel and then returns that
     /// message. If the sender end of this channel has been dropped, or is while
     /// we are waiting, then `None` is returned.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `this` -
+    /// 
     pub fn recv(this: OneReceiver<T>) -> Option<T> {
         // wait for the value to become available
         let (ref lock, ref cvar) = *this.inner;

@@ -37,7 +37,14 @@ pub enum PredictRequest {
     Wait
 }
 
-struct PredictShared {
+pub struct PredictState {
+    /// The neural network weights
+    network: Network,
+
+    /// The number of requests that are being processed by the GPU at
+    /// this moment
+    running_count: AtomicUsize,
+
     /// The features to get the value and policy for.
     features_list: Vec<Array>,
 
@@ -46,29 +53,17 @@ struct PredictShared {
     sender_list: Vec<OneSender<Option<(Singleton, Array)>>>,
 
     /// All threads that want to get notified when something changed.
-    waiting_list: Vec<OneSender<Option<(Singleton, Array)>>>
-}
-
-pub struct PredictState {
-    network: Network,
-    shared: Mutex<PredictShared>,
-
-    /// The number of requests that are being processed by the GPU at
-    /// this moment
-    running_count: AtomicUsize,
+    waiting_list: Vec<OneSender<Option<(Singleton, Array)>>>,
 }
 
 impl PredictState {
     pub fn new(network: Network) -> PredictState {
         PredictState {
             network: network,
-            shared: Mutex::new(PredictShared {
-                features_list: vec! [],
-                sender_list: vec! [],
-                waiting_list: vec! []
-            }),
-
-            running_count: AtomicUsize::new(0)
+            running_count: AtomicUsize::new(0),
+            features_list: vec! [],
+            sender_list: vec! [],
+            waiting_list: vec! []
         }
     }
 
@@ -114,21 +109,28 @@ impl PredictState {
         (value_list, policy_list)
     }
 
-    fn predict(&self, mut shared: MutexGuard<PredictShared>, batch_size: usize) {
-        let num_items = shared.features_list.len();
-        let features_list = shared.features_list.split_off(num_items - batch_size);
-        let sender_list = shared.sender_list.split_off(num_items - batch_size);
+    fn predict(
+        state: &Mutex<PredictState>,
+        mut state_lock: MutexGuard<PredictState>,
+        batch_size: usize
+    )
+    {
+        let num_items = state_lock.features_list.len();
+        let features_list = state_lock.features_list.split_off(num_items - batch_size);
+        let sender_list = state_lock.sender_list.split_off(num_items - batch_size);
+        let network = state_lock.network.clone();  // just a bunch of Arc<...> so cheap to clone
 
-        // get ride of our MutexGuard to `shared` to allow for parallel execution
-        // while we are busy running the forward pass through the network.
-        drop(shared);
+        // keep track of the number of running evaluations so that we avoid
+        // running duplicate small evaluations instead of one large one
+        state_lock.running_count.fetch_add(1, Ordering::SeqCst);
+        drop(state_lock);
 
         debug_assert!(features_list.len() == batch_size);
         debug_assert!(sender_list.len() == batch_size);
 
         // perform the neural network predictions and then inform all of
         // the receivers
-        let mut workspace = self.network.get_workspace(batch_size);
+        let mut workspace = network.get_workspace(batch_size);
         let (value_list, policy_list) = match *TYPE {
             Type::Int8 => PredictState::forward::<q8, f32>(&mut workspace, features_list),
             Type::Half => PredictState::forward::<f16, f16>(&mut workspace, features_list),
@@ -144,48 +146,56 @@ impl PredictState {
             sender.send(Some(response));
         }
 
-        // wake up all of the receivers waiting for something to change
-        let mut shared = self.shared.lock().unwrap();
-        let num_waiting = shared.waiting_list.len();
+        // wake up all of the receivers that are waiting for something to change
+        let mut state_lock = state.lock().unwrap();
+        let num_waiting = state_lock.waiting_list.len();
 
-        for waiting in shared.waiting_list.drain(0..num_waiting) {
+        for waiting in state_lock.waiting_list.drain(0..num_waiting) {
             waiting.send(None);
         }
 
         // decrease the number of running neural network evaluations
-        self.running_count.fetch_sub(1, Ordering::AcqRel);
+        state_lock.running_count.fetch_sub(1, Ordering::SeqCst);
     }
 
-    fn check(&self, mut shared: MutexGuard<PredictShared>, has_more: bool) {
-        let num_requests = shared.features_list.len();
+    fn check(
+        state: &Mutex<PredictState>,
+        mut state_lock: MutexGuard<PredictState>,
+        has_more: bool
+    )
+    {
+        let num_requests = state_lock.features_list.len();
         let batch_size = *config::BATCH_SIZE;
 
-        if num_requests >= batch_size {
-            // the batch is full, start an evaluation
-            self.running_count.fetch_add(1, Ordering::SeqCst);
-            self.predict(shared, batch_size);
-        } else if has_more {
-            // wait for the rest of the enqueued requests before evaluating
-            // the batch
-        } else if num_requests > 0 && self.running_count.compare_and_swap(0, 1, Ordering::SeqCst) == 0 {
-            // nothing is running at the moment, may as well make use of
-            // the device so start evaluating a partial batch
-            self.predict(shared, num_requests);
-        } else if num_requests > 0 && !has_more {
-            // immediately evaluate when we hit a barrier in order to:
-            //   1. minimize the latency between request and response
-            //   2. avoid a race condition where a request that arrives
-            //      during an evaluation does not trigger one.
-            self.running_count.fetch_add(1, Ordering::SeqCst);
-            self.predict(shared, num_requests);
-        } else if num_requests == 0 && self.running_count.load(Ordering::Acquire) == 0 {
-            // everything is asleep? probably a race condition between the
-            // pending message being sent and it being received. Just wake
-            // everything up and it should normalize.
-            let num_waiting = shared.waiting_list.len();
+        if has_more {
+            if num_requests >= batch_size {
+                // the batch is full, start an evaluation
+                PredictState::predict(state, state_lock, batch_size);
+            } else {
+                // more requests are incoming, wait for them before trying to
+                // evaluate a batch
+            }
+        } else {
+            if num_requests > 0 {
+                assert!(num_requests <= batch_size);
 
-            for waiting in shared.waiting_list.drain(0..num_waiting) {
-                waiting.send(None);
+                // immediately evaluate when we hit a barrier in order to:
+                //   1. minimize the latency between request and response
+                //   2. avoid a race condition where a request that arrives
+                //      during an evaluation does not trigger one.
+                PredictState::predict(state, state_lock, num_requests);
+            } else if state_lock.running_count.load(Ordering::SeqCst) == 0 {
+                // everything is asleep? probably a race condition between the
+                // pending message being sent and it being received. Just wake
+                // everything up and it should normalize.
+                let num_waiting = state_lock.waiting_list.len();
+
+                for waiting in state_lock.waiting_list.drain(0..num_waiting) {
+                    waiting.send(None);
+                }
+            } else {
+                // wait until the currently running request finish instead of
+                // waking up any threads
             }
         }
     }
@@ -200,19 +210,32 @@ impl parallel::ServiceImpl for PredictState {
         ::std::cmp::max(2, *config::NUM_THREADS / *config::BATCH_SIZE)
     }
 
-    fn process(state: &Self::State, req: Self::Request, sender: OneSender<Self::Response>, has_more: bool) {
-        let mut shared = state.shared.lock().unwrap();
-
+    fn process(
+        state: &Mutex<Self::State>,
+        mut state_lock: MutexGuard<Self::State>,
+        req: Self::Request,
+        sender: OneSender<Self::Response>,
+        has_more: bool
+    )
+    {
         match req {
             PredictRequest::Ask(features) => {
-                shared.features_list.push(features);
-                shared.sender_list.push(sender);
+                state_lock.features_list.push(features);
+                state_lock.sender_list.push(sender);
             },
             PredictRequest::Wait => {
-                shared.waiting_list.push(sender);
+                state_lock.waiting_list.push(sender);
             }
         };
 
-        state.check(shared, has_more);
+        PredictState::check(state, state_lock, has_more);
+    }
+
+    fn check_sleep(state: MutexGuard<Self::State>) {
+        let num_requests = state.features_list.len();
+        let num_waiting = state.waiting_list.len();
+
+        assert!(num_requests == 0, "we should never sleep with a pending request -- {}", num_requests);
+        assert!(num_waiting == 0, "we should never sleep with a pending wait -- {}", num_waiting);
     }
 }

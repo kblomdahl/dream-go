@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::thread::{self, JoinHandle};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+
 use parallel::*;
 
 /// The implementation details of a service that is responsible for actually
@@ -25,7 +25,7 @@ use parallel::*;
 /// mutability of the state using, for example, `Mutex` to ensure no two threads
 /// tries to mutate the state at the same time.
 pub trait ServiceImpl {
-    type State: Send + Sync;
+    type State: Send;
     type Request: Send + Sync;
     type Response: Send + Sync;
 
@@ -34,23 +34,46 @@ pub trait ServiceImpl {
     /// the user.
     fn get_thread_count() -> usize;
 
+    /// Perform sanity checks before a worker threads goes to sleep.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `state` - the state of the service
+    /// 
+    fn check_sleep(state: MutexGuard<Self::State>);
+
     /// Process a single request to this service. The response to the request
     /// should be send over the `resp` channel.
     /// 
     /// # Arguments
     /// 
     /// * `state` - the state of the service
+    /// * `state_lock` - the state of the service (acquired lock)
     /// * `req` - the request to process
     /// * `resp` - the channel to send the response to
     /// * `has_more` - whether there are no requests immedietly available after
-    ///   this one.
+    ///   this one. This number is only valid for the lifetime of `state_lock`.
     /// 
     fn process(
-        state: &Self::State,
+        state: &Mutex<Self::State>,
+        state_lock: MutexGuard<Self::State>,
         req: Self::Request,
         resp: OneSender<Self::Response>,
         has_more: bool
     );
+}
+
+/// The interior state of a service
+pub struct ServiceState<I: ServiceImpl> {
+    /// Whether this service should still be running.
+    is_running: bool,
+
+    /// The number of requests currently being processed.
+    num_process: usize,
+
+    /// The queue of pending requests, and the channel to send the response
+    /// over.
+    queue: Vec<(I::Request, OneSender<I::Response>)>
 }
 
 /// The worker thread that is responsible for receiving requests and dispatching
@@ -59,32 +82,42 @@ pub trait ServiceImpl {
 /// 
 /// # Arguments
 /// 
+/// * `num_running` - the number of requests currently being processed
 /// * `is_running` - whether the service should be running
 /// * `state` - the state of the service
 /// * `queue` - the queue of requests
 /// 
 fn worker_thread<I: ServiceImpl>(
-    is_running: Arc<AtomicBool>,
-    state: Arc<I::State>,
-    queue: Arc<(Mutex<Vec<(I::Request, OneSender<I::Response>)>>, Condvar)>
+    state: Arc<Mutex<I::State>>,
+    inner: Arc<(Mutex<ServiceState<I>>, Condvar)>
 ) {
-    let (ref queue, ref cvar) = *queue;
-    let mut queue_lock = queue.lock().unwrap();
+    let (ref inner, ref cvar) = *inner;
+    let mut inner_lock = inner.lock().unwrap();
 
     loop {
-        if let Some((req, tx)) = queue_lock.pop() {
-            let has_more = !queue_lock.is_empty();
-            drop(queue_lock);
+        if let Some((req, tx)) = inner_lock.queue.pop() {
+            let state_lock = state.lock().unwrap();
+            let has_more = !inner_lock.queue.is_empty();
+            inner_lock.num_process += 1;
 
-            I::process(&state, req, tx, has_more);
+            // get ride of the lock to encourage multiple parallel requests
+            drop(inner_lock);
 
-            queue_lock = queue.lock().unwrap();
+            I::process(&state, state_lock, req, tx, has_more);
+
+            inner_lock = inner.lock().unwrap();
+            inner_lock.num_process -= 1;
         } else {
-            if !is_running.load(Ordering::Acquire) {
+            if !inner_lock.is_running {
                 break
             }
+            if inner_lock.num_process == 0 {
+                let state_lock = state.lock().unwrap();
 
-            queue_lock = cvar.wait(queue_lock).unwrap();
+                I::check_sleep(state_lock);
+            }
+
+            inner_lock = cvar.wait(inner_lock).unwrap();
         }
     }
 }
@@ -94,13 +127,12 @@ fn worker_thread<I: ServiceImpl>(
 pub struct Service<I: ServiceImpl> {
     workers: Vec<JoinHandle<()>>,
 
-    state: Arc<I::State>,
-    queue: Arc<(Mutex<Vec<(I::Request, OneSender<I::Response>)>>, Condvar)>,
-    is_running: Arc<AtomicBool>
+    state: Arc<Mutex<I::State>>,
+    inner: Arc<(Mutex<ServiceState<I>>, Condvar)>
 }
 
 impl<I: ServiceImpl> ::std::ops::Deref for Service<I> {
-    type Target = I::State;
+    type Target = Mutex<I::State>;
 
     fn deref(&self) -> &Self::Target {
         &*self.state
@@ -109,11 +141,13 @@ impl<I: ServiceImpl> ::std::ops::Deref for Service<I> {
 
 impl<I: ServiceImpl> Drop for Service<I> {
     fn drop(&mut self) {
-        let queue_lock = self.queue.0.lock();
+        let mut inner_lock = self.inner.0.lock().unwrap();
 
-        if self.is_running.compare_and_swap(true, false, Ordering::AcqRel) {
-            self.queue.1.notify_all();
-            drop(queue_lock);
+        if inner_lock.is_running {
+            inner_lock.is_running = false;
+
+            self.inner.1.notify_all();
+            drop(inner_lock);
 
             let num_workers = self.workers.len();
 
@@ -134,25 +168,26 @@ impl<I: ServiceImpl + 'static> Service<I> {
     /// * `initial_state` -
     /// 
     pub fn new(num_threads: Option<usize>, initial_state: I::State) -> Service<I> {
-        let state = Arc::new(initial_state);
-        let queue = Arc::new((Mutex::new(vec! []), Condvar::new()));
-        let is_running = Arc::new(AtomicBool::new(true));
+        let state = Arc::new(Mutex::new(initial_state));
+        let inner = Arc::new((Mutex::new(ServiceState {
+            num_process: 0,
+            queue: vec! [],
+            is_running: true
+        }), Condvar::new()));
         let num_threads = num_threads.unwrap_or_else(|| I::get_thread_count());
 
         Service {
             workers: (0..num_threads)
                 .map(|_| {
+                    let inner = inner.clone();
                     let state = state.clone();
-                    let queue = queue.clone();
-                    let is_running = is_running.clone();
 
-                    thread::spawn(move || worker_thread::<I>(is_running, state, queue))
+                    thread::spawn(move || worker_thread::<I>(state, inner))
                 })
                 .collect(),
 
             state: state,
-            queue: queue,
-            is_running: is_running
+            inner: inner
         }
     }
 
@@ -163,8 +198,7 @@ impl<I: ServiceImpl + 'static> Service<I> {
             _owner: ::std::marker::PhantomData::default(),
 
             state: self.state.clone(),
-            queue: self.queue.clone(),
-            is_running: self.is_running.clone()
+            inner: self.inner.clone()
         }
     }
 }
@@ -173,15 +207,14 @@ impl<I: ServiceImpl + 'static> Service<I> {
 pub struct ServiceGuard<'a, I: ServiceImpl> {
     _owner: ::std::marker::PhantomData<&'a ()>,
 
-    state: Arc<I::State>,
-    queue: Arc<(Mutex<Vec<(I::Request, OneSender<I::Response>)>>, Condvar)>,
-    is_running: Arc<AtomicBool>
+    state: Arc<Mutex<I::State>>,
+    inner: Arc<(Mutex<ServiceState<I>>, Condvar)>
 }
 
 impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
     /// Returns the current state of this service.
-    pub fn get_state<'b>(&'b self) -> &'b I::State {
-        &*self.state
+    pub fn get_state<'b>(&'b self) -> MutexGuard<I::State> {
+        self.state.lock().unwrap()
     }
 
     /// Sends a request to the service and returns the response.
@@ -193,13 +226,13 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
     pub fn send(&self, req: I::Request) -> I::Response {
         let (tx, rx) = one_channel();
 
-        if let Ok(mut queue_lock) = self.queue.0.lock() {
-            queue_lock.push((req, tx));
-            self.queue.1.notify_one();
+        if let Ok(mut inner_lock) = self.inner.0.lock() {
+            inner_lock.queue.push((req, tx));
+            self.inner.1.notify_one();
 
             // get ride of the lock so that one of the service workers
             // can acquire it
-            drop(queue_lock);
+            drop(inner_lock);
 
             // wait for a response
             OneReceiver::recv(rx).unwrap()
@@ -215,8 +248,7 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
             _owner: ::std::marker::PhantomData::default(),
 
             state: self.state.clone(),
-            queue: self.queue.clone(),
-            is_running: self.is_running.clone()
+            inner: self.inner.clone()
         }
     }
 }
