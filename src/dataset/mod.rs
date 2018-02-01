@@ -32,7 +32,7 @@ pub struct Dataset<'a> {
     receiver: Receiver<Entry>,
 
     /// The lifetime of the server that each worker thread holds
-    lifetime: PhantomData<&'a usize>
+    lifetime: PhantomData<&'a ()>
 }
 
 impl<'a> Dataset<'a> {
