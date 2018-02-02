@@ -913,7 +913,6 @@ mod tests {
     use test::{self, Bencher};
     use rand::{XorShiftRng, Rng};
     use go::*;
-    use mcts::param::*;
     use mcts::tree::*;
 
     #[bench]
@@ -954,7 +953,7 @@ mod tests {
         prior.into_boxed_slice()
     }
 
-    unsafe fn bench_test<C: Param, E: Value>(b: &mut Bencher) {
+    unsafe fn bench_test<E: Value>(b: &mut Bencher) {
         let mut rng = XorShiftRng::new_unseeded();
         let mut root = Node::<E>::new(Color::Black, get_prior_distribution(&mut rng));
 
@@ -965,8 +964,8 @@ mod tests {
 
             // check so that the reference and asm implementation gives back the same
             // value
-            E::get::<C, E>(&root, &mut dst_asm);
-            E::get_ref::<C, E>(&root, &mut dst_ref);
+            E::get::<E>(&root, &mut dst_asm);
+            E::get_ref::<E>(&root, &mut dst_ref);
 
             for i in 0..362 {
                 // because of numeric instabilities and approximations the answers may
@@ -981,12 +980,12 @@ mod tests {
             }
 
             // expand the tree by one probe so that the root values change
-            let trace = probe::<C, E>(&mut root, &mut board).unwrap();
+            let trace = probe::<E>(&mut root, &mut board).unwrap();
             let &(_, color, _) = trace.last().unwrap();
             let next_color = color.opposite();
             let (value, policy) = (rng.next_f32(), get_prior_distribution(&mut rng));
 
-            insert::<C, E>(&trace, next_color, value, policy);
+            insert::<E>(&trace, next_color, value, policy);
         }
 
         // benchmark the value function only
@@ -995,7 +994,7 @@ mod tests {
         b.iter(|| {
             let mut dst = test::black_box([0.0f32; 368]);
 
-            E::get::<C, E>(&root, &mut dst);
+            E::get::<E>(&root, &mut dst);
             dst
         });
 
@@ -1003,11 +1002,11 @@ mod tests {
 
     #[bench]
     fn puct(b: &mut Bencher) {
-        unsafe { bench_test::<Standard, PUCT>(b); }
+        unsafe { bench_test::<PUCT>(b); }
     }
 
     #[bench]
     fn rave(b: &mut Bencher) {
-        unsafe { bench_test::<Standard, RAVE>(b); }
+        unsafe { bench_test::<RAVE>(b); }
     }
 }
