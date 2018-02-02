@@ -389,7 +389,7 @@ def cosine_decay_restarts(learning_rate, global_step, first_decay_steps, alpha=0
         first_decay_steps = tf.cast(first_decay_steps, tf.float32)
         alpha = tf.cast(alpha, tf.float32)
         t_mul = 1.4  # used to derive the number of iterations in the i-th period
-        m_mul = 0.7  # used to derive the initial learning rate of the i-th period:
+        m_mul = 0.5  # used to derive the initial learning rate of the i-th period:
 
         completed_fraction = global_step / first_decay_steps
         i_restart = tf.floor(tf.log(1.0 - completed_fraction * (1.0 - t_mul)) / tf.log(t_mul))
@@ -490,7 +490,10 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
                 value_accuracies.append(tf.reduce_mean(tf.cast(tf.equal(tf.sign(value), tf.sign(value_hat)), tf.float32)))
 
             # setup the loss for the local model
-            policy_losses.append(tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=policy, logits=policy_hat)))
+            policy_losses.append(tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+                labels=tf.stop_gradient(policy),
+                logits=policy_hat
+            )))
             value_losses.append(tf.reduce_mean(tf.squared_difference(value, value_hat)))
 
     # gather the losses and variables from all of the tower into a single loss function
@@ -770,7 +773,13 @@ def calibrate(sess, tower, files):
             if candidate[i-1] == 0 and reference[i-1] > 0:
                 candidate[i-1] = 1e-4
 
-            return stats.entropy(reference, candidate)
+            def js(p, q):
+                """ Jensen Shannon Divergence """
+                m = 0.5 * (p + q)
+
+                return 0.5 * (stats.entropy(p, m) + stats.entropy(q, m))
+
+            return js(reference, candidate)
 
         for name in histogram:
             best_i = min(
