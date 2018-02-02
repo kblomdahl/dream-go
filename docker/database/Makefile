@@ -12,7 +12,7 @@ create-volume:
 
 staging:
 	mkdir -p staging/
-	cp ../../tools/server.py staging/server.py
+	cp database.py staging/database.py
 
 build: staging
 	docker build -t "dream_go/db:$(VERSION)" .

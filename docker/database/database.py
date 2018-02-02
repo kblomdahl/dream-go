@@ -21,7 +21,7 @@ and to query them in useful ways.
 
 Uses SQLite3 as the internal storage engine.
 
-Usage: ./server.py <database file>
+Usage: ./database.py <database file>
 """
 
 from datetime import datetime

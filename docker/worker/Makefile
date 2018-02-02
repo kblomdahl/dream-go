@@ -11,8 +11,8 @@ staging:
 	mkdir -p staging/
 	cd ../.. ; cargo build --release
 	cp ../../target/release/dream_go staging/dream_go
-	cp ../../tools/loop_worker.sh staging/loop_worker.sh
 	cp ../../tools/upload2rest.py staging/upload2rest.py
+	cp loop_worker.sh staging/loop_worker.sh
 
 build: staging
 	docker build -t "dream_go/worker:$(VERSION)" .
