@@ -41,7 +41,7 @@ class BatchNorm:
         zeros_op = tf.zeros_initializer()
 
         self._scale = tf.get_variable('scale'+suffix, (num_features,), tf.float32, ones_op, trainable=False)
-        self._offset = tf.get_variable('offset'+suffix, (num_features,), tf.float32, zeros_op, trainable=False)
+        self._offset = tf.get_variable('offset'+suffix, (num_features,), tf.float32, zeros_op, trainable=True)
         self._mean = tf.get_variable('mean'+suffix, (num_features,), tf.float32, zeros_op, trainable=False)
         self._variance = tf.get_variable('variance'+suffix, (num_features,), tf.float32, ones_op, trainable=False)
 
@@ -49,6 +49,7 @@ class BatchNorm:
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._offset)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._mean)
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._variance)
+        tf.add_to_collection(tf.GraphKeys.BIASES, self._offset)
 
         if collection:
             tf.add_to_collection(collection, self._offset)
@@ -218,6 +219,9 @@ class ValueHead:
         tf.add_to_collection(ValueHead.VARIABLES, self._bias_1)
         tf.add_to_collection(ValueHead.VARIABLES, self._bias_2)
 
+        tf.add_to_collection(tf.GraphKeys.BIASES, self._bias_1)
+        tf.add_to_collection(tf.GraphKeys.BIASES, self._bias_2)
+
     def dump(self, sess, into=None):
         """ Returns a dictionary that contains all model variables of this head. """
 
@@ -276,6 +280,8 @@ class PolicyHead:
         tf.add_to_collection(PolicyHead.VARIABLES, self._weights)
         tf.add_to_collection(PolicyHead.VARIABLES, self._bias)
 
+        tf.add_to_collection(tf.GraphKeys.BIASES, self._bias)
+
     def dump(self, sess, into=None):
         """ Returns a dictionary that contains all model variables of this head. """
 
@@ -312,26 +318,26 @@ class Tower:
         glorot_op = tf.glorot_normal_initializer()
 
         with tf.variable_scope('01_upsample') as self._upsample_scope:
-            self._upsample = tf.get_variable('weights', (3, 3, 32, num_features), tf.float32, glorot_op)
+            self._upsample = tf.get_variable('weights', (3, 3, 36, num_features), tf.float32, glorot_op)
             self._bn = BatchNorm(num_features, collection=Tower.VARIABLES)
 
         tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, self._upsample)
         tf.add_to_collection(Tower.VARIABLES, self._upsample)
 
         # residual blocks
-        self._residual_scopes = [None] * 19
+        self._residual_scopes = [None] * 9
         self._residuals = []
 
-        for i in range(19):
+        for i in range(9):
             with tf.variable_scope('{:02d}_residual'.format(2 + i)) as self._residual_scopes[i]:
                 self._residuals += [ResidualBlock(num_features, collection=Tower.VARIABLES)]
 
         # policy head
-        with tf.variable_scope('21p_policy') as self._policy_scope:
+        with tf.variable_scope('11p_policy') as self._policy_scope:
             self._policy = PolicyHead(num_features)
 
         # value head
-        with tf.variable_scope('21v_value') as self._value_scope:
+        with tf.variable_scope('11v_value') as self._value_scope:
             self._value = ValueHead(num_features)
 
     def dump(self, sess, into=None):
@@ -369,6 +375,7 @@ class Tower:
 
         return v, p
 
+
 def list_local_devices():
     """ Returns a generator of all local GPU devices on this machine. """
     from tensorflow.python.client import device_lib
@@ -376,6 +383,7 @@ def list_local_devices():
     local_device_protos = device_lib.list_local_devices()
 
     return [dev.name for dev in local_device_protos if dev.device_type == 'GPU']
+
 
 def cosine_decay_restarts(learning_rate, global_step, first_decay_steps, alpha=0.0):
     """
@@ -403,12 +411,13 @@ def cosine_decay_restarts(learning_rate, global_step, first_decay_steps, alpha=0
 
         return learning_rate * decayed
 
+
 def make_dataset_iterator(files, batch_size=1):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
-    dataset = tf.data.FixedLengthRecordDataset(files, 23830)
+    dataset = tf.data.FixedLengthRecordDataset(files, 26718)
     dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
-    dataset = dataset.map(lambda x: tf.split(x, (11552, 1, 362)))
+    dataset = dataset.map(lambda x: tf.split(x, (12996, 1, 362)))
     dataset = dataset.shuffle(196704)
     dataset = dataset.batch(batch_size if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
 
@@ -465,7 +474,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
             with tf.device(None):
                 features, value, policy = iterator.get_next()
 
-            features = tf.reshape(features, (-1, 32, 19, 19))
+            features = tf.reshape(features, (-1, 36, 19, 19))
             value_hat, policy_hat = tower(
                 features,
                 train_tower=train_all or only_tower,
@@ -500,16 +509,20 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
     # that gets forwarded to the optimizer
     policy_loss = tf.reduce_mean(policy_losses)
     value_loss = tf.reduce_mean(value_losses)
-    reg_loss = tf.reduce_sum([tf.nn.l2_loss(var) for var in original_trainable])
+    reg_loss = tf.reduce_sum([
+        tf.nn.l2_loss(var)
+        for var in original_trainable
+        if var not in tf.get_collection(tf.GraphKeys.BIASES)  # do not apply to bias terms
+    ])
 
-    loss = policy_loss + 0.1 * value_loss + 2e-4 * reg_loss
+    loss = policy_loss + 0.1 * value_loss + 4e-4 * reg_loss
 
     tf.summary.scalar('loss/policy', policy_loss)
     tf.summary.scalar('loss/value', value_loss)
     tf.summary.scalar('loss/regularization', reg_loss)
     tf.summary.scalar('loss', loss)
 
-    learning_rate = cosine_decay_restarts(0.1, global_step, 3000)
+    learning_rate = cosine_decay_restarts(0.1, global_step, 1500)
     optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
     optimizer_op = optimizer.minimize(
         loss,
@@ -585,7 +598,10 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
             except KeyboardInterrupt:
                 break  # quit
             except:
-                sess.run([epoch_op])
+                epoch = sess.run(epoch_op)
+                if epoch >= 14:
+                    break
+
                 saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
 
         # save the model
@@ -600,7 +616,7 @@ def verify(args):
     # get the answer from the data-set and the prediction
     tower = Tower()
     features, value, policy = iterator.get_next()
-    features = tf.reshape(features, (-1, 32, 19, 19))
+    features = tf.reshape(features, (-1, 36, 19, 19))
     value_hat, policy_hat = tower(features, is_training=False)
 
     policy_argmax = tf.argmax(policy, axis=1)
@@ -665,6 +681,7 @@ def verify(args):
             100.0 * np.asscalar(accuracy_v)
         ))
 
+
 def calibrate(sess, tower, files):
     """
     Calculate the optimal scaling of each activation using cross-entropy
@@ -674,7 +691,7 @@ def calibrate(sess, tower, files):
     # setup the iterator over all features in the gives files
     iterator = make_dataset_iterator(files, batch_size=32)
     features, _value, _policy = iterator.get_next()
-    features = tf.reshape(features, (-1, 32, 19, 19))
+    features = tf.reshape(features, (-1, 36, 19, 19))
     _value_hat, _policy_hat = tower(features, is_training=False)
 
     # pre-allocate the dictionaries containing all activations
@@ -800,6 +817,7 @@ def calibrate(sess, tower, files):
         return values
     except KeyboardInterrupt:
         return {}
+
 
 def dump(args):
     """

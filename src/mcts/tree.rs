@@ -15,7 +15,7 @@
 use go::sgf::SgfCoordinate;
 use go::{Board, Color};
 use mcts::spin::Mutex;
-use util::config;
+use util::{config, max};
 
 use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
@@ -188,9 +188,12 @@ impl Value for PUCT {
         for &(node, _, index) in trace.iter() {
             let value_ = if color == (*node).color { value } else { 1.0 - value };
 
-            // incremental update of the average value
+            // incremental update of the average value and remove any additional
+            // virtual losses we added to the node
             let _guard = (*node).lock.lock();
 
+            (*node).total_count -= *config::VLOSS_CNT - 1;
+            (*node).count[index] -= *config::VLOSS_CNT - 1;
             (*node).value[index] += (value_ - (*node).value[index]) / ((*node).count[index] as f32);
         }
     }
@@ -407,7 +410,7 @@ impl<E: Value> Node<E> {
     /// * `color` - the color of the first players color
     /// * `prior` - the prior values of the nodes
     /// 
-    pub fn new(color: Color, prior: Box<[f32]>) -> Node<E> {
+    pub fn new(color: Color, value: f32, prior: Box<[f32]>) -> Node<E> {
         assert_eq!(prior.len(), 362);
 
         // copy the prior values into an array size that is dividable
@@ -425,7 +428,7 @@ impl<E: Value> Node<E> {
             total_count: 0,
             count: [0; 368],
             prior: prior_padding,
-            value: [0.0f32; 368],
+            value: [max(0.0, value - *config::FPU_REDUCE); 368],
             amaf: [0.0f32; 368],
             amaf_count: [0; 368],
             expanding: [false; 362],
@@ -528,7 +531,7 @@ impl<E: Value> Node<E> {
                 // we need to record that were was a pass so that we have the correct
                 // pass count in the root node.
                 let prior = vec! [0.0f32; 362].into_boxed_slice();
-                let mut next = Node::new(self.color.opposite(), prior);
+                let mut next = Node::new(self.color.opposite(), 0.5, prior);
                 next.pass_count = self.pass_count + 1;
 
                 Some(next)
@@ -626,8 +629,8 @@ impl<E: Value> Node<E> {
         });
 
         if let Some(max_i) = max_i {
-            self.total_count += 1;
-            self.count[max_i] += 1;
+            self.total_count += *config::VLOSS_CNT;
+            self.count[max_i] += *config::VLOSS_CNT;
             self.expanding[max_i] = true;
         }
 
@@ -680,8 +683,8 @@ pub unsafe fn probe<E>(root: &mut Node<E>, board: &mut Board) -> Option<NodeTrac
             for (node, _, next_child) in trace.into_iter() {
                 let _guard = (*node).lock.lock();
 
-                (*node).total_count -= 1;
-                (*node).count[next_child] -= 1;
+                (*node).total_count -= *config::VLOSS_CNT;
+                (*node).count[next_child] -= *config::VLOSS_CNT;
             }
 
             return None;
@@ -705,7 +708,7 @@ pub unsafe fn insert<E>(trace: &NodeTrace<E>, color: Color, value: f32, prior: B
     where E: Value
 {
     if let Some(&(node, _, index)) = trace.last() {
-        let mut next = Box::new(Node::new(color, prior));
+        let mut next = Box::new(Node::new(color, value, prior));
         if index == 361 {
             next.pass_count = (*node).pass_count + 1;
         }
@@ -955,7 +958,7 @@ mod tests {
 
     unsafe fn bench_test<E: Value>(b: &mut Bencher) {
         let mut rng = XorShiftRng::new_unseeded();
-        let mut root = Node::<E>::new(Color::Black, get_prior_distribution(&mut rng));
+        let mut root = Node::<E>::new(Color::Black, 0.5, get_prior_distribution(&mut rng));
 
         for t in 0..800 {
             let mut board = Board::new();

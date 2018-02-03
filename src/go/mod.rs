@@ -220,7 +220,7 @@ impl Board {
     /// * `vertices` -
     /// * `next_vertex` -
     /// * `index` -
-    /// 
+    ///
     fn get_one_liberty(vertices: &[u8], next_vertex: &[u16], index: usize) -> Option<usize> {
         let mut current = index;
 
@@ -232,21 +232,11 @@ impl Board {
 
             current = next_vertex[current] as usize;
             if current == index {
-                break
+                break;
             }
         }
 
         None
-    }
-
-    /// Returns true iff the group at the given index at least one liberty.
-    ///
-    /// # Arguments
-    ///
-    /// * `index` - the index of a stone in the group to check
-    ///
-    fn has_one_liberty(&self, index: usize) -> bool {
-        Board::get_one_liberty(&self.vertices, &self.next_vertex, index).is_some()
     }
 
     /// Returns true iff the group at the given index has at least two
@@ -291,33 +281,77 @@ impl Board {
 
             current = next_vertex[current] as usize;
             if current == index {
-                break
+                break;
             }
         }
 
         false
     }
 
-    /// Remove all stones strongly connected to the given index from the board.
+    /// Returns true iff the group at the given index has at least three
+    /// liberties in the given `vertices` and `next_vertex` arrays.
+    ///
+    /// # Arguments
+    ///
+    /// * `vertices` -
+    /// * `next_vertex` -
+    /// * `index` - the index of a stone in the group to check
+    ///
+    fn _has_three_liberties(vertices: &[u8], next_vertex: &[u16], index: usize) -> bool {
+        let mut current = index;
+        let mut previous = [0xffff, 0xffff];
+        let mut num_uniq = 0;
+
+        loop {
+            macro_rules! check_three_liberties {
+                ($index:expr) => ({
+                    if num_uniq == 2 && previous[0] != $index && !previous.contains(&$index) {
+                        return true;
+                    } else if !previous.contains(&$index) {
+                        previous[num_uniq] = $index;
+                        num_uniq += 1;
+                    }
+                })
+            }
+
+            if N!(vertices, current) == 0 { check_three_liberties!(current + 19); }
+            if E!(vertices, current) == 0 { check_three_liberties!(current + 1); }
+            if S!(vertices, current) == 0 { check_three_liberties!(current - 19); }
+            if W!(vertices, current) == 0 { check_three_liberties!(current - 1); }
+
+            current = next_vertex[current] as usize;
+            if current == index {
+                break;
+            }
+        }
+
+        false
+    }
+
+    /// Remove all stones strongly connected to the given index from the
+    /// board. It returns the necessary adjustment to the zobrist hash.
     ///
     /// # Arguments
     ///
     /// * `index` - the index of a stone in the group to capture
     ///
-    fn capture(&mut self, index: usize) {
+    fn capture(vertices: &mut [u8], next_vertex: &[u16], index: usize) -> u64 {
         let mut current = index;
+        let mut hash = 0;
 
         loop {
-            let c = self.vertices[current] as usize;
+            let c = vertices[current] as usize;
 
-            self.zobrist_hash ^= zobrist::TABLE[c][current];
-            self.vertices[current] = 0;
+            hash ^= zobrist::TABLE[c][current];
+            vertices[current] = 0;
 
-            current = self.next_vertex[current] as usize;
+            current = next_vertex[current] as usize;
             if current == index {
-                break
+                break;
             }
         }
+
+        hash
     }
 
     /// Remove all stones strongly connected to the given index from the given array
@@ -335,19 +369,19 @@ impl Board {
 
             current = self.next_vertex[current] as usize;
             if current == index {
-                break
+                break;
             }
         }
     }
 
     /// Returns the zobrist hash adjustment that would need to be done if the
     /// group at the given index was capture and was of the given color.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `color` - the color of the group to capture
     /// * `index` - the index of a stone in the group
-    /// 
+    ///
     fn capture_if(&self, color: usize, index: usize) -> u64 {
         let mut adjustment = 0;
         let mut current = index;
@@ -357,7 +391,7 @@ impl Board {
 
             current = self.next_vertex[current] as usize;
             if current == index {
-                break
+                break;
             }
         }
 
@@ -448,12 +482,12 @@ impl Board {
     /// rule. This functions assumes the given move is not suicide and
     /// does not play on top of another stone, these pre-conditions can
     /// be checked with the `_is_valid` function.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `color` - the color of the move
     /// * `index` - the HW index of the move
-    /// 
+    ///
     pub fn _is_ko(&self, color: Color, index: usize) -> bool {
         let mut zobrist_pretend = self.zobrist_hash ^ zobrist::TABLE[color as usize][index];
         let opponent = color.opposite() as u8;
@@ -490,7 +524,8 @@ impl Board {
     }
 
     /// Place the given stone on the board without checking if it is legal, and
-    /// without capturing any of the opponents stones.
+    /// without capturing any of the opponents stones. It returns the necessary
+    /// adjustment to the zobrist hash.
     ///
     /// # Arguments
     ///
@@ -499,12 +534,7 @@ impl Board {
     /// * `color` - the color of the move
     /// * `index` - the index of the move
     ///
-    fn place_no_capture(
-        vertices: &mut [u8],
-        next_vertex: &mut [u16],
-        color: Color,
-        index: usize
-    ) {
+    fn place_capture(vertices: &mut [u8], next_vertex: &mut [u16], color: Color, index: usize) -> u64 {
         let player = color as u8;
 
         // place the stone on the board regardless of whether it is legal
@@ -517,6 +547,17 @@ impl Board {
         if E!(vertices, index) == player { Board::join_vertices(next_vertex, index, index + 1); }
         if S!(vertices, index) == player { Board::join_vertices(next_vertex, index, index - 19); }
         if W!(vertices, index) == player { Board::join_vertices(next_vertex, index, index - 1); }
+
+        // clear the opponents color
+        let opponent = color.opposite() as u8;
+        let mut hash = zobrist::TABLE[color as usize][index];
+
+        if N!(vertices, index) == opponent && Board::get_one_liberty(vertices, next_vertex, index + 19).is_none() { hash ^= Board::capture(vertices, next_vertex, index + 19); }
+        if E!(vertices, index) == opponent && Board::get_one_liberty(vertices, next_vertex, index + 1).is_none() { hash ^= Board::capture(vertices, next_vertex, index + 1); }
+        if S!(vertices, index) == opponent && Board::get_one_liberty(vertices, next_vertex, index - 19).is_none() { hash ^= Board::capture(vertices, next_vertex, index - 19); }
+        if W!(vertices, index) == opponent && Board::get_one_liberty(vertices, next_vertex, index - 1).is_none() { hash ^= Board::capture(vertices, next_vertex, index - 1); }
+
+        hash
     }
 
     /// Place the given stone on the board without checking if it is legal, the
@@ -534,18 +575,8 @@ impl Board {
 
         // place the stone on the board regardless of whether it is legal
         // or not.
-        Board::place_no_capture(&mut self.vertices, &mut self.next_vertex, color, index);
-
+        self.zobrist_hash ^= Board::place_capture(&mut self.vertices, &mut self.next_vertex, color, index);
         self.count += 1;
-        self.zobrist_hash ^= zobrist::TABLE[color as usize][index];
-
-        // clear the opponents color
-        let opponent = color.opposite() as u8;
-
-        if N!(self.vertices, index) == opponent && !self.has_one_liberty(index + 19) { self.capture(index + 19); }
-        if E!(self.vertices, index) == opponent && !self.has_one_liberty(index + 1) { self.capture(index + 1); }
-        if S!(self.vertices, index) == opponent && !self.has_one_liberty(index - 19) { self.capture(index - 19); }
-        if W!(self.vertices, index) == opponent && !self.has_one_liberty(index - 1) { self.capture(index - 1); }
 
         // add the current board state to the history *after* we have updated it because:
         //
@@ -574,7 +605,7 @@ impl Board {
         index: usize
     ) -> bool
     {
-        Board::place_no_capture(vertices, next_vertex, color, index);
+        Board::place_capture(vertices, next_vertex, color, index);
 
         // if any of the neighbouring opponent groups were reduced to one
         // liberty then extend into that liberty. if no such group exists
@@ -608,7 +639,7 @@ impl Board {
             }
         };
 
-        Board::place_no_capture(vertices, next_vertex, color.opposite(), opponent_index);
+        Board::place_capture(vertices, next_vertex, color.opposite(), opponent_index);
 
         // check the number of liberties after extending the group that was put in atari
         //
@@ -616,14 +647,9 @@ impl Board {
         // * If two liberties, keep searching.
         // * If more than two liberties, then this group can not be captured.
         //
-        let opponent_count = if N!(vertices, opponent_index) == 0 { 1 } else { 0 }
-            + if E!(vertices, opponent_index) == 0 { 1 } else { 0 }
-            + if S!(vertices, opponent_index) == 0 { 1 } else { 0 }
-            + if W!(vertices, opponent_index) == 0 { 1 } else { 0 };
-
-        if opponent_count < 2 {
+        if !Board::_has_two_liberties(vertices, next_vertex, opponent_index) {
             return true;
-        } else if opponent_count > 2 {
+        } else if Board::_has_three_liberties(vertices, next_vertex, opponent_index) {
             return false;
         }
 
@@ -672,7 +698,6 @@ impl Board {
     /// * `color` - the color of the current player
     /// * `index` - the index of the stone to check
     ///
-    #[allow(unused)]
     fn is_ladder_capture(&self, color: Color, index: usize) -> bool {
         debug_assert!(self._is_valid(color, index));
 
@@ -691,7 +716,6 @@ impl Board {
     ///
     /// * `color` - the color of the current player
     /// * `index` - the index of the stone to check
-    #[allow(unused)]
     fn is_ladder_escape(&self, color: Color, index: usize) -> bool {
         debug_assert!(self._is_valid(color, index));
 
@@ -711,28 +735,23 @@ impl Board {
         let mut vertices = self.vertices.clone();
         let mut next_vertex = self.next_vertex.clone();
 
-        Board::place_no_capture(&mut vertices, &mut next_vertex, color, index);
+        Board::place_capture(&mut vertices, &mut next_vertex, color, index);
 
         // check if we have exactly two liberties
-        let liberty_count = if N!(vertices, index) == 0 { 1 } else { 0 }
-            + if E!(vertices, index) == 0 { 1 } else { 0 }
-            + if S!(vertices, index) == 0 { 1 } else { 0 }
-            + if W!(vertices, index) == 0 { 1 } else { 0 };
-
-        if liberty_count != 2 {
+        if Board::_has_three_liberties(&vertices, &next_vertex, index) {
+            return false;
+        } else if !Board::_has_two_liberties(&vertices, &next_vertex, index) {
             return false;
         }
 
         // check that we cannot be captured in a ladder from either direction
         macro_rules! check_ladder {
             ($dir:ident) => ({
-                let next_index = $dir!(index);
-
-                next_index < 361 && {
+                $dir!(vertices, index) == 0 && {
                     let mut vertices_ = vertices.clone();
                     let mut next_vertex_ = next_vertex.clone();
 
-                    Board::_is_ladder_capture(&mut vertices_, &mut next_vertex_, color, next_index)
+                    Board::_is_ladder_capture(&mut vertices_, &mut next_vertex_, color.opposite(), $dir!(index))
                 }
             })
         }
@@ -747,13 +766,13 @@ impl Board {
 
     /// Fills the given array with all liberties of in the provided array of vertices
     /// for the group.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `vertices` - the array to fill liberties from
     /// * `index` - the group to fill liberties for
     /// * `liberties` - output array containing the liberties of this group
-    /// 
+    ///
     fn fill_liberties(&self, vertices: &[u8], index: usize, liberties: &mut [u8]) {
         let mut current = index;
 
@@ -769,7 +788,7 @@ impl Board {
             }
 
             if current == index {
-                break
+                break;
             }
         }
     }
@@ -805,7 +824,7 @@ impl Board {
 
                 current = self.next_vertex[current] as usize;
                 if current == index {
-                    break
+                    break;
                 }
             }
 
@@ -816,7 +835,7 @@ impl Board {
     /// Returns whether the given move is valid according to the
     /// Tromp-Taylor rules using the provided `memoize` table to
     /// determine the number of liberties.
-    /// 
+    ///
     /// This function also assume the given vertex is empty and does
     /// not perform the check itself.
     ///
@@ -871,7 +890,7 @@ impl Board {
 
         vertices[index] = color as u8;
 
-        // capture of opponent stones 
+        // capture of opponent stones
         let current = color as u8;
         let opponent = color.opposite() as u8;
 
@@ -900,11 +919,11 @@ impl Board {
 
     /// Returns an array containing the (manhattan) distance to the closest stone
     /// of the given color for each point on the board.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `color` - the color to get the distance from
-    /// 
+    ///
     fn get_territory_distance(&self, color: Color) -> [u8; 368] {
         let current = color as u8;
 
@@ -973,6 +992,10 @@ impl Board {
     /// 30. Opponent vertices (now-3)
     /// 31. Opponent vertices (now-4)
     /// 32. Opponent vertices (now-5)
+    /// 33. Is ladder capture
+    /// 34. Is ladder escape
+    /// 35. Is point only reachable from our vertices
+    /// 36. Is point only reachable from opponent vertices
     ///
     /// # Arguments
     ///
@@ -987,7 +1010,7 @@ impl Board {
         let c_0: T = T::from(0.0);
         let c_1: T = T::from(1.0);
 
-        let mut features = vec! [c_0; 32 * 361];
+        let mut features = vec! [c_0; 36 * 361];
         let symmetry_table = symmetry.get_table();
         let is_black = if color == Color::Black { c_1 } else { c_0 };
         let current = color as u8;
@@ -1002,6 +1025,7 @@ impl Board {
             features[O::index(1, other)] = is_black;
 
             if self.vertices[index] != 0 {
+                // num liberties
                 let num_liberties = ::std::cmp::min(
                     self.get_num_liberties(index, &mut liberties),
                     6
@@ -1018,6 +1042,7 @@ impl Board {
 
                 features[O::index(l, other)] = c_1;
             } else if self._is_valid_memoize(color, index, &mut liberties) {
+                // liberties after move
                 let num_liberties = ::std::cmp::min(
                     self.get_num_liberties_if(color, index, &mut liberties),
                     6
@@ -1025,6 +1050,16 @@ impl Board {
                 let l = 7 + num_liberties;
 
                 features[O::index(l, other)] = c_1;
+
+                // is ladder capture
+                if self.is_ladder_capture(color, index) {
+                    features[O::index(32, other)] = c_1;
+                }
+
+                // is ladder escape
+                if self.is_ladder_escape(color, index) {
+                    features[O::index(33, other)] = c_1;
+                }
             }
         }
 
@@ -1039,11 +1074,26 @@ impl Board {
                     let p = 14 + i;
 
                     features[O::index(p, other)] = c_1;
-                } else { // opponent
+                } else {
+                    // opponent
                     let p = 26 + i;
 
                     features[O::index(p, other)] = c_1;
                 }
+            }
+        }
+
+        // set the territory features
+        let our_territory = self.get_territory_distance(color);
+        let other_territory = self.get_territory_distance(color.opposite());
+
+        for index in 0..361 {
+            let other = symmetry_table[index] as usize;
+
+            if our_territory[index] > 0 && other_territory[index] == 0xff {
+                features[O::index(34, other)] = c_1;
+            } else if our_territory[index] == 0xff && other_territory[index] > 0 {
+                features[O::index(35, other)] = c_1;
             }
         }
 
@@ -1052,10 +1102,10 @@ impl Board {
 
     /// Returns true if this game is fully scorable, a game is
     /// defined as scorable if the following conditions hold:
-    /// 
+    ///
     /// * Both black and white has played at least one stone
     /// * All empty vertices are only reachable from one color
-    /// 
+    ///
     pub fn is_scoreable(&self) -> bool {
         let some_black = (0..361).any(|i| self.vertices[i] == Color::Black as u8);
         let some_white = (0..361).any(|i| self.vertices[i] == Color::White as u8);
@@ -1070,7 +1120,7 @@ impl Board {
 
     /// Returns the score for each player `(black, white)` of the
     /// current board state according to the Tromp-Taylor rules.
-    /// 
+    ///
     /// This method does not take any komi into account, you will
     /// need to add it yourself.
     pub fn get_score(&self) -> (usize, usize) {
@@ -1168,7 +1218,9 @@ impl PartialEq for Board {
             .zip(other.zobrist_history.iter())
             .all(|(a, b)| a == b);
 
-        history && self.vertices.iter().zip(other.vertices.iter()).all(|(a, b)| a == b)
+        history && self.vertices.iter()
+            .zip(other.vertices.iter())
+            .all(|(a, b)| a == b)
     }
 }
 
@@ -1375,12 +1427,12 @@ mod tests {
     fn ladder_escape() {
         // test a standard ladder pattern with a stone on the diagonal
         let mut board = Board::new();
-        board.place(Color::White, 3, 3);
-        board.place(Color::White, 15, 15);
-        board.place(Color::Black, 2, 3);
-        board.place(Color::Black, 3, 2);
-        board.place(Color::Black, 4, 2);
-        board.place(Color::Black, 3, 4);
+        board.place(Color::White,  3,  3);
+        board.place(Color::White, 15, 15);  // ladder breaking
+        board.place(Color::Black,  2,  3);
+        board.place(Color::Black,  3,  2);
+        board.place(Color::Black,  4,  2);
+        board.place(Color::Black,  3,  4);
 
         for x in 0..19 {
             for y in 0..19 {
@@ -1393,5 +1445,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn not_ladder() {
+        let moves = [
+            (Color::Black, 15,  3), (Color::White,  3, 15), (Color::Black, 16, 15), (Color::White,  3,  2),
+            (Color::Black, 14, 16), (Color::White,  2,  4), (Color::Black,  3,  5), (Color::White,  3,  4),
+            (Color::Black,  4,  5), (Color::White,  4,  4), (Color::Black,  5,  5), (Color::White,  1,  6),
+            (Color::Black, 12,  2), (Color::White, 16,  9), (Color::Black, 16,  7), (Color::White, 16, 12),
+            (Color::Black,  6,  3), (Color::White, 14,  9), (Color::Black, 15, 10), (Color::White, 15,  9),
+            (Color::Black, 14,  7), (Color::White, 16,  2), (Color::Black, 16,  3), (Color::White, 15,  2),
+            (Color::Black, 14,  2), (Color::White, 14,  1), (Color::Black, 13,  1), (Color::White, 14,  3),
+            (Color::Black, 13,  2), (Color::White, 17,  3), (Color::Black, 17,  4), (Color::White, 17,  1),
+            (Color::Black, 18,  3), (Color::White, 17,  2), (Color::Black, 14,  4), (Color::White, 15,  1),
+            (Color::Black, 17, 11), (Color::White, 17, 12), (Color::Black, 17, 10), (Color::White, 15, 11),
+            (Color::Black, 17,  9), (Color::White, 14, 10), (Color::Black, 12,  8), (Color::White,  5, 16),
+            (Color::Black, 12, 10), (Color::White, 14, 14), (Color::Black, 12, 15), (Color::White, 12, 14),
+            (Color::Black, 11, 14), (Color::White, 12, 13), (Color::Black, 11, 15), (Color::White, 15, 16),
+            (Color::Black, 15, 15), (Color::White, 13, 16), (Color::Black, 13, 15), (Color::White, 14, 15),
+            (Color::Black, 14, 17), (Color::White, 15, 17), (Color::Black, 13, 17), (Color::White, 17, 16),
+            (Color::Black, 13, 14), (Color::White, 15, 14), (Color::Black, 13, 13), (Color::White, 14, 12),
+            (Color::Black,  5,  2), (Color::White, 11,  9), (Color::Black, 11,  8), (Color::White,  8,  8),
+            (Color::Black,  8,  6), (Color::White,  4,  1), (Color::Black,  1, 14), (Color::White,  1, 15),
+            (Color::Black,  2, 15), (Color::White,  2, 14), (Color::Black,  2, 16), (Color::White,  1, 16),
+            (Color::Black,  3, 14), (Color::White,  2, 13), (Color::Black,  3, 16), (Color::White,  4, 15),
+            (Color::Black,  1, 13), (Color::White,  1, 17), (Color::Black,  2, 12), (Color::White,  3, 13),
+            (Color::Black,  4, 12), (Color::White,  3, 12), (Color::Black,  3, 11)
+        ];
+
+        let mut board = Board::new();
+
+        for &(color, x, y) in moves.into_iter() {
+            board.place(color, x, y);
+        }
+
+        assert_eq!(board.is_ladder_escape(Color::White, 251), true);
     }
 }

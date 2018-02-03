@@ -107,6 +107,15 @@ lazy_static! {
     pub static ref TEMPERATURE: f32 = get_env("TEMPERATURE")
         .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 0.3 } else { 0.6 });
 
+    /// The _First Play Urgency_ reduction. Setting this is `1.0` effectively
+    /// disables FPU.
+    pub static ref FPU_REDUCE: f32 = get_env("FPU_REDUCE").unwrap_or(1.0);
+
+    /// The number of virtual losses to add during async probes into the monte
+    /// carlo search tree. A higher value avoids multiple probes exploring the
+    /// same search tree.
+    pub static ref VLOSS_CNT: i32 = get_env("VLOSS_CNT").unwrap_or(1);
+
     /// The UCT exploration rate.
     pub static ref UCT_EXP: f32 = get_env("UCT_EXP")
         .unwrap_or(1.283165);

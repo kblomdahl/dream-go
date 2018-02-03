@@ -704,7 +704,7 @@ impl Builder {
 
         g.tensors.insert("00_input/output:0".to_string(), Tensor::default()
             .set_data_type(data_type, format)
-            .set_shape(vec! [0, 32, 19, 19])
+            .set_shape(vec! [0, 36, 19, 19])
             .set_scale(1.0)
             .clone()
         );
@@ -904,7 +904,7 @@ pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard
     #[cfg(feature = "trace-cuda")]
     eprintln!("00_input/output:0\n= {:?}", Tensor::default()
         .set_data_type(cudnn::DataType::Int8, cudnn::TensorFormat::NHWC)
-        .set_shape(vec! [batch_size as i32, 32, 19, 19])
+        .set_shape(vec! [batch_size as i32, 36, 19, 19])
         .set_scale(1.0)
         .fmt_ptr(input)
     );
@@ -912,14 +912,14 @@ pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard
     O::convolution(
         graph,
         "00_input/output:0".to_string(), **input,
-        128, 32, 3, 3,
+        128, 36, 3, 3,
         "01_upsample/weights:0".to_string(),
         "01_upsample/offset:0".to_string(),
         "01_upsample/output:0".to_string(), *residual_1,
         *workspace_1, workspace_size
     );
 
-    for i in 2..21 {
+    for i in 2..11 {
         let input_name = if i == 2 {
             "01_upsample/output:0".to_string()
         } else {
@@ -953,28 +953,28 @@ pub fn policy<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> Slo
 
     O::convolution(
         graph,
-        "20_residual/output_2:0".to_string(), **residual_1,
+        "10_residual/output_2:0".to_string(), **residual_1,
         2, 128, 1, 1,
-        "21p_policy/downsample:0".to_string(),
-        "21p_policy/offset:0".to_string(),
-        "21p_policy/output_1:0".to_string(), *policy_out,
+        "11p_policy/downsample:0".to_string(),
+        "11p_policy/offset:0".to_string(),
+        "11p_policy/output_1:0".to_string(), *policy_out,
         *workspace_1, workspace_size
     );
 
     O::linear(
         graph,
-        "21p_policy/output_1:0".to_string(), *policy_out,
+        "11p_policy/output_1:0".to_string(), *policy_out,
         362, 722,
-        "21p_policy/weights:0".to_string(),
-        "21p_policy/bias:0".to_string(),
-        "21p_policy/output_2:0".to_string(), *policy_1,
+        "11p_policy/weights:0".to_string(),
+        "11p_policy/bias:0".to_string(),
+        "11p_policy/output_2:0".to_string(), *policy_1,
         *workspace_1, workspace_size
     );
 
     O::softmax(
         graph,
-        "21p_policy/output_2:0".to_string(), *policy_1,
-        "21p_policy/output_3:0".to_string(), *policy_out
+        "11p_policy/output_2:0".to_string(), *policy_1,
+        "11p_policy/output_3:0".to_string(), *policy_out
     );
 
     policy_out
@@ -990,44 +990,44 @@ pub fn value<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> Slot
 
     O::convolution(
         graph,
-        "20_residual/output_2:0".to_string(), **residual_1,
+        "10_residual/output_2:0".to_string(), **residual_1,
         1, 128, 1, 1,
-        "21v_value/downsample:0".to_string(),
-        "21v_value/offset:0".to_string(),
-        "21v_value/output_1:0".to_string(), *value_1,
+        "11v_value/downsample:0".to_string(),
+        "11v_value/offset:0".to_string(),
+        "11v_value/output_1:0".to_string(), *value_1,
         *workspace_2, workspace_size
     );
 
     O::linear(
         graph,
-        "21v_value/output_1:0".to_string(), *value_1,
+        "11v_value/output_1:0".to_string(), *value_1,
         256, 361,
-        "21v_value/weights_1:0".to_string(),
-        "21v_value/bias_1:0".to_string(),
-        "21v_value/output_2:0".to_string(), *value_out,
+        "11v_value/weights_1:0".to_string(),
+        "11v_value/bias_1:0".to_string(),
+        "11v_value/output_2:0".to_string(), *value_out,
         *workspace_2, workspace_size
     );
 
     O::relu(
         graph,
-        "21v_value/output_2:0".to_string(), *value_out,
-        "21v_value/output_3:0".to_string(), *value_out
+        "11v_value/output_2:0".to_string(), *value_out,
+        "11v_value/output_3:0".to_string(), *value_out
     );
 
     O::linear(
         graph,
-        "21v_value/output_3:0".to_string(), *value_out,
+        "11v_value/output_3:0".to_string(), *value_out,
         1, 256,
-        "21v_value/weights_2:0".to_string(),
-        "21v_value/bias_2:0".to_string(),
-        "21v_value/output_4:0".to_string(), *value_1,
+        "11v_value/weights_2:0".to_string(),
+        "11v_value/bias_2:0".to_string(),
+        "11v_value/output_4:0".to_string(), *value_1,
         *workspace_2, workspace_size
     );
 
     O::tanh(
         graph,
-        "21v_value/output_4:0".to_string(), *value_1,
-        "21v_value/output_5:0".to_string(), *value_out
+        "11v_value/output_4:0".to_string(), *value_1,
+        "11v_value/output_5:0".to_string(), *value_out
     );
 
     value_out

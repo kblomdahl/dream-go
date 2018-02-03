@@ -46,7 +46,7 @@ fn bench_batch_size_aux<T>(
 {
     let mut workspace = network.get_workspace(batch_size);
     let features = (0..batch_size).map(|_| {
-        let mut input = vec! [T::from(0.0); 11552];
+        let mut input = vec! [T::from(0.0); 12996];
 
         for b in input.iter_mut() {
             *b = T::from(if thread_rng().next_f32() < 0.2 { 1.0 } else { 0.0 });

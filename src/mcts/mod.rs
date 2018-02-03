@@ -313,9 +313,9 @@ fn predict_aux<E>(
         starting_tree
     } else {
         let server = server.clone();
-        let (_, mut policy) = forward(&server, starting_point, starting_color);
+        let (value, mut policy) = forward(&server, starting_point, starting_color);
 
-        tree::Node::new(starting_color, policy)
+        tree::Node::new(starting_color, value, policy)
     };
 
     // add some dirichlet noise to the root node of the search tree in order to increase

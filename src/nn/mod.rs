@@ -139,13 +139,13 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
 
-        let input = workspace.get_input(Some(4 * batch_size * 11552));
+        let input = workspace.get_input(Some(4 * batch_size * 12996));
 
         for (i, ref feature) in features.iter().enumerate() {
-            assert_eq!(feature.len(), 11552);
+            assert_eq!(feature.len(), 12996);
             assert_eq!(1, ::std::mem::size_of::<c_void>());
 
-            let element_size = ::std::mem::size_of::<T>() * 11552;
+            let element_size = ::std::mem::size_of::<T>() * 12996;
 
             check!(cuda::cudaMemcpyAsync(
                 input.offset((i * element_size) as isize),
