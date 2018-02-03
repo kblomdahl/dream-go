@@ -139,13 +139,6 @@ fn ladder_2() {
     assert!(x != 5 || y != 14, "Broken ladder at (5, 14) -- ({}, {})", x, y);
 }
 
-/// Test that the engine does not try to play out a ladder that does
-/// not work.
-#[test]
-fn ladder_3() {
-    // pass
-}
-
 /// Test that the engine correctly detects that a large black dragon is
 /// dead.
 #[test]
