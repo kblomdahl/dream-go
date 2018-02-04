@@ -4,7 +4,7 @@ Dream Go is an independent implementation of the algorithms and concepts present
 
 * Human games are used to bootstrap the network weights.
 * Additional (synthetic) features inspired by [AlphaGo](https://storage.googleapis.com/deepmind-media/alphago/AlphaGoNaturePaper.pdf) and [DeepForest](https://arxiv.org/pdf/1511.06410.pdf) are used during training and inference.
-* [Rapid Action Value Estimation (RAVE)](http://www.machinelearning.org/proceedings/icml2007/papers/387.pdf) is used during tree search as suggested by [Thinking Fast and Slow with Deep Learning and Tree Search](https://arxiv.org/pdf/1705.08439.pdf).
+* A self learning procedure inspired by [Thinking Fast and Slow with Deep Learning and Tree Search](https://arxiv.org/pdf/1705.08439.pdf) is used.
 
 ## Dependencies
 

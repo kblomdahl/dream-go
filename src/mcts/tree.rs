@@ -36,150 +36,11 @@ pub trait Value {
     fn get_ref<E: Value>(node: &Node<E>, dst: &mut [f32]);
 }
 
-/// An implementation of the _Rapid Action Value Estimation_ heuristic
-/// with a minimum MSE schedule as suggested by Sylvain Gelly and
-/// David Silver [1].
-/// 
-/// [1] http://www.cs.utexas.edu/~pstone/Courses/394Rspring13/resources/mcrave.pdf
-#[derive(Clone)]
-#[allow(dead_code)]
-pub struct RAVE;
-
-impl Value for RAVE {
-    #[inline]
-    unsafe fn update<E: Value>(trace: &NodeTrace<E>, color: Color, value: f32) {
-        PUCT::update::<E>(trace, color, value);
-
-        for (i, &(node, node_color, index)) in trace.iter().enumerate() {
-            let value_ = if color == (*node).color { value } else { 1.0 - value };
-
-            for &(other, other_color, _) in trace.iter().take(i) {
-                if node_color == other_color {
-                    let _guard = (*other).lock.lock();
-
-                    (*other).amaf_count[index] += 1;
-                    (*other).amaf[index] += (value_ - (*other).amaf[index]) / ((*other).amaf_count[index] as f32);
-                }
-            }
-        }
-    }
-
-    /// Reference implementation of the RAVE value function.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `node` -
-    /// * `dst` - output array for the UCT value
-    /// 
-    #[inline]
-    fn get_ref<E: Value>(node: &Node<E>, dst: &mut [f32]) {
-        let sqrt_n = ((1 + node.total_count) as f32).sqrt();
-        let b_sqr = *config::RAVE_BIAS * *config::RAVE_BIAS;
-        let uct_exp = *config::UCT_EXP;
-
-        for i in 0..362 {
-            let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
-            let value = if node.count[i] == 0 && node.amaf_count[i] == 0 {
-                node.value[i]
-            } else {
-                // minimum MSE schedule
-                let count = node.count[i] as f32;
-                let amaf_count = node.amaf_count[i] as f32;
-                let beta = amaf_count / (count + amaf_count + 4.0f32*count*amaf_count*b_sqr);
-
-                debug_assert!(0.0 <= beta && beta <= 1.0);
-
-                (1.0f32 - beta) * node.value[i] + beta * node.amaf[i]
-            };
-
-            dst[i] = value + node.prior[i] * uct_exp * exp_bonus
-        }
-    }
-
-    #[inline]
-    fn get<E: Value>(node: &Node<E>, dst: &mut [f32]) {
-        if cfg!(target_arch = "x86_64") {
-            let sqrt_n = ((1 + node.total_count) as f32).sqrt();
-            let b_sqr = *config::RAVE_BIAS * *config::RAVE_BIAS;
-
-            unsafe {
-                const ONE: f32 = 1.0f32;
-
-                asm!(r#"
-                    vxorps ymm11, ymm11, ymm11        # ymm11 = 0
-                    vbroadcastss ymm12, [rax]         # ymm12 = sqrt (total_count + 1)
-                    vbroadcastss ymm13, [rbx]         # ymm13 = 4 * b_sqr
-                    vbroadcastss ymm14, [rcx]         # ymm14 = exploration_rate
-                    vbroadcastss ymm15, [rdx]         # ymm15 = 1.0
-                    mov rcx, 46                       # loop counter
-                    xor rax, rax                      # rax = 0
-
-                    1:
-                    vmovups ymm0, [ r8+4*rax]         # ymm0 = count[rax]
-                    vmovups ymm1, [ r9+4*rax]         # ymm1 = value[rax]
-                    vmovups ymm2, [r10+4*rax]         # ymm2 = amaf_count[rax]
-                    vmovups ymm3, [r11+4*rax]         # ymm3 = amaf[rax]
-                    vmovups ymm4, [r12+4*rax]         # ymm4 = prior[rax]
-
-                    vcvtdq2ps ymm5, ymm0              # ymm5  = ymm0 as f32
-                    vaddps ymm6, ymm5, ymm15          # ymm6 += ymm5 + 1
-                    vdivps ymm6, ymm12, ymm6          # ymm6  = sqrt_n / ymm6  (=exp_bonus)
-
-                    vcvtdq2ps ymm7, ymm2              # ymm7  = ymm2 as f32
-                    vmulps ymm8, ymm13, ymm5          # ymm8  = (4 * b_sqr) * count
-                    vmulps ymm8, ymm8, ymm7           # ymm8 *= amaf_count
-                    vaddps ymm8, ymm8, ymm7           # ymm8 += amaf_count
-                    vaddps ymm8, ymm8, ymm5           # ymm8 += count
-                    vrcpps ymm8, ymm8                 # ymm8  = 1 / ymm8
-                    vmulps ymm8, ymm7, ymm8           # ymm8 *= amaf_count  (=beta)
-                    vsubps ymm9, ymm15, ymm8          # ymm9  = 1.0 - ymm8
-                    vmulps ymm9, ymm9, ymm1           # ymm9 *= value
-                    vmulps ymm3, ymm8, ymm3           # ymm3 *= ymm8
-                    vaddps ymm3, ymm3, ymm9           # ymm3 += ymm9
-
-                    vpcmpeqd ymm7, ymm0, ymm11        # ymm7  = (ymm0 == 0)
-                    vpcmpeqd ymm8, ymm2, ymm11        # ymm8  = (ymm2 == 0)
-                    vandps ymm8, ymm8, ymm7           # ymm8  = ymm7 && ymm8
-                    vblendvps ymm1, ymm3, ymm1, ymm8  # ymm1  = if ymm8 { ymm1 } else { ymm3 }
-
-                    vmulps ymm4, ymm4, ymm14          # ymm4 *= ymm14
-                    vmulps ymm4, ymm4, ymm6           # ymm4 *= ymm6
-                    vaddps ymm4, ymm4, ymm1           # ymm4 += ymm1
-
-                    vmovups [r13+4*rax], ymm4         # dst[rax] = ymm4
-
-                    add rax, 8                        # rax += 8
-                    dec ecx                           # rcx -= 1
-                    jnz 1b                            # repeat until rcx = 0
-                    "#
-                    : // no register outputs, but clobber memory
-                    : "{r8}"(node.count.as_ptr()),
-                      "{r9}"(node.value.as_ptr()),
-                      "{r10}"(node.amaf_count.as_ptr()),
-                      "{r11}"(node.amaf.as_ptr()),
-                      "{r12}"(node.prior.as_ptr()),
-                      "{r13}"(dst.as_ptr()),
-                      "{rax}"(&sqrt_n),
-                      "{rbx}"(&(4.0f32 * b_sqr)),
-                      "{rcx}"(&*config::UCT_EXP),
-                      "{rdx}"(&ONE)
-                    : "memory", "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", "ymm5", "ymm6",
-                      "ymm7", "ymm8", "ymm9", "ymm11", "ymm12", "ymm13", "ymm14", "ymm15"
-                    : "intel", "volatile"
-                );
-            }
-        } else {
-            RAVE::get_ref::<E>(node, dst);
-        }
-    }
-}
-
 /// An implementation of the _Polynomial UCT_ as suggested in the AlphaGo Zero
 /// paper [1].
 /// 
 /// [1] https://www.nature.com/articles/nature24270
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct PUCT;
 
 impl Value for PUCT {
@@ -194,7 +55,8 @@ impl Value for PUCT {
 
             (*node).total_count -= *config::VLOSS_CNT - 1;
             (*node).count[index] -= *config::VLOSS_CNT - 1;
-            (*node).value[index] += (value_ - (*node).value[index]) / ((*node).count[index] as f32);
+            (*node).total_value[index] += value_;
+            (*node).value[index] = (*node).total_value[index] / ((*node).count[index] as f32);
         }
     }
 
@@ -373,14 +235,11 @@ pub struct Node<E: Value> {
     /// The prior value of each edge as indicated by the policy.
     pub prior: [f32; 368],
 
+    /// The total sum of all values for the sub-tree of each edge.
+    total_value: [f32; 368],
+
     /// The average value for the sub-tree of each edge.
     value: [f32; 368],
-
-    /// The average value for the all moves as first heuristic of each edge.
-    amaf: [f32; 368],
-
-    /// The total number of all moves as first updates each edge has received.
-    amaf_count: [i32; 368],
 
     /// Whether some thread is currently busy (or is done) expanding the given
     /// child. This is used to avoid the same child being expanded multiple
@@ -428,9 +287,8 @@ impl<E: Value> Node<E> {
             total_count: 0,
             count: [0; 368],
             prior: prior_padding,
+            total_value: [0.0; 368],
             value: [max(0.0, value - *config::FPU_REDUCE); 368],
-            amaf: [0.0f32; 368],
-            amaf_count: [0; 368],
             expanding: [false; 362],
             children: [ptr::null_mut(); 362]
         }
@@ -492,13 +350,11 @@ impl<E: Value> Node<E> {
                 if self.color == Color::Black { "B" } else { "W" },
                 if i == 361 { "tt".to_string() } else { S::to_sgf(X[i] as usize, Y[i] as usize) },
             )?;
-            write!(fmt, "C[prior {:.4} value {:.4} (visits {} / total {}) amaf {:.4} (visits {}) uct {:.4}]",
+            write!(fmt, "C[prior {:.4} value {:.4} (visits {} / total {}) uct {:.4}]",
                 self.prior[i],
                 self.value[i],
                 self.count[i],
                 self.total_count,
-                self.amaf[i],
-                self.amaf_count[i],
                 uct[i]
             )?;
 
@@ -631,6 +487,7 @@ impl<E: Value> Node<E> {
         if let Some(max_i) = max_i {
             self.total_count += *config::VLOSS_CNT;
             self.count[max_i] += *config::VLOSS_CNT;
+            self.value[max_i] = self.total_value[max_i] / (self.count[max_i] as f32);
             self.expanding[max_i] = true;
         }
 
@@ -842,7 +699,6 @@ pub struct ToPretty<'a, E: Value + 'a> {
 
 impl<'a, E: Value + 'a> fmt::Display for ToPretty<'a, E> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        let is_additional = (0..362).any(|i| self.root.amaf_count[i] > 0);
         let mut children = (0..362).collect::<Vec<usize>>();
         children.sort_by_key(|&i| -self.root.count[i]);
 
@@ -874,20 +730,11 @@ impl<'a, E: Value + 'a> fmt::Display for ToPretty<'a, E> {
                     .map(|i| PrettyVertex { inner: i })
                     .map(|v| format!("{}", v))
                     .collect::<Vec<String>>().join(" ");
-            let additional = if is_additional {
-                format!("(A: {:5.2}%: {:7}) ",
-                    100.0 * self.root.amaf[i],
-                    self.root.amaf_count[i],
-                )
-            } else {
-                String::new()
-            };
 
-            write!(fmt, "{: >5} -> {:7} (W: {:5.2}%) {}(N: {:5.2}%) PV: {} {}\n",
+            write!(fmt, "{: >5} -> {:7} (W: {:5.2}%) (N: {:5.2}%) PV: {} {}\n",
                 pretty_vertex,
                 child.total_count,
                 100.0 * self.root.value[i],
-                additional,
                 100.0 * self.root.prior[i],
                 pretty_vertex,
                 likely_path
@@ -1006,10 +853,5 @@ mod tests {
     #[bench]
     fn puct(b: &mut Bencher) {
         unsafe { bench_test::<PUCT>(b); }
-    }
-
-    #[bench]
-    fn rave(b: &mut Bencher) {
-        //unsafe { bench_test::<RAVE>(b); }
     }
 }

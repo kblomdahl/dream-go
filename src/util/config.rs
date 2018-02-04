@@ -109,7 +109,7 @@ lazy_static! {
 
     /// The _First Play Urgency_ reduction. Setting this is `1.0` effectively
     /// disables FPU.
-    pub static ref FPU_REDUCE: f32 = get_env("FPU_REDUCE").unwrap_or(1.0);
+    pub static ref FPU_REDUCE: f32 = get_env("FPU_REDUCE").unwrap_or(0.22);
 
     /// The number of virtual losses to add during async probes into the monte
     /// carlo search tree. A higher value avoids multiple probes exploring the
@@ -118,7 +118,7 @@ lazy_static! {
 
     /// The UCT exploration rate.
     pub static ref UCT_EXP: f32 = get_env("UCT_EXP")
-        .unwrap_or(1.283165);
+        .unwrap_or(0.88);
 
     /// The rave bias.
     pub static ref RAVE_BIAS: f32 = get_env("RAVE_BIAS")

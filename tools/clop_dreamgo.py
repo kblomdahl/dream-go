@@ -70,6 +70,8 @@ def play_game(engine_1, engine_2, environ):
             elif line.startswith('?' + str(line_nr)):
                 break
 
+        return None
+
     try:
         write_both(b'komi 7.5\n')
         write_both(b'boardsize 19\n')
@@ -131,7 +133,7 @@ def play_game(engine_1, engine_2, environ):
 
         re = write_command(gnugo, 2000, 'final_score\n')
         if not re:
-            return  # cannot determine winner
+            return None  # cannot determine winner
 
         re = re.split(' ')[1].upper()  # trim away the id prefix
 
@@ -163,8 +165,8 @@ def main():
 
     #
     print(play_game(
-        "/home/kalle/Documents/Code/dream-go/dist/dg-128",  # engine to be optimized
-        "leela_gtp_opencl --noponder -g -p 800",  # opponent
+        "/home/kalle/Documents/Code/dream-go/target/release/dream_go",  # engine to be optimized
+        "leela_gtp_opencl --noponder -g -p 1600",  # opponent
         parameters
     ))
 
