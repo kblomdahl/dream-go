@@ -79,7 +79,7 @@ impl fmt::Display for GameResult {
 /// * `board` - the board position
 /// * `color` - the current player
 /// 
-fn forward(server: &PredictGuard, board: &Board, color: Color) -> (f32, Box<[f32]>) {
+fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Box<[f32]>)> {
     lazy_static! {
         static ref SYMM: Vec<symmetry::Transform> = vec! [
             symmetry::Transform::Identity,
@@ -101,13 +101,19 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> (f32, Box<[f32
 
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
-        let (value, original_policy) = server.send(PredictRequest::Ask({
+        let response = server.send(PredictRequest::Ask({
             match *TYPE {
                 Type::Int8 => Array::from(board.get_features::<q8, HWC>(color, t)),
                 Type::Half => Array::from(board.get_features::<f16, CHW>(color, t)),
                 Type::Single => Array::from(board.get_features::<f32, CHW>(color, t))
             }
-        })).unwrap();
+        }));
+
+        let (value, original_policy) = if let Some(x) = response {
+            x.unwrap()
+        } else {
+            return None;
+        };
 
         // copy the policy and replace any invalid moves in the suggested policy
         // with -Inf, while keeping the pass move (361) untouched so that there
@@ -173,7 +179,7 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> (f32, Box<[f32
             }
         }
 
-        (0.5 * value.get() + 0.5, policy.into_boxed_slice())
+        Some((0.5 * value.get() + 0.5, policy.into_boxed_slice()))
     })
 }
 
@@ -187,22 +193,25 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> (f32, Box<[f32
 /// * `board` -
 /// * `color` -
 /// 
-fn score(server: &PredictGuard, board: &Board, color: Color) -> (f32, Box<[f32]>) {
-    let (_, policy) = forward(server, board, color);
-    let value = {
-        let (black, white) = board.get_guess_score();
-        let black = black as f32;
-        let white = white as f32 + 7.5;
-        let winner = if black > white { Color::Black } else { Color::White };
+fn score(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Box<[f32]>)> {
+    if let Some((_, policy)) = forward(server, board, color) {
+        let value = {
+            let (black, white) = board.get_guess_score();
+            let black = black as f32;
+            let white = white as f32 + 7.5;
+            let winner = if black > white { Color::Black } else { Color::White };
 
-        if winner == color {
-            1.0
-        } else {
-            0.0
-        }
-    };
+            if winner == color {
+                1.0
+            } else {
+                0.0
+            }
+        };
 
-    (value, policy)
+        Some((value, policy))
+    } else {
+        None
+    }
 }
 
 /// The shared variables between the master and each worker thread in the `predict` function.
@@ -253,15 +262,19 @@ fn predict_worker<E>(context: ThreadContext<E>, server: PredictGuard)
             if let Some(trace) = trace {
                 let &(_, color, _) = trace.last().unwrap();
                 let next_color = color.opposite();
-                let (value, policy) = if is_game_over(&trace) {
+                let result = if is_game_over(&trace) {
                     score(&server, &board, next_color)
                 } else {
                     forward(&server, &board, next_color)
                 };
 
-                unsafe {
-                    tree::insert::<E>(&trace, next_color, value, policy);
-                    break
+                if let Some((value, policy)) = result {
+                    unsafe {
+                        tree::insert::<E>(&trace, next_color, value, policy);
+                        break
+                    }
+                } else {
+                    return  // unrecognized error
                 }
             } else {
                 server.send(PredictRequest::Wait);
@@ -303,7 +316,13 @@ fn predict_aux<E>(
             // that it was a pass so that we do not lose count of the number
             // of consecutive passes).
             let server = server.clone();
-            let (_, policy) = forward(&server, starting_point, starting_color);
+            let (_, policy) = forward(&server, starting_point, starting_color)
+                .unwrap_or_else(|| {
+                    let mut policy = vec! [0.0; 362];
+                    policy[361] = 1.0;
+
+                    (0.5, policy.into_boxed_slice())
+                });
 
             for i in 0..362 {
                 starting_tree.prior[i] = policy[i];
@@ -313,7 +332,13 @@ fn predict_aux<E>(
         starting_tree
     } else {
         let server = server.clone();
-        let (value, mut policy) = forward(&server, starting_point, starting_color);
+        let (value, mut policy) = forward(&server, starting_point, starting_color)
+            .unwrap_or_else(|| {
+                let mut policy = vec! [0.0; 362];
+                policy[361] = 1.0;
+
+                (0.5, policy.into_boxed_slice())
+            });
 
         tree::Node::new(starting_color, value, policy)
     };
@@ -523,7 +548,12 @@ fn policy_play_one(server: &PredictGuard) -> GameResult {
     let mut count = 0;
 
     while pass_count < 2 && count < 722 && !board.is_scoreable() {
-        let (_, policy) = forward(&server, &board, current);
+        let result = forward(&server, &board, current);
+        if result.is_none() {
+            break
+        }
+
+        let (_, policy) = result.unwrap();
 
         // pick a move stochastically according to its prior value, we
         // do not need to compute the sum because `forward` always
@@ -587,14 +617,18 @@ pub fn policy_play(network: Network, num_games: usize) -> (Receiver<GameResult>,
     let (sender, receiver) = channel();
 
     // spawn the worker threads that generate the self-play games
-    let num_games = ::std::cmp::min(*config::NUM_GAMES, num_games);
+    let num_workers = ::std::cmp::min(*config::NUM_GAMES, num_games);
+    let remaining = Arc::new(AtomicUsize::new(num_games));
 
-    for _ in 0..num_games {
+    for _ in 0..num_workers {
+        let remaining = remaining.clone();
         let sender = sender.clone();
         let server = server.lock().clone_static();
 
         thread::spawn(move || {
-            loop {
+            while remaining.load(Ordering::Acquire) > 0 {
+                remaining.fetch_sub(1, Ordering::AcqRel);
+
                 let result = policy_play_one(&server);
 
                 if sender.send(result).is_err() {

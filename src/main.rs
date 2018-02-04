@@ -72,7 +72,7 @@ fn main() {
         Procedure::SelfPlay(n) => {
             let (receiver, _server) = mcts::self_play(load_network(), n);
 
-            for result in receiver.iter().take(n) {
+            for result in receiver.iter() {
                 println!("{}", result);
             }
         },
@@ -80,7 +80,7 @@ fn main() {
         Procedure::PolicyPlay(n) => {
             let (receiver, _server) = mcts::policy_play(load_network(), n);
 
-            for result in receiver.iter().take(n) {
+            for result in receiver.iter() {
                 println!("{}", result);
             }
         },

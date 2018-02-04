@@ -165,8 +165,8 @@ pub fn get_or_insert<F>(
     board: &Board,
     color: Color,
     supplier: F
-) -> (f32, Box<[f32]>)
-    where F: FnOnce() -> (f32, Box<[f32]>)
+) -> Option<(f32, Box<[f32]>)>
+    where F: FnOnce() -> Option<(f32, Box<[f32]>)>
 {
     lazy_static! {
         static ref TABLE: [Mutex<LruCache<Board, (f32, Box<[f32]>)>>; 3] = {
@@ -191,14 +191,17 @@ pub fn get_or_insert<F>(
     };
 
     if let Some((value, policy)) = existing {
-        (value, policy)
+        Some((value, policy))
     } else {
-        let (value, policy) = supplier();
-        let mut table = table.lock().unwrap();
+        if let Some((value, policy)) = supplier() {
+            let mut table = table.lock().unwrap();
 
-        table.insert(board, (value, policy.clone()));
+            table.insert(board, (value, policy.clone()));
 
-        (value, policy)
+            Some((value, policy))
+        } else {
+            None
+        }
     }
 }
 

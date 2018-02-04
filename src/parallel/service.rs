@@ -223,19 +223,23 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
     /// 
     /// * `req` -
     /// 
-    pub fn send(&self, req: I::Request) -> I::Response {
+    pub fn send(&self, req: I::Request) -> Option<I::Response> {
         let (tx, rx) = one_channel();
 
         if let Ok(mut inner_lock) = self.inner.0.lock() {
-            inner_lock.queue.push((req, tx));
-            self.inner.1.notify_one();
+            if inner_lock.is_running {
+                inner_lock.queue.push((req, tx));
+                self.inner.1.notify_one();
 
-            // get ride of the lock so that one of the service workers
-            // can acquire it
-            drop(inner_lock);
+                // get ride of the lock so that one of the service workers
+                // can acquire it
+                drop(inner_lock);
 
-            // wait for a response
-            OneReceiver::recv(rx).unwrap()
+                // wait for a response
+                OneReceiver::recv(rx)
+            } else {
+                None
+            }
         } else {
             panic!("Service is unavailable");
         }
