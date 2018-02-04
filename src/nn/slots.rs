@@ -34,7 +34,7 @@ impl Drop for SlotsInner {
         for slot in self.named.values() {
             for ptr in &slot.ptr {
                 unsafe {
-                    check!(cuda::cudaFree(*ptr));
+                    cuda::cudaFree(*ptr);
                 }
             }
         }
@@ -131,7 +131,7 @@ impl Drop for SlotGuard {
                 if self.size_in_bytes < slot.size_in_bytes {
                     // if the slot has grown in our absence then throw our pointer away
                     unsafe {
-                        check!(cuda::cudaFree(*self.ptr));
+                        cuda::cudaFree(*self.ptr);
                     }
                 } else if self.size_in_bytes == slot.size_in_bytes {
                     // return this pointer to the pool

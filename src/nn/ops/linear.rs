@@ -43,7 +43,7 @@ pub struct Linear {
 impl Drop for Linear {
     fn drop(&mut self) {
         unsafe {
-            check!(cudnn::cudnnDestroyTensorDescriptor(self.input_nchw));
+            cudnn::cudnnDestroyTensorDescriptor(self.input_nchw);
         }
     }
 }

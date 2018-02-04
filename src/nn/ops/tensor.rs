@@ -84,9 +84,9 @@ impl Drop for Tensor {
             if (*self.ref_count).fetch_sub(1, Ordering::SeqCst) == 1 {
                 Box::from_raw(self.ref_count);
 
-                check!(cuda::cudaFree(self.ptr));
-                check!(cudnn::cudnnDestroyFilterDescriptor(self.filter_desc));
-                check!(cudnn::cudnnDestroyTensorDescriptor(self.tensor_desc));
+                cuda::cudaFree(self.ptr);
+                cudnn::cudnnDestroyFilterDescriptor(self.filter_desc);
+                cudnn::cudnnDestroyTensorDescriptor(self.tensor_desc);
             }
         }
     }

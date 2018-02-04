@@ -879,16 +879,16 @@ impl Workspace {
 impl Drop for Workspace {
     fn drop(&mut self) {
         unsafe {
-            check!(cuda::cudaEventDestroy(self.tower_event));
-            check!(cuda::cudaStreamDestroy(self.value_stream));
-            check!(cuda::cudaStreamDestroy(self.policy_stream));
-            check!(cuda::cudaStreamDestroy(self.tower_stream));
+            cuda::cudaEventDestroy(self.tower_event);
+            cuda::cudaStreamDestroy(self.value_stream);
+            cuda::cudaStreamDestroy(self.policy_stream);
+            cuda::cudaStreamDestroy(self.tower_stream);
 
-            check!(cudnn::cudnnDestroyActivationDescriptor(self.tanh));
-            check!(cudnn::cudnnDestroyActivationDescriptor(self.relu));
+            cudnn::cudnnDestroyActivationDescriptor(self.tanh);
+            cudnn::cudnnDestroyActivationDescriptor(self.relu);
 
-            check!(cudnn::cudnnDestroy(self.handle_dnn));
-            check!(cublas::cublasDestroy_v2(self.handle_blas));
+            cudnn::cudnnDestroy(self.handle_dnn);
+            cublas::cublasDestroy_v2(self.handle_blas);
         }
     }
 }

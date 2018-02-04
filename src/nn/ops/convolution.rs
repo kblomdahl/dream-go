@@ -260,7 +260,7 @@ impl Convolution {
 impl Drop for Convolution {
     fn drop(&mut self) {
         unsafe {
-            check!(cudnn::cudnnDestroyConvolutionDescriptor(self.descr));
+            cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
         }
     }
 }
