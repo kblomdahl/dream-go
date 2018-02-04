@@ -16,7 +16,7 @@ extern crate dream_go;
 extern crate ordered_float;
 
 use dream_go::go::symmetry::Transform;
-use dream_go::go::{Board, Color, CHW, HWC};
+use dream_go::go::{Board, Color, CHW, HWC, Features};
 use dream_go::nn;
 use dream_go::util::types::*;
 use ordered_float::OrderedFloat;

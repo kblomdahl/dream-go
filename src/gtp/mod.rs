@@ -17,7 +17,7 @@ use regex::Regex;
 use std::io::BufRead;
 
 use go::sgf::*;
-use go::{Board, Color};
+use go::{Board, Color, Score};
 use mcts::predict::{self, PredictService};
 use mcts;
 use nn::Network;

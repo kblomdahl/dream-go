@@ -137,6 +137,8 @@ fn get_features_16(b: &mut Bencher) {
     }
 
     b.iter(move || {
+        use dream_go::go::Features;
+
         let black = test::black_box(Color::Black);
 
         board.get_features::<f16, HWC>(black, Transform::Transpose)
@@ -192,6 +194,8 @@ fn get_features_32(b: &mut Bencher) {
     }
 
     b.iter(move || {
+        use dream_go::go::Features;
+
         let white = test::black_box(Color::White);
 
         board.get_features::<f32, CHW>(white, Transform::FlipLR)

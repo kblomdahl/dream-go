@@ -99,7 +99,7 @@ lazy_static! {
     /// tree. A larger value will result in a more random search, which is
     /// typically desirable during training but not during tournament play.
     pub static ref DIRICHLET_NOISE: f32 = get_env("DIRICHLET_NOISE")
-        .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 0.1 } else { 0.25 });
+        .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 0.05 } else { 0.25 });
 
     /// The temperature of the move selection during the eight first moves. A
     /// larger values make the engine more likely to pick a sub-optimal

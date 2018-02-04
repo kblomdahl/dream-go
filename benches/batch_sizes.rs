@@ -37,12 +37,13 @@ thread_local! {
 /// * `network` -
 /// * `batch_size` - the batch size to benchmark
 /// 
-fn bench_batch_size_aux<T>(
+fn bench_batch_size_aux<T, R>(
     b: &mut Bencher,
     network: &Network,
     batch_size: usize
 )
-    where T: From<f32> + Clone
+    where T: From<f32> + Clone,
+          R: From<f32> + Clone
 {
     let mut workspace = network.get_workspace(batch_size);
     let features = (0..batch_size).map(|_| {
@@ -56,7 +57,7 @@ fn bench_batch_size_aux<T>(
     }).collect();
 
     b.iter(move || {
-        forward::<T, T>(&mut workspace, &features)
+        forward::<T, R>(&mut workspace, &features)
     });
 }
 
@@ -71,10 +72,10 @@ fn bench_batch_size_aux<T>(
 fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
     NETWORK.with(|network| {
         // allocate a feature vector filled with random ones and zeros
-        if network.is_half() {
-            bench_batch_size_aux::<f16>(b, network, batch_size);
-        } else {
-            bench_batch_size_aux::<f32>(b, network, batch_size);
+        match *TYPE {
+            Type::Single => bench_batch_size_aux::<f32, f32>(b, network, batch_size),
+            Type::Half => bench_batch_size_aux::<f16, f16>(b, network, batch_size),
+            Type::Int8 => bench_batch_size_aux::<q8, f32>(b, network, batch_size),
         }
     });
 }

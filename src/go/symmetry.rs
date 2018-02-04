@@ -178,7 +178,7 @@ pub fn is_symmetric(board: &Board, transform: Transform) -> bool {
     (0..361).all(|i| {
         let j = lookup[i] as usize;
 
-        board.vertices[i] == board.vertices[j]
+        board.inner.vertices[i] == board.inner.vertices[j]
     })
 }
 

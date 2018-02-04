@@ -198,7 +198,7 @@ impl Value for PUCT {
         }
     }
 
-    /// Reference implementation of the RAVE value function.
+    /// Reference implementation of the PUCT value function.
     /// 
     /// # Arguments
     /// 
@@ -1010,6 +1010,6 @@ mod tests {
 
     #[bench]
     fn rave(b: &mut Bencher) {
-        unsafe { bench_test::<RAVE>(b); }
+        //unsafe { bench_test::<RAVE>(b); }
     }
 }

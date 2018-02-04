@@ -28,7 +28,7 @@ use std::thread::{self, JoinHandle};
 use time;
 
 use go::sgf::*;
-use go::{symmetry, Board, Color, CHW, HWC};
+use go::{symmetry, Board, Color, CHW, HWC, Features, Score};
 use mcts::predict::{PredictService, PredictGuard, PredictRequest};
 use nn::{Network, Type, TYPE};
 use util::array::*;
