@@ -51,7 +51,7 @@ impl fmt::Display for GameResult {
                 write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[7.5]RE[{}+Resign]{})", iso8601, winner, sgf)
             },
             GameResult::Ended(ref sgf, ref board) => {
-                let (black, white) = board.get_score();
+                let (black, white) = board.get_guess_score();
                 let black = black as f32;
                 let white = white as f32 + 7.5;
                 let winner = {
@@ -190,7 +190,7 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> (f32, Box<[f32
 fn score(server: &PredictGuard, board: &Board, color: Color) -> (f32, Box<[f32]>) {
     let (_, policy) = forward(server, board, color);
     let value = {
-        let (black, white) = board.get_score();
+        let (black, white) = board.get_guess_score();
         let black = black as f32;
         let white = white as f32 + 7.5;
         let winner = if black > white { Color::Black } else { Color::White };
