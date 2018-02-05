@@ -1,0 +1,12 @@
+Package: dreamgo
+Version: 0.5.0-0
+Section: games
+Priority: optional
+Architecture: amd64
+Depends: libc6 (>= 2.15), dpkg (>= 1.15.4)
+Maintainer: Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+Homepage: https://github.com/chicoryn/dream-go
+Vcs-Git: https://github.com/Chicoryn/dream-go.git
+Description: Dream Go is a free program that plays the game of Go.
+ It provides a text-only user interface, have a look at the cgoban or qgo package if you want to play on a graphical board.
+

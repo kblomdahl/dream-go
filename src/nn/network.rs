@@ -80,6 +80,7 @@ impl Network {
                 // hard-coded paths to make development and deployment easier
                 "dream_go.json".to_string(),
                 "models/dream_go.json".to_string(),
+                "/usr/share/dreamgo/dream_go.json".to_string(),
                 "/usr/share/dream_go/dream_go.json".to_string()
             ];
         }
