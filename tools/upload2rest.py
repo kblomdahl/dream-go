@@ -58,10 +58,7 @@ def time_from_sgf(sgf):
         except ValueError:
             pass
 
-        if not d:
-            return datetime.utcnow()
-        else:
-            return d.astimezone(timezone.utc)
+        return d.astimezone(timezone.utc) if d else datetime.utcnow()
 
     return datetime.utcnow()
 

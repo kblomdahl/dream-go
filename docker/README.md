@@ -6,7 +6,7 @@ create the closed loop, but some steps are more compute intense than others, so
 I would recommend you try the following deployments:
 
 - 1x Database (my trivial database implementation does not scale horizontally)
-- 1000x GPU Worker (as many as you can)
+- 10x GPU Worker (as many as you can)
 - 1x Tensorflow trainer
 
 ## `dream_go/db:0.5.0` - Database image
@@ -32,11 +32,11 @@ To run this image you need to setup the following:
 - Set the `DB` environment variable to point towards the location of the
   database. For example `upload.dg.io:8080`.
 
-## `dream_go/trainer:0.5.0` - Tensorflow trainer (Not yet done)
+## `dream_go/trainer:0.5.0` - Tensorflow trainer
 
 This image is responsible for retrieving features from the database and
-generating new weights from them. It will retrieve the 2,000,000 most recent
-features from the database and train a neural network for 50 epochs before
+generating new weights from them. It will retrieve the 500,000 most recent
+features from the database and train a neural network for 51500 steps before
 uploading the new weights to the database.
 
 You can monitor the training process by connecting to port 6006 of this image,
@@ -46,3 +46,8 @@ To run this image you need to setup the following:
 
 - Set the `DB` environment variable to point towards the location of the
   database. For example `upload.dg.io:8080`.
+
+Optionally:
+
+- Mount some persistent storage to `/app/logs` if you want to save any generated
+  logs from the training.

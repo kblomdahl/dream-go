@@ -125,7 +125,7 @@ with sqlite3.connect(sys.argv[1]) as conn:
                 self.send_response(400)  # bad request
                 self.end_headers()
 
-                return
+                return None
 
             c = conn.cursor()
             c.execute('''
@@ -142,7 +142,7 @@ with sqlite3.connect(sys.argv[1]) as conn:
                 self.send_response(400)  # bad request
                 self.end_headers()
 
-                return
+                return None
 
             c = conn.cursor()
             c.execute('''
