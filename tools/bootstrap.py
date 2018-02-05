@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+# Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -415,19 +415,92 @@ def cosine_decay_restarts(learning_rate, global_step, first_decay_steps, alpha=0
 def make_dataset_iterator(files, batch_size=1):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
-    dataset = tf.data.FixedLengthRecordDataset(files, 26718)
-    dataset = dataset.map(lambda x: tf.cast(tf.decode_raw(x, tf.half), tf.float32))
-    dataset = dataset.map(lambda x: tf.split(x, (12996, 1, 362)))
-    dataset = dataset.shuffle(196704)
-    dataset = dataset.batch(batch_size if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
+    def _decode_and_split(x):
+        return tf.split(tf.decode_raw(x, tf.uint8), (1625, 362))
 
-    return dataset.make_initializable_iterator()
+    def _parse_py(features_and_value, policy):
+        features_and_value = np.unpackbits(features_and_value)
+        features = features_and_value[0:12996].astype('f')
+        value = np.asarray(1.0 if features_and_value[12996] > 0 else -1.0, 'f')
+        policy = policy.astype('f') / 255.0
+
+        return features, value, policy
+
+    def _parse(features_and_value, policy):
+        return tuple(
+            tf.py_func(_parse_py, [features_and_value, policy], [tf.float32, tf.float32, tf.float32])
+        )
+
+    def _augment(features, value, policy):
+        def _identity(image):
+            return image
+
+        def _flip_lr(image):
+            return tf.reverse_v2(image, [2])
+
+        def _flip_ud(image):
+            return tf.reverse_v2(image, [1])
+
+        def _transpose_main(image):
+            return tf.transpose(image, [0, 2, 1])
+
+        def _transpose_anti(image):
+            return tf.reverse_v2(tf.transpose(image, [0, 2, 1]), [1, 2])
+
+        def _rot90(image):
+            return tf.transpose(tf.reverse_v2(image, [2]), [0, 2, 1])
+
+        def _rot180(image):
+            return tf.reverse_v2(image, [1, 2])
+
+        def _rot270(image):
+            return tf.reverse_v2(tf.transpose(image, [0, 2, 1]), [2])
+
+        def _apply_random(random, x):
+            return tf.case([
+                    (tf.equal(random, 0), lambda: _identity(x)),
+                    (tf.equal(random, 1), lambda: _flip_lr(x)),
+                    (tf.equal(random, 2), lambda: _flip_ud(x)),
+                    (tf.equal(random, 3), lambda: _transpose_main(x)),
+                    (tf.equal(random, 4), lambda: _transpose_anti(x)),
+                    (tf.equal(random, 5), lambda: _rot90(x)),
+                    (tf.equal(random, 6), lambda: _rot180(x)),
+                    (tf.equal(random, 7), lambda: _rot270(x)),
+                ],
+                None,
+                exclusive=True
+            )
+
+        random = tf.random_uniform((), 0, 8, tf.int32)
+        features = tf.reshape(features, [36, 19, 19])
+        features = _apply_random(random, features)
+
+        # transforming the policy is _harder_ since it has that extra pass
+        # element at the end, so we temporarily remove it while the tensor gets
+        # a random transformation applied
+        policy, policy_pass = tf.split(policy, (361, 1))
+        policy = tf.reshape(_apply_random(random, tf.reshape(policy, [1, 19, 19])), [361])
+        policy = tf.concat([policy, policy_pass], 0)
+
+        value = tf.reshape(value, [1])
+
+        return features, value, policy
+
+    with tf.device('cpu:0'):
+        dataset = tf.data.FixedLengthRecordDataset(files, 1987)
+        dataset = dataset.map(_decode_and_split)
+        dataset = dataset.map(_parse)
+        dataset = dataset.map(_augment)
+        dataset = dataset.shuffle(196704)
+        dataset = dataset.batch(batch_size if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
+
+        return dataset.make_initializable_iterator()
 
 
 def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False, only_value=False):
     """ Main function """
 
-    iterator = make_dataset_iterator(files, batch_size=512)
+    iterator = make_dataset_iterator(files, batch_size=896)  # 768
 
     with tf.device('cpu:0'):
         global_step = tf.train.create_global_step()
@@ -474,7 +547,6 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
             with tf.device(None):
                 features, value, policy = iterator.get_next()
 
-            features = tf.reshape(features, (-1, 36, 19, 19))
             value_hat, policy_hat = tower(
                 features,
                 train_tower=train_all or only_tower,
@@ -486,10 +558,10 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
                 if i == 0:
                     # log the result of the forward pass only from the first GPU since
                     # we are not interested in exact results anyway
-                    #tf.summary.histogram('value', value)
-                    #tf.summary.histogram('value_hat', value_hat)
-                    #tf.summary.histogram('policy', policy)
-                    #tf.summary.histogram('policy_hat', policy_hat)
+                    tf.summary.histogram('value', value)
+                    tf.summary.histogram('value_hat', value_hat)
+                    tf.summary.histogram('policy', policy)
+                    tf.summary.histogram('policy_hat', policy_hat)
                     pass
 
                 policy_argmax = tf.argmax(policy, axis=1)
@@ -583,26 +655,34 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
 
         sess.graph.finalize()
 
-        while True:
-            sess.run(iterator.initializer)
+        def train_forever():
+            global_step_hat = 0  # handle early Ctrl-C
+            max_steps = 51500 if 'MAX_STEPS' not in os.environ else int(os.environ['MAX_STEPS'])
 
-            try:
-                while True:
-                    global_step_hat, _, _ = sess.run([global_step, optimizer_op, update_op])
+            while True:
+                sess.run(iterator.initializer)
 
-                    if global_step_hat % 25 == 0:
-                        summary_hat = sess.run(summary_op)
-                        summary_writer.add_summary(summary_hat, global_step_hat)
-                    if global_step_hat > 0 and global_step_hat % 1000 == 0:
-                        saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
-            except KeyboardInterrupt:
-                break  # quit
-            except:
-                epoch = sess.run(epoch_op)
-                if epoch >= 14:
-                    break
+                try:
+                    while True:
+                        global_step_hat, _, _ = sess.run([global_step, optimizer_op, update_op])
 
-                saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
+                        if global_step_hat % 25 == 0:
+                            summary_hat = sess.run(summary_op)
+                            summary_writer.add_summary(summary_hat, global_step_hat)
+                        if global_step_hat > 0 and global_step_hat % 1000 == 0:
+                            saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
+                        if global_step_hat >= max_steps:
+                            return global_step_hat
+                except KeyboardInterrupt:
+                    break  # quit
+                except:
+                    sess.run(epoch_op)
+
+                    saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
+
+            return global_step_hat
+
+        global_step_hat = train_forever()
 
         # save the model
         saver.save(sess, 'models/dream-go', global_step=global_step_hat, write_meta_graph=False)
@@ -616,7 +696,6 @@ def verify(args):
     # get the answer from the data-set and the prediction
     tower = Tower()
     features, value, policy = iterator.get_next()
-    features = tf.reshape(features, (-1, 36, 19, 19))
     value_hat, policy_hat = tower(features, is_training=False)
 
     policy_argmax = tf.argmax(policy, axis=1)
@@ -691,7 +770,6 @@ def calibrate(sess, tower, files):
     # setup the iterator over all features in the gives files
     iterator = make_dataset_iterator(files, batch_size=32)
     features, _value, _policy = iterator.get_next()
-    features = tf.reshape(features, (-1, 36, 19, 19))
     _value_hat, _policy_hat = tower(features, is_training=False)
 
     # pre-allocate the dictionaries containing all activations

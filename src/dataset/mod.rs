@@ -61,7 +61,7 @@ impl<'a> Dataset<'a> {
                     // receivers
                     if let Some(entries) = Entry::all(&line, &server) {
                         let num_samples = ::std::cmp::max(1, match *config::NUM_SAMPLES {
-                            config::SamplingStrategy::Percent(pct) => (pct * (entries.original_len() as f32)) as usize,
+                            config::SamplingStrategy::Percent(pct) => (pct * (entries.len() as f32)) as usize,
                             config::SamplingStrategy::Fixed(f) => f
                         });
 

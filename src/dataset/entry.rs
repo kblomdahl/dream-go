@@ -19,8 +19,7 @@ use util::b85;
 use util::config;
 use util::types::*;
 
-use std::mem::transmute;
-use std::io::{self, Cursor};
+use std::io;
 
 use rand::{self, Rng};
 use regex::Regex;
@@ -54,18 +53,9 @@ impl PolicyEntry {
 }
 
 pub struct EntryIterator<'a> {
-    entries: Vec<((Board, Color, PolicyEntry), &'static symmetry::Transform)>,
-    original_size: usize,
+    entries: Vec<(Board, Color, PolicyEntry)>,
     winner: Color,
     server: &'a Option<PredictGuard<'a>>
-}
-
-impl<'a> EntryIterator<'a> {
-    /// Returns the number of moves that was played in this game
-    /// pre-augmentation.
-    pub fn original_len(&self) -> usize {
-        self.original_size
-    }
 }
 
 impl<'a> Iterator for EntryIterator<'a> {
@@ -73,8 +63,8 @@ impl<'a> Iterator for EntryIterator<'a> {
 
     fn next(&mut self) -> Option<Entry> {
         self.entries.pop()
-            .map(|((ref board, current_color, ref policy), &s)| {
-                let features = board.get_features::<f16, CHW>(current_color, s);
+            .map(|(ref board, current_color, ref policy)| {
+                let features = board.get_features::<f16, CHW>(current_color, symmetry::Transform::Identity);
                 let mut policy: Box<[f16]> = if self.server.is_some() && policy.is_partial() {
                     // if this is a partial policy then perform a search at this
                     // board position and output the result as the policy
@@ -96,7 +86,7 @@ impl<'a> Iterator for EntryIterator<'a> {
                 };
 
                 // transform the policy using the same symmetry as the features
-                symmetry::apply(&mut policy, s);
+                symmetry::apply(&mut policy, symmetry::Transform::Identity);
 
                 Entry::new(
                     &features,
@@ -115,12 +105,9 @@ impl<'a> ExactSizeIterator for EntryIterator<'a> {
 
 #[derive(Clone)]
 pub struct Entry {
-    /// The current board state.
-    pub features: Box<[u8]>,
-
-    /// The winner for the given features, `1.0` if the current player won
-    /// and `-1.0` if the current player lost.
-    pub winner: Box<[u8]>,
+    /// The current board state, where the last bit represents whether the
+    /// current player won the game.
+    pub features_and_winner: Box<[u8]>,
 
     /// The probabilities that each move should be played for the given
     /// features, encoded in HW format with one additional element at the
@@ -217,39 +204,14 @@ impl Entry {
             }
         }
 
-        // pluck the specified amount of samples from the game, where each sample
-        // is randomly transformed according to one of the symmetries in an attempt
-        // to use more samples per file without overfitting
-        lazy_static! {
-            static ref SYMMETRIES: Vec<symmetry::Transform> = vec! [
-                symmetry::Transform::Identity,
-                symmetry::Transform::FlipLR,
-                symmetry::Transform::FlipUD,
-                symmetry::Transform::Transpose,
-                symmetry::Transform::TransposeAnti,
-                symmetry::Transform::Rot90,
-                symmetry::Transform::Rot180,
-                symmetry::Transform::Rot270
-            ];
-        }
-
         // instead of plucking `num_samples` examples randomly, just shuffle the
         // list and take the first elements from the array. This avoids picking the
         // same element twice, and automatically handles the case where there are less
         // entries than `num_samples`.
-        let original_size = entries.len();
-        let mut entries: Vec<((Board, Color, PolicyEntry), &symmetry::Transform)> = entries.into_iter()
-            .flat_map(|e| ::std::iter::repeat(e).zip(SYMMETRIES.iter()))
-            .filter(|&((ref board, _, _), &s)| {
-                s == symmetry::Transform::Identity || !symmetry::is_symmetric(board, s)
-            })
-            .collect();
-
         rand::thread_rng().shuffle(&mut entries);
 
         Some(EntryIterator {
             entries: entries,
-            original_size: original_size,
             winner: winner,
             server: server
         })
@@ -265,10 +227,12 @@ impl Entry {
     /// * `policy` - the policy vector
     ///
     fn new(features: &[f16], winner: f16, policy: &[f16]) -> Entry {
+        let mut features = features.to_vec();
+        features.push(winner);
+
         Entry {
-            features: f16_to_bytes(features),
-            winner: f16_to_bytes(&[winner]),
-            policy: f16_to_bytes(policy)
+            features_and_winner: f16_to_bits(&features),
+            policy: f16_to_u8(policy)
         }
     }
 
@@ -281,28 +245,37 @@ impl Entry {
     pub fn write_into<T>(&self, f: &mut T) -> io::Result<()>
         where T: io::Write
     {
-        f.write_all(&self.features)?;
-        f.write_all(&self.winner)?;
+        f.write_all(&self.features_and_winner)?;
         f.write_all(&self.policy)
     }
 }
 
-/// Write the given 32-bit floating point number to the given formatter
-/// in the platform endianess.
+/// Returns an array of bits, where the i:th bit is set if `array[i] = 1.0`.
 ///
 /// # Arguments
 ///
-/// * `f` - the formatter to write to
-/// * `value` - the value to write
+/// * `array` - the array of 16-bit floating point numbers to serialize
 ///
-fn write_f16<T>(f: &mut T, value: f16) -> io::Result<()>
-    where T: io::Write
-{
-    unsafe {
-        let bytes = transmute::<_, [u8; 2]>(value.to_bits());
+fn f16_to_bits(array: &[f16]) -> Box<[u8]> {
+    let cursor_len = if array.len() % 8 == 0 {
+        array.len() / 8
+    } else {
+        1 + array.len() / 8
+    };
 
-        f.write_all(&bytes)
+    let mut cursor = vec! [0; cursor_len];
+    let c_1: f16 = f16::from(1.0);
+
+    for (i, &value) in array.into_iter().enumerate() {
+        if value == c_1 {
+            let j = i / 8;
+            let k = i % 8;
+
+            cursor[j] |= 1 << (7 - k);
+        }
     }
+
+    cursor.into_boxed_slice()
 }
 
 /// Returns an array of floating point serialized (and compressed) as
@@ -312,12 +285,39 @@ fn write_f16<T>(f: &mut T, value: f16) -> io::Result<()>
 ///
 /// * `array` - the array of 16-bit floating point numbers to serialize
 ///
-fn f16_to_bytes(array: &[f16]) -> Box<[u8]> {
-    let mut cursor = Cursor::new(vec! [0u8; 2 * array.len()]);
+fn f16_to_u8(array: &[f16]) -> Box<[u8]> {
+    let mut cursor = vec! [0; array.len()];
 
-    for &value in array {
-        write_f16(&mut cursor, value).unwrap();
+    for (i, &value) in array.into_iter().enumerate() {
+        cursor[i] = (255.0 * f32::from(value)).round() as u8;
     }
 
-    cursor.into_inner().into_boxed_slice()
+    cursor.into_boxed_slice()
+}
+
+#[cfg(test)]
+mod tests {
+    use dataset::entry::*;
+
+    #[test]
+    fn to_bits() {
+        let floats = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0f32].into_iter()
+            .map(|&v| f16::from(v))
+            .collect::<Vec<f16>>();
+        let bits = f16_to_bits(&floats);
+
+        assert_eq!(bits.len(), 1);
+        assert_eq!(bits[0], 133);
+    }
+
+    #[test]
+    fn to_u8() {
+        let floats = [1.0, 1.0, 0.5, 0.2, 0.7, 0.3, 0.1, 0.8f32].into_iter()
+            .map(|&v| f16::from(v))
+            .collect::<Vec<f16>>();
+        let quan = f16_to_u8(&floats);
+
+        assert_eq!(quan.len(), 8);
+        assert_eq!(quan.to_vec(), vec! [255, 255, 128, 51, 179, 77, 25, 204]);
+    }
 }
