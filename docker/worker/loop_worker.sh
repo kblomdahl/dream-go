@@ -12,5 +12,5 @@ while true; do
     echo "[$NOW] tick (gen $GEN)"
 
     ./dream_go $OPTS --policy-play $N | tee self_play.sgf | ./upload2rest.py --sgf "http://$DB/policy_play?generation=$GEN"
-    ./dream_go $OPTS --ex-it --extract self_play.sgf | ./upload2rest.py --bytes 26718 "http://$DB/features?generation=$GEN"
+    ./dream_go $OPTS --ex-it --extract self_play.sgf | ./upload2rest.py --bytes 1987 "http://$DB/features?generation=$GEN"
 done
