@@ -8,7 +8,7 @@ while true; do
     echo "[$now] tick"
 
     # fetch the latest batch of features from the database
-    curl -s http://$DB/features/recent/500000 > features.bin
+    curl -s http://$DB/features/recent/1000000 > features.bin
 
     rm -f models/*
     python3 bootstrap.py features.bin
