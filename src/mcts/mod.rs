@@ -373,19 +373,18 @@ fn predict_aux<E>(
 
     assert_eq!(Arc::strong_count(&context.root), 1);
 
-    unsafe {
-        let root = UnsafeCell::into_inner(Arc::try_unwrap(context.root).ok().expect(""));
-        let (value, index) = root.best(if starting_point.count() < 8 {
-            *config::TEMPERATURE
-        } else {
-            0.0
-        });
+    // choose the best move according to the search tree
+    let root = UnsafeCell::into_inner(Arc::try_unwrap(context.root).ok().expect(""));
+    let (value, index) = root.best(if starting_point.count() < 8 {
+        *config::TEMPERATURE
+    } else {
+        0.0
+    });
 
-        #[cfg(feature = "trace-mcts")]
-        eprintln!("{}", tree::to_sgf::<CGoban, E>(&root, starting_point, true));
+    #[cfg(feature = "trace-mcts")]
+    eprintln!("{}", tree::to_sgf::<CGoban, E>(&root, starting_point, true));
 
-        (value, index, root)
-    }
+    (value, index, root)
 }
 
 /// Predicts the _best_ next move according to the given neural network when applied
