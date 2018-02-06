@@ -554,17 +554,22 @@ fn policy_play_one(server: &PredictGuard) -> GameResult {
 
         let (_, policy) = result.unwrap();
 
-        // pick a move stochastically according to its prior value, we
-        // do not need to compute the sum because `forward` always
-        // returns a normalized vector of prior values
+        // pick a move stochastically according to its prior value with the
+        // specified temperature (to priority strongly suggested moves, and
+        // avoid picking _noise_ moves).
         let index = {
-            let threshold = thread_rng().next_f32();
+            let temperature = (*config::TEMPERATURE + 1e-3).recip();
+            let policy_sum = policy.iter()
+                .filter(|p| p.is_finite())
+                .map(|p| p.powf(temperature))
+                .sum::<f32>();
+            let threshold = policy_sum * thread_rng().next_f32();
             let mut so_far = 0.0f32;
             let mut best = None;
 
             for i in 0..362 {
                 if policy[i].is_finite() {
-                    so_far += policy[i];
+                    so_far += policy[i].powf(temperature);
 
                     if so_far >= threshold {
                         best = Some(i);
