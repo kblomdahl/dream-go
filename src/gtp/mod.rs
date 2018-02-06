@@ -28,10 +28,10 @@ use gtp::vertex::*;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&'static str; 17] = [
+const KNOWN_COMMANDS: [&'static str; 18] = [
     "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove", "undo",
-    "quit", "final_score", "heatmap", "sabaki-genmovelog"
+    "quit", "final_score", "heatmap", "heatmap-nn", "sabaki-genmovelog"
 ];
 
 #[derive(Debug, PartialEq)]
@@ -43,6 +43,7 @@ enum Command {
     BoardSize(usize),  // set the board size to NxN
     ClearBoard,  // clear the board
     Heatmap(Color),  // sabaki heatmap for the given color
+    HeatmapPrior(Color),  // sabaki heatmap (of the prior value) for the given color
     Komi(f32),  // set the komi
     Play(Color, Vertex),  // play a stone of the given color at the given vertex
     ListCommands,  // list all available commands
@@ -78,6 +79,7 @@ lazy_static! {
     static ref ID_PREFIX: Regex = Regex::new(r"^([0-9]+)(?: +(.*)$|$)").unwrap();
     static ref BOARD_SIZE: Regex = Regex::new(r"^boardsize +([0-9]+)").unwrap();
     static ref HEATMAP: Regex = Regex::new(r"^heatmap +([bw])").unwrap();
+    static ref HEATMAP_PRIOR: Regex = Regex::new(r"^heatmap-nn +([bw])").unwrap();
     static ref KOMI: Regex = Regex::new(r"^komi +([0-9\.]+)").unwrap();
     static ref PLAY: Regex = Regex::new(r"^play +([bBwW]) +([a-z][0-9]+|pass)").unwrap();
     static ref KNOWN_COMMAND: Regex = Regex::new(r"^known_command +([^ ]+)").unwrap();
@@ -127,6 +129,15 @@ impl Gtp {
 
             if let Ok(color) = color {
                 Some((id, Command::Heatmap(color)))
+            } else {
+                error!(id, "syntax error");
+                Some((None, Command::Pass))
+            }
+        } else if let Some(caps) = HEATMAP_PRIOR.captures(line) {
+            let color = caps[1].parse::<Color>();
+
+            if let Ok(color) = color {
+                Some((id, Command::HeatmapPrior(color)))
             } else {
                 error!(id, "syntax error");
                 Some((None, Command::Pass))
@@ -359,8 +370,9 @@ impl Gtp {
     /// 
     /// * `id` -
     /// * `color` -
+    /// * `prior` - whether to show the _prior_ as the heatmap
     /// 
-    fn heatmap(&mut self, id: Option<usize>, color: Color) {
+    fn heatmap(&mut self, id: Option<usize>, color: Color, prior: bool) {
         self.open_service();
 
         if let Some(ref service) = self.service {
@@ -376,7 +388,26 @@ impl Gtp {
             eprintln!("{}", mcts::tree::to_pretty(&tree));
 
             // output the heatmap in Sabaki format
-            let json = Gtp::to_heatmap(&tree.softmax());
+            let json = if prior {
+                let mut s = vec! [0.0f32; 362];
+                let mut s_total = 0.0f32;
+
+                for i in 0..362 {
+                    if tree.prior[i].is_finite() {
+                        s_total += tree.prior[i];
+                    }
+                }
+
+                for i in 0..362 {
+                    if tree.prior[i].is_finite() {
+                        s[i] = tree.prior[i] / s_total;
+                    }
+                }
+
+                Gtp::to_heatmap(&s)
+            } else {
+                Gtp::to_heatmap(&tree.softmax())
+            };
 
             success!(id, &format!("#sabaki{}", json));
         } else {
@@ -409,7 +440,10 @@ impl Gtp {
                 success!(id, "");
             },
             Command::Heatmap(color) => {
-                self.heatmap(id, color);
+                self.heatmap(id, color, false);
+            },
+            Command::HeatmapPrior(color) => {
+                self.heatmap(id, color, true);
             },
             Command::Play(color, vertex) => {
                 let next_board = {
