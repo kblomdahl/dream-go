@@ -21,6 +21,7 @@ use go::{Board, Color, Score};
 use mcts::predict::{self, PredictService};
 use mcts;
 use nn::Network;
+use util::config;
 
 mod vertex;
 
@@ -420,8 +421,16 @@ impl Gtp {
             Command::Quit => {}
             Command::Pass => {},
             Command::ProtocolVersion => { success!(id, "2"); },
-            Command::Name => { success!(id, env!("CARGO_PKG_NAME")); },
-            Command::Version => { success!(id, env!("CARGO_PKG_VERSION")); },
+            Command::Name => {
+                success!(id, config::get_env::<String>("DG_NAME")
+                    .unwrap_or(env!("CARGO_PKG_NAME").to_string())
+                );
+            },
+            Command::Version => {
+                success!(id, config::get_env::<String>("DG_VERSION")
+                    .unwrap_or(env!("CARGO_PKG_VERSION").to_string())
+                );
+            },
             Command::BoardSize(size) => {
                 if size != 19 {
                     error!(id, "unacceptable size");
