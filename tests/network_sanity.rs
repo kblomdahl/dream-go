@@ -139,6 +139,32 @@ fn ladder_2() {
     assert!(x != 5 || y != 14, "Broken ladder at (5, 14) -- ({}, {})", x, y);
 }
 
+#[test]
+fn ladder_3() {
+    let moves = [
+        (Color::Black, 15, 15), (Color::White,  3,  3), (Color::Black, 15,  3), (Color::White,  3, 15),
+        (Color::Black,  2, 16), (Color::White,  3, 16), (Color::Black,  2, 15), (Color::White,  2, 14),
+        (Color::Black,  1, 14), (Color::White,  1, 13), (Color::Black,  2, 13), (Color::White,  3, 14),
+        (Color::Black,  1, 12), (Color::White,  1, 15), (Color::Black,  0, 13), (Color::White,  1, 16),
+        (Color::Black, 13, 15), (Color::White, 16,  2), (Color::Black, 15,  2), (Color::White, 16,  3),
+        (Color::Black, 16,  4), (Color::White, 17,  4), (Color::Black, 17,  5), (Color::White, 16,  5),
+        (Color::Black, 15,  4), (Color::White, 17,  6), (Color::Black, 17,  3), (Color::White, 18,  5),
+        (Color::Black, 17,  2), (Color::White,  2,  5), (Color::Black, 16,  9), (Color::White,  5,  2),
+        (Color::Black, 16,  7), (Color::White, 15,  5), (Color::Black, 13,  7), (Color::White, 13,  5),
+        (Color::Black, 11,  7), (Color::White, 11,  5), (Color::Black, 11,  3), (Color::White, 13,  3),
+        (Color::Black,  9,  3), (Color::White,  9,  5), (Color::Black,  7,  2), (Color::White, 13,  1),
+        (Color::Black, 14,  1), (Color::White, 11,  1), (Color::Black, 14,  4), (Color::White, 15,  8),
+        (Color::Black, 15,  7), (Color::White, 16,  8), (Color::Black, 17,  8), (Color::White, 17,  7),
+        (Color::Black, 14,  8)
+    ];
+
+    // white should not (!) play `(Color::White, 15,  9)`
+    let (_value, policy) = predict(&moves, Color::White);
+    let (x, y) = policy_to_vertex(&policy);
+
+    assert!(x != 15 || y != 9, "Broken ladder at (15, 9) -- ({}, {})", x, y);
+}
+
 /// Test that the engine correctly detects that a large black dragon is
 /// dead.
 #[test]
