@@ -575,10 +575,15 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
                 labels=tf.stop_gradient(policy),
                 logits=policy_hat
             )))
-            value_losses.append(tf.reduce_mean(tf.squared_difference(value, value_hat)))
+            value_losses.append(tf.reduce_mean(tf.squared_difference(
+                tf.stop_gradient(value),
+                value_hat
+            )))
 
-    # gather the losses and variables from all of the tower into a single loss function
-    # that gets forwarded to the optimizer
+    # gather the losses and variables from all of the tower into a single loss
+    # function that gets forwarded to the optimizer. The coefficients normalize
+    # each component to the range [0.0, 1.0] based on te final value from some
+    # test runs.
     policy_loss = tf.reduce_mean(policy_losses)
     value_loss = tf.reduce_mean(value_losses)
     reg_loss = tf.reduce_sum([
@@ -587,7 +592,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
         if var not in tf.get_collection(tf.GraphKeys.BIASES)  # do not apply to bias terms
     ])
 
-    loss = policy_loss + 0.1 * value_loss + 4e-4 * reg_loss
+    loss = policy_loss + 0.1 * value_loss + 3e-4 * reg_loss
 
     tf.summary.scalar('loss/policy', policy_loss)
     tf.summary.scalar('loss/value', value_loss)
