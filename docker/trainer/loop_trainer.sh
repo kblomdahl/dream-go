@@ -13,7 +13,8 @@ while true; do
     rm -f models/*
     python3 bootstrap.py features.bin
 
-    # play some games and then upload them to the database
+    # calibrate the scaling factors using a different set of games, and upload
+    # the final weights to the database
     curl -s http://$DB/features/recent/20000 > calibrate.bin
 
     python3 bootstrap.py --dump calibrate.bin | ./upload2rest.py --bytes -1 http://$DB/weights
