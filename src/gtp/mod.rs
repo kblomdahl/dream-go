@@ -539,9 +539,11 @@ impl Gtp {
             },
             Command::FinalScore => {
                 let board = self.history.last().unwrap();
-                let (black, white) = board.get_guess_score();
+                let (black, white, rollout) = board.get_guess_score();
                 let black = black as f32;
                 let white = white as f32 + self.komi;
+
+                self.last_log = format!("({})", rollout);
 
                 if black == white {
                     success!(id, "0");

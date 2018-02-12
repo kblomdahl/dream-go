@@ -32,6 +32,9 @@ pub struct Board {
     /// The total number of moves that has been played on this board.
     pub(super) count: u16,
 
+    /// The color of the player who played the most recent move.
+    pub(super) last_played: Option<Color>,
+
     /// The zobrist hash of the current board state.
     pub(super) zobrist_hash: u64,
 
@@ -45,6 +48,7 @@ impl Board {
             inner: BoardFast::new(),
             history: CircularBuf::new(),
             count: 0,
+            last_played: None,
             zobrist_hash: 0,
             zobrist_history: SmallSet::new()
         }
@@ -95,18 +99,54 @@ impl Board {
     /// # Arguments
     ///
     /// * `color` - the color of the move
-    /// * `x` - the column of the move
-    /// * `y` - the row of the move
+    /// * `index` - the index of the move
     ///
-    pub fn is_valid(&self, color: Color, x: usize, y: usize) -> bool {
-        let index = 19 * y + x;
-
+    pub(super) fn _is_valid(&self, color: Color, index: usize) -> bool {
         self.inner.is_valid(color, index) && {
             let adjust = self.inner.place_if(color, index);
             let next_zobrist_hash = self.zobrist_hash ^ adjust;
 
             !self.zobrist_history.contains(next_zobrist_hash)
         }
+    }
+
+    /// Returns whether the given move is valid according to the
+    /// Tromp-Taylor rules.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the move
+    /// * `x` - the column of the move
+    /// * `y` - the row of the move
+    ///
+    pub fn is_valid(&self, color: Color, x: usize, y: usize) -> bool {
+        self._is_valid(color, 19 * y + x)
+    }
+
+    /// Place the given stone on the board without checking if it is legal, the
+    /// board is then updated according to the Tromp-Taylor rules with the
+    /// except that ones own color is not cleared.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the move
+    /// * `index` - The index of the move
+    ///
+    pub(super) fn _place(&mut self, color: Color, index: usize) {
+        // place the stone on the board regardless of whether it is legal
+        // or not.
+        self.zobrist_hash ^= self.inner.place(color, index);
+        self.last_played = Some(color);
+        self.count += 1;
+
+        // add the current board state to the history *after* we have updated it because:
+        //
+        // 1. that way we do not need a special case to retrieve the current board when
+        //    generating features.
+        // 2. the circular stack starts with all buffers as zero, so there is no need to
+        //    keep track of the initial board state.
+        self.history.push(&self.inner.vertices);
+        self.zobrist_history.push(self.zobrist_hash);
     }
 
     /// Place the given stone on the board without checking if it is legal, the
@@ -120,21 +160,7 @@ impl Board {
     /// * `y` - The row of the move
     ///
     pub fn place(&mut self, color: Color, x: usize, y: usize) {
-        let index = 19 * y + x;
-
-        // place the stone on the board regardless of whether it is legal
-        // or not.
-        self.zobrist_hash ^= self.inner.place(color, index);
-        self.count += 1;
-
-        // add the current board state to the history *after* we have updated it because:
-        //
-        // 1. that way we do not need a special case to retrieve the current board when
-        //    generating features.
-        // 2. the circular stack starts with all buffers as zero, so there is no need to
-        //    keep track of the initial board state.
-        self.history.push(&self.inner.vertices);
-        self.zobrist_history.push(self.zobrist_hash);
+        self._place(color, 19 * y + x)
     }
 }
 

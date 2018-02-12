@@ -15,14 +15,14 @@
 /// A LRA set that only keeps the eight most recently added values.
 #[derive(Clone)]
 pub struct SmallSet {
-    buf: [u64; 8],
+    buf: [u64; 16],
     count: usize
 }
 
 impl SmallSet {
     /// Returns an empty set.
     pub fn new() -> SmallSet {
-        SmallSet { buf: [0; 8], count: 0 }
+        SmallSet { buf: [0; 16], count: 0 }
     }
 
     /// Adds the given value to this set, removing the oldest value if
@@ -36,7 +36,7 @@ impl SmallSet {
         self.buf[self.count] = value;
         self.count += 1;
 
-        if self.count == 8 {
+        if self.count == 16 {
             self.count = 0;
         }
     }
@@ -48,7 +48,7 @@ impl SmallSet {
     /// * `other` - the value to look for
     /// 
     pub fn contains(&self, other: u64) -> bool {
-        (0..8).any(|x| self.buf[x] == other)
+        (0..16).any(|x| self.buf[x] == other)
     }
 
     /// Returns an iterator over all elements in this set.
@@ -70,7 +70,7 @@ impl<'a> Iterator for SmallIter<'a> {
     type Item = u64;
 
     fn next(&mut self) -> Option<u64> {
-        if self.position >= 8 {
+        if self.position >= 16 {
             None
         } else {
             let value = self.set.buf[self.position];

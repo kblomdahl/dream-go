@@ -16,7 +16,7 @@ extern crate dream_go;
 extern crate ordered_float;
 
 use dream_go::go::symmetry::Transform;
-use dream_go::go::{Board, Color, CHW, HWC, Features};
+use dream_go::go::{Board, Color, CHW, HWC, Features, Score};
 use dream_go::nn;
 use dream_go::util::types::*;
 use ordered_float::OrderedFloat;
@@ -25,7 +25,7 @@ thread_local! {
     static NETWORK: nn::Network = nn::Network::new().unwrap();
 }
 
-fn predict(moves: &[(Color, usize, usize)], next_color: Color) -> (f32, Box<[f32]>) {
+fn predict(moves: &[(Color, usize, usize)], next_color: Color) -> (Board, f32, Box<[f32]>) {
     // place each stone on a fresh board to re-produce the board state
     let mut board = Board::new();
 
@@ -44,7 +44,7 @@ fn predict(moves: &[(Color, usize, usize)], next_color: Color) -> (f32, Box<[f32
                 let features = board.get_features::<f32, CHW>(next_color, Transform::Identity);
                 let (value, policy) = nn::forward::<f32, f32>(&mut workspace, &vec! [features]);
 
-                (value[0], policy[0].clone())
+                (board, value[0], policy[0].clone())
             },
             nn::Type::Half => {
                 let features = board.get_features::<f16, CHW>(next_color, Transform::Identity);
@@ -53,13 +53,13 @@ fn predict(moves: &[(Color, usize, usize)], next_color: Color) -> (f32, Box<[f32
                     .map(|&p| f32::from(p))
                     .collect::<Vec<f32>>();
 
-                (f32::from(value[0]), policy.into_boxed_slice())
+                (board, f32::from(value[0]), policy.into_boxed_slice())
             },
             nn::Type::Int8 => {
                 let features = board.get_features::<q8, HWC>(next_color, Transform::Identity);
                 let (value, policy) = nn::forward::<q8, f32>(&mut workspace, &vec! [features]);
 
-                (value[0], policy[0].clone())
+                (board, value[0], policy[0].clone())
             }
         }
     })
@@ -114,7 +114,7 @@ fn ladder_1() {
     ];
 
     // white should not (!) play `(Color::White,  8,  6)`
-    let (_value, policy) = predict(&moves, Color::White);
+    let (_board, _value, policy) = predict(&moves, Color::White);
     let (x, y) = policy_to_vertex(&policy);
 
     assert!(x != 8 || y != 6, "Broken ladder at (8, 6) -- ({}, {})", x, y);
@@ -133,7 +133,7 @@ fn ladder_2() {
     ];
 
     // black should not (!) play `(Color::Black,  5, 14)`
-    let (_value, policy) = predict(&moves, Color::Black);
+    let (_board, _value, policy) = predict(&moves, Color::Black);
     let (x, y) = policy_to_vertex(&policy);
 
     assert!(x != 5 || y != 14, "Broken ladder at (5, 14) -- ({}, {})", x, y);
@@ -159,7 +159,7 @@ fn ladder_3() {
     ];
 
     // white should not (!) play `(Color::White, 15,  9)`
-    let (_value, policy) = predict(&moves, Color::White);
+    let (_board, _value, policy) = predict(&moves, Color::White);
     let (x, y) = policy_to_vertex(&policy);
 
     assert!(x != 15 || y != 9, "Broken ladder at (15, 9) -- ({}, {})", x, y);
@@ -240,8 +240,10 @@ fn dead_dragon_1() {
     ];
 
     // black should win by 38.5 points
-    let (value, _policy) = predict(&moves, Color::Black);
+    let (board, value, _policy) = predict(&moves, Color::Black);
+    let (black, white, _rollout) = board.get_guess_score();
 
+    assert!(black + 8 > white, "Black should win by 31 (without komi) -- black {}, white {}", black, white);
     assert!(value > 0.0, "Black should win by 38.5 -- {}", value);
 }
 
@@ -323,8 +325,10 @@ fn dead_dragon_2() {
     ];
 
     // black should win by 4.5 points
-    let (value, _policy) = predict(&moves, Color::Black);
+    let (board, value, _policy) = predict(&moves, Color::Black);
+    let (black, white, _rollout) = board.get_guess_score();
 
+    assert!(black + 8 > white , "Black should win by 4.5 -- black {}, white {}", black, white);
     assert!(value > 0.0, "Black should win by 4.5 -- {}", value);
 }
 
@@ -397,8 +401,10 @@ fn dead_dragon_3() {
     ];
 
     // white should win by 7.5 points
-    let (value, _policy) = predict(&moves, Color::White);
+    let (board, value, _policy) = predict(&moves, Color::White);
+    let (black, white, _rollout) = board.get_guess_score();
 
+    assert!(white + 8 > black, "White should win by 7.5 -- black {}, white {}", black, white);
     assert!(value > 0.0, "White should win by 7.5 -- {}", value);
 }
 
@@ -465,7 +471,9 @@ fn end_1() {
     ];
 
     // white should win by 48.5 points
-    let (value, _policy) = predict(&moves, Color::Black);
+    let (board, value, _policy) = predict(&moves, Color::Black);
+    let (black, white, _rollout) = board.get_guess_score();
 
+    assert!(white > black, "White should win by 41 (without komi) -- black {}, white {}", black, white);
     assert!(value < 0.0, "White should win by 48.5 -- {}", value);
 }

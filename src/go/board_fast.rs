@@ -108,6 +108,31 @@ impl Counter for Three {
     }
 }
 
+pub struct N {
+    liberties: Vec<usize>
+}
+
+impl Default for N {
+    fn default() -> N {
+        N { liberties: vec! [] }
+    }
+}
+
+impl Counter for N {
+    type Output = Vec<usize>;
+
+    fn get(&self) -> Self::Output { self.liberties.clone() }
+    fn add(&mut self, index: usize) -> bool {
+        if !self.liberties.contains(&index) {
+            self.liberties.push(index);
+
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// Macro for iterating over directions around a point.
 /// 
 /// ```
