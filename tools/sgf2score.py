@@ -16,14 +16,17 @@
 # pylint: disable=C0103, C0301
 
 """
-Reads a _big_ SGF file from standard input and writes to standard output a sub-set
-of the read SGF files that is perfectly balanced between black and white wins.
+Reads a _big_ SGF file from standard input and writes to standard output the
+same games after they have been scored by a referee.
 
-Usage: ./sgf2balance.py < kgs_big.sgf > kgs_big_bal.sgf
+Usage: ./sgf2score.py < kgs_big.sgf > kgs_score.sgf
 """
+import re
 from subprocess import Popen, PIPE, DEVNULL
 import sys
 import tempfile
+
+RE = re.compile(r'RE\[([^\]]+)\]')
 
 def score_game(sgf):
     """
@@ -37,7 +40,7 @@ def score_game(sgf):
 
         # start-up our judge (gnugo)
         gnugo = Popen(
-            'gnugo --score aftermath --chinese-rules -l "' + sgf_file.name + '"',
+            '/usr/games/gnugo --score aftermath --chinese-rules --positional-superko -l "' + sgf_file.name + '"',
             shell=True,
             stdin=DEVNULL,
             stdout=PIPE,
@@ -52,10 +55,11 @@ def score_game(sgf):
             elif 'Black wins by' in line:  # Black wins by 32.5 points
                 return 'B+' + line.split()[3]
 
-def main():
+def main(every):
     """ Main function """
 
     num_scored = 0
+    num_wrong = 0
 
     for line in sys.stdin:
         line = line.strip()
@@ -64,14 +68,26 @@ def main():
             winner = score_game(line)
 
             if winner:
-                print(line.replace('RE[?]', 'RE[' + winner + ']'))
+                print(re.sub(RE, 'RE[' + winner + ']', line))
                 num_scored += 1
             else:
                 print(line)
         else:
+            winner = RE.search(line)
+
+            if every and winner and 'R' not in winner.group(1).upper():
+                winner = score_game(line)
+
+                if winner[:4] not in line:
+                    num_wrong += 1
+                line = re.sub(RE, 'RE[' + winner + ']', line)
+
             print(line)
 
-    print('Arbitrated {} games without a winner'.format(num_scored), file=sys.stderr)
+    if num_scored > 0:
+        print('Arbitrated {} games without a winner'.format(num_scored), file=sys.stderr)
+    if num_wrong > 0:
+        print('Arbitrated {} games with the wrong winner'.format(num_wrong), file=sys.stderr)
 
 if __name__ == '__main__':
-    main()
+    main(every=any([arg for arg in sys.argv if arg == '--all']))
