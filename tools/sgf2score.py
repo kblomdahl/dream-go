@@ -78,7 +78,7 @@ def main(every):
             if every and winner and 'R' not in winner.group(1).upper():
                 winner = score_game(line)
 
-                if winner[:4] not in line:
+                if winner[:2] not in line:
                     num_wrong += 1
                 line = re.sub(RE, 'RE[' + winner + ']', line)
 
