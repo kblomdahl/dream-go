@@ -79,7 +79,7 @@ impl Value for PUCT {
         }
     }
 
-    #[inline]
+    #[inline(never)]
     fn get<E: Value>(node: &Node<E>, dst: &mut [f32]) {
         if cfg!(target_arch = "x86_64") {
             let sqrt_n = ((1 + node.total_count) as f32).sqrt();
@@ -93,7 +93,7 @@ impl Value for PUCT {
                     vbroadcastss ymm5, [r14]  # ymm5 = 1
                     mov rcx, 46               # loop counter
 
-                    1:
+                    loop_puct:
                     vmovups ymm0, [ r8]       # ymm0 = count[i]
                     vmovups ymm1, [ r9]       # ymm1 = value[i]
                     vmovups ymm2, [r10]       # ymm2 = prior[i]
@@ -112,7 +112,7 @@ impl Value for PUCT {
                     add r11, 32               # ...
 
                     dec ecx                   # rcx -= 1
-                    jnz 1b                    # repeat until rcx = 0
+                    jnz loop_puct             # repeat until rcx = 0
                     "#
                     : // no register outputs, but clobber memory
                     : "{r8}"(node.count.as_ptr()),
@@ -161,7 +161,7 @@ fn argmax(array: &[f32]) -> Option<usize> {
                 xor r10, r10                      # r10 = 0
                 mov rcx, 46                       # loop counter
 
-                1:
+                loop_max:
                 vmovups ymm0, [r8+4*r10]          # ymm0 = array[r10]
 
                 # this is a tree reduction of the horizontal maximum of `ymm0`
@@ -199,7 +199,7 @@ fn argmax(array: &[f32]) -> Option<usize> {
                 add r10, 8                         # i += 8
 
                 dec ecx                           # rcx -= 1
-                jnz 1b                            # repeat until rcx = 0
+                jnz loop_max                      # repeat until rcx = 0
                 "#
                 : "={rbx}"(index)
                 : "{r8}"(array.as_ptr()), "{r9}"(NEG_INFINITY.as_ptr())

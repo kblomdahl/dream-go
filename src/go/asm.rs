@@ -19,7 +19,7 @@
 /// 
 /// * `array` - 
 /// 
-#[inline]
+#[inline(never)]
 pub fn count_zeros(array: &[u8]) -> usize {
     debug_assert!(array.len() == 384);
 
@@ -46,7 +46,7 @@ pub fn count_zeros(array: &[u8]) -> usize {
                 xor rax, rax               # set rax = 0
                 xor rdx, rdx               # set rdx = 0
 
-                1:
+                loop_count:
                 vmovups ymm1, [rbx]        # ymm1 = array[rbx..(rbx+32)]
                 vpcmpeqb ymm1, ymm1, ymm0  # ymm1 = (xmm1 == 0)
                 vpmovmskb edx, ymm1        # edx = 1 bit set for each byte in ymm1 that is not 0
@@ -55,7 +55,7 @@ pub fn count_zeros(array: &[u8]) -> usize {
 
                 add rbx, 32                # rbx += 32
                 dec ecx                    # ecx -= 1
-                jnz 1b                     # repeat if ecx > 0
+                jnz loop_count             # repeat if ecx > 0
                 "#
                 : "={rax}"(count)  // outputs
                 : "{rbx}"(&array[0])  // inputs
