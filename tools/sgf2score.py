@@ -106,7 +106,7 @@ def main(every):
             resign = winner and 'R' in winner.group(1).upper()
 
             if every and winner and not resign:
-                # start-up a background thread to determine the winner
+                # start-up a background thread to check the winner
                 thread = threading.Thread(target=_run_check, args=(line, statistics))
                 thread.start()
 
