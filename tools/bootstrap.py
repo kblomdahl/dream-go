@@ -813,7 +813,7 @@ def calibrate(sess, tower, files):
         num_bins = 65536
 
         for act in tf.get_collection(tf.GraphKeys.ACTIVATIONS):
-            assert min_boundary[act.name] == 0.0
+            assert min_boundary[act.name] >= 0.0
 
             histogram_ops[act.name] = tf.histogram_fixed_width(
                 act,
