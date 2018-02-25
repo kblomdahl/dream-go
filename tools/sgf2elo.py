@@ -21,7 +21,7 @@ Usage: ./sgf2elo.py < games_big.sgf
 
 import re
 import numpy as np
-from scipy.sparse import csr_matrix, dok_matrix, lil_matrix, triu
+from scipy.sparse import coo_matrix, dok_matrix, triu
 import sys
 
 NAMES, INDICES = {}, {}
@@ -30,7 +30,7 @@ PW = re.compile(r'PW\[([^\]]*)\]')
 RE = re.compile(r'RE\[([BbWw])')
 
 def to_idx(name):
-    """ Returns an bijective index for the given name. """
+    """ Returns an bijective index larger than zero for the given name. """
     name = name.strip().lower()
     if name not in NAMES:
         NAMES[name] = len(NAMES)
@@ -39,7 +39,6 @@ def to_idx(name):
     return NAMES[name]
 
 # collect the raw number of wins and played games from standard input
-# using DOK matrices for fast random access and growth.
 wins = dok_matrix((0, 0), 'i4')
 count = dok_matrix((0, 0), 'i4')
 
@@ -65,24 +64,53 @@ for line in sys.stdin:
     count[i_w, i_l] += 1
     count[i_l, i_w] += 1
 
-# compute the winrate and then convert the winrate to elo rating difference
+wins = wins.tocsc()
+count = count.tocsc()
+
+# remove perfect winners and losers as we do not have enough information
+# to determine their rating (would be Inf and -Inf)
+matches = count.nonzero()
+
+perfect_winners = wins[matches] == count[matches]
+perfect_winners = coo_matrix((perfect_winners.getA1(), matches), count.shape, '?')
+perfect_losers = wins[matches] == 0
+perfect_losers = coo_matrix((perfect_losers.getA1(), matches), count.shape, '?')
+
+wins[perfect_winners] = 0
+count[perfect_winners] = 0
+count[perfect_losers] = 0
+
+# only keep the upper triangle of the matrix since they lower triangle is
+# redundant (`wins[lower] = count - wins[upper]`).
+nr_participants = len(NAMES)
 nz = triu(count).nonzero()
-winrate = wins[nz] / count[nz]
-elo_diff = 400.0 * np.log(1.0 / np.asarray(winrate.data) - 1.0) / np.log(10.0)
 
-# convert the elo difference to the linear equations
-nr_constraints = len(nz[0])
-C = np.zeros((nr_constraints, count.shape[0]))
-b = np.zeros((nr_constraints,))
+# find the best fit using the maximum log-likelihood function. We use the
+# bionomial distribution is calculate the likelihood that each specific
+# match-up receive the exact number of wins given some probability.
+from scipy.optimize import minimize
+from scipy.stats import binom
 
-for row in range(nr_constraints):
-    C[row, nz[0][row]] = -1
-    C[row, nz[1][row]] = +1
-    b[row] = elo_diff[0, row]
+def likelihood(x):
+    def elo(delta):
+        return 1.0 / (1 + 10.0 ** (delta / 400.0))
 
-# find the best fit to those linear equations
-y = np.linalg.lstsq(C, b)[0]
-y_min = -np.min(y)
+    p_win = elo(x[nz[1]] - x[nz[0]])
+    p = binom.logpmf(wins[nz], count[nz], p_win)
+
+    assert (p_win < 1).all()  # check that we do not predict any perfect winners
+    assert (p < 0).all()  # check that probability is between [0, 1)
+
+    return -0.5 * np.sum(p)
+
+result = minimize(
+    likelihood,
+    np.random.uniform(0.0, 1000.0, nr_participants),
+    bounds=[(0, None)] * nr_participants
+)
+
+y = result.x
+y_min = np.min(y)
 
 for i in np.argsort(y):
-    print('{:24}\t{:8.2f}'.format(INDICES[i], y_min + y[i]))
+    print('{:24}\t{:8.2f}'.format(INDICES[i], y[i] - y_min))
