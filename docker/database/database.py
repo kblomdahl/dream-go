@@ -38,7 +38,17 @@ if len(sys.argv) < 2:
 
 def sqlite3_connection():
     """ Returns an SQLite3 connection to the database """
-    return sqlite3.connect(sys.argv[1])
+    conn = sqlite3.connect(sys.argv[1])
+
+    # since we do not really need transactions turn a bunch of stuff off
+    #
+    # This is about 40x faster than the default settings...
+    c = conn.cursor()
+    c.execute('PRAGMA synchronous = OFF')
+    c.execute('PRAGMA journal_mode = MEMORY')
+    c.close()
+
+    return conn
 
 with sqlite3_connection() as conn:
     def create_table():
@@ -47,12 +57,6 @@ with sqlite3_connection() as conn:
         identify games. """
 
         c = conn.cursor()
-
-        # since we do not really need transactions turn a bunch of stuff off
-        #
-        # This is about 40x faster than the default settings...
-        c.execute('PRAGMA synchronous = OFF')
-        c.execute('PRAGMA journal_mode = MEMORY')
 
         # create the `collections` table
         c.execute('''
@@ -222,6 +226,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                         self.wfile.write(row[0])
                     except TypeError:
                         self.wfile.write(str(row[0]).encode('utf-8'))
+
+                self.wfile.flush()
+
+                c.close()
 
 # spin up the http server
 server = ThreadingSimpleServer(('', 8080), RequestHandler)
