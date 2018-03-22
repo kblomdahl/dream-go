@@ -23,6 +23,12 @@ use nn::ops::*;
 use nn::slots::*;
 use nn::{Type, TYPE};
 
+/// The number of features in the neural network architecture.
+const NUM_FEATURES: usize = 128;
+
+/// The number of residual blocks in the neural network architecture.
+const NUM_LAYERS: usize = 9;
+
 pub trait Graph {
     /// Returns a pointer to the memory on the GPU that should contain the
     /// input values.
@@ -896,30 +902,32 @@ impl Drop for Workspace {
 /// 
 pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard {
     let batch_size = graph.get_batch_size();
-    let residual_1 = O::get_slot(graph, "residual_1", 4 * batch_size * 46208);
-    let residual_2 = O::get_slot(graph, "residual_2", 4 * batch_size * 46208);
+    let residual_1 = O::get_slot(graph, "residual_1", 4 * batch_size * NUM_FEATURES * 361);
+    let residual_2 = O::get_slot(graph, "residual_2", 4 * batch_size * NUM_FEATURES * 361);
     let workspace_size = graph.get_workspace_size();
     let workspace_1 = O::get_slot(graph, "workspace_1", workspace_size);
 
+    /*
     #[cfg(feature = "trace-cuda")]
     eprintln!("00_input/output:0\n= {:?}", Tensor::default()
         .set_data_type(cudnn::DataType::Int8, cudnn::TensorFormat::NHWC)
         .set_shape(vec! [batch_size as i32, 36, 19, 19])
         .set_scale(1.0)
-        .fmt_ptr(input)
+        .fmt_ptr(input.ptr)
     );
+    */
 
     O::convolution(
         graph,
         "00_input/output:0".to_string(), **input,
-        128, 36, 3, 3,
+        NUM_FEATURES as i32, 36, 3, 3,
         "01_upsample/weights:0".to_string(),
         "01_upsample/offset:0".to_string(),
         "01_upsample/output:0".to_string(), *residual_1,
         *workspace_1, workspace_size
     );
 
-    for i in 2..11 {
+    for i in 2..(NUM_LAYERS + 2) {
         let input_name = if i == 2 {
             "01_upsample/output:0".to_string()
         } else {
@@ -929,7 +937,7 @@ pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard
         O::residual_block(
             graph,
             input_name, *residual_1,
-            128, 128, 3, 3,
+            NUM_FEATURES as i32, NUM_FEATURES as i32, 3, 3,
             format!("{:02}_residual/weights_1:0", i),
             format!("{:02}_residual/weights_2:0", i),
             format!("{:02}_residual/offset_1:0", i),
@@ -953,28 +961,28 @@ pub fn policy<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> Slo
 
     O::convolution(
         graph,
-        "10_residual/output_2:0".to_string(), **residual_1,
-        2, 128, 1, 1,
-        "11p_policy/downsample:0".to_string(),
-        "11p_policy/offset:0".to_string(),
-        "11p_policy/output_1:0".to_string(), *policy_out,
+        format!("{:02}_residual/output_2:0", NUM_LAYERS + 1), **residual_1,
+        2, NUM_FEATURES as i32, 1, 1,
+        format!("{:02}p_policy/downsample:0", NUM_LAYERS + 2),
+        format!("{:02}p_policy/offset:0", NUM_LAYERS + 2),
+        format!("{:02}p_policy/output_1:0", NUM_LAYERS + 2), *policy_out,
         *workspace_1, workspace_size
     );
 
     O::linear(
         graph,
-        "11p_policy/output_1:0".to_string(), *policy_out,
+        format!("{:02}p_policy/output_1:0", NUM_LAYERS + 2), *policy_out,
         362, 722,
-        "11p_policy/weights:0".to_string(),
-        "11p_policy/bias:0".to_string(),
-        "11p_policy/output_2:0".to_string(), *policy_1,
+        format!("{:02}p_policy/weights:0", NUM_LAYERS + 2),
+        format!("{:02}p_policy/bias:0", NUM_LAYERS + 2),
+        format!("{:02}p_policy/output_2:0", NUM_LAYERS + 2), *policy_1,
         *workspace_1, workspace_size
     );
 
     O::softmax(
         graph,
-        "11p_policy/output_2:0".to_string(), *policy_1,
-        "11p_policy/output_3:0".to_string(), *policy_out
+        format!("{:02}p_policy/output_2:0", NUM_LAYERS + 2), *policy_1,
+        format!("{:02}p_policy/output_3:0", NUM_LAYERS + 2), *policy_out
     );
 
     policy_out
@@ -990,44 +998,44 @@ pub fn value<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> Slot
 
     O::convolution(
         graph,
-        "10_residual/output_2:0".to_string(), **residual_1,
-        1, 128, 1, 1,
-        "11v_value/downsample:0".to_string(),
-        "11v_value/offset:0".to_string(),
-        "11v_value/output_1:0".to_string(), *value_1,
+        format!("{:02}_residual/output_2:0", NUM_LAYERS + 1), **residual_1,
+        2, NUM_FEATURES as i32, 1, 1,
+        format!("{:02}v_value/downsample:0", NUM_LAYERS + 2),
+        format!("{:02}v_value/offset:0", NUM_LAYERS + 2),
+        format!("{:02}v_value/output_1:0", NUM_LAYERS + 2), *value_1,
         *workspace_2, workspace_size
     );
 
     O::linear(
         graph,
-        "11v_value/output_1:0".to_string(), *value_1,
-        256, 361,
-        "11v_value/weights_1:0".to_string(),
-        "11v_value/bias_1:0".to_string(),
-        "11v_value/output_2:0".to_string(), *value_out,
+        format!("{:02}v_value/output_1:0", NUM_LAYERS + 2), *value_1,
+        256, 722,
+        format!("{:02}v_value/weights_1:0", NUM_LAYERS + 2),
+        format!("{:02}v_value/bias_1:0", NUM_LAYERS + 2),
+        format!("{:02}v_value/output_2:0", NUM_LAYERS + 2), *value_out,
         *workspace_2, workspace_size
     );
 
     O::relu(
         graph,
-        "11v_value/output_2:0".to_string(), *value_out,
-        "11v_value/output_3:0".to_string(), *value_out
+        format!("{:02}v_value/output_2:0", NUM_LAYERS + 2), *value_out,
+        format!("{:02}v_value/output_3:0", NUM_LAYERS + 2), *value_out
     );
 
     O::linear(
         graph,
-        "11v_value/output_3:0".to_string(), *value_out,
+        format!("{:02}v_value/output_3:0", NUM_LAYERS + 2), *value_out,
         1, 256,
-        "11v_value/weights_2:0".to_string(),
-        "11v_value/bias_2:0".to_string(),
-        "11v_value/output_4:0".to_string(), *value_1,
+        format!("{:02}v_value/weights_2:0", NUM_LAYERS + 2),
+        format!("{:02}v_value/bias_2:0", NUM_LAYERS + 2),
+        format!("{:02}v_value/output_4:0", NUM_LAYERS + 2), *value_1,
         *workspace_2, workspace_size
     );
 
     O::tanh(
         graph,
-        "11v_value/output_4:0".to_string(), *value_1,
-        "11v_value/output_5:0".to_string(), *value_out
+        format!("{:02}v_value/output_4:0", NUM_LAYERS + 2), *value_1,
+        format!("{:02}v_value/output_5:0", NUM_LAYERS + 2), *value_out
     );
 
     value_out

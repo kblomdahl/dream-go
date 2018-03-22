@@ -200,9 +200,9 @@ class ValueHead:
         glorot_op = tf.glorot_normal_initializer()
         zeros_op = tf.zeros_initializer()
 
-        self._downsample = tf.get_variable('downsample', (1, 1, num_features, 1), tf.float32, glorot_op)
-        self._bn = BatchNorm(1, collection=ValueHead.VARIABLES)
-        self._weights_1 = tf.get_variable('weights_1', (361, 256), tf.float32, glorot_op)
+        self._downsample = tf.get_variable('downsample', (1, 1, num_features, 2), tf.float32, glorot_op)
+        self._bn = BatchNorm(2, collection=ValueHead.VARIABLES)
+        self._weights_1 = tf.get_variable('weights_1', (722, 256), tf.float32, glorot_op)
         self._weights_2 = tf.get_variable('weights_2', (256, 1), tf.float32, glorot_op)
         self._bias_1 = tf.get_variable('bias_1', (256,), tf.float32, zeros_op)
         self._bias_2 = tf.get_variable('bias_2', (1,), tf.float32, zeros_op)
@@ -243,7 +243,7 @@ class ValueHead:
         y = tf.nn.relu(y)
         tf.add_to_collection(tf.GraphKeys.ACTIVATIONS, tf.identity(y, 'output_1'))
 
-        y = tf.reshape(y, (-1, 361))
+        y = tf.reshape(y, (-1, 722))
         y = tf.matmul(y, self._weights_1) + self._bias_1
         y = tf.nn.relu(y)
         y = tf.matmul(y, self._weights_2) + self._bias_2
@@ -314,7 +314,7 @@ class Tower:
 
     VARIABLES = 'tower_variables'
 
-    def __init__(self, num_features=128):
+    def __init__(self, num_features=128, num_layers=9):
         glorot_op = tf.glorot_normal_initializer()
 
         with tf.variable_scope('01_upsample') as self._upsample_scope:
@@ -325,19 +325,19 @@ class Tower:
         tf.add_to_collection(Tower.VARIABLES, self._upsample)
 
         # residual blocks
-        self._residual_scopes = [None] * 9
+        self._residual_scopes = [None] * num_layers
         self._residuals = []
 
-        for i in range(9):
+        for i in range(num_layers):
             with tf.variable_scope('{:02d}_residual'.format(2 + i)) as self._residual_scopes[i]:
                 self._residuals += [ResidualBlock(num_features, collection=Tower.VARIABLES)]
 
         # policy head
-        with tf.variable_scope('11p_policy') as self._policy_scope:
+        with tf.variable_scope('{:02d}p_policy'.format(2 + num_layers)) as self._policy_scope:
             self._policy = PolicyHead(num_features)
 
         # value head
-        with tf.variable_scope('11v_value') as self._value_scope:
+        with tf.variable_scope('{:02d}v_value'.format(2 + num_layers)) as self._value_scope:
             self._value = ValueHead(num_features)
 
     def dump(self, sess, into=None):
@@ -491,7 +491,7 @@ def make_dataset_iterator(files, batch_size=1):
         dataset = dataset.map(_decode_and_split)
         dataset = dataset.map(_parse)
         dataset = dataset.map(_augment)
-        dataset = dataset.shuffle(196704)
+        dataset = dataset.shuffle(393408)
         dataset = dataset.batch(batch_size if 'BATCH_SIZE' not in os.environ else int(os.environ['BATCH_SIZE']))
 
         return dataset.make_initializable_iterator()
@@ -631,6 +631,7 @@ def main(files, reset=False, reset_lr=False, only_tower=False, only_policy=False
     #
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
+    config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
     with tf.Session(config=config) as sess:
         sess.run([tf.local_variables_initializer(), tf.global_variables_initializer()])

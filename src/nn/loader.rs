@@ -130,7 +130,7 @@ pub fn load(path: &Path) -> Option<HashMap<String, Tensor>> {
         };
 
         for (name, mut json) in iter {
-            debug_assert!(json.scale > 0.0);
+            debug_assert!(json.scale > 0.0, "scale is non-positive for layer {} -- {}", name, json.scale);
 
             let mut t = Tensor::default();
 
