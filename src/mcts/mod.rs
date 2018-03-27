@@ -34,6 +34,7 @@ use nn::{Network, Type, TYPE};
 use util::array::*;
 use util::b85;
 use util::config;
+use util::min;
 use util::types::*;
 
 pub enum GameResult {
@@ -540,6 +541,7 @@ pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, P
 /// * `server` - the server to use during evaluation
 /// 
 fn policy_play_one(server: &PredictGuard) -> GameResult {
+    let mut temperature = (*config::TEMPERATURE + 1e-3).recip();
     let mut board = Board::new();
     let mut sgf = String::new();
     let mut current = Color::Black;
@@ -558,7 +560,6 @@ fn policy_play_one(server: &PredictGuard) -> GameResult {
         // specified temperature (to priority strongly suggested moves, and
         // avoid picking _noise_ moves).
         let index = {
-            let temperature = (*config::TEMPERATURE + 1e-3).recip();
             let policy_sum = policy.iter()
                 .filter(|p| p.is_finite())
                 .map(|p| p.powf(temperature))
@@ -598,6 +599,7 @@ fn policy_play_one(server: &PredictGuard) -> GameResult {
         }
 
         // continue with the next turn
+        temperature = min(5.0, 1.03 * temperature);
         current = current.opposite();
         count += 1;
     }
