@@ -1,11 +1,14 @@
+__pycache__
 bin/
 data/
 dist/
 models/
 target/
 *~
+*.bin
 *.dat
 *.json
 *.log
 *.sgf
+*.sqlite3
 
