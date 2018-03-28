@@ -35,20 +35,21 @@ The moves contained within the file then needs to be pre-processed to a more app
 ./dream_go --extract kgs_bal.sgf > kgs_big.bin
 ```
 
-This binary file can then be feed into the bootstrap script which will tune the network weights to more accurately predict the moves played in the original SGF files. This script will run forever, so feel free to cancel it when you feel happy with the accuracy. You can monitor the accuracy (and a bunch of other stuff) using Tensorboard, whose logs are stored in the `logs/` directory. The final output will be stored in the `models/` directory.
+This binary file can then be feed into the bootstrap script which will tune the network weights to more accurately predict the moves played in the original SGF files. This script will run forever, so feel free to cancel it when you feel happy with the accuracy. You can monitor the accuracy (and a bunch of other stuff) using Tensorboard, whose logs are stored in the `logs/` directory. The final output will also be stored in the `models/` directory.
 
 ```bash
-python tools/bootstrap.py kgs_big.bin
+cd contrib/trainer
+python -m dream_tf --start kgs_big.bin
 ```
 
 ```bash
-tensorboard --logdir logs/
+tensorboard --logdir models/
 ```
 
 When you are done training your network you need to transcode the weights from Tensorflow protobufs into a format that can be read by Dream Go, this can be accomplished using the `--dump` command of the bootstrap script:
 
 ```bash
-python tools/bootstrap.py --dump > models/dream-go.json
+python -m dream_tf --dump > dream-go.json
 ```
 
 ## Reinforcement Learning
@@ -77,7 +78,7 @@ sort < self_play.sgf | uniq | shuf | ./tools/sgf2balance.py > self_play_bal.sgf
 ./dream_go --num-samples 80 --extract self_play_bal.sgf > self_play.bin
 ```
 ```bash
-python3 tools/bootstrap.py self_play.bin
+cd contrib/trainer/ && python3 -m dream_tf --start self_play.bin
 ```
 
 One observation worth pointing out is that if we generate 25,000 games and each game contains on average 250 moves, we just generated 4,250,000 search _unnecessary_ trees. This is not quite true as they are still useful for the _value head_, but one could argue that we are **way** past the point of diminishing returns.
@@ -99,7 +100,7 @@ sort < policy_play.sgf | uniq | shuf | ./tools/sgf2balance.py > policy_play_bal.
 ./dream_go --num-games 256 --num-threads 512 --batch-size 256 --num-samples 2 --extract --ex-it policy_play_bal.sgf > policy_play.bin
 ```
 ```bash
-python3 tools/bootstrap.py policy_play.bin
+cd contrib/trainer/ && python3 -m dream_tf --start policy_play.bin
 ```
 
 For the values provided in this example, which generate 2,000,000 examples for the neural network it should take about 7 days to generate the required data (from 1,000,000 distinct games).

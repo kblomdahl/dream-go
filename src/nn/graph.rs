@@ -725,9 +725,7 @@ impl Builder {
         // since floating types does the scaling internally (better than we
         // can).
         let is_floating_point = g.tensors.values().all(|t| {
-            let data_type = t.get_data_type();
-
-            data_type == cudnn::DataType::Half || data_type == cudnn::DataType::Float
+            t.get_data_type().is_floating_point()
         });
 
         if is_floating_point {
@@ -999,7 +997,7 @@ pub fn value<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> Slot
     O::convolution(
         graph,
         format!("{:02}_residual/output_2:0", NUM_LAYERS + 1), **residual_1,
-        2, NUM_FEATURES as i32, 1, 1,
+        1, NUM_FEATURES as i32, 1, 1,
         format!("{:02}v_value/downsample:0", NUM_LAYERS + 2),
         format!("{:02}v_value/offset:0", NUM_LAYERS + 2),
         format!("{:02}v_value/output_1:0", NUM_LAYERS + 2), *value_1,
@@ -1009,7 +1007,7 @@ pub fn value<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> Slot
     O::linear(
         graph,
         format!("{:02}v_value/output_1:0", NUM_LAYERS + 2), *value_1,
-        256, 722,
+        256, 361,
         format!("{:02}v_value/weights_1:0", NUM_LAYERS + 2),
         format!("{:02}v_value/bias_1:0", NUM_LAYERS + 2),
         format!("{:02}v_value/output_2:0", NUM_LAYERS + 2), *value_out,

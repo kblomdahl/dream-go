@@ -17,6 +17,7 @@ use std::ptr;
 
 use nn::ffi::cudnn;
 use nn::ops::tensor::*;
+use nn::ops::min::*;
 
 /// Operator for performing a 2D convolution using cuDNN.
 pub struct Convolution {
@@ -25,15 +26,17 @@ pub struct Convolution {
 
     pub descr: cudnn::ConvolutionDescriptor,
     pub fwd_algo: cudnn::ConvolutionFwdAlgo,
-    pub workspace_size: usize
+    pub workspace_size: usize,
+
+    pub min_six: Min
 }
 
 impl Convolution {
     /// Set the correct type, shape, and scale for the operands of the
     /// operator `output = weights * input + offset`.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `input` -
     /// * `k` -
     /// * `c` -
@@ -42,7 +45,7 @@ impl Convolution {
     /// * `weights` -
     /// * `offset` -
     /// * `output` -
-    /// 
+    ///
     pub fn calibrate(
         input: &Tensor,
         k: i32,
@@ -89,9 +92,9 @@ impl Convolution {
 
     /// Returns a convolutional operator that is optimized for the given
     /// arguments.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `handle` -
     /// * `alpha` -
     /// * `input` -
@@ -100,7 +103,7 @@ impl Convolution {
     /// * `blend` -
     /// * `bias` -
     /// * `output` -
-    /// 
+    ///
     pub fn new(
         handle: cudnn::Handle,
         mut alpha: f32,
@@ -138,7 +141,8 @@ impl Convolution {
                 compute_type
             ));
 
-            #[cfg(feature = "tensor-core")] {
+            #[cfg(feature = "tensor-core")]
+            {
                 check!(cudnn::cudnnSetConvolutionMathType(
                     conv_desc,
                     cudnn::MathType::TensorOpMath
@@ -186,29 +190,31 @@ impl Convolution {
 
             descr: conv_desc,
             fwd_algo: fwd_algo,
-            workspace_size: workspace_size
+            workspace_size: workspace_size,
+
+            min_six: Min::new(output, 6.0)
         }
     }
 
     /// Performs the appropriate cuDNN calls to compute the convolution and
     /// stores the result in `output_data`.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `handle` - 
-    /// * `input` - 
-    /// * `input_data` - 
-    /// * `weights` - 
-    /// * `blend` - 
-    /// * `blend_data` - 
-    /// * `weights` - 
-    /// * `offset` - 
-    /// * `output` - 
-    /// * `output_data` - 
-    /// * `workspace_data` - 
-    /// * `workspace_size` - 
-    /// * `relu` - 
-    /// 
+    ///
+    /// * `handle` -
+    /// * `input` -
+    /// * `input_data` -
+    /// * `weights` -
+    /// * `blend` -
+    /// * `blend_data` -
+    /// * `weights` -
+    /// * `offset` -
+    /// * `output` -
+    /// * `output_data` -
+    /// * `workspace_data` -
+    /// * `workspace_size` -
+    /// * `relu` -
+    ///
     pub fn forward(
         &self,
         handle: cudnn::Handle,
@@ -222,7 +228,7 @@ impl Convolution {
         output_data: *mut c_void,
         workspace_data: *mut c_void,
         workspace_size: usize,
-        relu: cudnn::ActivationDescriptor
+        relu: cudnn::ActivationDescriptor,
     )
     {
         unsafe {
@@ -241,7 +247,8 @@ impl Convolution {
                 output.tensor_desc, output_data  // output
             ));
 
-            if input.get_data_type() == cudnn::DataType::Int8 && output.get_data_type() == cudnn::DataType::Float {
+            if input.get_data_type() == cudnn::DataType::Int8 && output.get_data_type() == cudnn::DataType::Float
+            {
                 // we have to re-scale the output tensor from [-128,+127] to [0,1] after
                 // the convolution because it uses an `i32` accumulator which cannot store
                 // fractions.
@@ -252,6 +259,12 @@ impl Convolution {
                     output.tensor_desc, output_data,
                     &C_127
                 ));
+            }
+
+            if output.get_data_type() == cudnn::DataType::Float {
+                self.min_six.forward(handle, output, output_data);
+            } else {
+                debug_assert!(output.get_scale() <= 6.0);
             }
         }
     }

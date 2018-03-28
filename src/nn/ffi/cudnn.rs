@@ -74,6 +74,16 @@ impl DataType {
         }
     }
 
+    pub fn is_floating_point(&self) -> bool {
+        match *self {
+            DataType::Float => true,
+            DataType::Half => true,
+            DataType::Int8 => false,
+            DataType::Int32 => false,
+            DataType::Int8x4 => false
+        }
+    }
+
     pub fn to_cuda(&self) -> cuda::DataType {
         match *self {
             DataType::Float => cuda::DataType::R32F,
@@ -89,7 +99,9 @@ impl DataType {
 #[derive(Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum OpTensorOp {
-    Add = 0
+    Add = 0,
+    Min = 2,
+    Max = 3
 }
 
 #[repr(i32)]
@@ -208,6 +220,60 @@ extern {
 
     pub fn cudnnCreateActivationDescriptor(activationDesc: *mut ActivationDescriptor) -> Status;
     pub fn cudnnDestroyActivationDescriptor(activationDesc: ActivationDescriptor) -> Status;
+
+    /// This function implements the equation:
+    ///
+    /// ```C = op ( alpha1[0] * A, alpha2[0] * B ) + beta[0] * C```
+    ///
+    /// Given tensors `A`, `B`, and `C` and scaling factors `alpha1`, `alpha2`,
+    /// and `beta`. The op to use is indicated by the descriptor `opTensorDesc`.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - Handle to a previously created cuDNN context.
+    /// * `opDesc` - Handle to a previously initialized op tensor descriptor.
+    /// * `alpha1` - Pointers to scaling factors (in host memory).
+    /// * `aDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `A` - Pointer to data of the tensors described by `aDesc`.
+    /// * `alpha2` - Pointers to scaling factors (in host memory).
+    /// * `bDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `B` - Pointer to data of the tensors described by `bDesc`.
+    /// * `beta` - Pointers to scaling factors (in host memory).
+    /// * `cDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `C` - Pointer to data of the tensors described by `cDesc`.
+    /// 
+    pub fn cudnnOpTensor(
+        handle: Handle,
+        opDesc: OpTensorDescriptor,
+        alpha1: *const f32,
+        aDesc: TensorDescriptor,
+        A: *const c_void,
+        alpha2: *const f32,
+        bDesc: TensorDescriptor,
+        B: *const c_void,
+        beta: *const f32,
+        cDesc: TensorDescriptor,
+        C: *const c_void
+    ) -> Status;
+
+    pub fn cudnnCreateOpTensorDescriptor(opDesc: *mut OpTensorDescriptor) -> Status;
+    pub fn cudnnDestroyOpTensorDescriptor(opDesc: OpTensorDescriptor) -> Status;
+    
+    /// ???
+    /// 
+    /// # Arguments
+    /// 
+    /// * `opDesc` - 
+    /// * `op` - 
+    /// * `dataType` - 
+    /// * `nanOpt` - 
+    /// 
+    pub fn cudnnSetOpTensorDescriptor(
+        opDesc: OpTensorDescriptor,
+        op: OpTensorOp,
+        dataType: DataType,
+        nanOpt: NanPropagation
+    ) -> Status;
 
     /// This function initializes a previously created generic activation descriptor object
     /// 

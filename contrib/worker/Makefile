@@ -1,24 +1,25 @@
-.PHONY: clean staging
+.PHONY: build clean docker
 
 VERSION?=0.5.0
+DEVICE?=0
+DB?=upload.dg.io:8080
 
-all: build
+all:
 
 clean:
-	rm -rf staging/
+	rm -rf .staging/
 
-staging:
-	mkdir -p staging/
+build:
+	mkdir -p .staging/
 	cd ../.. ; cargo build --release
-	cp ../../target/release/dream_go staging/dream_go
-	cp ../../tools/upload2rest.py staging/upload2rest.py
-	cp ../../tools/sgf2score.py staging/sgf2score.py
-	cp loop_worker.sh staging/loop_worker.sh
+	cp ../../target/release/dream_go .staging/dream_go
+	cp ../../tools/upload2rest.py .staging/upload2rest.py
+	cp ../../tools/sgf2score.py .staging/sgf2score.py
+	cp loop_worker.sh .staging/loop_worker.sh
 
-build: staging
 	docker build -t "dream_go/worker:$(VERSION)" .
 
-run:
+docker: build
 	# this is for local deployments only, for a larger scale deployment you
 	# will want to push the images to some repository and then deploy them from
 	# there.
@@ -30,9 +31,6 @@ run:
 	# - set the environment variable `DB` to point towards a host (and port)
 	#   where the `dream_go/db` image is available.
 	# 
-	docker run --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=0 \
-		-e DB=upload.dg.io:8080 --link dream_db:upload.dg.io \
-		-td --rm "dream_go/worker:$(VERSION)"
-	docker run --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=1 \
-		-e DB=upload.dg.io:8080 --link dream_db:upload.dg.io \
+	docker run --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=$(DEVICE) \
+		-e DB=$(DB) \
 		-td --rm "dream_go/worker:$(VERSION)"

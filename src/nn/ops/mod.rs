@@ -14,10 +14,12 @@
 
 mod convolution;
 mod linear;
+mod min;
 mod operator;
 mod tensor;
 
 pub use self::convolution::*;
 pub use self::linear::*;
+pub use self::min::*;
 pub use self::operator::*;
 pub use self::tensor::Tensor;
