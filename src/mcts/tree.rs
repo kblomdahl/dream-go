@@ -32,8 +32,8 @@ lazy_static! {
 
 pub trait Value {
     unsafe fn update<E: Value>(trace: &NodeTrace<E>, color: Color, value: f32);
-    fn get<E: Value>(node: &Node<E>, dst: &mut [f32]);
-    fn get_ref<E: Value>(node: &Node<E>, dst: &mut [f32]);
+    fn get<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]);
+    fn get_ref<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]);
 }
 
 /// An implementation of the _Polynomial UCT_ as suggested in the AlphaGo Zero
@@ -65,22 +65,23 @@ impl Value for PUCT {
     /// # Arguments
     /// 
     /// * `node` -
+    /// * `value` - the winrates to use in the calculations
     /// * `dst` - output array for the UCT value
     /// 
     #[inline]
-    fn get_ref<E: Value>(node: &Node<E>, dst: &mut [f32]) {
+    fn get_ref<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
         let sqrt_n = ((1 + node.total_count) as f32).sqrt();
         let uct_exp = *config::UCT_EXP;
 
         for i in 0..362 {
             let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
 
-            dst[i] = node.value[i] + node.prior[i] * uct_exp * exp_bonus
+            dst[i] = value[i] + node.prior[i] * uct_exp * exp_bonus
         }
     }
 
     #[inline(never)]
-    fn get<E: Value>(node: &Node<E>, dst: &mut [f32]) {
+    fn get<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
         if cfg!(target_arch = "x86_64") {
             let sqrt_n = ((1 + node.total_count) as f32).sqrt();
 
@@ -116,7 +117,7 @@ impl Value for PUCT {
                     "#
                     : // no register outputs, but clobber memory
                     : "{r8}"(node.count.as_ptr()),
-                      "{r9}"(node.value.as_ptr()),
+                      "{r9}"(value.as_ptr()),
                       "{r10}"(node.prior.as_ptr()),
                       "{r11}"(dst.as_ptr()),
                       "{r12}"(&*config::UCT_EXP),
@@ -127,7 +128,7 @@ impl Value for PUCT {
                 );
             }
         } else {
-            PUCT::get_ref::<E>(node, dst);
+            PUCT::get_ref::<E>(node, value, dst);
         }
     }
 }
@@ -288,7 +289,7 @@ impl<E: Value> Node<E> {
             count: [0; 368],
             prior: prior_padding,
             total_value: [0.0; 368],
-            value: [max(0.0, value - *config::FPU_REDUCE); 368],
+            value: [value; 368],
             expanding: [false; 362],
             children: [ptr::null_mut(); 362]
         }
@@ -336,7 +337,7 @@ impl<E: Value> Node<E> {
         }
 
         let mut uct = [::std::f32::NEG_INFINITY; 368];
-        E::get::<E>(self, &mut uct);
+        E::get::<E>(self, &self.value, &mut uct);
 
         for i in children {
             // do not output nodes that has not been visited to reduce the
@@ -466,12 +467,36 @@ impl<E: Value> Node<E> {
 
     /// Returns the child with the maximum UCT value, and increase its visit count
     /// by one.
-    fn select<'a>(&'a mut self) -> Option<usize> {
+    /// 
+    /// # Arguments
+    /// 
+    /// * `apply_fpu` - whether to use the first-play urgency heuristic 
+    /// 
+    fn select<'a>(&'a mut self, apply_fpu: bool) -> Option<usize> {
+        let mut value = self.value.clone();
+
+        if apply_fpu {
+            // for unvisited children, attempt to transform the parent `value`
+            // into a reasonable value for that child. This is known as the
+            // _First Play Urgency_ heuristic, of the ones that has been tried
+            // so far this one turns out to be the best:
+            //
+            // - square root visit count
+            // - constant (this is currently used)
+            // - zero
+            //
+            for i in 0..368 {
+                if self.count[i] == 0 {
+                    value[i] = max(0.0, value[i] - *config::FPU_REDUCE);
+                }
+            }
+        }
+
         // compute all UCB1 values for each node before trying to figure out which
         // to pick to make it possible to do it with SIMD.
         let mut uct = [::std::f32::NEG_INFINITY; 368];
 
-        E::get::<E>(self, &mut uct);
+        E::get::<E>(self, &value, &mut uct);
 
         // greedy selection based on the maximum ucb1 value, failing if someone else
         // is already expanding the node we want to expand.
@@ -514,7 +539,7 @@ pub unsafe fn probe<E>(root: &mut Node<E>, board: &mut Board) -> Option<NodeTrac
     let mut current = root;
 
     loop {
-        if let Some(next_child) = current.select() {
+        if let Some(next_child) = current.select(trace.is_empty()) {
             trace.push((current as *mut Node<E>, current.color, next_child));
 
             if next_child != 361 {  // not a passing move
@@ -814,8 +839,8 @@ mod tests {
 
             // check so that the reference and asm implementation gives back the same
             // value
-            E::get::<E>(&root, &mut dst_asm);
-            E::get_ref::<E>(&root, &mut dst_ref);
+            E::get::<E>(&root, &root.value, &mut dst_asm);
+            E::get_ref::<E>(&root, &root.value, &mut dst_ref);
 
             for i in 0..362 {
                 // because of numeric instabilities and approximations the answers may
@@ -844,7 +869,7 @@ mod tests {
         b.iter(|| {
             let mut dst = test::black_box([0.0f32; 368]);
 
-            E::get::<E>(&root, &mut dst);
+            E::get::<E>(&root, &root.value, &mut dst);
             dst
         });
 
