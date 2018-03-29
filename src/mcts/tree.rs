@@ -539,7 +539,7 @@ pub unsafe fn probe<E>(root: &mut Node<E>, board: &mut Board) -> Option<NodeTrac
     let mut current = root;
 
     loop {
-        if let Some(next_child) = current.select(trace.is_empty()) {
+        if let Some(next_child) = current.select(!trace.is_empty()) {
             trace.push((current as *mut Node<E>, current.color, next_child));
 
             if next_child != 361 {  // not a passing move
