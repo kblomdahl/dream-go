@@ -162,6 +162,7 @@ class DBRequestHandler(ThreadingMixIn, BaseHTTPRequestHandler):
 
     def _write_results(self, cursor):
         self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
 
         while True:
