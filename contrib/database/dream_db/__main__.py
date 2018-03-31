@@ -78,6 +78,7 @@ class DBRequest:
         #
         # - `[table]/recent/[n]`
         # - `[table]/recent/[n]/[field]`
+        # - `[table]/count/[field]`
         # - `[table]/[name]`
         # - `[table]`
         #
@@ -89,9 +90,7 @@ class DBRequest:
 
         if len(parts) == 2:
             self.operation = ('SELECT', parts[1])
-        elif len(parts) >= 3:
-            assert parts[1] == 'recent'
-
+        elif len(parts) >= 3 and parts[1] == 'recent':
             try:
                 n = int(parts[2])
 
@@ -103,6 +102,12 @@ class DBRequest:
                     self.operation = ('RECENT', n, 'content')
             except ValueError:
                 raise ValueError('unrecognized request')
+        elif len(parts) == 3 and parts[1] == 'count':
+            assert parts[2] in ['rowid', 'name', 'parent', 'creationtime']
+
+            self.operation = ('COUNT', parts[2])
+        else:
+            raise ValueError('unrecognized request')
 
         # set any optional parameters from the query string:
         #
@@ -183,17 +188,18 @@ class DBRequestHandler(ThreadingMixIn, BaseHTTPRequestHandler):
                 self.wfile.write(request.separator.encode('utf-8'))
             first = False
 
-            value = row[0]
+            for (i, value) in enumerate(row):
+                if isinstance(value, int):
+                    value = '%d' % (value,)
+                if isinstance(value, datetime):
+                    value = ''
 
-            if isinstance(value, int):
-                value = '%d' % (value,)
-            if isinstance(value, datetime):
-                value = ''
-
-            try:
-                self.wfile.write(value)
-            except TypeError:
-                self.wfile.write(value.encode('utf-8'))
+                try:
+                    if i > 0:
+                        self.wfile.write('|'.encode('utf-8'))
+                    self.wfile.write(value)
+                except TypeError:
+                    self.wfile.write(value.encode('utf-8'))
 
         self.wfile.flush()
 
@@ -213,6 +219,14 @@ class DBRequestHandler(ThreadingMixIn, BaseHTTPRequestHandler):
 
         self._write_results(cursor, request)
 
+    def do_COUNT(self, cursor, request):
+        ensure_table_exists(cursor, request.table)
+        cursor.execute('''
+        SELECT %s, COUNT(*) FROM %s GROUP BY %s
+        ''' % (request.operation[1], request.table, request.operation[1]))
+
+        self._write_results(cursor, request)
+
     def do_GET(self):
         """ Handle GET requests that retrieve data from the database """
 
@@ -225,6 +239,8 @@ class DBRequestHandler(ThreadingMixIn, BaseHTTPRequestHandler):
                 sqlite3_execute(lambda cursor: self.do_SELECT(cursor, request))
             elif request.operation[0] == 'RECENT':
                 sqlite3_execute(lambda cursor: self.do_RECENT(cursor, request))
+            elif request.operation[0] == 'COUNT':
+                sqlite3_execute(lambda cursor: self.do_COUNT(cursor, request))
             else:
                 raise ValueError('unrecognized request')
         except ValueError as e:
