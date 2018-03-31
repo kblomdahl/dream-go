@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod concat;
 mod convolution;
 mod linear;
 mod min;
 mod operator;
 mod tensor;
 
+pub use self::concat::*;
 pub use self::convolution::*;
 pub use self::linear::*;
 pub use self::min::*;

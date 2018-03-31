@@ -127,6 +127,12 @@ impl Tensor {
         }
     }
 
+    pub fn with_tensor_desc(&self, tensor_desc: cudnn::TensorDescriptor) -> Tensor {
+        let mut other = self.clone();
+        other.tensor_desc = tensor_desc;
+        other
+    }
+
     pub fn get_data_type(&self) -> cudnn::DataType {
         *self.data_type.borrow()
     }
@@ -250,7 +256,12 @@ impl Tensor {
                     let size = 4 * elements.len();
 
                     check!(cuda::cudaMalloc(&mut self.ptr, size));
-                    check!(cuda::cudaMemcpy(self.ptr, elements.as_ptr() as *const c_void, size, cuda::MemcpyKind::HostToDevice));
+                    check!(cuda::cudaMemcpy(
+                        self.ptr,
+                        elements.as_ptr() as *const c_void,
+                        size,
+                        cuda::MemcpyKind::HostToDevice
+                    ));
                 },
 
                 cudnn::DataType::Half => {
@@ -260,7 +271,12 @@ impl Tensor {
                     let size = 2 * elements.len();
 
                     check!(cuda::cudaMalloc(&mut self.ptr, size));
-                    check!(cuda::cudaMemcpy(self.ptr, elements.as_ptr() as *const c_void, size, cuda::MemcpyKind::HostToDevice));
+                    check!(cuda::cudaMemcpy(
+                        self.ptr,
+                        elements.as_ptr() as *const c_void,
+                        size,
+                        cuda::MemcpyKind::HostToDevice
+                    ));
                 },
 
                 cudnn::DataType::Int8 => {
@@ -280,7 +296,12 @@ impl Tensor {
                     let size = 1 * elements.len();
 
                     check!(cuda::cudaMalloc(&mut self.ptr, size));
-                    check!(cuda::cudaMemcpy(self.ptr, elements.as_ptr() as *const c_void, size, cuda::MemcpyKind::HostToDevice));
+                    check!(cuda::cudaMemcpy(
+                        self.ptr,
+                        elements.as_ptr() as *const c_void,
+                        size,
+                        cuda::MemcpyKind::HostToDevice
+                    ));
                 },
 
                 _ => {
@@ -371,6 +392,7 @@ impl Tensor {
 
     /// Returns a pretty-printable version of this.
     #[cfg(feature = "trace-cuda")]
+    #[allow(dead_code)]
     pub fn fmt<'a>(&'a self) -> TensorFmt<'a> {
         TensorFmt {
             inner: self,

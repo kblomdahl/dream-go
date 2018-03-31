@@ -215,23 +215,41 @@ def residual_block(x, mode, params):
     5. Batch normalisation
     6. A skip connection that adds the input to the block
     7. A rectifier non-linearity
+
+    We replace step 1 with two parallel convolutions, the first has a dilation
+    of one and the second has a dilation of two. We then concatenate the result
+    of these convolution before step 2.
     """
     init_op = orthogonal_initializer()
     num_channels = params['num_channels']
+    num_dilation = 32 * max(1, math.floor(num_channels / 176.0))
+    num_normal = num_channels - num_dilation
 
-    conv_1 = tf.get_variable('weights_1', (3, 3, num_channels, num_channels), tf.float32, init_op)
+    conv_1c = tf.get_variable('weights_1c', (3, 3, num_channels, num_normal), tf.float32, init_op)
+    conv_1d = tf.get_variable('weights_1d', (3, 3, num_channels, num_dilation), tf.float32, init_op)
     conv_2 = tf.get_variable('weights_2', (3, 3, num_channels, num_channels), tf.float32, init_op)
 
-    tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, tf.nn.l2_loss(conv_1))
+    tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, tf.nn.l2_loss(conv_1c))
+    tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, tf.nn.l2_loss(conv_1d))
     tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, tf.nn.l2_loss(conv_2))
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
-        y = tf.nn.conv2d(x, conv_1, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        tf.add_to_collection(LSUV_OPS, lsuv_initializer(y, conv_1))
+        c = tf.nn.conv2d(x, conv_1c, (1, 1, 1, 1), 'SAME', True, 'NCHW')
+        tf.add_to_collection(LSUV_OPS, lsuv_initializer(c, conv_1c))
 
-        y = batch_norm(y, conv_1, mode, params, suffix='_1')
-        y = tf.nn.relu6(y)
+        c = batch_norm(c, conv_1c, mode, params, suffix='_1c')
+        c = tf.nn.relu6(c)
+
+        d = tf.nn.conv2d(x, conv_1d, (1, 1, 1, 1), 'SAME', True, 'NCHW', (1, 1, 2, 2))
+        tf.add_to_collection(LSUV_OPS, lsuv_initializer(d, conv_1d))
+
+        d = batch_norm(d, conv_1d, mode, params, suffix='_1d')
+        d = tf.nn.relu6(d)
+
+        y = tf.concat([c, d], axis=1)
+        tf.add_to_collection(OUTPUT_OPS, tf.identity(y, 'output_1c'))
+        tf.add_to_collection(OUTPUT_OPS, tf.identity(y, 'output_1d'))
         tf.add_to_collection(OUTPUT_OPS, tf.identity(y, 'output_1'))
 
         y = tf.nn.conv2d(y, conv_2, (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -468,7 +486,7 @@ class DumpHook(tf.train.SessionRunHook):
                 's': base64.b85encode(scale, pad=True).decode('ascii')
             }
 
-            print('.', end='', file=sys.stderr)
+            print('.', end='', file=sys.stderr, flush=True)
 
         # dump the variables to JSON in half precision in order to save disk
         # space.
@@ -626,7 +644,7 @@ def model_fn(features, labels, mode, params):
         learning_steps = params['steps'] // params['batch_size']
         learning_rate_threshold = int(0.3 * learning_steps)
         learning_rate_exp = tf.train.exponential_decay(
-            0.01,
+            params['learning_rate'],
             global_step - learning_rate_threshold,
             (learning_steps - learning_rate_threshold) / 200,
             0.98
@@ -635,7 +653,7 @@ def model_fn(features, labels, mode, params):
         learning_rate = tf.train.piecewise_constant(
             global_step,
             [learning_rate_threshold],
-            [0.01, learning_rate_exp]
+            [params['learning_rate'], learning_rate_exp]
         )
         optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -788,6 +806,7 @@ if not model_dir:
 params = {
     'steps': args.steps[0] if args.steps else MAX_STEPS,
     'batch_size': args.batch_size[0] if args.batch_size else BATCH_SIZE,
+    'learning_rate': 0.001 if args.warm_start else 0.01,
 
     'num_channels': 128,
     'num_blocks': 9,
@@ -826,6 +845,9 @@ if args.start or args.resume:
         steps=params['steps'] // params['batch_size']
     )
 elif args.verify:
+    #from tensorflow.python import debug as tf_debug
+    #hooks = [tf_debug.LocalCLIDebugHook()]
+
     # iterate over the entire dataset and collect the metric, which we will
     # then pretty-print as a JSON object to standard output
     results = nn.evaluate(

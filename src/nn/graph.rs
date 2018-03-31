@@ -22,6 +22,7 @@ use nn::ffi::cudnn;
 use nn::ops::*;
 use nn::slots::*;
 use nn::{Type, TYPE};
+use util::max;
 
 /// The number of features in the neural network architecture.
 const NUM_FEATURES: usize = 128;
@@ -82,16 +83,22 @@ pub trait Ops<G: Graph> {
         c: i32,
         h: i32,
         w: i32,
-        weights_1: String,
+        weights_1c: String,
+        weights_1d: String,
         weights_2: String,
-        offset_1: String,
+        offset_1c: String,
+        offset_1d: String,
         offset_2: String,
+        output_1c: String,
+        output_1d: String,
         output_1: String,
         output_data_1: *mut c_void,
         output_2: String,
         output_data_2: *mut c_void,
-        workspace: *mut c_void,
-        workspace_size: usize
+        output_workspace: *mut c_void,
+        workspace_1: *mut c_void,
+        workspace_2: *mut c_void,
+        workspace_size: usize,
     );
 
     /// `output = weights * input + offset`
@@ -185,23 +192,51 @@ impl Ops<Builder> for Calibrate {
         c: i32,
         h: i32,
         w: i32,
-        weights_1: String,
+        weights_1c: String,
+        weights_1d: String,
         weights_2: String,
-        offset_1: String,
+        offset_1c: String,
+        offset_1d: String,
         offset_2: String,
+        output_1c: String,
+        output_1d: String,
         output_1: String,
         _output_data_1: *mut c_void,
         output_2: String,
         _output_data_2: *mut c_void,
-        _workspace: *mut c_void,
+        _output_workspace: *mut c_void,
+        _workspace_1: *mut c_void,
+        _workspace_2: *mut c_void,
         _workspace_size: usize
     )
     {
+        let d_ = 32 * max(1.0, (k as f32 / 176.0).floor()) as i32;
+        let c_ = k - d_;
+
+        // the scale of the two parallel convolutions must match the final
+        // output scale (since we will just copy the results).
+        graph.tensors[&output_1c].set_scale(graph.tensors[&output_1].get_scale());
+        graph.tensors[&output_1d].set_scale(graph.tensors[&output_1].get_scale());
+
         Convolution::calibrate(
             &graph.tensors[&input],
-            k, c, h, w,
-            &graph.tensors[&weights_1],
-            &graph.tensors[&offset_1],
+            c_, c, h, w,
+            &graph.tensors[&weights_1c],
+            &graph.tensors[&offset_1c],
+            &graph.tensors[&output_1c]
+        );
+
+        Convolution::calibrate(
+            &graph.tensors[&input],
+            d_, c, h, w,
+            &graph.tensors[&weights_1d],
+            &graph.tensors[&offset_1d],
+            &graph.tensors[&output_1d]
+        );
+
+        Concat::calibrate(
+            &graph.tensors[&output_1c],
+            &graph.tensors[&output_1d],
             &graph.tensors[&output_1]
         );
 
@@ -308,10 +343,12 @@ impl Ops<Workspace> for Allocate {
             1.0,
             &workspace.tensors[&input],
             &workspace.tensors[&weights],
+            1, 1,
             0.0,
             &Tensor::default(),
             &workspace.tensors[&offset],
-            &workspace.tensors[&output]
+            &workspace.tensors[&output],
+            0
         ));
     }
 
@@ -323,29 +360,57 @@ impl Ops<Workspace> for Allocate {
         _c: i32,
         _h: i32,
         _w: i32,
-        weights_1: String,
+        weights_1c: String,
+        weights_1d: String,
         weights_2: String,
-        offset_1: String,
+        offset_1c: String,
+        offset_1d: String,
         offset_2: String,
+        output_1c: String,
+        output_1d: String,
         output_1: String,
         _output_data_1: *mut c_void,
         output_2: String,
         _output_data_2: *mut c_void,
-        _workspace: *mut c_void,
+        _output_workspace: *mut c_void,
+        _workspace_1: *mut c_void,
+        _workspace_2: *mut c_void,
         _workspace_size: usize
     )
     {
-        debug_assert!(!workspace.convolutions.contains_key(&output_1));
+        debug_assert!(!workspace.convolutions.contains_key(&output_1c));
+        debug_assert!(!workspace.convolutions.contains_key(&output_1d));
         debug_assert!(!workspace.convolutions.contains_key(&output_2));
 
-        workspace.convolutions.insert(output_1.clone(), Convolution::new(
+        workspace.convolutions.insert(output_1c.clone(), Convolution::new(
             workspace.handle_dnn,
             1.0,
             &workspace.tensors[&input],
-            &workspace.tensors[&weights_1],
+            &workspace.tensors[&weights_1c],
+            1, 1,
             0.0,
             &Tensor::default(),
-            &workspace.tensors[&offset_1],
+            &workspace.tensors[&offset_1c],
+            &workspace.tensors[&output_1c],
+            workspace.tensors[&output_1c].get_size_in_bytes()
+        ));
+
+        workspace.convolutions.insert(output_1d.clone(), Convolution::new(
+            workspace.handle_dnn,
+            1.0,
+            &workspace.tensors[&input],
+            &workspace.tensors[&weights_1d],
+            2, 2,
+            0.0,
+            &Tensor::default(),
+            &workspace.tensors[&offset_1d],
+            &workspace.tensors[&output_1d],
+            workspace.tensors[&output_1d].get_size_in_bytes()
+        ));
+
+        workspace.concats.insert(output_1.clone(), Concat::new(
+            &workspace.tensors[&output_1c],
+            &workspace.tensors[&output_1d],
             &workspace.tensors[&output_1]
         ));
 
@@ -354,10 +419,12 @@ impl Ops<Workspace> for Allocate {
             1.0,
             &workspace.tensors[&output_1],
             &workspace.tensors[&weights_2],
+            1, 1,
             1.0,
             &workspace.tensors[&input],
             &workspace.tensors[&offset_2],
-            &workspace.tensors[&output_2]
+            &workspace.tensors[&output_2],
+            0
         ));
     }
 
@@ -480,34 +547,96 @@ impl Ops<Workspace> for Runtime {
         _c: i32,
         _h: i32,
         _w: i32,
-        weights_name_1: String,
+        weights_name_1c: String,
+        weights_name_1d: String,
         weights_name_2: String,
-        offset_name_1: String,
+        offset_name_1c: String,
+        offset_name_1d: String,
         offset_name_2: String,
+        output_name_1c: String,
+        output_name_1d: String,
         output_name_1: String,
         output_data_1: *mut c_void,
         output_name_2: String,
         output_data_2: *mut c_void,
-        workspace_data: *mut c_void,
+        output_workspace: *mut c_void,
+        workspace_data_1: *mut c_void,
+        workspace_data_2: *mut c_void,
         workspace_size: usize
     )
     {
-        let op_1 = &workspace.convolutions[&output_name_1];
+        let op_1c = &workspace.convolutions[&output_name_1c];
+        let op_1d = &workspace.convolutions[&output_name_1d];
+        let op_c = &workspace.concats[&output_name_1];
         let op_2 = &workspace.convolutions[&output_name_2];
+        let c_size = workspace.tensors[&output_name_1c].get_size_in_bytes() as isize;
+        let output_1c = output_workspace;
+        let output_1d = unsafe { output_workspace.offset(c_size) };
 
-        op_1.forward(
+        let mut current_stream = ptr::null();
+
+        unsafe {
+            check!(cudnn::cudnnGetStream(workspace.handle_dnn, &mut current_stream));
+            check!(cuda::cudaEventRecord(op_c.start, current_stream));
+
+            check!(cuda::cudaStreamWaitEvent(op_c.stream_1, op_c.start, 0));
+            check!(cuda::cudaStreamWaitEvent(op_c.stream_2, op_c.start, 0));
+        }
+
+        unsafe {
+            check!(cudnn::cudnnSetStream(workspace.handle_dnn, op_c.stream_1));
+        }
+
+        op_1c.forward(
             workspace.handle_dnn,
             &workspace.tensors[&input_name], input_data,
-            &workspace.tensors[&weights_name_1],
-            &workspace.tensors[&output_name_1], output_data_1,
-            &workspace.tensors[&offset_name_1],
-            &workspace.tensors[&output_name_1], output_data_1,
-            workspace_data, workspace_size,
+            &workspace.tensors[&weights_name_1c],
+            &workspace.tensors[&output_name_1c].with_tensor_desc(op_c.input_1_cnhw), output_1c,
+            &workspace.tensors[&offset_name_1c],
+            &workspace.tensors[&output_name_1c].with_tensor_desc(op_c.input_1_cnhw), output_1c,
+            workspace_data_1, workspace_size,
             workspace.relu
         );
 
         #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- conv2d({})\n= {:?}", output_name_1, input_name, workspace.tensors[&output_name_1].fmt_ptr(output_data_1));
+        eprintln!("{} <- conv2d({})\n= {:?}", output_name_1c, input_name, workspace.tensors[&output_name_1c].fmt_ptr(output_1c));
+
+        unsafe {
+            check!(cudnn::cudnnSetStream(workspace.handle_dnn, op_c.stream_2));
+        }
+
+        op_1d.forward(
+            workspace.handle_dnn,
+            &workspace.tensors[&input_name], input_data,
+            &workspace.tensors[&weights_name_1d],
+            &workspace.tensors[&output_name_1d].with_tensor_desc(op_c.input_2_cnhw), output_1d,
+            &workspace.tensors[&offset_name_1d],
+            &workspace.tensors[&output_name_1d].with_tensor_desc(op_c.input_2_cnhw), output_1d,
+            workspace_data_2, workspace_size,
+            workspace.relu
+        );
+
+        #[cfg(feature = "trace-cuda")]
+        eprintln!("{} <- conv2d({})\n= {:?}", output_name_1d, input_name, workspace.tensors[&output_name_1d].fmt_ptr(output_1d));
+
+        unsafe {
+            check!(cudnn::cudnnSetStream(workspace.handle_dnn, current_stream));
+
+            check!(cuda::cudaEventRecord(op_c.finish_1, op_c.stream_1));
+            check!(cuda::cudaStreamWaitEvent(current_stream, op_c.finish_1, 0));
+
+            check!(cuda::cudaEventRecord(op_c.finish_2, op_c.stream_2));
+            check!(cuda::cudaStreamWaitEvent(current_stream, op_c.finish_2, 0));
+        }
+
+        op_c.forward(
+            workspace.handle_dnn,
+            output_workspace,
+            &workspace.tensors[&output_name_1], output_data_1,
+        );
+
+        #[cfg(feature = "trace-cuda")]
+        eprintln!("{} <- concat([{}, {}])\n= {:?}", output_name_1, output_name_1c, output_name_1d, workspace.tensors[&output_name_1].fmt_ptr(output_data_1));
 
         op_2.forward(
             workspace.handle_dnn,
@@ -516,12 +645,12 @@ impl Ops<Workspace> for Runtime {
             &workspace.tensors[&input_name], input_data,
             &workspace.tensors[&offset_name_2],
             &workspace.tensors[&output_name_2], output_data_2,
-            workspace_data, workspace_size,
+            workspace_data_1, workspace_size,
             workspace.relu
         );
 
         #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- conv2d({}) + {}\n= {:?}", output_name_2, output_name_2, input_name, workspace.tensors[&output_name_2].fmt_ptr(output_data_2));
+        eprintln!("{} <- conv2d({}) + {}\n= {:?}", output_name_2, output_name_1, input_name, workspace.tensors[&output_name_2].fmt_ptr(output_data_2));
     }
 
     fn linear(
@@ -629,6 +758,7 @@ pub struct Workspace {
     pub(super) handle_dnn: cudnn::Handle,
 
     // operators
+    pub(super) concats: HashMap<String, Concat>,
     pub(super) convolutions: HashMap<String, Convolution>,
     pub(super) linears: HashMap<String, Linear>,
     pub(super) operators: HashMap<String, Operator>,
@@ -765,6 +895,7 @@ impl Builder {
             handle_blas: ptr::null(),
             handle_dnn: ptr::null(),
 
+            concats: HashMap::new(),
             convolutions: HashMap::new(),
             linears: HashMap::new(),
             operators: HashMap::new(),
@@ -902,8 +1033,10 @@ pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard
     let batch_size = graph.get_batch_size();
     let residual_1 = O::get_slot(graph, "residual_1", 4 * batch_size * NUM_FEATURES * 361);
     let residual_2 = O::get_slot(graph, "residual_2", 4 * batch_size * NUM_FEATURES * 361);
+    let residual_3 = O::get_slot(graph, "residual_3", 4 * batch_size * NUM_FEATURES * 361);
     let workspace_size = graph.get_workspace_size();
     let workspace_1 = O::get_slot(graph, "workspace_1", workspace_size);
+    let workspace_2 = O::get_slot(graph, "workspace_2", workspace_size);
 
     /*
     #[cfg(feature = "trace-cuda")]
@@ -936,13 +1069,17 @@ pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard
             graph,
             input_name, *residual_1,
             NUM_FEATURES as i32, NUM_FEATURES as i32, 3, 3,
-            format!("{:02}_residual/weights_1:0", i),
+            format!("{:02}_residual/weights_1c:0", i),
+            format!("{:02}_residual/weights_1d:0", i),
             format!("{:02}_residual/weights_2:0", i),
-            format!("{:02}_residual/offset_1:0", i),
+            format!("{:02}_residual/offset_1c:0", i),
+            format!("{:02}_residual/offset_1d:0", i),
             format!("{:02}_residual/offset_2:0", i),
+            format!("{:02}_residual/output_1c:0", i),
+            format!("{:02}_residual/output_1d:0", i),
             format!("{:02}_residual/output_1:0", i), *residual_2,
-            format!("{:02}_residual/output_2:0", i), *residual_1,
-            *workspace_1, workspace_size
+            format!("{:02}_residual/output_2:0", i), *residual_1, *residual_3,
+            *workspace_1, *workspace_2, workspace_size
         );
     }
 

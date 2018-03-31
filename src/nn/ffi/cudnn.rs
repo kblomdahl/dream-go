@@ -194,7 +194,6 @@ extern {
     /// * `yDesc` -
     /// * `y` -
     /// 
-    #[allow(dead_code)]
     pub fn cudnnTransformTensor(
         handle: Handle,
         alpha: *const f32,
@@ -217,6 +216,17 @@ extern {
     /// * `stream` -
     ///
     pub fn cudnnSetStream(handle: Handle, stream: Stream) -> Status;
+
+    /// This function retrieves the user CUDA stream programmed in the cuDNN
+    /// handle. When the user's CUDA stream was not set in the cuDNN
+    /// handle, this function reports the null-stream.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - 
+    /// * `stream` -
+    /// 
+    pub fn cudnnGetStream(handle: Handle, stream: *mut Stream) -> Status;
 
     pub fn cudnnCreateActivationDescriptor(activationDesc: *mut ActivationDescriptor) -> Status;
     pub fn cudnnDestroyActivationDescriptor(activationDesc: ActivationDescriptor) -> Status;
@@ -319,6 +329,38 @@ extern {
         c: c_int,  // channels
         h: c_int,  // height
         w: c_int,  // width
+    ) -> Status;
+
+    /// This function initializes a previously created generic Tensor descriptor
+    /// object into a 4D tensor, similarly to cudnnSetTensor4dDescriptor but
+    /// with the strides explicitly passed as parameters. This can be used to
+    /// lay out the 4D tensor in any order or simply to define gaps between
+    /// dimensions
+    /// 
+    /// # Arguments
+    /// 
+    /// * `tensorDesc` - Handle to a previously created tensor descriptor. 
+    /// * `dataType` - Data type.
+    /// * `n` - Number of images
+    /// * `c` - Number of feature maps per image.
+    /// * `h` - Height of each feature map.
+    /// * `w` - Width of each feature map.
+    /// * `nStride` - Stride between two consecutive images.
+    /// * `cStride` - Stride between two consecutive feature maps.
+    /// * `hStride` - Stride between two consecutive rows.
+    /// * `wStride` - Stride between two consecutive columns.
+    /// 
+    pub fn cudnnSetTensor4dDescriptorEx(
+        tensorDesc: TensorDescriptor,
+        dataType: DataType,
+        n: c_int,  // batch
+        c: c_int,  // channels
+        h: c_int,  // height
+        w: c_int,  // width
+        nStride: c_int,
+        cStride: c_int,
+        hStride: c_int,
+        wStride: c_int,
     ) -> Status;
 
     pub fn cudnnCreateFilterDescriptor(filterDesc: *mut FilterDescriptor) -> Status;

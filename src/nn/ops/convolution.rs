@@ -99,20 +99,25 @@ impl Convolution {
     /// * `alpha` -
     /// * `input` -
     /// * `weights` -
+    /// * `d_h` -
+    /// * `d_w` -
     /// * `beta` -
     /// * `blend` -
     /// * `bias` -
     /// * `output` -
+    /// * `min_workspace_size` -
     ///
     pub fn new(
         handle: cudnn::Handle,
         mut alpha: f32,
         input: &Tensor,
         weights: &Tensor,
+        d_h: i32, d_w: i32,
         beta: f32,
         blend: &Tensor,
         _bias: &Tensor,
         output: &Tensor,
+        min_workspace_size: usize
     ) -> Convolution
     {
         let mut fwd_algo: cudnn::ConvolutionFwdAlgo = cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm;
@@ -135,8 +140,8 @@ impl Convolution {
             check!(cudnn::cudnnCreateConvolutionDescriptor(&mut conv_desc));
             check!(cudnn::cudnnSetConvolution2dDescriptor(
                 conv_desc,
-                w_shape[2] / 2, w_shape[3] / 2,
-                1, 1, 1, 1,
+                w_shape[2] / 2 + d_h - 1, w_shape[3] / 2 + d_w - 1,
+                1, 1, d_h, d_w,
                 cudnn::ConvolutionMode::CrossCorrelation,
                 compute_type
             ));
@@ -190,7 +195,11 @@ impl Convolution {
 
             descr: conv_desc,
             fwd_algo: fwd_algo,
-            workspace_size: workspace_size,
+            workspace_size: if min_workspace_size < workspace_size {
+                workspace_size
+            } else {
+                min_workspace_size
+            },
 
             min_six: Min::new(output, 6.0)
         }
