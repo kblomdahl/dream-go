@@ -106,7 +106,7 @@ class DBRequest:
             assert parts[2] in ['rowid', 'name', 'parent', 'creationtime']
 
             self.operation = ('COUNT', parts[2])
-        else:
+        elif len(parts) >= 2:
             raise ValueError('unrecognized request')
 
         # set any optional parameters from the query string:
