@@ -69,6 +69,7 @@ class DBRequest:
     table = None
     parent = None
     creationtime = None
+    separator = None
 
     def __init__(self, path):
         url = urlsplit(path)
@@ -107,6 +108,7 @@ class DBRequest:
         #
         # - creationtime
         # - parent
+        # - separator
         #
         if url.query:
             query = parse_qs(url.query, strict_parsing=True)
@@ -122,6 +124,11 @@ class DBRequest:
                 self.creationtime = datetime.fromtimestamp(creationtime)
             except ValueError:
                 raise ValueError('invalid creation time')
+            except KeyError:
+                pass
+
+            try:
+                self.separator = query['separator'][0]
             except KeyError:
                 pass
 
@@ -160,15 +167,21 @@ class DBRequestHandler(ThreadingMixIn, BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
 
-    def _write_results(self, cursor):
+    def _write_results(self, cursor, request):
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
+
+        first = True
 
         while True:
             row = cursor.fetchone()
             if not row:
                 break
+
+            if not first and request.separator:
+                self.wfile.write(request.separator.encode('utf-8'))
+            first = False
 
             value = row[0]
 
@@ -190,7 +203,7 @@ class DBRequestHandler(ThreadingMixIn, BaseHTTPRequestHandler):
         SELECT content FROM %s WHERE name = ?
         ''' % (request.table), (request.operation[1],))
 
-        self._write_results(cursor)
+        self._write_results(cursor, request)
 
     def do_RECENT(self, cursor, request):
         ensure_table_exists(cursor, request.table)
@@ -198,7 +211,7 @@ class DBRequestHandler(ThreadingMixIn, BaseHTTPRequestHandler):
         SELECT %s FROM %s ORDER BY creationtime DESC LIMIT ?
         ''' % (request.operation[2], request.table), (request.operation[1],))
 
-        self._write_results(cursor)
+        self._write_results(cursor, request)
 
     def do_GET(self):
         """ Handle GET requests that retrieve data from the database """
