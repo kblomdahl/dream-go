@@ -76,7 +76,7 @@ if not args.sgf and not args.bytes:
 # establish a connection to the provided host
 url = urlparse(args.host[0])
 query = parse_qs(url.query)
-rest = http.client.HTTPConnection(url.netloc)
+rest = http.client.HTTPConnection(url.netloc, timeout=60)
 
 while not sys.stdin.closed:
     if args.sgf:
