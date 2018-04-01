@@ -1,0 +1,44 @@
+(;GM[1]FF[4]SZ[19]AP[SmartGo:3.1]CA[UTF-8]
+GN[w-dream_go-b-ray-1]
+PW[dream_go]
+PB[Ray]
+DT[2018-01-19]
+KM[6.5]
+RE[B+35.5]
+C[Black command: /home/alex/Programme/Engines/Go/ray --time 3600 --thread 1 --no-debug
+White command: /home/alex/Programme/Engines/Go/dream_go
+Black version: 9.0.1
+White version: 0.5.0
+Result(Black): B+36.5
+Result(White): W+8.5
+Host: alex-Aspire-VN7-791 (Intel(R) Core(TM) i5-4210H CPU @ 2.90GHz)
+Date: January 19, 2018 8:37:23 AM CET]
+;B[pd];W[pp];B[dd];W[dp];B[nq];W[qn];B[pr];W[qq];B[kq];W[nc];B[lc];W[qf]
+;B[nd];W[qc];B[qd];W[pc];B[oc];W[ob];B[od];W[nb];B[mc];W[rd];B[re];W[rc]
+;B[qe];W[rf];B[of];W[ph];B[nh];W[pj];B[gh];W[fc];B[hc];W[cc];B[dc];W[cd]
+;B[de];W[db];B[eb];W[cb];B[ec];W[cf];B[cn];W[fq];B[bp];W[cq];B[dl];W[df]
+;B[ef];W[eg];B[ff];W[cj];B[dg];W[cg];B[dh];W[ch];B[di];W[dj];B[hq];W[bq]
+;B[fr];W[er];B[fp];W[gq];B[gp];W[hp];B[ho];W[ip];B[iq];W[jp];B[jq];W[in]
+;B[hm];W[jl];B[hn];W[kn];B[io];W[jo];B[im];W[jm];B[ik];W[kj];B[nj];W[mi]
+;B[ni];W[kh];B[ll];W[jk];B[ji];W[ki];B[jh];W[mk];B[nk];W[ml];B[pk];W[qk]
+;B[ql];W[pl];B[ok];W[qj];B[pm];W[rl];B[qm];W[rm];B[pn];W[po];B[no];W[on]
+;B[om];W[nm];B[ol];W[mp];B[np];W[nn];B[mo];W[kf];B[jg];W[kg];B[mj];W[lm]
+;B[mn];W[mm];B[oo];W[mf];B[mh];W[og];B[ng];W[nf];B[pf];W[pg];B[lj];W[lk]
+;B[li];W[md];B[me];W[ld];B[le];W[kd];B[ke];W[ne];B[jd];W[kc];B[kb];W[jc]
+;B[ic];W[oe];B[lf];W[lg];B[jb];W[mg];B[pe];W[se];B[md];W[jf];B[kl];W[kp]
+;B[lp];W[lq];B[lo];W[jn];B[gr];W[eq];B[il];W[lr];B[kr];W[fs];B[hr];W[dn]
+;B[go];W[dm];B[ig];W[el];B[ij];W[qr];B[or];W[ei];B[eh];W[fi];B[fh];W[if]
+;B[hf];W[ea];B[fa];W[da];B[fb];W[fk];B[ek];W[fm];B[cm];W[bl];B[cl];W[bk]
+;B[ci];W[bi];B[dk];W[ej];B[gi];W[mb];B[ls];W[ie];B[he];W[id];B[hd];W[ps]
+;B[os];W[qs];B[mr];W[gs];B[hs];W[es];B[ks];W[la];B[lb];W[gj];B[gl];W[fl]
+;B[fn];W[eo];B[gm];W[hj];B[hi];W[hk];B[jj];W[kk];B[lh];W[oi];B[je];W[oj]
+;B[rn];W[qo];B[ro];W[oh];B[rp];W[rq];B[qp];W[sp];B[pq];W[sn];B[op];W[so]
+;B[sm];W[sl];B[rk];W[rj];B[sd];W[sc];B[sk];W[sj];B[rh];W[qg];B[ri];W[ma]
+;B[ka];W[ce];B[fd];W[fo];B[co];W[bm];B[bn];W[aq];B[an];W[ap];B[ao];W[cp]
+;B[bo];W[];B[]
+TB[fa][ga][ha][ia][ja][ka][eb][fb][gb][hb][ib][jb][kb][lb][dc][ec][fc][gc][hc][ic][jc][kc][lc][mc][oc][dd][ed][fd][gd][hd][id][jd][kd][ld][md][nd][od][pd][qd][de][ee][fe][ge][he][ie][je][ke][le][me][ne][oe][pe][qe][re][ef][ff][gf][hf][if][jf][kf][lf][mf][nf][of][pf][dg][eg][fg][gg][hg][ig][jg][kg][lg][mg][ng][dh][eh][fh][gh][hh][ih][jh][kh][lh][mh][nh][ci][di][gi][hi][ii][ji][ki][li][mi][ni][ij][jj][kj][lj][mj][nj][ik][jk][kk][lk][mk][nk][ok][pk][gl][il][jl][kl][ll][ml][nl][ol][pl][ql][gm][hm][im][jm][km][lm][mm][nm][om][pm][qm][fn][gn][hn][in][jn][kn][ln][mn][nn][on][pn][qn][rn][go][ho][io][jo][ko][lo][mo][no][oo][po][qo][ro][fp][gp][hp][ip][jp][kp][lp][mp][np][op][pp][qp][rp][hq][iq][jq][kq][lq][mq][nq][oq][pq][fr][gr][hr][ir][jr][kr][lr][mr][nr][or][pr][hs][is][js][ks][ls][ms][ns][os]
+TW[aa][ba][ca][da][ea][la][ma][na][oa][pa][qa][ra][sa][ab][bb][cb][db][mb][nb][ob][pb][qb][rb][sb][ac][bc][cc][nc][pc][qc][rc][sc][ad][bd][cd][rd][sd][ae][be][ce][se][af][bf][cf][df][qf][rf][sf][ag][bg][cg][og][pg][qg][rg][sg][ah][bh][ch][oh][ph][qh][rh][sh][ai][bi][ei][fi][oi][pi][qi][ri][si][aj][bj][cj][dj][ej][fj][gj][hj][oj][pj][qj][rj][sj][ak][bk][ck][dk][ek][fk][hk][qk][rk][sk][al][bl][cl][dl][el][fl][rl][sl][am][bm][cm][dm][fm][rm][sm][an][bn][cn][dn][sn][ao][bo][co][do][eo][fo][so][ap][bp][cp][dp][sp][aq][bq][cq][dq][eq][fq][gq][qq][rq][sq][ar][br][cr][dr][er][qr][rr][sr][as][bs][cs][ds][es][fs][gs][ps][qs][rs][ss]
+TZ[km]
+DB[ha][ia][ja][hb][ib][gc][jc][kc][ed][gd][kd][ld][fe][ge][gf][fg][gg][hh][ih][ii][gn][qn][qo][pp][mq][oq][ir][jr][nr][is][js][ms][ns]
+DW[ca][na][oa][pa][qa][ra][sa][ab][bb][pb][qb][rb][sb][ac][bc][ad][bd][sd][ae][be][af][bf][sf][ag][bg][ah][bh][ai][pi][aj][bj][fj][ak][ck][rk][sk][al][am][sm][do][dq][sq][ar][br][cr][dr][rr][sr][as][bs][cs][rs][ss]
+V[35.5])

@@ -16,50 +16,9 @@
 extern crate regex;
 extern crate dream_go;
 
-use dream_go::go::{Board, Color};
-use regex::Regex;
+mod common;
 
-/// Play each move in the given SGF string and return the final board state,
-/// if any of the moves are invalid then it panic.
-///
-/// # Arguments
-///
-/// * `src` - the SGF string
-///
-fn playout_game(src: &str) -> Board {
-    lazy_static! {
-        static ref LETTERS: [char; 26] = [
-            'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
-            'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
-            'w', 'x', 'y', 'z'
-        ];
-        static ref MOVE: Regex = Regex::new(r";([BW])\[([a-z]*)\]").unwrap();
-    }
-
-    let mut board = Board::new();
-    let mut count = 1;
-
-    for cap in MOVE.captures_iter(src) {
-        let color = match &cap[1] {
-            "B" => Color::Black,
-            "W" => Color::White,
-            _   => { unreachable!(); }
-        };
-        let x = cap[2].chars().nth(0)
-            .and_then(|x| LETTERS.binary_search(&x).ok())
-            .unwrap_or(board.size());
-        let y = cap[2].chars().nth(1)
-            .and_then(|y| LETTERS.binary_search(&y).ok())
-            .unwrap_or(board.size());
-
-        assert!(board.is_valid(color, x, 18 - y), "invalid move {}: {} {} {}\n{}", count, color, x, y, board);
-
-        board.place(color, x, 18 - y);
-        count += 1;
-    }
-
-    board
-}
+use common::playout_game;
 
 /// Famous game for basic sanity checks
 #[test]
@@ -83,7 +42,7 @@ fn lee_sedol_alpha_go_game_4() {
 ;B[bk];W[ak];B[cl];W[hn];B[in];W[hp];B[fr];W[er];B[es];W[ds]
 ;B[ah];W[ai];B[kd];W[ie];B[kc];W[kb];B[gk];W[ib];B[qh];W[rh]
 ;B[qs];W[rs];B[oh];W[sl];B[of];W[sj];B[ni];W[nj];B[oo];W[jp]
-"#);
+"#, None);
 
     assert_eq!(board.zobrist_hash(), 0x616d53bfd7c63e6c, "wrong hash\n{}", board);
 }
@@ -108,7 +67,7 @@ fn ke_jie_alpha_go_game_2() {
 ;B[kg];W[cp];B[jn];W[in];B[dp];W[fo];B[cp];W[gn];B[ke];W[me]
 ;B[jf];W[jb];B[ic];W[ib];B[er];W[hc];B[cc];W[bc];B[dd];W[cb]
 ;B[ce];W[dc];B[cf];W[dg];B[be]
-"#);
+"#, None);
 
     assert_eq!(board.zobrist_hash(), 0xad4f3d0dfc4e535b, "wrong hash\n{}", board);
 }
@@ -151,7 +110,7 @@ fn park_taehee_kim_dayoung() {
 ;B[ps];W[ip];B[jp];W[ao];B[an];W[ap];B[cp];W[bq];B[pm];W[pn]
 ;B[nn];W[no];B[og];W[gn];B[oh];W[oi];B[oe];W[pf];B[rs];W[ca]
 ;B[bd];W[qs];B[da]
-"#);
+"#, None);
 
     assert_eq!(board.zobrist_hash(), 0x2867823577192483, "wrong hash\n{}", board);
 }

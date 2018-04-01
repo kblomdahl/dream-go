@@ -9,6 +9,5 @@ target/
 *.dat
 *.json
 *.log
-*.sgf
 *.sqlite3
 
