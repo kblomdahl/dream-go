@@ -167,29 +167,69 @@ impl Concat {
     }
 
     /// Performs the appropriate cuDNN calls to compute the concatenation of
-    /// the two tensors. This function assumes the tensors to be concatenated
-    /// has already been copied to `input_cnhw` in CNHW format.
+    /// the two tensors.
     ///
     /// # Arguments
     ///
     /// * `handle` -
-    /// * `input_cnhw` - 
+    /// * `input_1` - 
     /// * `output` -
     /// * `output_data` -
     ///
     pub fn forward(
         &self,
         handle: cudnn::Handle,
-        input_cnhw: *const c_void,
+        input_1: &Tensor,
+        input_data_1: *mut c_void,        
+        input_2: &Tensor,
+        input_data_2: *mut c_void,
         output: &Tensor,
         output_data: *mut c_void,        
+        output_workspace: *mut c_void,        
     )
     {
+        let input_workspace_1 = output_workspace;
+        let input_workspace_2 = unsafe {
+            output_workspace.offset(input_1.get_size_in_bytes() as isize)
+        };
+
+        let mut current_stream = ptr::null();
+
         unsafe {
+            check!(cudnn::cudnnGetStream(handle, &mut current_stream));
+
+            // transform `input_1` to CNHW
+            check!(cudnn::cudnnSetStream(handle, self.stream_1));
             check!(cudnn::cudnnTransformTensor(
                 handle,
                 &self.alpha,
-                self.output_cnhw, input_cnhw,
+                input_1.tensor_desc, input_data_1,
+                &self.beta,
+                self.input_1_cnhw, input_workspace_1
+            ));
+
+            check!(cuda::cudaEventRecord(self.finish_1, self.stream_1));
+            check!(cuda::cudaStreamWaitEvent(current_stream, self.finish_1, 0));
+
+            // transform `input_2` to CNHW
+            check!(cudnn::cudnnSetStream(handle, self.stream_2));
+            check!(cudnn::cudnnTransformTensor(
+                handle,
+                &self.alpha,
+                input_2.tensor_desc, input_data_2,
+                &self.beta,
+                self.input_2_cnhw, input_workspace_2
+            ));
+
+            check!(cuda::cudaEventRecord(self.finish_2, self.stream_2));
+            check!(cuda::cudaStreamWaitEvent(current_stream, self.finish_2, 0));
+
+            // transform `[input_1, input_2]` to NCHW
+            check!(cudnn::cudnnSetStream(handle, current_stream));
+            check!(cudnn::cudnnTransformTensor(
+                handle,
+                &self.alpha,
+                self.output_cnhw, output_workspace,
                 &self.beta,
                 output.tensor_desc, output_data
             ));

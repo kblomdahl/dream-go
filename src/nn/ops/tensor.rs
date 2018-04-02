@@ -127,12 +127,6 @@ impl Tensor {
         }
     }
 
-    pub fn with_tensor_desc(&self, tensor_desc: cudnn::TensorDescriptor) -> Tensor {
-        let mut other = self.clone();
-        other.tensor_desc = tensor_desc;
-        other
-    }
-
     pub fn get_data_type(&self) -> cudnn::DataType {
         *self.data_type.borrow()
     }

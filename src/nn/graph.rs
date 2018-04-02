@@ -570,8 +570,8 @@ impl Ops<Workspace> for Runtime {
         let op_c = &workspace.concats[&output_name_1];
         let op_2 = &workspace.convolutions[&output_name_2];
         let c_size = workspace.tensors[&output_name_1c].get_size_in_bytes() as isize;
-        let output_1c = output_workspace;
-        let output_1d = unsafe { output_workspace.offset(c_size) };
+        let output_1c = output_data_1;
+        let output_1d = unsafe { output_data_1.offset(c_size) };
 
         let mut current_stream = ptr::null();
 
@@ -591,9 +591,9 @@ impl Ops<Workspace> for Runtime {
             workspace.handle_dnn,
             &workspace.tensors[&input_name], input_data,
             &workspace.tensors[&weights_name_1c],
-            &workspace.tensors[&output_name_1c].with_tensor_desc(op_c.input_1_cnhw), output_1c,
+            &workspace.tensors[&output_name_1c], output_1c,
             &workspace.tensors[&offset_name_1c],
-            &workspace.tensors[&output_name_1c].with_tensor_desc(op_c.input_1_cnhw), output_1c,
+            &workspace.tensors[&output_name_1c], output_1c,
             workspace_data_1, workspace_size,
             workspace.relu
         );
@@ -609,9 +609,9 @@ impl Ops<Workspace> for Runtime {
             workspace.handle_dnn,
             &workspace.tensors[&input_name], input_data,
             &workspace.tensors[&weights_name_1d],
-            &workspace.tensors[&output_name_1d].with_tensor_desc(op_c.input_2_cnhw), output_1d,
+            &workspace.tensors[&output_name_1d], output_1d,
             &workspace.tensors[&offset_name_1d],
-            &workspace.tensors[&output_name_1d].with_tensor_desc(op_c.input_2_cnhw), output_1d,
+            &workspace.tensors[&output_name_1d], output_1d,
             workspace_data_2, workspace_size,
             workspace.relu
         );
@@ -621,18 +621,14 @@ impl Ops<Workspace> for Runtime {
 
         unsafe {
             check!(cudnn::cudnnSetStream(workspace.handle_dnn, current_stream));
-
-            check!(cuda::cudaEventRecord(op_c.finish_1, op_c.stream_1));
-            check!(cuda::cudaStreamWaitEvent(current_stream, op_c.finish_1, 0));
-
-            check!(cuda::cudaEventRecord(op_c.finish_2, op_c.stream_2));
-            check!(cuda::cudaStreamWaitEvent(current_stream, op_c.finish_2, 0));
         }
 
         op_c.forward(
             workspace.handle_dnn,
-            output_workspace,
+            &workspace.tensors[&output_name_1c], output_1c,
+            &workspace.tensors[&output_name_1d], output_1d,
             &workspace.tensors[&output_name_1], output_data_1,
+            output_workspace
         );
 
         #[cfg(feature = "trace-cuda")]
