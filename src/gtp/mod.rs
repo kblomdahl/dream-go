@@ -633,15 +633,23 @@ impl Gtp {
                     error!(id, "cannot undo");
                 }
             },
-            Command::TimeSettings(main_time, byo_yomi_time, _byo_yomi_stones) => {
+            Command::TimeSettings(main_time, byo_yomi_time, byo_yomi_stones) => {
                 // ensure the neural network weights are loaded since we do not
                 // want that to be part of the allocated time
                 self.open_service();
 
-                if main_time >= 0.0 && byo_yomi_time >= 0.0 {
-                    self.main_time = main_time;
-                    self.byo_yomi_time = byo_yomi_time;
+                if byo_yomi_stones == 0 {
+                    self.main_time = ::std::f32::INFINITY;
+                    self.byo_yomi_time = ::std::f32::INFINITY;
                     success!(id, "");
+                } else if byo_yomi_stones == 1 {
+                    if main_time >= 0.0 && byo_yomi_time >= 0.0 {
+                        self.main_time = main_time;
+                        self.byo_yomi_time = byo_yomi_time;
+                        success!(id, "");
+                    } else {
+                        error!(id, "syntax error");
+                    }
                 } else {
                     error!(id, "syntax error");
                 }
