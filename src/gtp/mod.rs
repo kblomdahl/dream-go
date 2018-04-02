@@ -15,10 +15,12 @@
 use ordered_float::*;
 use regex::Regex;
 use std::io::BufRead;
+use std::time::Instant;
 
 use go::sgf::*;
 use go::{Board, Color, Score};
 use mcts::predict::{self, PredictService};
+use mcts::time_control;
 use mcts;
 use nn::Network;
 use util::config;
@@ -29,10 +31,11 @@ use gtp::vertex::*;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&'static str; 18] = [
+const KNOWN_COMMANDS: [&'static str; 19] = [
     "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove", "undo",
-    "quit", "final_score", "heatmap", "heatmap-nn", "sabaki-genmovelog"
+    "time_settings", "quit", "final_score", "heatmap", "heatmap-nn",
+    "sabaki-genmovelog"
 ];
 
 #[derive(Debug, PartialEq)]
@@ -55,6 +58,7 @@ enum Command {
     FinalScore,  // write the score to stdout
     RegGenMove(Color),  // generate the supposedly best move for either color
     Undo,  // undo one move
+    TimeSettings(f32, f32, usize),  // set the time settings
     Quit  // quit
 }
 
@@ -86,6 +90,7 @@ lazy_static! {
     static ref KNOWN_COMMAND: Regex = Regex::new(r"^known_command +([^ ]+)").unwrap();
     static ref GENMOVE: Regex = Regex::new(r"^genmove +([bw])").unwrap();
     static ref REG_GENMOVE: Regex = Regex::new(r"^reg_genmove +([bBwW])").unwrap();
+    static ref TIME_SETTINGS: Regex = Regex::new(r"^time_settings +([0-9]+\.?[0-9]*) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
 }
 
 struct Gtp {
@@ -93,7 +98,9 @@ struct Gtp {
     search_tree: Option<mcts::tree::Node<mcts::tree::DefaultValue>>,
     last_log: String,
     history: Vec<Board>,
-    komi: f32
+    komi: f32,
+    main_time: f32,
+    byo_yomi_time: f32
 }
 
 impl Gtp {
@@ -199,6 +206,27 @@ impl Gtp {
             }
         } else if line == "undo" {
             Some((id, Command::Undo))
+        } else if let Some(caps) = TIME_SETTINGS.captures(line) {
+            let main_time = caps[1].parse::<f32>();
+            let byo_yomi_time = caps[2].parse::<f32>();
+            let byo_yomi_stones = caps[3].parse::<usize>();
+
+            if let Ok(main_time) = main_time {
+                if let Ok(byo_yomi_time) = byo_yomi_time {
+                    if let Ok(byo_yomi_stones) = byo_yomi_stones {
+                        Some((id, Command::TimeSettings(main_time, byo_yomi_time, byo_yomi_stones)))
+                    } else {
+                        error!(id, "syntax error");
+                        Some((None, Command::Pass))
+                    }
+                } else {
+                    error!(id, "syntax error");
+                    Some((None, Command::Pass))
+                }
+            } else {
+                error!(id, "syntax error");
+                Some((None, Command::Pass))
+            }
         } else if line == "quit" {
             Some((id, Command::Quit))
         } else {
@@ -275,17 +303,35 @@ impl Gtp {
                 }
             });
 
-            let (value, index, tree) = mcts::predict::<mcts::tree::DefaultValue>(
-                &service.lock(),
-                None,
-                search_tree,
-                &board,
-                color
-            );
+            let (value, index, tree) = if self.main_time.is_finite() && self.byo_yomi_time.is_finite() {
+                let total_visits = search_tree.as_ref()
+                    .map(|tree| tree.total_count)
+                    .unwrap_or(0);
+
+                mcts::predict::<mcts::tree::DefaultValue, _>(
+                    &service.lock(),
+                    None,
+                    time_control::ByoYomi::new(board.count(), total_visits, self.main_time, self.byo_yomi_time),
+                    search_tree,
+                    &board,
+                    color
+                )
+            } else {
+                mcts::predict::<mcts::tree::DefaultValue, _>(
+                    &service.lock(),
+                    None,
+                    time_control::RolloutLimit::new(*config::NUM_ROLLOUT),
+                    search_tree,
+                    &board,
+                    color
+                )
+            };
 
             eprintln!("{}", mcts::tree::to_pretty(&tree));
 
-            self.last_log = format!("{}", mcts::tree::to_sgf::<Sabaki, _>(&tree, &board, false));
+            if !*config::NO_SABAKI {
+                self.last_log = format!("{}", mcts::tree::to_sgf::<Sabaki, _>(&tree, &board, false));
+            }
             self.search_tree = Some(tree);
 
             if value < 0.025 {  // 2.5% chance of winning
@@ -378,9 +424,10 @@ impl Gtp {
 
         if let Some(ref service) = self.service {
             let board = self.history.last().unwrap();
-            let (_value, _index, tree) = mcts::predict::<mcts::tree::DefaultValue>(
+            let (_value, _index, tree) = mcts::predict::<mcts::tree::DefaultValue, _>(
                 &service.lock(),
                 None,
+                time_control::RolloutLimit::new(*config::NUM_ROLLOUT),
                 None,
                 &board,
                 color
@@ -501,7 +548,13 @@ impl Gtp {
                 }
             },
             Command::ListCommands => {
-                success!(id, KNOWN_COMMANDS.join("\n"));
+                let known_commands = KNOWN_COMMANDS.iter()
+                    .cloned()
+                    .filter(|&c| {
+                        !c.starts_with("sabaki-") || !*config::NO_SABAKI
+                    }).collect::<Vec<&str>>();
+
+                success!(id, known_commands.join("\n"));
             },
             Command::KnownCommand(other) => {
                 success!(id, {
@@ -518,6 +571,7 @@ impl Gtp {
                 success!(id, &format!("\n{}", board));
             },
             Command::GenMove(color) => {
+                let start_time = Instant::now();
                 let vertex = self.generate_move(id, color);
 
                 if let Some(vertex) = vertex {
@@ -533,6 +587,17 @@ impl Gtp {
                         mcts::tree::Node::forward(tree, 361)
                     });
                 }
+
+                // update the remaining main time, saturating at zero instead of
+                // overflowing.
+                let duration = start_time.elapsed();
+
+                self.main_time -= duration.as_secs() as f32;
+                self.main_time -= duration.subsec_nanos() as f32 / 1e9;
+
+                if self.main_time < 0.0 {
+                    self.main_time = 0.0;
+                }
             },
             Command::GenMoveLog => {
                 self.generate_move_log(id);
@@ -543,7 +608,9 @@ impl Gtp {
                 let black = black as f32;
                 let white = white as f32 + self.komi;
 
-                self.last_log = format!("({})", rollout);
+                if !*config::NO_SABAKI {
+                    self.last_log = format!("({})", rollout);
+                }
 
                 if black == white {
                     success!(id, "0");
@@ -565,6 +632,19 @@ impl Gtp {
                 } else {
                     error!(id, "cannot undo");
                 }
+            },
+            Command::TimeSettings(main_time, byo_yomi_time, _byo_yomi_stones) => {
+                // ensure the neural network weights are loaded since we do not
+                // want that to be part of the allocated time
+                self.open_service();
+
+                if main_time >= 0.0 && byo_yomi_time >= 0.0 {
+                    self.main_time = main_time;
+                    self.byo_yomi_time = byo_yomi_time;
+                    success!(id, "");
+                } else {
+                    error!(id, "syntax error");
+                }
             }
         }
     }
@@ -581,7 +661,9 @@ pub fn run() {
         search_tree: None,
         last_log: "{}".to_string(),
         history: vec! [Board::new()],
-        komi: 7.5
+        komi: 7.5,
+        main_time: ::std::f32::INFINITY,
+        byo_yomi_time: ::std::f32::INFINITY
     };
 
     for line in stdin_lock.lines() {
@@ -687,6 +769,12 @@ mod tests {
     fn undo() {
         assert_eq!(Gtp::parse_line("1 undo"), Some((Some(1), Command::Undo)));
         assert_eq!(Gtp::parse_line("undo"), Some((None, Command::Undo)));
+    }
+
+    #[test]
+    fn time_settings() {
+        assert_eq!(Gtp::parse_line("1 time_settings 30.2 0 0"), Some((Some(1), Command::TimeSettings(30.2, 0.0, 0))));
+        assert_eq!(Gtp::parse_line("time_settings 300 3.14 0"), Some((None, Command::TimeSettings(300.0, 3.14, 0))));
     }
 
     #[test]

@@ -14,6 +14,7 @@
 
 use go::{Board, Color, Features, symmetry, CHW};
 use mcts::predict::PredictGuard;
+use mcts::time_control;
 use mcts;
 use util::b85;
 use util::config;
@@ -72,9 +73,10 @@ impl<'a> Iterator for EntryIterator<'a> {
                         *config::NUM_THREADS / *config::NUM_GAMES,
                         1
                     );
-                    let (_, _, tree) = mcts::predict::<mcts::tree::DefaultValue>(
+                    let (_, _, tree) = mcts::predict::<mcts::tree::DefaultValue, _>(
                         self.server.as_ref().unwrap(),
                         Some(num_threads),
+                        time_control::RolloutLimit::new(*config::NUM_ROLLOUT),
                         None,
                         board,
                         current_color

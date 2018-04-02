@@ -228,19 +228,19 @@ pub struct Node<E: Value> {
     pub pass_count: i32,
 
     /// The total number of times any edge has been traversed.
-    total_count: i32,
+    pub total_count: i32,
 
     /// The number of times each edge has been traversed
-    count: [i32; 368],
+    pub count: [i32; 368],
 
     /// The prior value of each edge as indicated by the policy.
     pub prior: [f32; 368],
 
     /// The total sum of all values for the sub-tree of each edge.
-    total_value: [f32; 368],
+    pub total_value: [f32; 368],
 
     /// The average value for the sub-tree of each edge.
-    value: [f32; 368],
+    pub value: [f32; 368],
 
     /// Whether some thread is currently busy (or is done) expanding the given
     /// child. This is used to avoid the same child being expanded multiple
