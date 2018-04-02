@@ -80,10 +80,12 @@ fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
     });
 }
 
-#[bench] fn batch_size_01(b: &mut Bencher) { bench_batch_size(b,  1); }
-#[bench] fn batch_size_02(b: &mut Bencher) { bench_batch_size(b,  2); }
-#[bench] fn batch_size_04(b: &mut Bencher) { bench_batch_size(b,  4); }
-#[bench] fn batch_size_08(b: &mut Bencher) { bench_batch_size(b,  8); }
-#[bench] fn batch_size_16(b: &mut Bencher) { bench_batch_size(b, 16); }
-#[bench] fn batch_size_32(b: &mut Bencher) { bench_batch_size(b, 32); }
-#[bench] fn batch_size_64(b: &mut Bencher) { bench_batch_size(b, 64); }
+#[bench] fn batch_size_01(b: &mut Bencher)  { bench_batch_size(b,  1); }
+#[bench] fn batch_size_02(b: &mut Bencher)  { bench_batch_size(b,  2); }
+#[bench] fn batch_size_04(b: &mut Bencher)  { bench_batch_size(b,  4); }
+#[bench] fn batch_size_08(b: &mut Bencher)  { bench_batch_size(b,  8); }
+#[bench] fn batch_size_16(b: &mut Bencher)  { bench_batch_size(b, 16); }
+#[bench] fn batch_size_32(b: &mut Bencher)  { bench_batch_size(b, 32); }
+#[bench] fn batch_size_64(b: &mut Bencher)  { bench_batch_size(b, 64); }
+#[bench] fn batch_size_128(b: &mut Bencher) { bench_batch_size(b, 128); }
+#[bench] fn batch_size_256(b: &mut Bencher) { bench_batch_size(b, 256); }
