@@ -23,6 +23,7 @@ use std::fs::File;
 use std::io::prelude::*;
 
 thread_local! {
+    #[allow(dead_code)]
     static NETWORK: nn::Network = nn::Network::new().unwrap();
 }
 
@@ -34,6 +35,7 @@ thread_local! {
 /// * `src` - the SGF string
 /// * `max_moves` -
 ///
+#[allow(dead_code)]
 pub fn playout_game(src: &str, max_moves: Option<usize>) -> Board {
     lazy_static! {
         static ref LETTERS: [char; 26] = [
@@ -84,6 +86,7 @@ pub fn playout_game(src: &str, max_moves: Option<usize>) -> Board {
 /// * `filename` -
 /// * `max_moves` -
 /// 
+#[allow(dead_code)]
 pub fn playout_file(filename: &str, max_moves: Option<usize>) -> Board {
     let mut file = File::open(filename).expect("file not found");
     let mut contents = String::new();
@@ -101,6 +104,7 @@ pub fn playout_file(filename: &str, max_moves: Option<usize>) -> Board {
 /// * `board` -
 /// * `next_color` -
 /// 
+#[allow(dead_code)]
 pub fn predict(board: &Board, next_color: Color) -> (f32, Box<[f32]>) {
     // predict the next move and the current value using the neural network
     NETWORK.with(|network| {
