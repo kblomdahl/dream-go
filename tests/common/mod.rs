@@ -14,7 +14,8 @@
 //
 
 use dream_go::go::symmetry::Transform;
-use dream_go::go::{Board, Color, Features, CHW, HWC};
+use dream_go::go::{Board, Color, Features, Score, CHW, HWC};
+use dream_go::mcts;
 use dream_go::nn;
 use dream_go::util::types::*;
 
@@ -133,5 +134,27 @@ pub fn predict(board: &Board, next_color: Color) -> (f32, Box<[f32]>) {
                 (value[0], policy[0].clone())
             }
         }
+    })
+}
+
+/// Returns the final score as suggested by the neural network for the given
+/// next color to play.
+/// 
+/// # Arguments
+/// 
+/// * `board` -
+/// * `next_color` -
+/// 
+#[allow(dead_code)]
+pub fn greedy_score(board: &Board, next_color: Color) -> (usize, usize) {
+    NETWORK.with(|network| {
+        let service = mcts::predict::service(network.clone());
+        let (finished, _rollout) = mcts::greedy_score(
+            &service.lock(),
+            board,
+            next_color
+        );
+
+        board.get_guess_score(&finished)
     })
 }

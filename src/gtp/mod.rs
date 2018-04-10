@@ -18,7 +18,7 @@ use std::io::BufRead;
 use std::time::Instant;
 
 use go::sgf::*;
-use go::{Board, Color, Score};
+use go::{Board, Color, Score, StoneStatus};
 use mcts::predict::{self, PredictService};
 use mcts::time_control;
 use mcts;
@@ -32,11 +32,12 @@ use gtp::vertex::*;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&'static str; 22] = [
+const KNOWN_COMMANDS: [&'static str; 23] = [
     "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove",
     "kgs-genmove_cleanup", "undo",
-    "time_settings", "kgs-time_settings", "time_left", "quit", "final_score",
+    "time_settings", "kgs-time_settings", "time_left", "quit",
+    "final_score", "final_status_list",
     "heatmap", "heatmap-nn", "sabaki-genmovelog"
 ];
 
@@ -58,6 +59,7 @@ enum Command {
     GenMove(Color, bool),  // generate and play the supposedly best move for either color, the second argument indicate whether it is a clean-up move
     GenMoveLog,  // output all variations considered by the most recent search
     FinalScore,  // write the score to stdout
+    FinalStatusList(StoneStatus),  // write status of stones to stdout
     RegGenMove(Color),  // generate the supposedly best move for either color
     Undo,  // undo one move
     TimeSettingsNone,  // set the time settings
@@ -97,6 +99,7 @@ lazy_static! {
     static ref GENMOVE: Regex = Regex::new(r"^genmove +([bw])").unwrap();
     static ref REG_GENMOVE: Regex = Regex::new(r"^reg_genmove +([bBwW])").unwrap();
     static ref KGS_GENMOVE_CLEANUP: Regex = Regex::new(r"^kgs-genmove_cleanup +([bw])").unwrap();
+    static ref FINAL_STATUS_LIST: Regex = Regex::new(r"^final_status_list +(dead|alive|seki)").unwrap();
     static ref TIME_SETTINGS: Regex = Regex::new(r"^time_settings +([0-9]+\.?[0-9]*) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
     static ref KGS_TIME_SETTINGS_NONE: Regex = Regex::new(r"^kgs-time_settings +none").unwrap();
     static ref KGS_TIME_SETTINGS_ABSOLUTE: Regex = Regex::new(r"^kgs-time_settings +absolute +([0-9]+\.?[0-9]*)").unwrap();
@@ -171,6 +174,10 @@ impl Gtp {
             Ok((id, Command::GenMoveLog))
         } else if line == "final_score" {
             Ok((id, Command::FinalScore))
+        } else if let Some(caps) = FINAL_STATUS_LIST.captures(line) {
+            let status = caps[1].parse::<StoneStatus>().map_err(|_| "syntax error")?;
+
+            Ok((id, Command::FinalStatusList(status)))
         } else if let Some(caps) = REG_GENMOVE.captures(line) {
             let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
@@ -615,23 +622,69 @@ impl Gtp {
                 self.generate_move_log(id);
             },
             Command::FinalScore => {
-                let board = self.history.last().unwrap();
-                let (black, white, rollout) = board.get_guess_score();
-                let black = black as f32;
-                let white = white as f32 + self.komi;
+                self.open_service();
 
-                if !*config::NO_SABAKI {
-                    self.last_log = format!("({})", rollout);
-                }
+                if let Some(ref service) = self.service {
+                    let board = self.history.last().unwrap();
+                    let next_color = match board.last_played() {
+                        Some(color) => color.opposite(),
+                        _ => Color::Black,
+                    };
+                    let (finished, rollout) = mcts::greedy_score(&service.lock(), &board, next_color);
+                    let (black, white) = board.get_guess_score(&finished);
 
-                if black == white {
-                    success!(id, "0");
-                } else if black > white {
-                    success!(id, &format!("B+{:.1}", black - white));
-                } else if white > black {
-                    success!(id, &format!("W+{:.1}", white - black));
+                    eprintln!("Black: {}", black);
+                    eprintln!("White: {} + {}", white, self.komi);
+
+                    let black = black as f32;
+                    let white = white as f32 + self.komi;
+
+                    if !*config::NO_SABAKI {
+                        self.last_log = format!("({})", rollout);
+                    }
+
+                    if black == white {
+                        success!(id, "0");
+                    } else if black > white {
+                        success!(id, &format!("B+{:.1}", black - white));
+                    } else if white > black {
+                        success!(id, &format!("W+{:.1}", white - black));
+                    }
+                } else {
+                    error!(id, "");
                 }
-            }
+            },
+            Command::FinalStatusList(status) => {
+                self.open_service();
+
+                if let Some(ref service) = self.service {
+                    let board = self.history.last().unwrap();
+                    let next_color = match board.last_played() {
+                        Some(color) => color.opposite(),
+                        _ => Color::Black,
+                    };
+                    let (finished, _rollout) = mcts::greedy_score(&service.lock(), &board, next_color);
+                    let status_list = board.get_stone_status(&finished);
+                    let vertices = status_list.into_iter()
+                        .filter_map(|(index, stone_status)| {
+                            if stone_status == status {
+                                let vertex = Vertex {
+                                    x: mcts::tree::X[index] as usize,
+                                    y: mcts::tree::Y[index] as usize
+                                };
+
+                                Some(format!("{}", vertex))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<String>>();
+
+                    success!(id, vertices.join(" "));
+                } else {
+                    error!(id, "could not load network weights");
+                }
+            },
             Command::RegGenMove(color) => {
                 self.search_tree = None;
                 self.generate_move(id, color, false);
@@ -819,6 +872,14 @@ mod tests {
     fn final_score() {
         assert_eq!(Gtp::parse_line("1 final_score"), Some((Some(1), Command::FinalScore)));
         assert_eq!(Gtp::parse_line("final_score"), Some((None, Command::FinalScore)));
+    }
+
+    #[test]
+    fn final_status_list() {
+        assert_eq!(Gtp::parse_line("1 final_status_list dead"), Some((Some(1), Command::FinalStatusList(StoneStatus::Dead))));
+        assert_eq!(Gtp::parse_line("final_status_list alive"), Some((None, Command::FinalStatusList(StoneStatus::Alive))));
+        assert_eq!(Gtp::parse_line("final_status_list dead"), Some((None, Command::FinalStatusList(StoneStatus::Dead))));
+        assert_eq!(Gtp::parse_line("final_status_list seki"), Some((None, Command::FinalStatusList(StoneStatus::Seki))));
     }
 
     #[test]

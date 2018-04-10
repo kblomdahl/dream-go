@@ -19,8 +19,8 @@ extern crate ordered_float;
 
 mod common;
 
-use common::{playout_file, predict};
-use dream_go::go::{Color, Score};
+use common::{playout_file, predict, greedy_score};
+use dream_go::go::{Color};
 use ordered_float::OrderedFloat;
 
 /// Returns the vertex with the maximum value in the given policy.
@@ -197,7 +197,7 @@ fn ladder_3() {
 fn dead_dragon_1() {
     let board = playout_file("examples/dead_dragon_1.sgf", None);
     let (value, _policy) = predict(&board, Color::Black);
-    let (black, white, _rollout) = board.get_guess_score();
+    let (black, white) = greedy_score(&board, Color::Black);
 
     assert!(black > white, "Black should win by 31 (without komi) -- black {}, white {}", black, white);
     assert!(value > 0.0, "Black should win by 38.5 -- {}", value);
@@ -237,7 +237,7 @@ fn dead_dragon_1() {
 fn dead_dragon_2() {
     let board = playout_file("examples/dead_dragon_2.sgf", None);
     let (value, _policy) = predict(&board, Color::Black);
-    let (black, white, _rollout) = board.get_guess_score();
+    let (black, white) = greedy_score(&board, Color::Black);
 
     assert!(black + 8 > white , "Black should win by 4.5 -- black {}, white {}", black, white);
     assert!(value > 0.0, "Black should win by 4.5 -- {}", value);
@@ -277,7 +277,7 @@ fn dead_dragon_2() {
 fn dead_dragon_3() {
     let board = playout_file("examples/dead_dragon_3.sgf", None);
     let (value, _policy) = predict(&board, Color::White);
-    let (black, white, _rollout) = board.get_guess_score();
+    let (black, white) = greedy_score(&board, Color::White);
 
     assert!(white + 8 > black, "White should win by 7.5 -- black {}, white {}", black, white);
     assert!(value > 0.0, "White should win by 7.5 -- {}", value);
@@ -316,7 +316,7 @@ fn dead_dragon_3() {
 fn dead_dragon_4() {
     let board = playout_file("examples/dead_dragon_4.sgf", None);
     let (value, _policy) = predict(&board, Color::Black);
-    let (black, white, _rollout) = board.get_guess_score();
+    let (black, white) = greedy_score(&board, Color::Black);
 
     assert!(black > white, "Black should win by 140.5 -- black {}, white {}", black, white);
     assert!(value > 0.0, "Black should win by 140.5 -- {}", value);
@@ -355,7 +355,7 @@ fn dead_dragon_4() {
 fn seki_1() {
     let board = playout_file("examples/seki_1.sgf", None);
     let (value, _policy) = predict(&board, Color::White);
-    let (black, white, _rollout) = board.get_guess_score();
+    let (black, white) = greedy_score(&board, Color::White);
 
     assert!(white + 8 > black, "White should win by 4.5 -- black {}, white {}", black, white);
     assert!(value > 0.0, "White should win by 4.5 -- {}", value);
@@ -394,7 +394,7 @@ fn seki_1() {
 fn seki_2() {
     let board = playout_file("examples/seki_2.sgf", None);
     let (value, _policy) = predict(&board, Color::White);
-    let (black, white, _rollout) = board.get_guess_score();
+    let (black, white) = greedy_score(&board, Color::White);
 
     assert!(white + 8 > black, "White should win by 7.5 -- black {}, white {}", black, white);
     assert!(value > 0.0, "White should win by 7.5 -- {}", value);
@@ -433,7 +433,7 @@ fn seki_2() {
 fn seki_3() {
     let board = playout_file("examples/seki_3.sgf", None);
     let (value, _policy) = predict(&board, Color::Black);
-    let (black, white, _rollout) = board.get_guess_score();
+    let (black, white) = greedy_score(&board, Color::Black);
 
     assert!(black > white, "Black should win by 19.5 -- black {}, white {}", black, white);
     assert!(value > 0.0, "Black should win by 19.5 -- {}", value);
@@ -472,7 +472,7 @@ fn seki_3() {
 fn seki_4() {
     let board = playout_file("examples/seki_4.sgf", None);
     let (value, _policy) = predict(&board, Color::Black);
-    let (black, white, _rollout) = board.get_guess_score();
+    let (black, white) = greedy_score(&board, Color::Black);
 
     assert!(black > white + 8, "Black should win by 7.5 -- black {}, white {}", black, white);
     assert!(value > 0.0, "Black should win by 7.5 -- {}", value);
@@ -511,7 +511,7 @@ fn seki_4() {
 fn bent_four_1() {
     let board = playout_file("examples/bent_four_1.sgf", None);
     let (value, _policy) = predict(&board, Color::White);
-    let (black, white, _rollout) = board.get_guess_score();
+    let (black, white) = greedy_score(&board, Color::White);
 
     assert!(white + 8 > black, "White should win by 6.5 -- black {}, white {}", black, white);
     assert!(value > 0.0, "White should win by 6.5 -- {}", value);
@@ -550,7 +550,7 @@ fn bent_four_1() {
 fn end_1() {
     let board = playout_file("examples/end_1.sgf", None);
     let (value, _policy) = predict(&board, Color::Black);
-    let (black, white, _rollout) = board.get_guess_score();
+    let (black, white) = greedy_score(&board, Color::Black);
 
     assert!(white > black, "White should win by 41 (without komi) -- black {}, white {}", black, white);
     assert!(value < 0.0, "White should win by 48.5 -- {}", value);

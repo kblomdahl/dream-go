@@ -72,6 +72,12 @@ impl Board {
         self.zobrist_hash
     }
 
+    /// Returns the color of the last player that played a move.
+    #[inline]
+    pub fn last_played(&self) -> Option<Color> {
+        self.last_played
+    }
+
     /// Returns the color (if the vertex is not empty) of the stone at
     /// the given coordinates.
     ///
