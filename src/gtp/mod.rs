@@ -31,10 +31,10 @@ use gtp::vertex::*;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&'static str; 19] = [
+const KNOWN_COMMANDS: [&'static str; 20] = [
     "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove", "undo",
-    "time_settings", "quit", "final_score", "heatmap", "heatmap-nn",
+    "time_settings", "time_left", "quit", "final_score", "heatmap", "heatmap-nn",
     "sabaki-genmovelog"
 ];
 
@@ -59,6 +59,7 @@ enum Command {
     RegGenMove(Color),  // generate the supposedly best move for either color
     Undo,  // undo one move
     TimeSettings(f32, f32, usize),  // set the time settings
+    TimeLeft(Color, f32, usize),  // set the remaining time for the given color
     Quit  // quit
 }
 
@@ -91,6 +92,7 @@ lazy_static! {
     static ref GENMOVE: Regex = Regex::new(r"^genmove +([bw])").unwrap();
     static ref REG_GENMOVE: Regex = Regex::new(r"^reg_genmove +([bBwW])").unwrap();
     static ref TIME_SETTINGS: Regex = Regex::new(r"^time_settings +([0-9]+\.?[0-9]*) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
+    static ref TIME_LEFT: Regex = Regex::new(r"^time_left +([bBwW]) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
 }
 
 struct Gtp {
@@ -215,6 +217,27 @@ impl Gtp {
                 if let Ok(byo_yomi_time) = byo_yomi_time {
                     if let Ok(byo_yomi_stones) = byo_yomi_stones {
                         Some((id, Command::TimeSettings(main_time, byo_yomi_time, byo_yomi_stones)))
+                    } else {
+                        error!(id, "syntax error");
+                        Some((None, Command::Pass))
+                    }
+                } else {
+                    error!(id, "syntax error");
+                    Some((None, Command::Pass))
+                }
+            } else {
+                error!(id, "syntax error");
+                Some((None, Command::Pass))
+            }
+        } else if let Some(caps) = TIME_LEFT.captures(line) {
+            let color = caps[1].parse::<Color>();
+            let main_time = caps[2].parse::<f32>();
+            let byo_yomi_stones = caps[3].parse::<usize>();
+
+            if let Ok(color) = color {
+                if let Ok(main_time) = main_time {
+                    if let Ok(byo_yomi_stones) = byo_yomi_stones {
+                        Some((id, Command::TimeLeft(color, main_time, byo_yomi_stones)))
                     } else {
                         error!(id, "syntax error");
                         Some((None, Command::Pass))
@@ -647,19 +670,42 @@ impl Gtp {
                     byo_yomi_time = ::std::f32::INFINITY;
                 }
 
-                if byo_yomi_stones <= 1 {
-                    if main_time >= 0.0 && byo_yomi_time >= 0.0 {
-                        for &c in &[Color::Black, Color::White] {
-                            let c = c as usize;
+                if main_time >= 0.0 && byo_yomi_time >= 0.0 {
+                    for &c in &[Color::Black, Color::White] {
+                        let c = c as usize;
 
-                            self.main_time[c] = main_time;
-                            self.byo_yomi_time[c] = byo_yomi_time;
-                        }
-
-                        success!(id, "");
-                    } else {
-                        error!(id, "syntax error");
+                        self.main_time[c] = main_time;
+                        self.byo_yomi_time[c] = byo_yomi_time;
                     }
+
+                    success!(id, "");
+                } else {
+                    error!(id, "syntax error");
+                }
+            },
+            Command::TimeLeft(color, main_time, byo_yomi_stones) => {
+                let c = color as usize;
+
+                // ensure the neural network weights are loaded since we do not
+                // want that to be part of the allocated time
+                self.open_service();
+
+                if byo_yomi_stones == 0 {
+                    self.main_time[c] = main_time;
+
+                    if !self.byo_yomi_time[c].is_finite() {
+                        self.byo_yomi_time[c] = 0.0;
+                    }
+
+                    success!(id, "");
+                } else if byo_yomi_stones == 1 {
+                    self.byo_yomi_time[c] = main_time;
+
+                    if !self.main_time[c].is_finite() {
+                        self.main_time[c] = 0.0;
+                    }
+
+                    success!(id, "");
                 } else {
                     error!(id, "syntax error");
                 }
@@ -793,6 +839,12 @@ mod tests {
     fn time_settings() {
         assert_eq!(Gtp::parse_line("1 time_settings 30.2 0 0"), Some((Some(1), Command::TimeSettings(30.2, 0.0, 0))));
         assert_eq!(Gtp::parse_line("time_settings 300 3.14 0"), Some((None, Command::TimeSettings(300.0, 3.14, 0))));
+    }
+
+    #[test]
+    fn time_left() {
+        assert_eq!(Gtp::parse_line("1 time_left b 3.14 0"), Some((Some(1), Command::TimeLeft(Color::Black, 3.14, 0))));
+        assert_eq!(Gtp::parse_line("time_left W 278.1 1"), Some((None, Command::TimeLeft(Color::White, 278.1, 1))));
     }
 
     #[test]
