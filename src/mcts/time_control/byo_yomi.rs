@@ -44,40 +44,36 @@ pub struct ByoYomi {
 }
 
 impl ByoYomi {
-    pub fn new(move_number: usize, starting_visits: i32, main_time: f32, byo_yomi_time: f32) -> ByoYomi {
+    pub fn new(move_number: usize, starting_visits: i32, main_time: f32, byo_yomi_time: f32, byo_yomi_periods: usize) -> ByoYomi {
         let main_time_ms = (990.0 * main_time) as usize;
         let byo_yomi_time_ms = (990.0 * byo_yomi_time) as usize;
 
         ByoYomi {
-            total_time_ms: main_time_ms + byo_yomi_time_ms,
+            total_time_ms: main_time_ms + byo_yomi_time_ms * byo_yomi_periods,
             starting_visits: starting_visits,
             count: Arc::new(AtomicUsize::new(0)),
 
             start_time: Instant::now(),
             expire_time: Arc::new(AtomicUsize::new({
-                let area_fraction = if move_number < 247 {
+                let period_ms = if move_number < 247 {
                     // The average game length is 257 moves as suggested
                     // by _Andries E. Brouwer_:
                     //
                     // https://homepages.cwi.nl/~aeb/go/misc/gostat.html
                     let remaining_regret = regret_cost_cum(257, 257) - regret_cost_cum(move_number, 257);
+                    let fraction = regret_cost(move_number, 257) / remaining_regret;
 
-                    regret_cost(move_number, 257) / remaining_regret
+                    0.9 * fraction * main_time_ms as f32
                 } else {
-                    0.1  // assume the game will last for 10 more moves
-                };
-                let total_time_ms = main_time_ms + byo_yomi_time_ms;
-                let period_ms = if main_time_ms <= byo_yomi_time_ms {
-                    total_time_ms
-                } else {
-                    (total_time_ms as f32 * area_fraction) as usize
+                    // assume the game will last for 10 more moves (forever)
+                    //
+                    // this will decay very quickly but should be fine since
+                    // past the expected end-game most moves should just be the
+                    // opponent refusing to surrender and playing stupid moves.
+                    0.1 * main_time_ms as f32
                 };
 
-                if main_time_ms < period_ms {
-                    total_time_ms
-                } else {
-                    period_ms
-                }
+                byo_yomi_time_ms + period_ms as usize
             })),
         }
     }

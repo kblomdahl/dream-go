@@ -28,7 +28,7 @@ pub trait TimeSettings {
     /// Returns the amount of remaining time as the
     /// triplet `(main_time, byo_yomi_time, byo_yomi_periods)` according to
     /// the byo yomi time system.
-    fn remaining(&self) -> (f32, f32);
+    fn remaining(&self) -> (f32, f32, usize);
 
     /// Decrease the amount of remaining time by the given amount of seconds.
     /// 
@@ -58,8 +58,8 @@ impl TimeSettings for None {
         // pass
     }
 
-    fn remaining(&self) -> (f32, f32) {
-        (::std::f32::INFINITY, ::std::f32::INFINITY)
+    fn remaining(&self) -> (f32, f32, usize) {
+        (::std::f32::INFINITY, ::std::f32::INFINITY, 1)
     }
 
     fn update(&mut self, _elapsed: f32) {
@@ -88,8 +88,8 @@ impl TimeSettings for Absolute {
         self.main_time = main_time;
     }
 
-    fn remaining(&self) -> (f32, f32) {
-        (self.main_time, 0.0)
+    fn remaining(&self) -> (f32, f32, usize) {
+        (self.main_time, 0.0, 0)
     }
 
     fn update(&mut self, elapsed: f32) {
@@ -129,8 +129,8 @@ impl TimeSettings for ByoYomi {
         }
     }
 
-    fn remaining(&self) -> (f32, f32) {
-        (self.main_time, self.byo_yomi_time * self.byo_yomi_periods as f32)
+    fn remaining(&self) -> (f32, f32, usize) {
+        (self.main_time, self.byo_yomi_time, self.byo_yomi_periods)
     }
 
     fn update(&mut self, elapsed: f32) {
@@ -178,8 +178,8 @@ impl TimeSettings for Canadian {
         self.byo_yomi_stones_remaining = byo_yomi_stones;
     }
 
-    fn remaining(&self) -> (f32, f32) {
-        (self.main_time, 0.0)
+    fn remaining(&self) -> (f32, f32, usize) {
+        (self.main_time, 0.0, 0)
     }
 
     fn update(&mut self, elapsed: f32) {

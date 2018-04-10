@@ -302,7 +302,7 @@ impl Gtp {
                 }
             });
 
-            let (main_time, byo_yomi_time) = self.time_settings[color as usize].remaining();
+            let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[color as usize].remaining();
             let (value, index, tree) = if main_time.is_finite() && byo_yomi_time.is_finite() {
                 let total_visits = search_tree.as_ref()
                     .map(|tree| tree.total_count)
@@ -311,7 +311,7 @@ impl Gtp {
                 mcts::predict::<mcts::tree::DefaultValue, _>(
                     &service.lock(),
                     None,
-                    time_control::ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time),
+                    time_control::ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods),
                     search_tree,
                     &board,
                     color
