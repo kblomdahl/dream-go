@@ -99,8 +99,8 @@ struct Gtp {
     last_log: String,
     history: Vec<Board>,
     komi: f32,
-    main_time: f32,
-    byo_yomi_time: f32
+    main_time: [f32; 3],
+    byo_yomi_time: [f32; 3]
 }
 
 impl Gtp {
@@ -303,7 +303,10 @@ impl Gtp {
                 }
             });
 
-            let (value, index, tree) = if self.main_time.is_finite() && self.byo_yomi_time.is_finite() {
+            let main_time = self.main_time[color as usize];
+            let byo_yomi_time = self.byo_yomi_time[color as usize];
+
+            let (value, index, tree) = if main_time.is_finite() && byo_yomi_time.is_finite() {
                 let total_visits = search_tree.as_ref()
                     .map(|tree| tree.total_count)
                     .unwrap_or(0);
@@ -311,7 +314,7 @@ impl Gtp {
                 mcts::predict::<mcts::tree::DefaultValue, _>(
                     &service.lock(),
                     None,
-                    time_control::ByoYomi::new(board.count(), total_visits, self.main_time, self.byo_yomi_time),
+                    time_control::ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time),
                     search_tree,
                     &board,
                     color
@@ -591,12 +594,13 @@ impl Gtp {
                 // update the remaining main time, saturating at zero instead of
                 // overflowing.
                 let duration = start_time.elapsed();
+                let c = color as usize;
 
-                self.main_time -= duration.as_secs() as f32;
-                self.main_time -= duration.subsec_nanos() as f32 / 1e9;
+                self.main_time[c] -= duration.as_secs() as f32;
+                self.main_time[c] -= duration.subsec_nanos() as f32 / 1e9;
 
-                if self.main_time < 0.0 {
-                    self.main_time = 0.0;
+                if self.main_time[c] < 0.0 {
+                    self.main_time[c] = 0.0;
                 }
             },
             Command::GenMoveLog => {
@@ -633,19 +637,25 @@ impl Gtp {
                     error!(id, "cannot undo");
                 }
             },
-            Command::TimeSettings(main_time, byo_yomi_time, byo_yomi_stones) => {
+            Command::TimeSettings(mut main_time, mut byo_yomi_time, byo_yomi_stones) => {
                 // ensure the neural network weights are loaded since we do not
                 // want that to be part of the allocated time
                 self.open_service();
 
                 if byo_yomi_stones == 0 {
-                    self.main_time = ::std::f32::INFINITY;
-                    self.byo_yomi_time = ::std::f32::INFINITY;
-                    success!(id, "");
-                } else if byo_yomi_stones == 1 {
+                    main_time = ::std::f32::INFINITY;
+                    byo_yomi_time = ::std::f32::INFINITY;
+                }
+
+                if byo_yomi_stones <= 1 {
                     if main_time >= 0.0 && byo_yomi_time >= 0.0 {
-                        self.main_time = main_time;
-                        self.byo_yomi_time = byo_yomi_time;
+                        for &c in &[Color::Black, Color::White] {
+                            let c = c as usize;
+
+                            self.main_time[c] = main_time;
+                            self.byo_yomi_time[c] = byo_yomi_time;
+                        }
+
                         success!(id, "");
                     } else {
                         error!(id, "syntax error");
@@ -670,8 +680,8 @@ pub fn run() {
         last_log: "{}".to_string(),
         history: vec! [Board::new()],
         komi: 7.5,
-        main_time: ::std::f32::INFINITY,
-        byo_yomi_time: ::std::f32::INFINITY
+        main_time: [::std::f32::INFINITY; 3],
+        byo_yomi_time: [::std::f32::INFINITY; 3]
     };
 
     for line in stdin_lock.lines() {
