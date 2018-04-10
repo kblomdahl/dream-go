@@ -25,17 +25,18 @@ use mcts;
 use nn::Network;
 use util::config;
 
+mod time_settings;
 mod vertex;
 
 use gtp::vertex::*;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&'static str; 20] = [
+const KNOWN_COMMANDS: [&'static str; 21] = [
     "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove", "undo",
-    "time_settings", "time_left", "quit", "final_score", "heatmap", "heatmap-nn",
-    "sabaki-genmovelog"
+    "time_settings", "kgs-time_settings", "time_left", "quit", "final_score",
+    "heatmap", "heatmap-nn", "sabaki-genmovelog"
 ];
 
 #[derive(Debug, PartialEq)]
@@ -58,7 +59,10 @@ enum Command {
     FinalScore,  // write the score to stdout
     RegGenMove(Color),  // generate the supposedly best move for either color
     Undo,  // undo one move
-    TimeSettings(f32, f32, usize),  // set the time settings
+    TimeSettingsNone,  // set the time settings
+    TimeSettingsAbsolute(f32),  // set the time settings
+    TimeSettingsCanadian(f32, f32, usize),  // set the time settings
+    TimeSettingsByoYomi(f32, f32, usize),  // set the time settings
     TimeLeft(Color, f32, usize),  // set the remaining time for the given color
     Quit  // quit
 }
@@ -92,6 +96,10 @@ lazy_static! {
     static ref GENMOVE: Regex = Regex::new(r"^genmove +([bw])").unwrap();
     static ref REG_GENMOVE: Regex = Regex::new(r"^reg_genmove +([bBwW])").unwrap();
     static ref TIME_SETTINGS: Regex = Regex::new(r"^time_settings +([0-9]+\.?[0-9]*) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
+    static ref KGS_TIME_SETTINGS_NONE: Regex = Regex::new(r"^kgs-time_settings +none").unwrap();
+    static ref KGS_TIME_SETTINGS_ABSOLUTE: Regex = Regex::new(r"^kgs-time_settings +absolute +([0-9]+\.?[0-9]*)").unwrap();
+    static ref KGS_TIME_SETTINGS_BYOYOMI: Regex = Regex::new(r"^kgs-time_settings +byoyomi +([0-9]+\.?[0-9]*) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
+    static ref KGS_TIME_SETTINGS_CANADIAN: Regex = Regex::new(r"^kgs-time_settings +canadian +([0-9]+\.?[0-9]*) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
     static ref TIME_LEFT: Regex = Regex::new(r"^time_left +([bBwW]) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
 }
 
@@ -101,8 +109,7 @@ struct Gtp {
     last_log: String,
     history: Vec<Board>,
     komi: f32,
-    main_time: [f32; 3],
-    byo_yomi_time: [f32; 3]
+    time_settings: [Box<time_settings::TimeSettings>; 3]
 }
 
 impl Gtp {
@@ -114,147 +121,103 @@ impl Gtp {
     /// * `id` -
     /// * `line` -
     /// 
-    fn parse_command(id: Option<usize>, line: &str) -> Option<(Option<usize>, Command)> {
+    fn parse_command(id: Option<usize>, line: &str) -> Result<(Option<usize>, Command), &str> {
         let line = &line.to_lowercase();
 
         if line == "protocol_version" {
-            Some((id, Command::ProtocolVersion))
+            Ok((id, Command::ProtocolVersion))
         } else if line == "name" {
-            Some((id, Command::Name))
+            Ok((id, Command::Name))
         } else if line == "version" {
-            Some((id, Command::Version))
+            Ok((id, Command::Version))
         } else if let Some(caps) = BOARD_SIZE.captures(line) {
-            let size = caps[1].parse::<usize>();
+            let size = caps[1].parse::<usize>().map_err(|_| "syntax error")?;
 
-            if let Ok(size) = size {
-                Some((id, Command::BoardSize(size)))
-            } else {
-                error!(id, "syntax error");
-                Some((None, Command::Pass))
-            }
+            Ok((id, Command::BoardSize(size)))
         } else if line == "clear_board" {
-            Some((id, Command::ClearBoard))
+            Ok((id, Command::ClearBoard))
         } else if let Some(caps) = HEATMAP.captures(line) {
-            let color = caps[1].parse::<Color>();
+            let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
-            if let Ok(color) = color {
-                Some((id, Command::Heatmap(color)))
-            } else {
-                error!(id, "syntax error");
-                Some((None, Command::Pass))
-            }
+            Ok((id, Command::Heatmap(color)))
         } else if let Some(caps) = HEATMAP_PRIOR.captures(line) {
-            let color = caps[1].parse::<Color>();
+            let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
-            if let Ok(color) = color {
-                Some((id, Command::HeatmapPrior(color)))
-            } else {
-                error!(id, "syntax error");
-                Some((None, Command::Pass))
-            }
+            Ok((id, Command::HeatmapPrior(color)))
         } else if let Some(caps) = KOMI.captures(line) {
-            let komi = caps[1].parse::<f32>();
+            let komi = caps[1].parse::<f32>().map_err(|_| "syntax error")?;
 
-            if let Ok(komi) = komi {
-                Some((id, Command::Komi(komi)))
-            } else {
-                error!(id, "syntax error");
-                Some((None, Command::Pass))
-            }
+            Ok((id, Command::Komi(komi)))
         } else if let Some(caps) = PLAY.captures(line) {
-            let color = caps[1].parse::<Color>();
-            let vertex = caps[2].parse::<Vertex>();
+            let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
+            let vertex = caps[2].parse::<Vertex>().map_err(|_| "syntax error")?;
 
-            if let Ok(color) = color {
-                if let Ok(vertex) = vertex {
-                    Some((id, Command::Play(color, vertex)))
-                } else {
-                    error!(id, "syntax error");
-                    Some((None, Command::Pass))
-                }
-            } else {
-                error!(id, "syntax error");
-                Some((None, Command::Pass))
-            }
+            Ok((id, Command::Play(color, vertex)))
         } else if line == "list_commands" {
-            Some((id, Command::ListCommands))
+            Ok((id, Command::ListCommands))
         } else if let Some(caps) = KNOWN_COMMAND.captures(line) {
             let command = &caps[1];
 
-            Some((id, Command::KnownCommand(command.to_string())))
+            Ok((id, Command::KnownCommand(command.to_string())))
         } else if line == "showboard" {
-            Some((id, Command::ShowBoard))
+            Ok((id, Command::ShowBoard))
         } else if let Some(caps) = GENMOVE.captures(line) {
-            let color = caps[1].parse::<Color>();
+            let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
-            if let Ok(color) = color {
-                Some((id, Command::GenMove(color)))
-            } else {
-                error!(id, "syntax error");
-                Some((None, Command::Pass))
-            }
+            Ok((id, Command::GenMove(color)))
         } else if line == "sabaki-genmovelog" {
-            Some((id, Command::GenMoveLog))
+            Ok((id, Command::GenMoveLog))
         } else if line == "final_score" {
-            Some((id, Command::FinalScore))
+            Ok((id, Command::FinalScore))
         } else if let Some(caps) = REG_GENMOVE.captures(line) {
-            let color = caps[1].parse::<Color>();
+            let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
-            if let Ok(color) = color {
-                Some((id, Command::RegGenMove(color)))
-            } else {
-                error!(id, "syntax error");
-                Some((None, Command::Pass))
-            }
+            Ok((id, Command::RegGenMove(color)))
         } else if line == "undo" {
-            Some((id, Command::Undo))
+            Ok((id, Command::Undo))
         } else if let Some(caps) = TIME_SETTINGS.captures(line) {
-            let main_time = caps[1].parse::<f32>();
-            let byo_yomi_time = caps[2].parse::<f32>();
-            let byo_yomi_stones = caps[3].parse::<usize>();
+            let main_time = caps[1].parse::<f32>().map_err(|_| "syntax error")?;
+            let byo_yomi_time = caps[2].parse::<f32>().map_err(|_| "syntax error")?;
+            let byo_yomi_stones = caps[3].parse::<usize>().map_err(|_| "syntax error")?;
 
-            if let Ok(main_time) = main_time {
-                if let Ok(byo_yomi_time) = byo_yomi_time {
-                    if let Ok(byo_yomi_stones) = byo_yomi_stones {
-                        Some((id, Command::TimeSettings(main_time, byo_yomi_time, byo_yomi_stones)))
-                    } else {
-                        error!(id, "syntax error");
-                        Some((None, Command::Pass))
-                    }
-                } else {
-                    error!(id, "syntax error");
-                    Some((None, Command::Pass))
-                }
+            if byo_yomi_stones == 0 {
+                Ok((id, Command::TimeSettingsNone))
             } else {
-                error!(id, "syntax error");
-                Some((None, Command::Pass))
+                Ok((id, Command::TimeSettingsCanadian(main_time, byo_yomi_time, byo_yomi_stones)))
+            }
+        } else if let Some(_caps) = KGS_TIME_SETTINGS_NONE.captures(line) {
+            Ok((id, Command::TimeSettingsNone))
+        } else if let Some(caps) = KGS_TIME_SETTINGS_ABSOLUTE.captures(line) {
+            let main_time = caps[1].parse::<f32>().map_err(|_| "syntax error")?;
+
+            Ok((id, Command::TimeSettingsAbsolute(main_time)))
+        } else if let Some(caps) = KGS_TIME_SETTINGS_BYOYOMI.captures(line) {
+            let main_time = caps[1].parse::<f32>().map_err(|_| "syntax error")?;
+            let byo_yomi_time = caps[2].parse::<f32>().map_err(|_| "syntax error")?;
+            let byo_yomi_stones = caps[3].parse::<usize>().map_err(|_| "syntax error")?;
+
+            Ok((id, Command::TimeSettingsByoYomi(main_time, byo_yomi_time, byo_yomi_stones)))
+        } else if let Some(caps) = KGS_TIME_SETTINGS_CANADIAN.captures(line) {
+            let main_time = caps[1].parse::<f32>().map_err(|_| "syntax error")?;
+            let byo_yomi_time = caps[2].parse::<f32>().map_err(|_| "syntax error")?;
+            let byo_yomi_stones = caps[3].parse::<usize>().map_err(|_| "syntax error")?;
+
+            if byo_yomi_stones > 0 {
+                Ok((id, Command::TimeSettingsCanadian(main_time, byo_yomi_time, byo_yomi_stones)))
+            } else {
+                Err("syntax error")
             }
         } else if let Some(caps) = TIME_LEFT.captures(line) {
-            let color = caps[1].parse::<Color>();
-            let main_time = caps[2].parse::<f32>();
-            let byo_yomi_stones = caps[3].parse::<usize>();
+            let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
+            let main_time = caps[2].parse::<f32>().map_err(|_| "syntax error")?;
+            let byo_yomi_stones = caps[3].parse::<usize>().map_err(|_| "syntax error")?;
 
-            if let Ok(color) = color {
-                if let Ok(main_time) = main_time {
-                    if let Ok(byo_yomi_stones) = byo_yomi_stones {
-                        Some((id, Command::TimeLeft(color, main_time, byo_yomi_stones)))
-                    } else {
-                        error!(id, "syntax error");
-                        Some((None, Command::Pass))
-                    }
-                } else {
-                    error!(id, "syntax error");
-                    Some((None, Command::Pass))
-                }
-            } else {
-                error!(id, "syntax error");
-                Some((None, Command::Pass))
-            }
+            Ok((id, Command::TimeLeft(color, main_time, byo_yomi_stones)))
         } else if line == "quit" {
-            Some((id, Command::Quit))
+            Ok((id, Command::Quit))
         } else {
             error!(id, "unknown command");
-            Some((None, Command::Pass))
+            Ok((None, Command::Pass))
         }
     }
 
@@ -281,9 +244,22 @@ impl Gtp {
             let id = caps[1].parse::<usize>().unwrap();
             let rest = &caps[2];
 
-            Gtp::parse_command(Some(id), rest.trim())
+            match Gtp::parse_command(Some(id), rest.trim()) {
+                Ok(result) => Some(result),
+                Err(reason) => {
+                    error!(Some(id), reason);
+                    Some((None, Command::Pass))
+                }
+            }
         } else {
-            Gtp::parse_command(None, &line)
+            match Gtp::parse_command(None, &line) {
+                Ok(result) => Some(result),
+                Err(reason) => {
+                    error!(None as Option<usize>, reason);
+
+                    Some((None, Command::Pass))
+                }
+            }
         }
     }
 
@@ -326,9 +302,7 @@ impl Gtp {
                 }
             });
 
-            let main_time = self.main_time[color as usize];
-            let byo_yomi_time = self.byo_yomi_time[color as usize];
-
+            let (main_time, byo_yomi_time) = self.time_settings[color as usize].remaining();
             let (value, index, tree) = if main_time.is_finite() && byo_yomi_time.is_finite() {
                 let total_visits = search_tree.as_ref()
                     .map(|tree| tree.total_count)
@@ -616,15 +590,11 @@ impl Gtp {
 
                 // update the remaining main time, saturating at zero instead of
                 // overflowing.
-                let duration = start_time.elapsed();
+                let elapsed = start_time.elapsed();
+                let elapsed_secs = elapsed.as_secs() as f32 + elapsed.subsec_nanos() as f32 / 1e9;
                 let c = color as usize;
 
-                self.main_time[c] -= duration.as_secs() as f32;
-                self.main_time[c] -= duration.subsec_nanos() as f32 / 1e9;
-
-                if self.main_time[c] < 0.0 {
-                    self.main_time[c] = 0.0;
-                }
+                self.time_settings[c].update(elapsed_secs);
             },
             Command::GenMoveLog => {
                 self.generate_move_log(id);
@@ -660,28 +630,57 @@ impl Gtp {
                     error!(id, "cannot undo");
                 }
             },
-            Command::TimeSettings(mut main_time, mut byo_yomi_time, byo_yomi_stones) => {
+            Command::TimeSettingsNone => {
                 // ensure the neural network weights are loaded since we do not
                 // want that to be part of the allocated time
                 self.open_service();
 
-                if byo_yomi_stones == 0 {
-                    main_time = ::std::f32::INFINITY;
-                    byo_yomi_time = ::std::f32::INFINITY;
+                for &c in &[Color::Black, Color::White] {
+                    self.time_settings[c as usize] = Box::new(time_settings::None::new());
                 }
 
-                if main_time >= 0.0 && byo_yomi_time >= 0.0 {
-                    for &c in &[Color::Black, Color::White] {
-                        let c = c as usize;
+                success!(id, "");
+            },
+            Command::TimeSettingsAbsolute(main_time) => {
+                // ensure the neural network weights are loaded since we do not
+                // want that to be part of the allocated time
+                self.open_service();
 
-                        self.main_time[c] = main_time;
-                        self.byo_yomi_time[c] = byo_yomi_time;
-                    }
-
-                    success!(id, "");
-                } else {
-                    error!(id, "syntax error");
+                for &c in &[Color::Black, Color::White] {
+                    self.time_settings[c as usize] = Box::new(time_settings::Absolute::new(main_time));
                 }
+
+                success!(id, "");
+            },
+            Command::TimeSettingsByoYomi(main_time, byo_yomi_time, byo_yomi_stones) => {
+                // ensure the neural network weights are loaded since we do not
+                // want that to be part of the allocated time
+                self.open_service();
+
+                for &c in &[Color::Black, Color::White] {
+                    self.time_settings[c as usize] = Box::new(time_settings::ByoYomi::new(
+                        main_time,
+                        byo_yomi_time,
+                        byo_yomi_stones
+                    ));
+                }
+
+                success!(id, "");
+            },
+            Command::TimeSettingsCanadian(main_time, byo_yomi_time, byo_yomi_stones) => {
+                // ensure the neural network weights are loaded since we do not
+                // want that to be part of the allocated time
+                self.open_service();
+
+                for &c in &[Color::Black, Color::White] {
+                    self.time_settings[c as usize] = Box::new(time_settings::Canadian::new(
+                        main_time,
+                        byo_yomi_time,
+                        byo_yomi_stones
+                    ));
+                }
+
+                success!(id, "");
             },
             Command::TimeLeft(color, main_time, byo_yomi_stones) => {
                 let c = color as usize;
@@ -689,26 +688,7 @@ impl Gtp {
                 // ensure the neural network weights are loaded since we do not
                 // want that to be part of the allocated time
                 self.open_service();
-
-                if byo_yomi_stones == 0 {
-                    self.main_time[c] = main_time;
-
-                    if !self.byo_yomi_time[c].is_finite() {
-                        self.byo_yomi_time[c] = 0.0;
-                    }
-
-                    success!(id, "");
-                } else if byo_yomi_stones == 1 {
-                    self.byo_yomi_time[c] = main_time;
-
-                    if !self.main_time[c].is_finite() {
-                        self.main_time[c] = 0.0;
-                    }
-
-                    success!(id, "");
-                } else {
-                    error!(id, "syntax error");
-                }
+                self.time_settings[c].time_left(main_time, byo_yomi_stones);
             }
         }
     }
@@ -726,8 +706,11 @@ pub fn run() {
         last_log: "{}".to_string(),
         history: vec! [Board::new()],
         komi: 7.5,
-        main_time: [::std::f32::INFINITY; 3],
-        byo_yomi_time: [::std::f32::INFINITY; 3]
+        time_settings: [
+            Box::new(time_settings::None::new()),
+            Box::new(time_settings::None::new()),
+            Box::new(time_settings::None::new()),
+        ],
     };
 
     for line in stdin_lock.lines() {
@@ -837,8 +820,23 @@ mod tests {
 
     #[test]
     fn time_settings() {
-        assert_eq!(Gtp::parse_line("1 time_settings 30.2 0 0"), Some((Some(1), Command::TimeSettings(30.2, 0.0, 0))));
-        assert_eq!(Gtp::parse_line("time_settings 300 3.14 0"), Some((None, Command::TimeSettings(300.0, 3.14, 0))));
+        assert_eq!(Gtp::parse_line("1 time_settings 30.2 0 0"), Some((Some(1), Command::TimeSettingsNone)));
+        assert_eq!(Gtp::parse_line("time_settings 300 3.14 1"), Some((None, Command::TimeSettingsCanadian(300.0, 3.14, 1))));
+    }
+
+    #[test]
+    fn kgs_time_settings() {
+        assert_eq!(Gtp::parse_line("1 kgs-time_settings none"), Some((Some(1), Command::TimeSettingsNone)));
+        assert_eq!(Gtp::parse_line("kgs-time_settings none"), Some((None, Command::TimeSettingsNone)));
+
+        assert_eq!(Gtp::parse_line("2 kgs-time_settings absolute 30.2"), Some((Some(2), Command::TimeSettingsAbsolute(30.2))));
+        assert_eq!(Gtp::parse_line("kgs-time_settings absolute 300"), Some((None, Command::TimeSettingsAbsolute(300.0))));
+
+        assert_eq!(Gtp::parse_line("3 kgs-time_settings byoyomi 30.2 0 0"), Some((Some(3), Command::TimeSettingsByoYomi(30.2, 0.0, 0))));
+        assert_eq!(Gtp::parse_line("kgs-time_settings byoyomi 300 3.14 1"), Some((None, Command::TimeSettingsByoYomi(300.0, 3.14, 1))));
+
+        assert_eq!(Gtp::parse_line("4 kgs-time_settings canadian 30.2 1 1"), Some((Some(4), Command::TimeSettingsCanadian(30.2, 1.0, 1))));
+        assert_eq!(Gtp::parse_line("kgs-time_settings canadian 300 3.14 1"), Some((None, Command::TimeSettingsCanadian(300.0, 3.14, 1))));
     }
 
     #[test]
