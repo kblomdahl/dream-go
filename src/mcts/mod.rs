@@ -186,37 +186,6 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, B
     })
 }
 
-/// Like `forward`, but instead of using the neural network to determine the score
-/// use the Tromp-Taylor rules to score the game and output a value based on that
-/// score. This function can replace `forward` if the game is over.
-/// 
-/// # Arguments
-/// 
-/// * `server` -
-/// * `board` -
-/// * `color` -
-/// 
-fn score(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Box<[f32]>)> {
-    if let Some((_, policy)) = forward(server, board, color) {
-        let value = {
-            let (black, white, _rollout) = board.get_guess_score();
-            let black = black as f32;
-            let white = white as f32 + 7.5;
-            let winner = if black > white { Color::Black } else { Color::White };
-
-            if winner == color {
-                1.0
-            } else {
-                0.0
-            }
-        };
-
-        Some((value, policy))
-    } else {
-        None
-    }
-}
-
 /// The shared variables between the master and each worker thread in the `predict` function.
 #[derive(Clone)]
 struct ThreadContext<E: tree::Value + Clone + Send, T: TimeStrategy + Clone + Send> {
@@ -235,19 +204,6 @@ struct ThreadContext<E: tree::Value + Clone + Send, T: TimeStrategy + Clone + Se
 
 unsafe impl<E: tree::Value + Clone + Send, T: TimeStrategy + Clone + Send> Send for ThreadContext<E, T> { }
 
-/// Returns true if the final position in the given trace is over according to
-/// the Tromp-Taylor rule set. This can only happend if two consecutive passes
-/// has occured.
-/// 
-/// # Arguments
-/// 
-/// * `trace` -
-/// 
-fn is_game_over<E: tree::Value>(trace: &tree::NodeTrace<E>) -> bool {
-    let &(node, _, index) = trace.last().unwrap();
-
-    index == 361 && unsafe { (*node).pass_count >= 1 }
-}
 
 /// Worker that probes into the given monte carlo search tree until the context
 /// is exhausted.
@@ -271,11 +227,7 @@ fn predict_worker<E, T>(context: ThreadContext<E, T>, server: PredictGuard)
             if let Some(trace) = trace {
                 let &(_, color, _) = trace.last().unwrap();
                 let next_color = color.opposite();
-                let result = if is_game_over(&trace) {
-                    score(&server, &board, next_color)
-                } else {
-                    forward(&server, &board, next_color)
-                };
+                let result = forward(&server, &board, next_color);
 
                 if let Some((value, policy)) = result {
                     unsafe {

@@ -465,6 +465,18 @@ impl<E: Value> Node<E> {
         s.into_boxed_slice()
     }
 
+    /// Remove the given move as a valid choice in this search tree by setting
+    /// its `value` to negative infinity.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `index` - the index of the child to disqualify
+    /// 
+    pub fn disqualify(&mut self, index: usize) {
+        self.value[index] = ::std::f32::NEG_INFINITY;
+        self.count[index] = 0;
+    }
+
     /// Returns the child with the maximum UCT value, and increase its visit count
     /// by one.
     /// 

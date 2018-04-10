@@ -32,9 +32,10 @@ use gtp::vertex::*;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&'static str; 21] = [
+const KNOWN_COMMANDS: [&'static str; 22] = [
     "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
-    "list_commands", "known_command", "showboard", "genmove", "reg_genmove", "undo",
+    "list_commands", "known_command", "showboard", "genmove", "reg_genmove",
+    "kgs-genmove_cleanup", "undo",
     "time_settings", "kgs-time_settings", "time_left", "quit", "final_score",
     "heatmap", "heatmap-nn", "sabaki-genmovelog"
 ];
@@ -54,7 +55,7 @@ enum Command {
     ListCommands,  // list all available commands
     KnownCommand(String),  // tell whether a command is known
     ShowBoard,  // write the position to stdout
-    GenMove(Color),  // generate and play the supposedly best move for either color
+    GenMove(Color, bool),  // generate and play the supposedly best move for either color, the second argument indicate whether it is a clean-up move
     GenMoveLog,  // output all variations considered by the most recent search
     FinalScore,  // write the score to stdout
     RegGenMove(Color),  // generate the supposedly best move for either color
@@ -95,6 +96,7 @@ lazy_static! {
     static ref KNOWN_COMMAND: Regex = Regex::new(r"^known_command +([^ ]+)").unwrap();
     static ref GENMOVE: Regex = Regex::new(r"^genmove +([bw])").unwrap();
     static ref REG_GENMOVE: Regex = Regex::new(r"^reg_genmove +([bBwW])").unwrap();
+    static ref KGS_GENMOVE_CLEANUP: Regex = Regex::new(r"^kgs-genmove_cleanup +([bw])").unwrap();
     static ref TIME_SETTINGS: Regex = Regex::new(r"^time_settings +([0-9]+\.?[0-9]*) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
     static ref KGS_TIME_SETTINGS_NONE: Regex = Regex::new(r"^kgs-time_settings +none").unwrap();
     static ref KGS_TIME_SETTINGS_ABSOLUTE: Regex = Regex::new(r"^kgs-time_settings +absolute +([0-9]+\.?[0-9]*)").unwrap();
@@ -164,7 +166,7 @@ impl Gtp {
         } else if let Some(caps) = GENMOVE.captures(line) {
             let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
-            Ok((id, Command::GenMove(color)))
+            Ok((id, Command::GenMove(color, false)))
         } else if line == "sabaki-genmovelog" {
             Ok((id, Command::GenMoveLog))
         } else if line == "final_score" {
@@ -173,6 +175,10 @@ impl Gtp {
             let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
             Ok((id, Command::RegGenMove(color)))
+        } else if let Some(caps) = KGS_GENMOVE_CLEANUP.captures(line) {
+            let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
+
+            Ok((id, Command::GenMove(color, true)))
         } else if line == "undo" {
             Ok((id, Command::Undo))
         } else if let Some(caps) = TIME_SETTINGS.captures(line) {
@@ -288,19 +294,28 @@ impl Gtp {
     /// 
     /// * `id` - the identifier of the command
     /// * `color` - the color to generate the move for
+    /// * `is_cleanup` - determine whether this is a clean-up move
     /// 
-    fn generate_move(&mut self, id: Option<usize>, color: Color) -> Option<Vertex> {
+    fn generate_move(&mut self, id: Option<usize>, color: Color, is_cleanup: bool) -> Option<Vertex> {
         self.open_service();
 
         if let Some(ref service) = self.service {
             let board = self.history.last().unwrap();
-            let search_tree = self.search_tree.take().and_then(|tree| {
+            let mut search_tree = self.search_tree.take().and_then(|tree| {
                 if tree.color != color {
                     mcts::tree::Node::forward(tree, 361)  // pass
                 } else {
                     Some(tree)
                 }
             });
+
+            // disqualify the `pass` move if we are doing clean-up and the board
+            // is not scoreable.
+            if is_cleanup && !board.is_scoreable() {
+                if let Some(ref mut search_tree) = search_tree {
+                    search_tree.disqualify(361);
+                }
+            }
 
             let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[color as usize].remaining();
             let (value, index, tree) = if main_time.is_finite() && byo_yomi_time.is_finite() {
@@ -570,9 +585,9 @@ impl Gtp {
 
                 success!(id, &format!("\n{}", board));
             },
-            Command::GenMove(color) => {
+            Command::GenMove(color, is_cleanup) => {
                 let start_time = Instant::now();
-                let vertex = self.generate_move(id, color);
+                let vertex = self.generate_move(id, color, is_cleanup);
 
                 if let Some(vertex) = vertex {
                     let mut board = self.history.last().unwrap().clone();
@@ -619,7 +634,7 @@ impl Gtp {
             }
             Command::RegGenMove(color) => {
                 self.search_tree = None;
-                self.generate_move(id, color);
+                self.generate_move(id, color, false);
             },
             Command::Undo => {
                 if self.history.len() > 1 {
@@ -796,8 +811,8 @@ mod tests {
 
     #[test]
     fn genmove() {
-        assert_eq!(Gtp::parse_line("1 genmove b"), Some((Some(1), Command::GenMove(Color::Black))));
-        assert_eq!(Gtp::parse_line("genmove w"), Some((None, Command::GenMove(Color::White))));
+        assert_eq!(Gtp::parse_line("1 genmove b"), Some((Some(1), Command::GenMove(Color::Black, false))));
+        assert_eq!(Gtp::parse_line("genmove w"), Some((None, Command::GenMove(Color::White, false))));
     }
 
     #[test]
@@ -810,6 +825,12 @@ mod tests {
     fn reg_genmove() {
         assert_eq!(Gtp::parse_line("1 reg_genmove b"), Some((Some(1), Command::RegGenMove(Color::Black))));
         assert_eq!(Gtp::parse_line("reg_genmove w"), Some((None, Command::RegGenMove(Color::White))));
+    }
+
+    #[test]
+    fn kgs_genmove_cleanup() {
+        assert_eq!(Gtp::parse_line("1 kgs-genmove_cleanup b"), Some((Some(1), Command::GenMove(Color::Black, true))));
+        assert_eq!(Gtp::parse_line("kgs-genmove_cleanup w"), Some((None, Command::GenMove(Color::White, true))));
     }
 
     #[test]
