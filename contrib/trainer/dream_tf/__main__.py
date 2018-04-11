@@ -163,7 +163,7 @@ def batch_norm(x, weights, mode, params, suffix=None):
     offset_ = offset - mean / std_
     weights_ = tf.multiply(
         weights_,
-        tf.reshape(1.0 / std_, (weights_.shape[0], 1, 1, 1))
+        tf.reshape(scale / std_, (weights_.shape[0], 1, 1, 1))
     )
 
     tf.add_to_collection(DUMP_OPS, [offset, offset_])
