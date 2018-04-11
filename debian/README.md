@@ -44,3 +44,16 @@ systems:
 fakeroot make
 fakeroot alien -r dreamgo-*.deb
 ```
+
+## Windows packages
+
+This will require a bash prompt to build, you can acquire one from the
+[MSYS2](https://www.msys2.org/) project. It will build the zip archive
+`dreamgo-X.Y.Z_amd64.zip` containing the relevant files.
+
+```bash
+make zip
+```
+
+You should manually add the CUDA and cuDNN libraries you built the binary
+against since there is no way to automatically detect them.

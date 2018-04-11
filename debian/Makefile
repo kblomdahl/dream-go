@@ -7,6 +7,8 @@ DIR=dreamgo-$(VERSION)_amd64
 
 all: $(DIR).deb $(DIR).tar.gz
 
+zip: $(DIR).zip
+
 clean:
 	rm -rf $(DIR)
 
@@ -32,3 +34,13 @@ $(DIR).tar.gz: build
 	cp -f ../dream_go.json $(DIR)/
 
 	tar czf $(DIR).tar.gz $(DIR)/
+
+$(DIR).zip: build
+	rm -rf $(DIR) && mkdir -p $(DIR)
+	cp -f ../target/release/dream_go.exe $(DIR)/
+	cp -f ../dream_go.json $(DIR)/
+
+	curl http://docs.nvidia.com/deeplearning/sdk/pdf/cuDNN-SLA.pdf -o $(DIR)/cuDNN-SLA.pdf
+	curl http://docs.nvidia.com/cuda/pdf/EULA.pdf -o $(DIR)/CUDA-EULA.pdf
+
+	zip $(DIR).zip $(DIR)/*
