@@ -398,11 +398,12 @@ impl<E: Value> Node<E> {
             (self.value[max_i], max_i)
         } else {
             let t = (temperature as f64).recip();
+            let c_total = self.count.iter().sum::<i32>() as f64;
             let mut s = vec! [0.0; 362];
             let mut s_total = 0.0;
 
             for i in 0..362 {
-                let count = (self.count[i] as f64).powf(t);
+                let count = (self.count[i] as f64 / c_total).powf(t);
 
                 s_total += count;
                 s[i] = s_total;
