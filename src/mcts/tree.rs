@@ -43,6 +43,33 @@ pub trait Value {
 #[derive(Clone)]
 pub struct PUCT;
 
+impl PUCT {
+    #[inline(always)]
+    unsafe fn get_impl<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
+        use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
+
+        let sqrt_n = ((1 + node.total_count) as f32).sqrt();
+        let uct_exp = *config::UCT_EXP;
+
+        for i in 0..362 {
+            let count = *node.count.get_unchecked(i);
+            let prior = *node.prior.get_unchecked(i);
+            let value = *value.get_unchecked(i);
+            let exp_bonus = fdiv_fast(sqrt_n, (1 + count) as f32);
+
+            *dst.get_unchecked_mut(i) = fadd_fast(value, fmul_fast(fmul_fast(prior, uct_exp), exp_bonus));
+        }
+    }
+
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn get_avx2<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
+        // since there is no real _trickery_ in this function except the
+        // usage of the AVX2 SIMD instructions for addition, multiplication,
+        // etc, we rely on LLVM to do all of the optimizations.
+        PUCT::get_impl(node, value, dst);
+    }
+}
+
 impl Value for PUCT {
     #[inline]
     unsafe fn update<E: Value>(trace: &NodeTrace<E>, color: Color, value: f32) {
@@ -68,67 +95,25 @@ impl Value for PUCT {
     /// * `value` - the winrates to use in the calculations
     /// * `dst` - output array for the UCT value
     /// 
-    #[inline]
+    #[inline(always)]
     fn get_ref<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
-        let sqrt_n = ((1 + node.total_count) as f32).sqrt();
-        let uct_exp = *config::UCT_EXP;
-
-        for i in 0..362 {
-            let exp_bonus = sqrt_n * ((1 + node.count[i]) as f32).recip();
-
-            dst[i] = value[i] + node.prior[i] * uct_exp * exp_bonus
-        }
+        unsafe { PUCT::get_impl(node, value, dst) };
     }
 
-    #[inline(never)]
+    /// Optimized implementation of the PUCT value function.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `node` -
+    /// * `value` - the winrates to use in the calculations
+    /// * `dst` - output array for the UCT value
+    /// 
+    #[inline(always)]
     fn get<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
-        if cfg!(target_arch = "x86_64") {
-            let sqrt_n = ((1 + node.total_count) as f32).sqrt();
-
-            unsafe {
-                const ONE: i32 = 1;
-
-                asm!(r#"
-                    vbroadcastss ymm3, [r12]  # ymm3 = exploration_rate
-                    vbroadcastss ymm4, [r13]  # ymm4 = sqrt (total_count + 1)
-                    vbroadcastss ymm5, [r14]  # ymm5 = 1
-                    mov rcx, 46               # loop counter
-
-                    loop_puct:
-                    vmovups ymm0, [ r8]       # ymm0 = count[i]
-                    vmovups ymm1, [ r9]       # ymm1 = value[i]
-                    vmovups ymm2, [r10]       # ymm2 = prior[i]
-
-                    vpaddd ymm0, ymm0, ymm5   # count[i] += 1
-                    vcvtdq2ps ymm0, ymm0      # count[i] = count[i] as f32
-                    vmulps ymm2, ymm2, ymm3   # prior[i] *= exploration_rate
-                    vdivps ymm0, ymm4, ymm0   # count[i] = sqrt (total_count + 1) / count[i]
-                    vmulps ymm0, ymm0, ymm2   # count[i] *= prior[i]
-                    vaddps ymm0, ymm0, ymm1   # count[i] += value[i]
-                    vmovups [r11], ymm0       # dst[i] = count[i]
-
-                    add  r8, 32               # i += 32
-                    add  r9, 32               # ...
-                    add r10, 32               # ...
-                    add r11, 32               # ...
-
-                    dec ecx                   # rcx -= 1
-                    jnz loop_puct             # repeat until rcx = 0
-                    "#
-                    : // no register outputs, but clobber memory
-                    : "{r8}"(node.count.as_ptr()),
-                      "{r9}"(value.as_ptr()),
-                      "{r10}"(node.prior.as_ptr()),
-                      "{r11}"(dst.as_ptr()),
-                      "{r12}"(&*config::UCT_EXP),
-                      "{r13}"(&sqrt_n),
-                      "{r14}"(&ONE)
-                    : "memory", "rcx", "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", "ymm5"
-                    : "intel", "volatile"
-                );
-            }
+        if is_x86_feature_detected!("avx2")  {
+            unsafe { PUCT::get_avx2(node, value, dst) };
         } else {
-            PUCT::get_ref::<E>(node, value, dst);
+            unsafe { PUCT::get_impl(node, value, dst) };
         }
     }
 }
@@ -142,77 +127,68 @@ pub type DefaultValue = PUCT;
 /// 
 /// * `array` -
 /// 
-#[inline(never)]
-fn argmax(array: &[f32]) -> Option<usize> {
-    // This function is `inline(never)` to avoid LLVM from performing dead
-    // code elimination (?) on the inline assembly.
+#[target_feature(enable = "avx,avx2,bmi1")]
+unsafe fn _argmax(array: &[f32]) -> Option<usize> {
+    use std::arch::x86_64::*;
 
-    if cfg!(target_arch = "x86_64") {
-        unsafe {
-            const NEG_INFINITY: [f32; 8] = [
-                ::std::f32::NEG_INFINITY, ::std::f32::NEG_INFINITY, ::std::f32::NEG_INFINITY, ::std::f32::NEG_INFINITY,
-                ::std::f32::NEG_INFINITY, ::std::f32::NEG_INFINITY, ::std::f32::NEG_INFINITY, ::std::f32::NEG_INFINITY
-            ];
-            let index: usize;
+    let mut so_far = _mm256_broadcast_ss(&::std::f32::NEG_INFINITY);
+    let mut index: usize = 0;
 
-            asm!(r#"
-                vmovups ymm3, [r9]                # ymm3 = -inf
-                xor rax, rax                      # rax = 0
-                xor rbx, rbx                      # rbx = 0
-                xor r10, r10                      # r10 = 0
-                mov rcx, 46                       # loop counter
+    for i in 0..46 {
+        let x = _mm256_loadu_ps(array.get_unchecked(8*i) as *const f32 as *const _);
 
-                loop_max:
-                vmovups ymm0, [r8+4*r10]          # ymm0 = array[r10]
+        // this is a tree reduction of the horizontal maximum of `ymm0`
+        // by shuffling the elements around and taking the maximum
+        // again. For example:
+        //
+        // a b c d | e f g h  ymm0
+        // b a d c | f e h g  ymm1 = shuffle(ymm0, [1, 0, 3, 2])
+        // -----------------  ymm0 = max(ymm0, ymm1)
+        // a a c c | e e g g  ymm0
+        // c c a a | g g e e  ymm1 = shuffle(ymm0, [2, 3, 0, 1])
+        // -----------------  ymm0 = max(ymm0, ymm1)
+        // a a a a | e e e e  ymm0
+        // e e e e | a a a a  ymm1 = shuffle_hilo(ymm0)
+        // -----------------  ymm0 = max(ymm0, ymm1)
+        // a a a a | a a a a  ymm0
+        //
+        let y = _mm256_permute_ps(x, 0xb1);
+        let z = _mm256_max_ps(x, y);
+        let y = _mm256_permute_ps(z, 0x4e);
+        let z = _mm256_max_ps(z, y);
+        let y = _mm256_permute2f128_ps(z, z, 0x01);
+        let z = _mm256_max_ps(z, y);
 
-                # this is a tree reduction of the horizontal maximum of `ymm0`
-                # by shuffling the elements around and taking the maximum
-                # again. For example:
-                #
-                # a b c d | e f g h  ymm0
-                # b a d c | f e h g  ymm1 = shuffle(ymm0, [1, 0, 3, 2])
-                # -----------------  ymm0 = max(ymm0, ymm1)
-                # a a c c | e e g g  ymm0
-                # c c a a | g g e e  ymm1 = shuffle(ymm0, [2, 3, 0, 1])
-                # -----------------  ymm0 = max(ymm0, ymm1)
-                # a a a a | e e e e  ymm0
-                # e e e e | a a a a  ymm1 = shuffle_hilo(ymm0)
-                # -----------------  ymm0 = max(ymm0, ymm1)
-                # a a a a | a a a a  ymm0
-                #
+        // determine the index of the element from our horizontal
+        // maximum that is now in `so_far`.
+        so_far = _mm256_max_ps(so_far, z);
+        let eq = _mm256_cmp_ps(so_far, x, _CMP_EQ_UQ);
+        let eq = _mm256_movemask_ps(eq) as u32;
 
-                vpermilps ymm1, ymm0, 0xb1        # ymm1 = shuffle(ymm0, [1, 0, 3, 2])
-                vmaxps ymm2, ymm0, ymm1           # ymm2 = max(ymm1, ymm0)
-                vpermilps ymm1, ymm2, 0x4e        # ymm1 = shuffle(ymm2, [2, 3, 0, 1])
-                vmaxps ymm2, ymm2, ymm1           # ymm2 = max(ymm2, ymm1)
-                vperm2f128 ymm1, ymm2, ymm2, 0x01 # ymm1 = shuffle_hilo(ymm2)
-                vmaxps ymm2, ymm2, ymm1           # ymm2 = max(ymm2, ymm1)
+        if eq != 0 {
+            let trailing_zeros = _mm_tzcnt_32(eq) as usize;
 
-                vmaxps ymm3, ymm3, ymm2           # ymm3 = max(ymm3, ymm2)
-                vcmpeqps ymm4, ymm3, ymm0         # ymm4 = (ymm0 == ymm3)
-                vmovmskps eax, ymm4               # eax  = compressed ymm4
-
-                tzcnt eax, eax                    # eax  = leading zero in eax
-                jc 2f                             # if eax == 0 skip
-                lea rbx, [r10+rax]
-
-                2:
-                add r10, 8                         # i += 8
-
-                dec ecx                           # rcx -= 1
-                jnz loop_max                      # repeat until rcx = 0
-                "#
-                : "={rbx}"(index)
-                : "{r8}"(array.as_ptr()), "{r9}"(NEG_INFINITY.as_ptr())
-                : "rax", "rbx", "rcx", "r10", "ymm0", "ymm1", "ymm2", "ymm3", "ymm4"
-                : "intel", "volatile"
-            );
-
-            Some(index)
+            index = 8 * i + trailing_zeros;
         }
+    }
+
+    Some(index)
+}
+
+/// Returns the index of the maximum value in the given array. If multiple
+/// indices share the same value, then which is returned is undefined.
+/// 
+/// # Arguments
+/// 
+/// * `array` -
+/// 
+#[inline(always)]
+fn argmax(array: &[f32]) -> Option<usize> {
+    if is_x86_feature_detected!("avx2")  {
+        unsafe { _argmax(array) }
     } else {
         (0..362).filter(|&i| array[i].is_finite())
-                .max_by_key(|&i| OrderedFloat(array[i]))
+            .max_by_key(|&i| OrderedFloat(array[i]))
     }
 }
 

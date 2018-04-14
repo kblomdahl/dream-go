@@ -19,55 +19,40 @@
 /// 
 /// * `array` - 
 /// 
-#[inline(never)]
-pub fn count_zeros(array: &[u8]) -> usize {
+#[target_feature(enable = "avx,avx2,popcnt")]
+unsafe fn _count_zeros(array: &[u8]) -> usize {
     debug_assert!(array.len() == 384);
 
-    let count: usize;
+    use std::arch::x86_64::*;
 
-    if cfg!(target_arch = "x86_64") {
-        unsafe {
-            // 256-bit AVX2 implementation of the following algorithm, where
-            // the main _trick_ is the use of the `movemask` and `popcnt` in
-            // order to figure out the number of values in each lane that
-            // succeeded the test.
-            //
-            // ```
-            // let mut count = 0
-            // for i in 0..361 {
-            //     if array[i] == 1 { count += 1 }
-            // }
-            // count
-            // ```
-            asm!(
-                r#"
-                mov rcx, 12                # set loop counter
-                vpxor ymm0, ymm0, ymm0     # set ymm0 = 0
-                xor rax, rax               # set rax = 0
-                xor rdx, rdx               # set rdx = 0
+    let zero = _mm256_setzero_si256();
+    let mut count = 0;
 
-                loop_count:
-                vmovups ymm1, [rbx]        # ymm1 = array[rbx..(rbx+32)]
-                vpcmpeqb ymm1, ymm1, ymm0  # ymm1 = (xmm1 == 0)
-                vpmovmskb edx, ymm1        # edx = 1 bit set for each byte in ymm1 that is not 0
-                popcnt edx, edx            # edx = number of bits set in edx
-                add rax, rdx               # rax += edx
+    for i in 0..12 {
+        let x = _mm256_loadu_si256(array.get_unchecked(32*i) as *const u8 as *const _);
+        let c = _mm256_cmpeq_epi8(x, zero);
+        let m = _mm256_movemask_epi8(c);  // set one bit for every match in `c`
 
-                add rbx, 32                # rbx += 32
-                dec ecx                    # ecx -= 1
-                jnz loop_count             # repeat if ecx > 0
-                "#
-                : "={rax}"(count)  // outputs
-                : "{rbx}"(&array[0])  // inputs
-                : "rax", "rbx", "rcx", "rdx", "ymm0", "ymm1"  // clobbers
-                : "intel", "volatile"
-            );
-        }
-    } else {
-        count = (0..361).filter(|&i| array[i] == 0).count();
+        count += _popcnt32(m);  // count the number of matches in `c`
     }
 
-    count
+    count as usize
+}
+
+/// Returns the number of elements in the given array that are `0`. The
+/// input arrays length must be a divider of `16` (for SIMD reasons).
+/// 
+/// # Arguments
+/// 
+/// * `array` - 
+/// 
+#[inline(always)]
+pub fn count_zeros(array: &[u8]) -> usize {
+    if is_x86_feature_detected!("avx2")  {
+        unsafe { _count_zeros(array) }
+    } else {
+        (0..361).filter(|&i| array[i] == 0).count()
+    }
 }
 
 #[cfg(test)]
