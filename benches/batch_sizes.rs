@@ -46,15 +46,15 @@ fn bench_batch_size_aux<T, R>(
           R: From<f32> + Clone
 {
     let mut workspace = network.get_workspace(batch_size);
-    let features = (0..batch_size).map(|_| {
+    let features = (0..batch_size).flat_map(|_| {
         let mut input = vec! [T::from(0.0); 12996];
 
         for b in input.iter_mut() {
             *b = T::from(if thread_rng().next_f32() < 0.2 { 1.0 } else { 0.0 });
         }
 
-        input.into_boxed_slice()
-    }).collect();
+        input.into_iter()
+    }).collect::<Vec<T>>();
 
     b.iter(move || {
         forward::<T, R>(&mut workspace, &features)
@@ -80,12 +80,12 @@ fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
     });
 }
 
-#[bench] fn batch_size_01(b: &mut Bencher)  { bench_batch_size(b,  1); }
-#[bench] fn batch_size_02(b: &mut Bencher)  { bench_batch_size(b,  2); }
-#[bench] fn batch_size_04(b: &mut Bencher)  { bench_batch_size(b,  4); }
-#[bench] fn batch_size_08(b: &mut Bencher)  { bench_batch_size(b,  8); }
-#[bench] fn batch_size_16(b: &mut Bencher)  { bench_batch_size(b, 16); }
-#[bench] fn batch_size_32(b: &mut Bencher)  { bench_batch_size(b, 32); }
-#[bench] fn batch_size_64(b: &mut Bencher)  { bench_batch_size(b, 64); }
+#[bench] fn batch_size_001(b: &mut Bencher)  { bench_batch_size(b,  1); }
+#[bench] fn batch_size_002(b: &mut Bencher)  { bench_batch_size(b,  2); }
+#[bench] fn batch_size_004(b: &mut Bencher)  { bench_batch_size(b,  4); }
+#[bench] fn batch_size_008(b: &mut Bencher)  { bench_batch_size(b,  8); }
+#[bench] fn batch_size_016(b: &mut Bencher)  { bench_batch_size(b, 16); }
+#[bench] fn batch_size_032(b: &mut Bencher)  { bench_batch_size(b, 32); }
+#[bench] fn batch_size_064(b: &mut Bencher)  { bench_batch_size(b, 64); }
 #[bench] fn batch_size_128(b: &mut Bencher) { bench_batch_size(b, 128); }
 #[bench] fn batch_size_256(b: &mut Bencher) { bench_batch_size(b, 256); }

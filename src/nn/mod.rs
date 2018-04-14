@@ -125,36 +125,30 @@ lazy_static! {
 ///
 pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
     workspace: &mut Workspace,
-    features: &Vec<Box<[T]>>
-) -> (Vec<R>, Vec<Box<[R]>>)
+    features: &[T]
+) -> (Vec<R>, Vec<Vec<R>>)
 {
     let batch_size = workspace.batch_size;
-
-    debug_assert!(batch_size == features.len());
-
-    let mut softmax = vec! [vec! [R::from(0.0f32); 362]; batch_size];
-    let mut value = vec! [R::from(0.0f32); batch_size];
+    let mut softmax;  // allocated later, after some work has been queued
+    let mut value;  // allocated later, after some work has been queued
 
     unsafe {
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
 
-        let input = workspace.get_input(Some(4 * batch_size * 12996));
+        // copy all of the input features into a single buffer on the CPU since
+        // each call to `cudaMemcpyAsync` carries a fair amount of overhead
+        let feature_size = ::std::mem::size_of::<T>() * 12996;
+        let input = workspace.get_input(Some(batch_size * feature_size));
 
-        for (i, ref feature) in features.iter().enumerate() {
-            assert_eq!(feature.len(), 12996);
-            assert_eq!(1, ::std::mem::size_of::<c_void>());
-
-            let element_size = ::std::mem::size_of::<T>() * 12996;
-
-            check!(cuda::cudaMemcpyAsync(
-                input.offset((i * element_size) as isize),
-                feature.as_ptr() as *const c_void,
-                element_size,
-                cuda::MemcpyKind::HostToDevice,
-                workspace.tower_stream
-            ));
-        }
+        debug_assert!(12996 * batch_size == features.len());
+        check!(cuda::cudaMemcpyAsync(
+            *input,
+            features.as_ptr() as *const c_void,
+            batch_size * feature_size,
+            cuda::MemcpyKind::HostToDevice,
+            workspace.tower_stream
+        ));
 
         let tower = graph::tower::<graph::Runtime, _>(workspace, &input);
 
@@ -170,25 +164,23 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream));
 
         let policy_output = graph::policy::<graph::Runtime, _>(workspace, &tower);
+        let softmax_size = ::std::mem::size_of::<R>() * 362;
+        softmax = vec! [R::from(0.0f32); 362 * batch_size];
 
-        for i in 0..batch_size {
-            let element_size = ::std::mem::size_of::<R>() * 362;
-            let output = (*policy_output).offset((i * element_size) as isize);
-
-            check!(cuda::cudaMemcpyAsync(
-                softmax[i].as_mut_ptr() as *mut c_void,
-                output,
-                element_size,
-                cuda::MemcpyKind::DeviceToHost,
-                workspace.policy_stream
-            ));
-        }
+        check!(cuda::cudaMemcpyAsync(
+            softmax.as_mut_ptr() as *mut c_void,
+            *policy_output,
+            softmax_size * batch_size,
+            cuda::MemcpyKind::DeviceToHost,
+            workspace.policy_stream
+        ));
 
         // value head (21v_value)
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.value_stream));
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.value_stream));
 
         let value_output = graph::value::<graph::Runtime, _>(workspace, &tower);
+        value = vec! [R::from(0.0f32); batch_size];
 
         check!(cuda::cudaMemcpyAsync(
             value.as_mut_ptr() as *mut c_void,
@@ -206,5 +198,5 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
         workspace.clear();
     }
 
-    (value, softmax.into_iter().map(|s| s.into_boxed_slice()).collect())
+    (value, softmax.chunks(362).map(|s| s.to_vec()).collect())
 }

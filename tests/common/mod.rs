@@ -106,7 +106,7 @@ pub fn playout_file(filename: &str, max_moves: Option<usize>) -> Board {
 /// * `next_color` -
 /// 
 #[allow(dead_code)]
-pub fn predict(board: &Board, next_color: Color) -> (f32, Box<[f32]>) {
+pub fn predict(board: &Board, next_color: Color) -> (f32, Vec<f32>) {
     // predict the next move and the current value using the neural network
     NETWORK.with(|network| {
         let mut workspace = network.get_workspace(1);
@@ -114,22 +114,22 @@ pub fn predict(board: &Board, next_color: Color) -> (f32, Box<[f32]>) {
         match *nn::TYPE {
             nn::Type::Single => {
                 let features = board.get_features::<f32, CHW>(next_color, Transform::Identity);
-                let (value, policy) = nn::forward::<f32, f32>(&mut workspace, &vec! [features]);
+                let (value, policy) = nn::forward::<f32, f32>(&mut workspace, &features);
 
                 (value[0], policy[0].clone())
             },
             nn::Type::Half => {
                 let features = board.get_features::<f16, CHW>(next_color, Transform::Identity);
-                let (value, policy) = nn::forward::<f16, f16>(&mut workspace, &vec! [features]);
+                let (value, policy) = nn::forward::<f16, f16>(&mut workspace, &features);
                 let policy = policy[0].iter()
                     .map(|&p| f32::from(p))
                     .collect::<Vec<f32>>();
 
-                (f32::from(value[0]), policy.into_boxed_slice())
+                (f32::from(value[0]), policy)
             },
             nn::Type::Int8 => {
                 let features = board.get_features::<q8, HWC>(next_color, Transform::Identity);
-                let (value, policy) = nn::forward::<q8, f32>(&mut workspace, &vec! [features]);
+                let (value, policy) = nn::forward::<q8, f32>(&mut workspace, &features);
 
                 (value[0], policy[0].clone())
             }

@@ -58,7 +58,7 @@ pub trait Features {
         &self,
         color: Color,
         symmetry: symmetry::Transform
-    ) -> Box<[T]>;
+    ) -> Vec<T>;
 }
 
 impl Features for Board {
@@ -110,7 +110,7 @@ impl Features for Board {
         &self,
         color: Color,
         symmetry: symmetry::Transform
-    ) -> Box<[T]>
+    ) -> Vec<T>
     {
         let c_0: T = T::from(0.0);
         let c_1: T = T::from(1.0);
@@ -202,7 +202,7 @@ impl Features for Board {
             }
         }
 
-        features.into_boxed_slice()
+        features
     }
 }
 

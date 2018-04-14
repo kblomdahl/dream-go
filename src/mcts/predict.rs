@@ -46,7 +46,7 @@ pub struct PredictState {
     running_count: AtomicUsize,
 
     /// The features to get the value and policy for.
-    features_list: Vec<Array>,
+    features_list: Array,
 
     /// The sender to response to each of the features in `features_list`
     /// over.
@@ -61,7 +61,7 @@ impl PredictState {
         PredictState {
             network: network,
             running_count: AtomicUsize::new(0),
-            features_list: vec! [],
+            features_list: Array::empty(),
             sender_list: vec! [],
             waiting_list: vec! []
         }
@@ -83,18 +83,16 @@ impl PredictState {
     /// 
     fn forward<T, R>(
         workspace: &mut Workspace,
-        features_list: Vec<Array>
+        features_list: &[T]
     ) -> (Vec<Singleton>, Vec<Array>)
         where T: From<f32> + Clone,
-              R: From<f32> + Clone, Box<[R]>: Into<Array>,
-              Array: Into<Box<[T]>> + From<Box<[R]>>,
+              R: From<f32> + Clone, Vec<R>: Into<Array>,
+              Array: Into<Vec<T>> + From<Vec<R>>,
               Singleton: From<R>,
     {
         let (value_list, policy_list) = nn::forward::<T, R>(
             workspace,
-            &features_list.into_iter()
-                .map(|feature| Array::into(feature))
-                .collect()
+            features_list
         );
 
         // wrap the results in `Array` so that we can avoid having to pass
@@ -115,9 +113,10 @@ impl PredictState {
         batch_size: usize
     )
     {
-        let num_items = state_lock.features_list.len();
-        let features_list = state_lock.features_list.split_off(num_items - batch_size);
-        let sender_list = state_lock.sender_list.split_off(num_items - batch_size);
+        let num_items = state_lock.sender_list.len();
+        let split_index = num_items - batch_size;
+        let features_list = state_lock.features_list.split_off(split_index * 12996);
+        let sender_list = state_lock.sender_list.split_off(split_index);
         let network = state_lock.network.clone();  // just a bunch of Arc<...> so cheap to clone
 
         // keep track of the number of running evaluations so that we avoid
@@ -125,16 +124,16 @@ impl PredictState {
         state_lock.running_count.fetch_add(1, Ordering::SeqCst);
         drop(state_lock);
 
-        debug_assert!(features_list.len() == batch_size);
+        debug_assert!(features_list.len() == batch_size * 12996);
         debug_assert!(sender_list.len() == batch_size);
 
         // perform the neural network predictions and then inform all of
         // the receivers
         let mut workspace = network.get_workspace(batch_size);
         let (value_list, policy_list) = match *TYPE {
-            Type::Int8 => PredictState::forward::<q8, f32>(&mut workspace, features_list),
-            Type::Half => PredictState::forward::<f16, f16>(&mut workspace, features_list),
-            Type::Single => PredictState::forward::<f32, f32>(&mut workspace, features_list)
+            Type::Int8 => PredictState::forward::<q8, f32>(&mut workspace, &Vec::from(features_list)),
+            Type::Half => PredictState::forward::<f16, f16>(&mut workspace, &Vec::from(features_list)),
+            Type::Single => PredictState::forward::<f32, f32>(&mut workspace, &Vec::from(features_list))
         };
 
         drop(workspace);
@@ -164,7 +163,7 @@ impl PredictState {
         has_more: bool
     )
     {
-        let num_requests = state_lock.features_list.len();
+        let num_requests = state_lock.sender_list.len();
         let batch_size = *config::BATCH_SIZE;
 
         if has_more {
@@ -220,7 +219,7 @@ impl parallel::ServiceImpl for PredictState {
     {
         match req {
             PredictRequest::Ask(features) => {
-                state_lock.features_list.push(features);
+                state_lock.features_list.extend_from_slice(features);
                 state_lock.sender_list.push(sender);
             },
             PredictRequest::Wait => {
@@ -232,7 +231,7 @@ impl parallel::ServiceImpl for PredictState {
     }
 
     fn check_sleep(state: MutexGuard<Self::State>) {
-        let num_requests = state.features_list.len();
+        let num_requests = state.sender_list.len();
         let num_waiting = state.waiting_list.len();
 
         assert!(num_requests == 0, "we should never sleep with a pending request -- {}", num_requests);
