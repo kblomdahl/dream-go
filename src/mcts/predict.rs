@@ -15,6 +15,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use parallel::{self, OneSender};
+use go::FEATURE_SIZE;
 use nn::{self, Network, Type, TYPE, Workspace};
 use util::array::*;
 use util::config;
@@ -115,7 +116,7 @@ impl PredictState {
     {
         let num_items = state_lock.sender_list.len();
         let split_index = num_items - batch_size;
-        let features_list = state_lock.features_list.split_off(split_index * 12996);
+        let features_list = state_lock.features_list.split_off(split_index * FEATURE_SIZE);
         let sender_list = state_lock.sender_list.split_off(split_index);
         let network = state_lock.network.clone();  // just a bunch of Arc<...> so cheap to clone
 
@@ -124,7 +125,7 @@ impl PredictState {
         state_lock.running_count.fetch_add(1, Ordering::SeqCst);
         drop(state_lock);
 
-        debug_assert!(features_list.len() == batch_size * 12996);
+        debug_assert!(features_list.len() == batch_size * FEATURE_SIZE);
         debug_assert!(sender_list.len() == batch_size);
 
         // perform the neural network predictions and then inform all of

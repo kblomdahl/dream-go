@@ -138,10 +138,10 @@ pub fn forward<T: From<f32> + Clone, R: From<f32> + Clone>(
 
         // copy all of the input features into a single buffer on the CPU since
         // each call to `cudaMemcpyAsync` carries a fair amount of overhead
-        let feature_size = ::std::mem::size_of::<T>() * 12996;
+        let feature_size = ::std::mem::size_of::<T>() * ::go::FEATURE_SIZE;
         let input = workspace.get_input(Some(batch_size * feature_size));
 
-        debug_assert!(12996 * batch_size == features.len());
+        debug_assert!(::go::FEATURE_SIZE * batch_size == features.len());
         check!(cuda::cudaMemcpyAsync(
             *input,
             features.as_ptr() as *const c_void,

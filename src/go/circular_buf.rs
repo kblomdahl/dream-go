@@ -16,7 +16,7 @@
 pub struct CircularIterator<'a> {
     count: usize,
     position: usize,
-    buf: &'a [[u8; 368]]
+    buf: &'a [usize]
 }
 
 /// Lookup table computing `(index + 1) % 6`.
@@ -27,9 +27,9 @@ const N_MOD_SIX: [usize; 6] = [1, 2, 3, 4, 5, 0];
 const P_MOD_SIX: [usize; 6] = [5, 0, 1, 2, 3, 4];
 
 impl<'a> Iterator for CircularIterator<'a> {
-    type Item = &'a [u8];
+    type Item = usize;
 
-    fn next(&mut self) -> Option<&'a [u8]> {
+    fn next(&mut self) -> Option<usize> {
         if self.count == 6 {
             None
         } else {
@@ -37,7 +37,7 @@ impl<'a> Iterator for CircularIterator<'a> {
             self.position = P_MOD_SIX[self.position];
             self.count += 1;
 
-            Some(&self.buf[index])
+            Some(self.buf[index])
         }
     }
 }
@@ -45,7 +45,7 @@ impl<'a> Iterator for CircularIterator<'a> {
 /// A circular stack that keeps track of the six most recent pushed buffers.
 pub struct CircularBuf {
     position: usize,
-    buf: [[u8; 368]; 6]
+    buf: [usize; 6]
 }
 
 impl Clone for CircularBuf {
@@ -61,18 +61,18 @@ impl CircularBuf {
     pub fn new() -> CircularBuf {
         CircularBuf {
             position: 0,
-            buf: [[0; 368]; 6]
+            buf: [361; 6]
         }
     }
 
-    /// Adds another buffer to this stack.
+    /// Adds another value to this circular buffer.
     /// 
     /// # Arguments
     /// 
-    /// * `buf` - 
+    /// * `value` - 
     /// 
-    pub fn push(&mut self, buf: &[u8]) {
-        self.buf[self.position].copy_from_slice(buf);
+    pub fn push(&mut self, value: usize) {
+        self.buf[self.position] = value;
         self.position = N_MOD_SIX[self.position];
     }
 
@@ -95,24 +95,24 @@ mod tests {
     fn check() {
         let mut buf = CircularBuf::new();
 
-        buf.push(&[0; 368]);
-        buf.push(&[1; 368]);
-        buf.push(&[2; 368]);
-        buf.push(&[3; 368]);
-        buf.push(&[4; 368]);
-        buf.push(&[5; 368]);
-        buf.push(&[6; 368]);
-        buf.push(&[7; 368]);
-        buf.push(&[8; 368]);
+        buf.push(0);
+        buf.push(1);
+        buf.push(2);
+        buf.push(3);
+        buf.push(4);
+        buf.push(5);
+        buf.push(6);
+        buf.push(7);
+        buf.push(8);
 
         let mut iter = buf.iter();
 
-        assert_eq!(iter.next().unwrap()[0], 8);
-        assert_eq!(iter.next().unwrap()[0], 7);
-        assert_eq!(iter.next().unwrap()[0], 6);
-        assert_eq!(iter.next().unwrap()[0], 5);
-        assert_eq!(iter.next().unwrap()[0], 4);
-        assert_eq!(iter.next().unwrap()[0], 3);
+        assert_eq!(iter.next().unwrap(), 8);
+        assert_eq!(iter.next().unwrap(), 7);
+        assert_eq!(iter.next().unwrap(), 6);
+        assert_eq!(iter.next().unwrap(), 5);
+        assert_eq!(iter.next().unwrap(), 4);
+        assert_eq!(iter.next().unwrap(), 3);
         assert!(iter.next().is_none());
     }
 }

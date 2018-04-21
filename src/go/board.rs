@@ -99,6 +99,23 @@ impl Board {
         }
     }
 
+    /// Returns true if playing at the given index violated the
+    /// super-ko rule.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `color` - the color of the move
+    /// * `index` - the index of the move
+    /// 
+    pub(super) fn _is_ko(&self, color: Color, index: usize) -> bool {
+        debug_assert!(self.inner.is_valid(color, index));
+
+        let adjust = self.inner.place_if(color, index);
+        let next_zobrist_hash = self.zobrist_hash ^ adjust;
+
+        self.zobrist_history.contains(next_zobrist_hash)
+    }
+
     /// Returns whether the given move is valid according to the
     /// Tromp-Taylor rules.
     ///
@@ -108,12 +125,7 @@ impl Board {
     /// * `index` - the index of the move
     ///
     pub(super) fn _is_valid(&self, color: Color, index: usize) -> bool {
-        self.inner.is_valid(color, index) && {
-            let adjust = self.inner.place_if(color, index);
-            let next_zobrist_hash = self.zobrist_hash ^ adjust;
-
-            !self.zobrist_history.contains(next_zobrist_hash)
-        }
+        self.inner.is_valid(color, index) && !self._is_ko(color, index)
     }
 
     /// Returns whether the given move is valid according to the
@@ -151,7 +163,7 @@ impl Board {
         //    generating features.
         // 2. the circular stack starts with all buffers as zero, so there is no need to
         //    keep track of the initial board state.
-        self.history.push(&self.inner.vertices);
+        self.history.push(index);
         self.zobrist_history.push(self.zobrist_hash);
     }
 

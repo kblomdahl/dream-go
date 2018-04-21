@@ -108,7 +108,7 @@ lazy_static! {
     /// larger values make the engine more likely to pick a sub-optimal
     /// move (according to the search).
     pub static ref TEMPERATURE: f32 = get_env("TEMPERATURE")
-        .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 0.3 } else { 0.97 });
+        .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 0.3 } else { 0.92 });
 
     /// The _First Play Urgency_ reduction. Setting this is `1.0` effectively
     /// disables FPU.

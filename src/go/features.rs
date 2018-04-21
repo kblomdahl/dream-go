@@ -19,7 +19,11 @@ use go::color::Color;
 use go::ladder::Ladder;
 use go::symmetry;
 
-use std::collections::VecDeque;
+/// The number of features that the board will provide.
+pub const NUM_FEATURES: usize = 32;
+
+/// The total size (in elements) of the feature set.
+pub const FEATURE_SIZE: usize = NUM_FEATURES * 361;
 
 /// Utility function for determining the data format of the array returned by
 /// `get_features`.
@@ -63,44 +67,53 @@ pub trait Features {
 
 impl Features for Board {
     /// Returns the features of the current board state for the given color,
-    /// it returns the following features:
-    ///
-    /// 1. A constant plane filled with ones
-    /// 2. A constant plane filled with ones if we are black
-    /// 3. Our liberties (1)
-    /// 4. Our liberties (2)
-    /// 5. Our liberties (3)
-    /// 6. Our liberties (4)
-    /// 7. Our liberties (5)
-    /// 8. Our liberties (6+)
-    /// 9. Our liberties after move (1)
-    /// 10. Our liberties after move (2)
-    /// 11. Our liberties after move (3)
-    /// 12. Our liberties after move (4)
-    /// 13. Our liberties after move (5)
-    /// 14. Our liberties after move (6+)
-    /// 15. Our vertices (now)
-    /// 16. Our vertices (now-1)
-    /// 17. Our vertices (now-2)
-    /// 18. Our vertices (now-3)
-    /// 19. Our vertices (now-4)
-    /// 20. Our vertices (now-5)
-    /// 21. Opponent liberties (1)
-    /// 22. Opponent liberties (2)
-    /// 23. Opponent liberties (3)
-    /// 24. Opponent liberties (4)
-    /// 25. Opponent liberties (5)
-    /// 26. Opponent liberties (6+)
-    /// 27. Opponent vertices (now)
-    /// 28. Opponent vertices (now-1)
-    /// 29. Opponent vertices (now-2)
-    /// 30. Opponent vertices (now-3)
-    /// 31. Opponent vertices (now-4)
-    /// 32. Opponent vertices (now-5)
-    /// 33. Is ladder capture
-    /// 34. Is ladder escape
-    /// 35. Is point only reachable from our vertices
-    /// 36. Is point only reachable from opponent vertices
+    /// it returns the following features. Divided into four sections based
+    /// on their intended purpose (regardless of what the network does with
+    /// them).
+    /// 
+    /// ## Global properties
+    /// 
+    ///  1. A constant plane filled with ones if we are black
+    ///  2. A constant plane filled with ones if we are white
+    ///  3. A constant plane filled with ones if any move is super-ko
+    /// 
+    /// ## Board state (current and historical)
+    /// 
+    ///  4. Our vertices (now)
+    ///  5. Opponent vertices (now)
+    ///  6. Most recent move ( 0)
+    ///  7. Most recent move (-1)
+    ///  8. Most recent move (-2)
+    ///  9. Most recent move (-3)
+    /// 10. Most recent move (-4)
+    /// 11. Most recent move (-5)
+    /// 
+    /// ## Liberties
+    /// 
+    /// 12. Our liberties (>= 1)
+    /// 13. Our liberties (>= 2)
+    /// 14. Our liberties (>= 3)
+    /// 15. Our liberties (>= 4)
+    /// 16. Our liberties (>= 5)
+    /// 17. Our liberties (>= 6)
+    /// 18. Our liberties after move (>= 1)
+    /// 19. Our liberties after move (>= 2)
+    /// 20. Our liberties after move (>= 3)
+    /// 21. Our liberties after move (>= 4)
+    /// 22. Our liberties after move (>= 5)
+    /// 23. Our liberties after move (>= 6)
+    /// 24. Opponent liberties (>= 1)
+    /// 25. Opponent liberties (>= 2)
+    /// 26. Opponent liberties (>= 3)
+    /// 27. Opponent liberties (>= 4)
+    /// 28. Opponent liberties (>= 5)
+    /// 29. Opponent liberties (>= 6)
+    /// 
+    /// ## Vertex properties
+    /// 
+    /// 30. Is super-ko
+    /// 31. Is ladder capture
+    /// 32. Is ladder escape
     ///
     /// # Arguments
     ///
@@ -115,91 +128,98 @@ impl Features for Board {
         let c_0: T = T::from(0.0);
         let c_1: T = T::from(1.0);
 
-        let mut features = vec! [c_0; 36 * 361];
+        let mut features = vec! [c_0; FEATURE_SIZE];
         let symmetry_table = symmetry.get_table();
-        let is_black = if color == Color::Black { c_1 } else { c_0 };
         let current = color as u8;
 
-        // set the two constant planes and the liberties
+        // board state (current)
+        for index in 0..361 {
+            let other = symmetry_table[index] as usize;
+
+            if self.inner.vertices[index] == current {
+                features[O::index(3, other)] = c_1;
+            } else if self.inner.vertices[index] != 0 {
+                features[O::index(4, other)] = c_1;
+            }
+        }
+
+        // board state (historic)
+        for (i, index) in self.history.iter().enumerate() {
+            if index == 361 {
+                // pass
+            } else {
+                let other = symmetry_table[index] as usize;
+
+                features[O::index(5+i, other)] = c_1;
+            }
+        }
+
+        // liberties
         let mut liberties = [0; 368];
 
         for index in 0..361 {
             let other = symmetry_table[index] as usize;
 
-            features[O::index(0, other)] = c_1;
-            features[O::index(1, other)] = is_black;
-
             if self.inner.vertices[index] != 0 {
-                // num liberties
+                let start = if self.inner.vertices[index] == current { 11 } else { 23 };
                 let num_liberties = ::std::cmp::min(
                     get_num_liberties(&self.inner, index, &mut liberties),
                     6
                 );
-                let l = {
-                    debug_assert!(num_liberties > 0);
 
-                    if self.inner.vertices[index] == current {
-                        1 + num_liberties
-                    } else {
-                        19 + num_liberties
-                    }
-                };
-
-                features[O::index(l, other)] = c_1;
+                for i in 0..num_liberties {
+                    features[O::index(start+i, other)] = c_1;
+                }
             } else if _is_valid_memoize(&self.inner, color, index, &mut liberties) {
-                // liberties after move
                 let num_liberties = ::std::cmp::min(
                     get_num_liberties_if(&self.inner, color, index, &mut liberties),
                     6
                 );
-                let l = 7 + num_liberties;
 
-                features[O::index(l, other)] = c_1;
-
-                // is ladder capture
-                if self.inner.is_ladder_capture(color, index) {
-                    features[O::index(32, other)] = c_1;
-                }
-
-                // is ladder escape
-                if self.inner.is_ladder_escape(color, index) {
-                    features[O::index(33, other)] = c_1;
+                for i in 0..num_liberties {
+                    features[O::index(17+i, other)] = c_1;
                 }
             }
         }
 
-        // set the 12 planes that denotes our and the opponents stones
-        for (i, vertices) in self.history.iter().enumerate() {
-            for index in 0..361 {
-                let other = symmetry_table[index] as usize;
-
-                if vertices[index] == 0 {
-                    // pass
-                } else if vertices[index] == current {
-                    let p = 14 + i;
-
-                    features[O::index(p, other)] = c_1;
-                } else {
-                    // opponent
-                    let p = 26 + i;
-
-                    features[O::index(p, other)] = c_1;
-                }
-            }
-        }
-
-        // set the territory features
-        let our_territory = get_territory_distance(&self.inner, color);
-        let other_territory = get_territory_distance(&self.inner, color.opposite());
+        // vertex properties
+        let mut is_ko = c_0;
 
         for index in 0..361 {
             let other = symmetry_table[index] as usize;
 
-            if our_territory[index] > 0 && other_territory[index] == 0xff {
-                features[O::index(34, other)] = c_1;
-            } else if our_territory[index] == 0xff && other_territory[index] > 0 {
-                features[O::index(35, other)] = c_1;
+            if self.inner.vertices[index] != 0 {
+                // pass
+            } else if _is_valid_memoize(&self.inner, color, index, &mut liberties) {
+                // is super-ko
+                if self._is_ko(color, index) {
+                    is_ko = c_1;
+
+                    features[O::index(29, other)] = c_1;
+                }
+
+                // is ladder capture
+                if self.inner.is_ladder_capture(color, index) {
+                    features[O::index(30, other)] = c_1;
+                }
+
+                // is ladder escape
+                if self.inner.is_ladder_escape(color, index) {
+                    features[O::index(31, other)] = c_1;
+                }
             }
+        }
+
+        // global properties
+        let is_black = if color == Color::Black { c_1 } else { c_0 };
+        let is_white = if color == Color::White { c_1 } else { c_0 };
+
+        for index in 0..361 {
+            let other = symmetry_table[index] as usize;
+
+            features[O::index(0, other)] = is_black;
+            features[O::index(1, other)] = is_white;
+            features[O::index(2, other)] = is_ko;
         }
 
         features
@@ -349,48 +369,6 @@ fn get_num_liberties_if(board: &BoardFast, color: Color, index: usize, memoize: 
     });
 
     asm::count_zeros(&liberties)
-}
-
-/// Returns an array containing the (manhattan) distance to the closest stone
-/// of the given color for each point on the board.
-///
-/// # Arguments
-///
-/// * `color` - the color to get the distance from
-///
-fn get_territory_distance(board: &BoardFast, color: Color) -> [u8; 368] {
-    let current = color as u8;
-
-    // find all of our stones and mark them as starting points
-    let mut territory = [0xff; 368];
-    let mut probes = VecDeque::with_capacity(512);
-
-    for index in 0..361 {
-        if board.vertices[index] == current {
-            territory[index] = 0;
-            probes.push_back(index);
-        }
-    }
-
-    // compute the distance to all neighbours using a dynamic programming
-    // approach where we at each iteration try to update the neighbours of
-    // each updated vertex, and if the distance we tried to set was smaller
-    // than the current distance we try to update that vertex neighbours.
-    //
-    // This is equivalent to a Bellman–Ford algorithm for the shortest path.
-    while !probes.is_empty() {
-        let index = probes.pop_front().unwrap();
-        let t = territory[index] + 1;
-
-        foreach_4d!(board, index, |other_index, value| {
-            if value == 0 && territory[other_index] > t {
-                probes.push_back(other_index);
-                territory[other_index] = t;
-            }
-        });
-    }
-
-    territory
 }
 
 #[cfg(test)]

@@ -16,6 +16,7 @@ use libc::c_void;
 use std::collections::HashMap;
 use std::ptr;
 
+use go::NUM_FEATURES;
 use nn::ffi::cublas;
 use nn::ffi::cuda;
 use nn::ffi::cudnn;
@@ -25,7 +26,7 @@ use nn::{Type, TYPE};
 use util::max;
 
 /// The number of features in the neural network architecture.
-const NUM_FEATURES: usize = 128;
+const NUM_CHANNELS: usize = 128;
 
 /// The number of residual blocks in the neural network architecture.
 const NUM_LAYERS: usize = 9;
@@ -836,7 +837,7 @@ impl Builder {
 
         g.tensors.insert("00_input/output:0".to_string(), Tensor::default()
             .set_data_type(data_type, format)
-            .set_shape(vec! [0, 36, 19, 19])
+            .set_shape(vec! [0, ::go::NUM_FEATURES as i32, 19, 19])
             .set_scale(1.0)
             .clone()
         );
@@ -1027,9 +1028,9 @@ impl Drop for Workspace {
 /// 
 pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard {
     let batch_size = graph.get_batch_size();
-    let residual_1 = O::get_slot(graph, "residual_1", 4 * batch_size * NUM_FEATURES * 361);
-    let residual_2 = O::get_slot(graph, "residual_2", 4 * batch_size * NUM_FEATURES * 361);
-    let residual_3 = O::get_slot(graph, "residual_3", 4 * batch_size * NUM_FEATURES * 361);
+    let residual_1 = O::get_slot(graph, "residual_1", 4 * batch_size * NUM_CHANNELS * 361);
+    let residual_2 = O::get_slot(graph, "residual_2", 4 * batch_size * NUM_CHANNELS * 361);
+    let residual_3 = O::get_slot(graph, "residual_3", 4 * batch_size * NUM_CHANNELS * 361);
     let workspace_size = graph.get_workspace_size();
     let workspace_1 = O::get_slot(graph, "workspace_1", workspace_size);
     let workspace_2 = O::get_slot(graph, "workspace_2", workspace_size);
@@ -1047,7 +1048,7 @@ pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard
     O::convolution(
         graph,
         "00_input/output:0".to_string(), **input,
-        NUM_FEATURES as i32, 36, 3, 3,
+        NUM_CHANNELS as i32, NUM_FEATURES as i32, 3, 3,
         "01_upsample/weights:0".to_string(),
         "01_upsample/offset:0".to_string(),
         "01_upsample/output:0".to_string(), *residual_1,
@@ -1064,7 +1065,7 @@ pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard
         O::residual_block(
             graph,
             input_name, *residual_1,
-            NUM_FEATURES as i32, NUM_FEATURES as i32, 3, 3,
+            NUM_CHANNELS as i32, NUM_CHANNELS as i32, 3, 3,
             format!("{:02}_residual/weights_1c:0", i),
             format!("{:02}_residual/weights_1d:0", i),
             format!("{:02}_residual/weights_2:0", i),
@@ -1093,7 +1094,7 @@ pub fn policy<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> Slo
     O::convolution(
         graph,
         format!("{:02}_residual/output_2:0", NUM_LAYERS + 1), **residual_1,
-        2, NUM_FEATURES as i32, 1, 1,
+        2, NUM_CHANNELS as i32, 1, 1,
         format!("{:02}p_policy/downsample:0", NUM_LAYERS + 2),
         format!("{:02}p_policy/offset:0", NUM_LAYERS + 2),
         format!("{:02}p_policy/output_1:0", NUM_LAYERS + 2), *policy_out,
@@ -1130,7 +1131,7 @@ pub fn value<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> Slot
     O::convolution(
         graph,
         format!("{:02}_residual/output_2:0", NUM_LAYERS + 1), **residual_1,
-        1, NUM_FEATURES as i32, 1, 1,
+        1, NUM_CHANNELS as i32, 1, 1,
         format!("{:02}v_value/downsample:0", NUM_LAYERS + 2),
         format!("{:02}v_value/offset:0", NUM_LAYERS + 2),
         format!("{:02}v_value/output_1:0", NUM_LAYERS + 2), *value_1,

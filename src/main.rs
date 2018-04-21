@@ -18,6 +18,8 @@ extern crate time;
 use dream_go::{dataset, gtp, nn, mcts};
 use dream_go::util::config::{self, Procedure};
 
+use std::io::Write;
+
 /// Returns the network weights, panics if it failed to load the weights.
 fn load_network() -> nn::Network {
     match nn::Network::new() {
@@ -68,6 +70,8 @@ fn main() {
                     break
                 }
             }
+
+            handle.flush().unwrap();
         },
 
         Procedure::SelfPlay(n) => {
