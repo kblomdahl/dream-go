@@ -18,16 +18,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
-import numpy as np
-
 import argparse
 import base64
-from datetime import datetime
 import json
 import math
+from datetime import datetime
 
-NUM_FEATURES = 36  # the total number of input features
+import numpy as np
+import tensorflow as tf
+
+NUM_FEATURES = 32  # the total number of input features
 NUM_BINS = 65536  # the number of bins to use internally when determining scaling
 
 MAX_STEPS = 52428800  # the default total number of examples to train over
@@ -37,8 +37,12 @@ LSUV_OPS = 'LSUVOps'  # the graph collection that contains all lsuv operations
 DUMP_OPS = 'DumpOps'  # the graph collection that contains all dump operations
 HIST_OPS = 'HistOps'  # the graph collection that contains all histogram operations
 OUTPUT_OPS = 'OutputOps'  # the graph collection that contains all output tensors
+NORM_OPS = 'NormOps'  # the graph collection that contains all weights to be normalized
+LEARNING_RATE = 'LearningRate'  # the graph collection that contains the learning rate
+LOSS = 'Loss'  # the graph collection that contains the loss
 
-# -------- LSUV initialization --------
+
+# -------- Initialization --------
 
 def orthogonal_initializer():
     """ Returns an orthogonal initializer that use QR-factorization to find
@@ -79,49 +83,128 @@ def orthogonal_initializer():
         if num_rows < num_cols:
             q = np.transpose(q, [1, 0])
 
-        return np.reshape(q, shape)
+        return np.reshape(q, shape) / np.linalg.norm(q, ord=2)
 
     return _init
 
 
-def lsuv_initializer(output, weights):
-    """ Returns an operation that initialize the given weights and their output
-    using the LSUV [1] methodology.
+# -------- Learning Rate Schedule --------
 
-    [1] Dmytro Mishkin, Jiri Matas, "All you need is a good init" """
+import scipy.stats
 
-    _, variance = tf.nn.moments(output, axes=[0, 2, 3], keep_dims=True)
-    variance = tf.transpose(variance, [0, 2, 3, 1])
+class LearningRateScheduler(tf.train.SessionRunHook):
+    """
+    An automatic learning rate scheduler [1] that decrease the learning rate
+    by a factor of 3.0 when the loss reach a plateau.
 
-    update_op = tf.assign(weights, tf.truediv(weights, tf.sqrt(variance)), use_locking=True)
+    [1] Dlib, "Automatic Learning Rate Scheduling That Really Works",
+        http://blog.dlib.net/2018/02/automatic-learning-rate-scheduling-that.html
+    """
 
-    with tf.control_dependencies([update_op]):
-        name = weights.name.split(':')[0] + '/lsuv'
+    BUF_SIZE = 4096  # the number of samples to calculate the slope over
+    THRESHOLD = 2048  # the minimum distance between two decreases in learning rate
 
-        return tf.sqrt(variance, name=name)
+    def begin(self):
+        self.global_step = tf.train.get_global_step()
+        self.learning_rate = tf.get_collection(LEARNING_RATE)[-1]
+        self.loss = tf.get_collection(LOSS)[-1]
 
+        with tf.device('cpu:0'):
+            buf_size = LearningRateScheduler.BUF_SIZE
 
-class LSUVInit(tf.train.SessionRunHook):
-    """ LSUV [1] initialization hook that calls any operations added to
-    the `LSUV_OPS` graph collection twice in sequence.
+            # keep track of the loss in a tensorflow variable so that it can
+            # survive a checkpoint
+            self.losses = tf.get_variable('learning_rate/losses', (buf_size, 3), tf.float32, trainable=False)
+            self.losses_ph = tf.placeholder(tf.float32)
+            self.losses_op = self.losses.assign(self.losses_ph)
 
-    [1] Dmytro Mishkin, Jiri Matas, "All you need is a good init" """
+            # keep track of when we last decreased so we don't do it too often
+            self.last_decrease = tf.Variable(0, False, name='learning_rate/last_decrease', dtype=tf.int64)
+            self.last_decrease_ph = tf.placeholder(tf.int64)
+            self.last_decrease_op = self.last_decrease.assign(self.last_decrease_ph)
+
+            # create some variable purely for the purpose of TensorBoard logging
+            # of the slope and the probability that the slope is decreasing
+            self.slope = tf.Variable(0.0, False, name='learning_rate/slope')
+            self.slope_ph = tf.placeholder(tf.float32)
+            self.slope_op = self.slope.assign(self.slope_ph)
+
+            self.p_decreasing = tf.Variable(1.0, False, name='learning_rate/decreasing')
+            self.p_decreasing_ph = tf.placeholder(tf.float32)
+            self.p_decreasing_op = self.p_decreasing.assign(self.p_decreasing_ph)
+
+        tf.summary.scalar('learning_rate/slope', self.slope)
+        tf.summary.scalar('learning_rate/p_decreasing', self.p_decreasing)
+
+        # the operations necessary to decrease the learning rate
+        self.learning_rate_ph = tf.placeholder(tf.float32)
+        self.learning_rate_op = self.learning_rate.assign(self.learning_rate_ph)
 
     def before_run(self, run_context):
-        session = run_context.session
-        global_step = tf.train.get_global_step()
-        if global_step.eval(session) > 0:
-            return
+        return tf.train.SessionRunArgs(fetches=[
+            self.global_step,
+            self.learning_rate,
+            self.loss,
+            self.losses,
+            self.last_decrease
+        ])
 
-        count = 0
+    def is_decreasing(self, x, y):
+        n = x.shape[0]
+        if n < 5:
+            return 1.0, 0.0
 
-        for lsuv_op in tf.get_collection(LSUV_OPS):
-            for _ in range(2):
-                _std = session.run([lsuv_op])
+        m, c = np.linalg.lstsq(x, y, rcond=None)[0]
 
-            count += 1
+        # estimate the probability that the loss is decreasing based on how
+        # well the least squares fit the actual data
+        y_hat = m * x[:, 0] + c
+        variance = 1.0 / (n - 2.0) * np.sum(np.square(y[:-1] - y_hat[:-1]))
+        variance = (12.0 * variance) / (n**3 - n)
+        p = scipy.stats.norm.cdf(0.0, loc=m, scale=math.sqrt(variance))
 
-        print('LSUV initialization finished, adjusted %d tensors.' % (count,))
+        return p, m
+
+    def after_run(self, run_context, run_values):
+        global_step, learning_rate, loss, losses, last_decrease = run_values.results
+
+        # add the loss of this step to the global state
+        index = global_step % LearningRateScheduler.BUF_SIZE
+        losses[index, :] = (global_step, 1.0, loss)
+
+        run_context.session.run(self.losses_op, feed_dict={
+            self.losses_ph: losses
+        })
+
+        # if we have enough data to estimate the slope of the loss, we do so by
+        # fitting a straight line to the function `f(global_step) = loss` using
+        # least squares.
+        steps = global_step - last_decrease
+
+        if steps > LearningRateScheduler.THRESHOLD:
+            x = losses[:global_step, 0:2]
+            y = losses[:global_step, 2].T
+            p, m = self.is_decreasing(x, y)
+
+            t = np.percentile(y, 90)
+            rx, ry = x[y < t, :], y[y < t]
+            rp, _rm = self.is_decreasing(rx, ry)
+
+            run_context.session.run([self.slope_op, self.p_decreasing_op], feed_dict={
+                self.slope_ph: m,
+                self.p_decreasing_ph: p
+            })
+
+            # decrease the learning rate if we are not certain whether the slope
+            # is decreasing or not
+            if p < 0.51 and rp < 0.51:
+                if learning_rate < 1e-8:
+                    run_context.request_stop()
+
+                run_context.session.run([self.learning_rate_op, self.last_decrease_op], feed_dict={
+                    self.learning_rate_ph: learning_rate / 3.0,
+                    self.last_decrease_ph: global_step
+                })
 
 
 # -------- Graph Components --------
@@ -229,32 +312,27 @@ def residual_block(x, mode, params):
     conv_1d = tf.get_variable('weights_1d', (3, 3, num_channels, num_dilation), tf.float32, init_op)
     conv_2 = tf.get_variable('weights_2', (3, 3, num_channels, num_channels), tf.float32, init_op)
 
-    tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, tf.nn.l2_loss(conv_1c))
-    tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, tf.nn.l2_loss(conv_1d))
-    tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, tf.nn.l2_loss(conv_2))
+    tf.add_to_collection(NORM_OPS, conv_1c)
+    tf.add_to_collection(NORM_OPS, conv_1d)
+    tf.add_to_collection(NORM_OPS, conv_2)
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
+
+        # the 1st convolution
         c = tf.nn.conv2d(x, conv_1c, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        tf.add_to_collection(LSUV_OPS, lsuv_initializer(c, conv_1c))
-
         c = batch_norm(c, conv_1c, mode, params, suffix='_1c')
-        c = tf.nn.relu6(c)
-
         d = tf.nn.conv2d(x, conv_1d, (1, 1, 1, 1), 'SAME', True, 'NCHW', (1, 1, 2, 2))
-        tf.add_to_collection(LSUV_OPS, lsuv_initializer(d, conv_1d))
-
         d = batch_norm(d, conv_1d, mode, params, suffix='_1d')
-        d = tf.nn.relu6(d)
 
         y = tf.concat([c, d], axis=1)
+        y = tf.nn.relu6(y)
         tf.add_to_collection(OUTPUT_OPS, tf.identity(y, 'output_1c'))
         tf.add_to_collection(OUTPUT_OPS, tf.identity(y, 'output_1d'))
         tf.add_to_collection(OUTPUT_OPS, tf.identity(y, 'output_1'))
 
+        # the 2nd convolution
         y = tf.nn.conv2d(y, conv_2, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        tf.add_to_collection(LSUV_OPS, lsuv_initializer(y, conv_2))
-
         y = batch_norm(y, conv_2, mode, params, suffix='_2')
         y = tf.nn.relu6(y + x)
         tf.add_to_collection(OUTPUT_OPS, tf.identity(y, 'output_2'))
@@ -286,6 +364,8 @@ def value_head(x, mode, params):
     bias_1 = tf.get_variable('bias_1', (256,), tf.float32, zeros_op)
     bias_2 = tf.get_variable('bias_2', (1,), tf.float32, zeros_op)
 
+    tf.add_to_collection(NORM_OPS, downsample)
+
     tf.add_to_collection(DUMP_OPS, [weights_1, weights_1])
     tf.add_to_collection(DUMP_OPS, [weights_2, weights_2])
     tf.add_to_collection(DUMP_OPS, [bias_1, bias_1])
@@ -294,8 +374,6 @@ def value_head(x, mode, params):
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
         y = tf.nn.conv2d(x, downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        tf.add_to_collection(LSUV_OPS, lsuv_initializer(y, downsample))
-
         y = batch_norm(y, downsample, mode, params)
         y = tf.nn.relu6(y)
         tf.add_to_collection(OUTPUT_OPS, tf.identity(y, 'output_1'))
@@ -329,14 +407,14 @@ def policy_head(x, mode, params):
     weights = tf.get_variable('weights', (722, 362), tf.float32, init_op)
     bias = tf.get_variable('bias', (362,), tf.float32, zeros_op)
 
+    tf.add_to_collection(NORM_OPS, downsample)
+
     tf.add_to_collection(DUMP_OPS, [weights, weights])
     tf.add_to_collection(DUMP_OPS, [bias, bias])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
         y = tf.nn.conv2d(x, downsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        tf.add_to_collection(LSUV_OPS, lsuv_initializer(y, downsample))
-
         y = batch_norm(y, downsample, mode, params)
         y = tf.nn.relu6(y)
         tf.add_to_collection(OUTPUT_OPS, tf.identity(y, 'output_1'))
@@ -358,11 +436,9 @@ def tower(x, mode, params):
 
     with tf.variable_scope('01_upsample'):
         upsample = tf.get_variable('weights', (3, 3, num_inputs, num_channels), tf.float32, init_op)
-        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, tf.nn.l2_loss(upsample))
+        tf.add_to_collection(NORM_OPS, upsample)
 
         y = tf.nn.conv2d(x, upsample, (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        tf.add_to_collection(LSUV_OPS, lsuv_initializer(y, upsample))
-
         y = batch_norm(y, upsample, mode, params)
         y = tf.nn.relu6(y)
 
@@ -508,15 +584,16 @@ class DumpHook(tf.train.SessionRunHook):
 def get_dataset(files, batch_size=1, is_training=True):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
-    def _decode_and_split(x):
-        num_bytes = math.ceil((361 * NUM_FEATURES + 1) / 8.0)
+    num_bytes = math.ceil((361 * NUM_FEATURES + 1) / 8.0)
 
+    def _decode_and_split(x):
         return tf.split(tf.decode_raw(x, tf.uint8), (num_bytes, 362))
 
     def _parse_py(features_and_value, policy):
+        feature_size = 361 * NUM_FEATURES
         features_and_value = np.unpackbits(features_and_value)
-        features = features_and_value[0:12996].astype('f')
-        value = np.asarray(1.0 if features_and_value[12996] > 0 else -1.0, 'f')
+        features = features_and_value[0:feature_size].astype('f')
+        value = np.asarray(1.0 if features_and_value[feature_size] > 0 else -1.0, 'f')
         policy = policy.astype('f') / 255.0
 
         return features, value, policy
@@ -566,6 +643,7 @@ def get_dataset(files, batch_size=1, is_training=True):
                 exclusive=True
             )
 
+        # apply a random transformation to the input features
         random = tf.random_uniform((), 0, 8, tf.int32)
         features = tf.reshape(features, [NUM_FEATURES, 19, 19])
         features = _apply_random(random, features)
@@ -589,7 +667,7 @@ def get_dataset(files, batch_size=1, is_training=True):
         return features, value, policy
 
     with tf.device('cpu:0'):
-        dataset = tf.data.FixedLengthRecordDataset(files, 1987)
+        dataset = tf.data.FixedLengthRecordDataset(files, num_bytes + 362)
         dataset = dataset.map(_decode_and_split)
         dataset = dataset.map(_parse)
         if is_training:
@@ -621,7 +699,6 @@ def model_fn(features, labels, mode, params):
         # - Value head
         # - Policy head
         #
-        loss_l2 = tf.add_n(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
         loss_value = tf.reduce_mean(tf.squared_difference(
             tf.stop_gradient(labels['value']),
             value_hat
@@ -631,32 +708,17 @@ def model_fn(features, labels, mode, params):
             logits=policy_hat
         ))
 
-        loss = loss_policy + loss_value + 8e-4 * loss_l2
+        loss = loss_policy + loss_value
+        tf.add_to_collection(LOSS, loss)
 
-        # setup the optimizer to use a constant learning rate of `0.01` for the
-        # first 30% of the steps, then use an exponential decay. This is similar
-        # to cosine decay, and has proven critical to the value head converging
-        # at all.
-        # 
-        # We then clip the gradients by its global norm to avoid some gradient
-        # explosions that seems to occur during the first few steps.
+        # set an initial learning rate and then rely on the `LearningRateScheduler`
+        # hook to decrease it when the loss plateaus
         global_step = tf.train.get_global_step()
-        learning_steps = params['steps'] // params['batch_size']
-        learning_rate_threshold = int(0.3 * learning_steps)
-        learning_rate_exp = tf.train.exponential_decay(
-            params['learning_rate'],
-            global_step - learning_rate_threshold,
-            (learning_steps - learning_rate_threshold) / 200,
-            0.98
-        )
-
-        learning_rate = tf.train.piecewise_constant(
-            global_step,
-            [learning_rate_threshold],
-            [params['learning_rate'], learning_rate_exp]
-        )
+        learning_rate = tf.Variable(params['learning_rate'], False, name='lr')
         optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+
+        tf.add_to_collection(LEARNING_RATE, learning_rate)
 
         with tf.control_dependencies(update_ops):
             gradients, variables = zip(*optimizer.compute_gradients(
@@ -665,24 +727,24 @@ def model_fn(features, labels, mode, params):
                 colocate_gradients_with_ops=True
             ))
 
-            clip_gradients, global_norm = tf.clip_by_global_norm(gradients, 10.0)
-            train_op = optimizer.apply_gradients(zip(clip_gradients, variables), global_step)
+            apply_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
+
+        with tf.control_dependencies([apply_op]):
+            train_ops = [tf.assign(var, var / tf.norm(var)) for var in tf.get_collection(NORM_OPS)]
+            train_op = tf.group(train_ops)
 
         # during training it is very useful to plot the norm of the gradients at
         # each tensor so that we can detect the cause of any exploding gradients
         # or similar issues.
         if mode == tf.estimator.ModeKeys.TRAIN:
-            tf.summary.scalar('gradients/global_norm', global_norm)
-
             for grad, var in zip(gradients, variables):
-                var_name = var.name.split(':', 2)[0]
+                var_name = var.op.name
 
                 tf.summary.scalar('gradients/' + var_name, tf.norm(grad))
                 tf.summary.scalar('norms/' + var_name, tf.norm(var))
 
             tf.summary.scalar('loss/policy', loss_policy)
             tf.summary.scalar('loss/value', loss_value)
-            tf.summary.scalar('loss/l2', loss_l2)
 
             tf.summary.scalar('learning_rate', learning_rate)
 
@@ -706,8 +768,7 @@ def model_fn(features, labels, mode, params):
             'accuracy/policy_5': tf.metrics.mean(policy_5),
             'accuracy/value': tf.metrics.mean(value_1),
             'loss/policy': tf.metrics.mean(loss_policy),
-            'loss/value': tf.metrics.mean(loss_value),
-            'loss/l2': tf.metrics.mean(loss_l2)
+            'loss/value': tf.metrics.mean(loss_value)
         }
     else:
         loss = None
@@ -775,6 +836,7 @@ def parse_args():
     op_group.add_argument('--verify', action='store_true', help='evaluate the accuracy of a model')
     op_group.add_argument('--dump', action='store_true', help='print the weights of a model to standard output')
     op_group.add_argument('--print', action='store_true', help='print the value of the given tensor')
+    op_group.add_argument('--stats', action='store_true', help='print statistics of all tensors')
 
     return parser.parse_args()
 
@@ -837,11 +899,9 @@ nn = tf.estimator.Estimator(
 )
 
 if args.start or args.resume:
-    hooks = [LSUVInit()] if args.start and not args.warm_start else []
-
     nn.train(
         input_fn=lambda: input_fn(args.files, params['batch_size'], True),
-        hooks=hooks,
+        hooks=[LearningRateScheduler()],
         steps=params['steps'] // params['batch_size']
     )
 elif args.verify:
