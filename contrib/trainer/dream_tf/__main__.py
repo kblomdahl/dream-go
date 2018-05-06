@@ -666,6 +666,31 @@ def get_dataset(files, batch_size=1, is_training=True):
 
         return features, value, policy
 
+    def _shuffle_history(features):
+        features = tf.split(features, (5, 6, NUM_FEATURES - 11), 0)
+
+        return tf.concat([
+            features[0],
+            tf.random_shuffle(features[1]),
+            features[2]
+        ], axis=0)
+
+    def _fix_history(features, value, policy):
+        """ Zeros out the history planes for 25% of the features. """
+        HISTORY_MASK = np.asarray([1.0] * NUM_FEATURES, 'f4')
+        HISTORY_MASK[5:11] = 0.0
+
+        random = tf.random_uniform((), 0, 100, tf.int32)
+        features = tf.case(
+            [
+                (tf.less(random, 25), lambda: features * tf.reshape(HISTORY_MASK, (-1, 1, 1))),
+                (tf.less(random, 35), lambda: _shuffle_history(features)),
+            ],
+            default=lambda: features
+        )
+
+        return features, value, policy
+
     with tf.device('cpu:0'):
         dataset = tf.data.FixedLengthRecordDataset(files, num_bytes + 362)
         dataset = dataset.map(_decode_and_split)
@@ -673,6 +698,7 @@ def get_dataset(files, batch_size=1, is_training=True):
         if is_training:
             dataset = dataset.repeat()
             dataset = dataset.map(_augment)
+            dataset = dataset.map(_fix_history)
             dataset = dataset.shuffle(393408)
         else:
             dataset = dataset.map(_fix_shape)
@@ -836,7 +862,6 @@ def parse_args():
     op_group.add_argument('--verify', action='store_true', help='evaluate the accuracy of a model')
     op_group.add_argument('--dump', action='store_true', help='print the weights of a model to standard output')
     op_group.add_argument('--print', action='store_true', help='print the value of the given tensor')
-    op_group.add_argument('--stats', action='store_true', help='print statistics of all tensors')
 
     return parser.parse_args()
 
