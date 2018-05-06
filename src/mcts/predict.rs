@@ -16,11 +16,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use parallel::{self, OneSender};
 use go::FEATURE_SIZE;
-use nn::{self, Network, Type, TYPE, Workspace};
-use util::array::*;
+use nn::devices::{DEVICES, set_current_device};
+use nn::{self, Network, Output, OutputSet, Workspace};
 use util::config;
-use util::singleton::*;
-use util::types::*;
 
 pub type PredictGuard<'a> = parallel::ServiceGuard<'a, PredictState>;
 pub type PredictService = parallel::Service<PredictState>;
@@ -31,7 +29,7 @@ pub fn service(network: Network) -> PredictService {
 
 pub enum PredictRequest {
     /// Request to compute the value and policy for some feature.
-    Ask(Array),
+    Ask(Vec<i8>),
 
     /// Indicate that a worker is waiting for some other thread to finish
     /// and should be awaken after the next batch of computations finish.
@@ -47,14 +45,14 @@ pub struct PredictState {
     running_count: AtomicUsize,
 
     /// The features to get the value and policy for.
-    features_list: Array,
+    features_list: Vec<i8>,
 
     /// The sender to response to each of the features in `features_list`
     /// over.
-    sender_list: Vec<OneSender<Option<(Singleton, Array)>>>,
+    sender_list: Vec<OneSender<Option<(f32, Vec<f32>)>>>,
 
     /// All threads that want to get notified when something changed.
-    waiting_list: Vec<OneSender<Option<(Singleton, Array)>>>,
+    waiting_list: Vec<OneSender<Option<(f32, Vec<f32>)>>>,
 }
 
 impl PredictState {
@@ -62,7 +60,7 @@ impl PredictState {
         PredictState {
             network: network,
             running_count: AtomicUsize::new(0),
-            features_list: Array::empty(),
+            features_list: vec! [],
             sender_list: vec! [],
             waiting_list: vec! []
         }
@@ -82,27 +80,19 @@ impl PredictState {
     /// * `workspace` - 
     /// * `features_list` - 
     /// 
-    fn forward<T, R>(
-        workspace: &mut Workspace,
-        features_list: &[T]
-    ) -> (Vec<Singleton>, Vec<Array>)
-        where T: From<f32> + Clone,
-              R: From<f32> + Clone, Vec<R>: Into<Array>,
-              Array: Into<Vec<T>> + From<Vec<R>>,
-              Singleton: From<R>,
-    {
-        let (value_list, policy_list) = nn::forward::<T, R>(
+    fn forward(workspace: &mut Workspace, features_list: &[i8]) -> (Vec<f32>, Vec<Vec<f32>>) {
+        let mut outputs = nn::forward(
             workspace,
-            features_list
+            features_list,
+            OutputSet::new().with(Output::Policy)
+                            .with(Output::Value)
+                            //.with(Output::ValueDown)
+                            //.with(Output::PolicyDown)
         );
 
-        // wrap the results in `Array` so that we can avoid having to pass
-        // generics everywhere
-        let value_list = value_list.into_iter()
-            .map(|value| Singleton::from(value))
-            .collect();
-        let policy_list = policy_list.into_iter()
-            .map(|policy| Array::from(policy))
+        let value_list = outputs.take(Output::Value);
+        let policy_list = outputs.take(Output::Policy).chunks(362)
+            .map(|p| p.to_vec())
             .collect();
 
         (value_list, policy_list)
@@ -130,14 +120,10 @@ impl PredictState {
 
         // perform the neural network predictions and then inform all of
         // the receivers
-        let mut workspace = network.get_workspace(batch_size);
-        let (value_list, policy_list) = match *TYPE {
-            Type::Int8 => PredictState::forward::<q8, f32>(&mut workspace, &Vec::from(features_list)),
-            Type::Half => PredictState::forward::<f16, f16>(&mut workspace, &Vec::from(features_list)),
-            Type::Single => PredictState::forward::<f32, f32>(&mut workspace, &Vec::from(features_list))
-        };
-
-        drop(workspace);
+        let (value_list, policy_list) = PredictState::forward(
+            &mut network.get_workspace(batch_size),
+            &Vec::from(features_list)
+        );
 
         // send out our predictions to all of the receivers
         let response_iter = value_list.into_iter().zip(policy_list.into_iter());
@@ -204,10 +190,19 @@ impl PredictState {
 impl parallel::ServiceImpl for PredictState {
     type State = PredictState;
     type Request = PredictRequest;
-    type Response = Option<(Singleton, Array)>;
+    type Response = Option<(f32, Vec<f32>)>;
 
     fn get_thread_count() -> usize {
-        ::std::cmp::max(2, *config::NUM_THREADS / *config::BATCH_SIZE)
+        let num_devices = DEVICES.len();
+        let num_busy = *config::NUM_THREADS / *config::BATCH_SIZE;
+
+        ::std::cmp::max(::std::cmp::max(2, num_devices), num_busy)
+    }
+
+    fn setup_thread(index: usize) {
+        let device_id = DEVICES[index % DEVICES.len()];
+
+        set_current_device(device_id);
     }
 
     fn process(
@@ -220,7 +215,7 @@ impl parallel::ServiceImpl for PredictState {
     {
         match req {
             PredictRequest::Ask(features) => {
-                state_lock.features_list.extend_from_slice(features);
+                state_lock.features_list.extend_from_slice(&features);
                 state_lock.sender_list.push(sender);
             },
             PredictRequest::Wait => {

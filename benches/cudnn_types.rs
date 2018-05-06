@@ -25,6 +25,22 @@ use libc::{c_void};
 use dream_go::nn::ffi::*;
 use dream_go::util::types::*;
 
+#[derive(Clone, Copy)]
+#[allow(non_camel_case_types)]
+struct q8 { value: i8 }
+
+impl From<f32> for q8 {
+    fn from(other: f32) -> q8 {
+        q8 { value: (127.0 * other).round() as i8 }
+    }
+}
+
+impl From<q8> for f32 {
+    fn from(other: q8) -> f32 {
+        other.value as f32 / 127.0
+    }
+}
+
 /// Benchmark the given cuDNN configuration using a single convolutional
 /// layer.
 /// 

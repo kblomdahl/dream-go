@@ -157,12 +157,8 @@ impl Board {
         self.last_played = Some(color);
         self.count += 1;
 
-        // add the current board state to the history *after* we have updated it because:
-        //
-        // 1. that way we do not need a special case to retrieve the current board when
-        //    generating features.
-        // 2. the circular stack starts with all buffers as zero, so there is no need to
-        //    keep track of the initial board state.
+        // store the actually played move since it is necessary for the feature
+        // vector.
         self.history.push(index);
         self.zobrist_history.push(self.zobrist_hash);
     }

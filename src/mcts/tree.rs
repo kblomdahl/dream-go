@@ -61,6 +61,7 @@ impl PUCT {
         }
     }
 
+    #[allow(unused_attributes)]
     #[target_feature(enable = "avx,avx2")]
     unsafe fn get_avx2<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
         // since there is no real _trickery_ in this function except the
@@ -190,6 +191,19 @@ fn argmax(array: &[f32]) -> Option<usize> {
         (0..362).filter(|&i| array[i].is_finite())
             .max_by_key(|&i| OrderedFloat(array[i]))
     }
+}
+
+/// Returns the `n`:th smallest element from the given array.
+/// 
+/// # Arguments
+/// 
+/// * `array` - 
+/// * `n` - 
+/// 
+fn percentile(array: &[i32], n: usize) -> i32 {
+    let mut copy = array.to_vec();
+    copy.sort_unstable();
+    copy[n]
 }
 
 /// A monte carlo search tree.
@@ -399,22 +413,29 @@ impl<E: Value> Node<E> {
         } else {
             let t = (temperature as f64).recip();
             let c_total = self.count.iter().sum::<i32>() as f64;
-            let mut s = vec! [0.0; 362];
+            let c_threshold = percentile(&self.count, 358);  // top 10 elements
+            let mut s = vec! [::std::f64::NAN; 362];
             let mut s_total = 0.0;
 
             for i in 0..362 {
-                let count = (self.count[i] as f64 / c_total).powf(t);
+                let count = self.count[i];
 
-                s_total += count;
-                s[i] = s_total;
+                if count >= c_threshold {
+                    s_total += (count as f64 / c_total).powf(t);
+                    s[i] = s_total;
+                }
             }
 
             debug_assert!(s_total.is_finite());
 
-            let threshold = s_total * thread_rng().next_f64();
-            let max_i = (0..362).filter(|&i| s[i] >= threshold).next().unwrap();
+            if s_total < ::std::f64::MIN_POSITIVE {
+                (0.5, thread_rng().gen_range(0, 362))
+            } else {
+                let threshold = s_total * thread_rng().next_f64();
+                let max_i = (0..362).filter(|&i| s[i] >= threshold).next().unwrap();
 
-            (self.value[max_i], max_i)
+                (self.value[max_i], max_i)
+            }
         }
     }
 
@@ -427,7 +448,7 @@ impl<E: Value> Node<E> {
 
     /// Returns a vector containing the _correct_ normalized probability that each move
     /// should be played given the current search tree.
-    pub fn softmax<T: From<f32> + Clone>(&self) -> Box<[T]> {
+    pub fn softmax<T: From<f32> + Clone>(&self) -> Vec<T> {
         let mut s = vec! [T::from(0.0f32); 362];
         let mut s_total = 0.0f32;
 
@@ -439,7 +460,7 @@ impl<E: Value> Node<E> {
             s[i] = T::from(self.count[i] as f32 / s_total);
         }
 
-        s.into_boxed_slice()
+        s
     }
 
     /// Remove the given move as a valid choice in this search tree by setting

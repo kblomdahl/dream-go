@@ -6,16 +6,13 @@ license = "Apache-2.0"
 publish = false
 
 [features]
-default = []
+default = ["tensor-core"]
 
 # print (a lot) of debug info during neural network evaluation to stderr
 trace-cuda = []
 
 # whether to enable tensor-cores in the cuDNN routines
 tensor-core = []
-
-# whether to enable use of DP4A in the cuDNN routines
-dp4a = []
 
 # dump all finished search tree's to stderr
 trace-mcts = []

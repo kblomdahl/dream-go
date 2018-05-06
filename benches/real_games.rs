@@ -19,9 +19,8 @@ extern crate test;
 
 use test::Bencher;
 
-use dream_go::go::{Board, Color, CHW, HWC};
+use dream_go::go::{Board, Color, CHW};
 use dream_go::go::symmetry::Transform;
-use dream_go::util::types::*;
 
 /// Benchmark the full playout of a game as a serie of `is_valid` and `place` calls.
 #[bench]
@@ -141,7 +140,7 @@ fn get_features_16(b: &mut Bencher) {
 
         let black = test::black_box(Color::Black);
 
-        board.get_features::<f16, HWC>(black, Transform::Transpose)
+        board.get_features::<CHW>(black, Transform::Transpose)
     });
 }
 
@@ -198,6 +197,6 @@ fn get_features_32(b: &mut Bencher) {
 
         let white = test::black_box(Color::White);
 
-        board.get_features::<f32, CHW>(white, Transform::FlipLR)
+        board.get_features::<CHW>(white, Transform::FlipLR)
     });
 }

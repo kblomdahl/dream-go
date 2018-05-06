@@ -16,30 +16,35 @@ use libc::c_void;
 use std::ptr;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 
+use nn::devices::{MAX_DEVICES, get_current_device};
 use nn::ffi::cuda;
 
-struct Slot {
+#[repr(u8)]
+#[derive(Clone, Copy, Debug)]
+#[allow(non_camel_case_types)]
+pub enum Slot {
+    Input = 0,
+    Policy_1 = 1,
+    Policy_2 = 2,
+    Policy_3 = 3,
+    Value_1 = 4,
+    Value_2 = 5,
+    Value_3 = 6,
+    Residual_1 = 7,
+    Residual_2 = 8,
+    Workspace_1 = 9,  // workspace for tower head
+    Workspace_r = 10,  // workspace for residual blocks
+    Workspace_p = 11,  // workspace for policy head
+    Workspace_v = 12,  // workspace for value head
+}
+
+struct SlotInner {
     ptr: Vec<*mut c_void>,
     size_in_bytes: usize,
 }
 
-struct SlotsInner {
-    named: HashMap<String, Slot>
-}
-
-impl Drop for SlotsInner {
-    fn drop(&mut self) {
-        for slot in self.named.values() {
-            for ptr in &slot.ptr {
-                unsafe {
-                    cuda::cudaFree(*ptr);
-                }
-            }
-        }
-    }
-}
+type SlotsInner = [Vec<SlotInner>; MAX_DEVICES];
 
 /// CUDA memory pool that keep requires all objects in the same pool to be of
 /// the same minimum size.
@@ -51,9 +56,10 @@ pub struct Slots {
 impl Slots {
     pub fn new() -> Slots {
         Slots {
-            inner: Arc::new(Mutex::new(SlotsInner {
-                named: HashMap::new()
-            }))
+            inner: Arc::new(Mutex::new([
+                vec! [], vec! [], vec! [], vec! [],
+                vec! [], vec! [], vec! [], vec! [],
+            ]))
         }
     }
 
@@ -64,14 +70,22 @@ impl Slots {
     /// 
     /// * `name` - the name of the variable
     /// * `size_in_bytes` - the minimum required size of the allocated area
-    pub fn get_slot(&self, name: &'static str, size_in_bytes: usize) -> SlotGuard {
+    pub fn get_slot(&self, name: Slot, size_in_bytes: usize) -> SlotGuard {
+        let device_id = get_current_device();
         let mut inner = self.inner.lock().unwrap();
-        let slot = inner.named.entry(name.to_string()).or_insert_with(|| {
-            Slot {
-                ptr: vec! [],
-                size_in_bytes: size_in_bytes
+        let slot = {
+            let device_id = device_id as usize;
+            let slot_pos = name as usize;
+
+            while inner[device_id].len() <= slot_pos {
+                inner[device_id].push(SlotInner {
+                    ptr: vec! [],
+                    size_in_bytes: 0
+                });
             }
-        });
+
+            &mut inner[device_id][slot_pos]
+        };
 
         if slot.size_in_bytes < size_in_bytes {
             // all of the stored pointers are too small, they will need to be
@@ -89,8 +103,11 @@ impl Slots {
         }
 
         if let Some(ptr) = slot.ptr.pop() {
+            debug_assert!(slot.size_in_bytes == 0 || !ptr.is_null());
+
             SlotGuard {
-                name: name.to_string(),
+                name: name,
+                device_id: device_id,
                 ptr: Rc::new(ptr),
                 size_in_bytes: slot.size_in_bytes,
                 inner: Some(self.inner.clone())
@@ -100,10 +117,13 @@ impl Slots {
 
             unsafe {
                 check!(cuda::cudaMalloc(&mut ptr, slot.size_in_bytes));
+
+                debug_assert!(slot.size_in_bytes == 0 || !ptr.is_null(), "Failed to allocate CUDA buffer of size {} (expected size {})", slot.size_in_bytes, size_in_bytes);
             }
 
             SlotGuard {
-                name: name.to_string(),
+                name: name,
+                device_id: device_id,
                 ptr: Rc::new(ptr),
                 size_in_bytes: slot.size_in_bytes,
                 inner: Some(self.inner.clone())
@@ -114,7 +134,8 @@ impl Slots {
 
 #[derive(Clone)]
 pub struct SlotGuard {
-    name: String,
+    name: Slot,
+    device_id: i32,
     ptr: Rc<*mut c_void>,
     size_in_bytes: usize,
 
@@ -126,7 +147,7 @@ impl Drop for SlotGuard {
         if Rc::strong_count(&self.ptr) == 1 {
             if let Some(ref inner) = self.inner {
                 let mut inner = inner.lock().unwrap();
-                let slot = inner.named.get_mut(&self.name).unwrap();
+                let slot = &mut inner[self.device_id as usize][self.name as usize];
 
                 if self.size_in_bytes < slot.size_in_bytes {
                     // if the slot has grown in our absence then throw our pointer away
@@ -151,17 +172,5 @@ impl<'a> ::std::ops::Deref for SlotGuard {
 
     fn deref(&self) -> &*mut c_void {
         &self.ptr
-    }
-}
-
-impl SlotGuard {
-    pub fn null() -> SlotGuard {
-        SlotGuard {
-            name: "null".to_string(),
-            ptr: Rc::new(ptr::null_mut()),
-            size_in_bytes: 0,
-
-            inner: None
-        }
     }
 }

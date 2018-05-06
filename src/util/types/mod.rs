@@ -13,7 +13,5 @@
 // limitations under the License.
 
 mod fp16;
-mod fp8;
 
 pub use self::fp16::*;
-pub use self::fp8::*;

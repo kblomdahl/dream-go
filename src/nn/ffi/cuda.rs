@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use libc::{c_void, c_int};
+use libc::{c_void, c_int, c_uint};
 
 #[repr(i32)]
 #[derive(Debug, PartialEq, Eq)]
@@ -122,20 +122,26 @@ pub type Stream = *const c_void;
 #[link(name = "cudart")]
 extern {
     pub fn cudaFree(devPtr: *const c_void) -> Error;
+    pub fn cudaFreeHost(hostPtr: *const c_void) -> Error;
     pub fn cudaMalloc(devPtr: *mut *mut c_void, size: usize) -> Error;
+    pub fn cudaMallocHost(hostPtr: *mut *mut c_void, size: usize) -> Error;
     pub fn cudaMemcpy(dst: *mut c_void, src: *const c_void, count: usize, kind: MemcpyKind) -> Error;
     pub fn cudaMemcpyAsync(dst: *mut c_void, src: *const c_void, count: usize, kind: MemcpyKind, stream: Stream) -> Error;
+
+    pub fn cudaGetDeviceCount(count: *mut c_int) -> Error;
+    pub fn cudaGetDevice(device: *mut c_int) -> Error;
+    pub fn cudaSetDevice(device: c_int) -> Error;
 
     #[cfg(feature = "trace-cuda")]
     pub fn cudaDeviceSynchronize() -> Error;
     pub fn cudaRuntimeGetVersion(version: *mut c_int) -> Error;
     pub fn cudaDeviceGetAttribute(value: *mut c_int, attr: DeviceAttr, device: c_int) -> Error;
 
-    pub fn cudaEventCreate(event: *mut Event) -> Error;
+    pub fn cudaEventCreateWithFlags(event: *mut Event, flags: c_uint) -> Error;
     pub fn cudaEventDestroy(event: Event) -> Error;
     pub fn cudaEventRecord(event: Event, stream: Stream) -> Error;
 
-    pub fn cudaStreamCreate(stream: *mut Stream) -> Error;
+    pub fn cudaStreamCreateWithFlags(stream: *mut Stream, flags: c_uint) -> Error;
     pub fn cudaStreamDestroy(stream: Stream) -> Error;
     pub fn cudaStreamSynchronize(stream: Stream) -> Error;
     pub fn cudaStreamWaitEvent(stream: Stream, event: Event, flags: u32) -> Error;

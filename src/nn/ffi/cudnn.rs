@@ -63,6 +63,14 @@ pub enum DataType {
     Int8x4 = 5,
 }
 
+#[repr(i32)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[allow(dead_code)]
+pub enum Determinism {
+    NonDeterministic = 0,
+    Deterministic = 1
+}
+
 impl DataType {
     pub fn size(&self) -> usize {
         match *self {
@@ -130,7 +138,6 @@ impl Status {
 }
 
 #[repr(i32)]
-#[cfg(feature = "tensor-core")]
 pub enum MathType {
     TensorOpMath = 1
 }
@@ -158,6 +165,26 @@ pub enum SoftmaxMode {
 }
 
 #[repr(i32)]
+#[allow(dead_code)]
+pub enum ReduceTensorOp {
+    Max = 3,
+    Avg = 5,
+}
+
+#[repr(i32)]
+#[allow(dead_code)]
+pub enum ReduceTensorIndices {
+    NoIndices = 0,
+    Flatten = 1
+}
+
+#[repr(i32)]
+#[allow(dead_code)]
+pub enum IndicesType {
+    Default = 0
+}
+
+#[repr(i32)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[allow(dead_code)]
 pub enum TensorFormat {
@@ -166,11 +193,37 @@ pub enum TensorFormat {
     NCHWVECTC = 2
 }
 
+#[repr(C)]
+pub struct ConvolutionFwdAlgoPerf {
+    pub algo: ConvolutionFwdAlgo,
+    pub status: Status,
+    pub time: f32,
+    pub memory: usize,
+    pub determinism: Determinism,
+    pub math_type: MathType,
+    reserved: [c_int; 3]
+}
+
+impl ConvolutionFwdAlgoPerf {
+    pub fn new() -> ConvolutionFwdAlgoPerf {
+        ConvolutionFwdAlgoPerf {
+            algo: ConvolutionFwdAlgo::ImplicitPrecompGemm,
+            status: Status::Success,
+            time: 0.0f32,
+            memory: 0,
+            determinism: Determinism::NonDeterministic,
+            math_type: MathType::TensorOpMath,
+            reserved: [0; 3]
+        }
+    }
+}
+
 pub type ActivationDescriptor = *const c_void;
 pub type ConvolutionDescriptor = *const c_void;
 pub type FilterDescriptor = *const c_void;
 pub type Handle = *const c_void;
 pub type OpTensorDescriptor = *const c_void;
+pub type ReduceTensorDescriptor = *const c_void;
 pub type TensorDescriptor = *const c_void;
 
 #[link(name = "cudnn")]
@@ -268,21 +321,94 @@ extern {
 
     pub fn cudnnCreateOpTensorDescriptor(opDesc: *mut OpTensorDescriptor) -> Status;
     pub fn cudnnDestroyOpTensorDescriptor(opDesc: OpTensorDescriptor) -> Status;
-    
-    /// ???
+
+    /// This function initializes a Tensor Pointwise math descriptor.
     /// 
     /// # Arguments
     /// 
-    /// * `opDesc` - 
-    /// * `op` - 
-    /// * `dataType` - 
-    /// * `nanOpt` - 
+    /// * `opDesc` - Pointer to the structure holding the description of the
+    ///   Tensor Pointwise math descriptor.
+    /// * `op` - Tensor Pointwise math operation for this Tensor Pointwise math
+    ///   descriptor.
+    /// * `dataType` - Computation datatype for this Tensor Pointwise math
+    ///   descriptor.
+    /// * `nanOpt` - NaN propagation policy
     /// 
     pub fn cudnnSetOpTensorDescriptor(
         opDesc: OpTensorDescriptor,
         op: OpTensorOp,
         dataType: DataType,
         nanOpt: NanPropagation
+    ) -> Status;
+
+    pub fn cudnnCreateReduceTensorDescriptor(reduceTensorDesc: *mut ReduceTensorDescriptor) -> Status;
+    pub fn cudnnDestroyReduceTensorDescriptor(reduceTensorDesc: ReduceTensorDescriptor) -> Status;
+
+    /// This function initializes a previously created reduce tensor descriptor object.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `reduceTensorDesc` - Handle to a previously created reduce tensor
+    ///   descriptor.
+    /// * `reduceTensorOp` - Enumerant to specify the reduce tensor operation.
+    /// * `reduceTensorCompType` - Enumerant to specify the computation datatype
+    ///   of the reduction.
+    /// * `reduceTensorNanOpt` - Enumerant to specify the Nan propagation mode.
+    /// * `reduceTensorIndices` - Enumerant to specify the reduce tensor indices.
+    ///   indices.
+    /// * `reduceTensorIndicesType` - Enumerant to specify the reduce tensor
+    ///   indices type.
+    ///
+    pub fn cudnnSetReduceTensorDescriptor(
+        reduceTensorDesc: ReduceTensorDescriptor,
+        reduceTensorOp: ReduceTensorOp,
+        reduceTensorCompType: DataType,
+        reduceTensorNanOpt: NanPropagation,
+        reduceTensorIndices: ReduceTensorIndices,
+        reduceTensorIndicesType: IndicesType
+    ) -> Status;
+
+    /// This function reduces tensor A by implementing the equation
+    /// `C = alpha * reduce op ( A ) + beta * C`, given tensors `A` and `C` and
+    /// scaling factors `alpha` and `beta`. The reduction op to use is indicated
+    /// by the descriptor `reduceTensorDesc`. Currently-supported ops are listed
+    /// by the cudnnReduceTensorOp_t enum.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - Handle to a previously created cuDNN context.
+    /// * `reduceTensorDesc` - Handle to a previously initialized reduce tensor
+    ///   descriptor.
+    /// * `indices` - Handle to a previously allocated space for writing
+    ///   indices.
+    /// * `indicesSizeInBytes` - Size of the above previously allocated space.
+    /// * `workspace` - Handle to a previously allocated space for the reduction
+    ///   implementation.
+    /// * `workspaceSizeInBytes` - Size of the above previously allocated space.
+    /// * `alpha` - Pointers to scaling factors (in host memory) used to blend
+    ///   the source value with prior value in the destination tensor as
+    ///   indicated by the above op equation.
+    /// * `aDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `A` - Pointer to data of the tensor described by the aDesc descriptor.
+    /// * `beta` - Pointers to scaling factors (in host memory) used to blend
+    ///   the source value with prior value in the destination tensor as
+    ///   indicated by the above op equation.
+    /// * `cDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `C` - Pointer to data of the tensor described by the cDesc descriptor.
+    /// 
+    pub fn cudnnReduceTensor(
+        handle: Handle,
+        reduceTensorDesc: ReduceTensorDescriptor,
+        indices: *mut c_void,
+        indicesSizeInBytes: size_t,
+        workspace: *mut c_void,
+        workspaceSizeInBytes: size_t,
+        alpha: *const f32,
+        aDesc: TensorDescriptor,
+        A: *const c_void,
+        beta: *const f32,
+        cDesc: TensorDescriptor,
+        C: *mut c_void
     ) -> Status;
 
     /// This function initializes a previously created generic activation descriptor object
@@ -361,6 +487,35 @@ extern {
         cStride: c_int,
         hStride: c_int,
         wStride: c_int,
+    ) -> Status;
+
+    /// This function queries the parameters of the previouly initialized
+    /// Tensor4D descriptor object.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `tensorDesc` - Handle to a previously created tensor descriptor. 
+    /// * `dataType` - Data type.
+    /// * `n` - Number of images
+    /// * `c` - Number of feature maps per image.
+    /// * `h` - Height of each feature map.
+    /// * `w` - Width of each feature map.
+    /// * `nStride` - Stride between two consecutive images.
+    /// * `cStride` - Stride between two consecutive feature maps.
+    /// * `hStride` - Stride between two consecutive rows.
+    /// * `wStride` - Stride between two consecutive columns.
+    /// 
+    pub fn cudnnGetTensor4dDescriptor(
+        tensorDesc: TensorDescriptor,
+        dataType: *mut DataType,
+        n: *mut c_int,
+        c: *mut c_int,
+        h: *mut c_int,
+        w: *mut c_int,
+        nStride: *mut c_int,
+        cStride: *mut c_int,
+        hStride: *mut c_int,
+        wStride: *mut c_int,
     ) -> Status;
 
     pub fn cudnnCreateFilterDescriptor(filterDesc: *mut FilterDescriptor) -> Status;
@@ -479,6 +634,24 @@ extern {
         alpha: *const f32
     ) -> Status;
 
+    /// This function sets all the elements of a tensor to a given value.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - Handle to a previously created cuDNN context.
+    /// * `yDesc` - Handle to a previously initialized tensor descriptor.
+    /// * `y` - Pointer to data of the tensor described by the yDesc descriptor.
+    /// * `valuePtr` - Pointer in Host memory to a single value. All elements
+    ///   of the `y` tensor will be set to `value[0]`. The data type of the element
+    ///   in `value[0]` has to match the data type of tensor `y`.
+    /// 
+    pub fn cudnnSetTensor(
+        handle: Handle,
+        yDesc: TensorDescriptor,
+        y: *mut c_void,
+        valuePtr: *const c_void
+    ) -> Status;
+
     /// This routine applies a specified neuron activation function element-wise over each input
     /// value.
     /// 
@@ -502,6 +675,37 @@ extern {
         beta: *const f32,
         destDesc: TensorDescriptor,
         dest: *mut c_void,
+    ) -> Status;
+
+    /// This function attempts all cuDNN algorithms (including `CUDNN_TENSOR_OP_MATH` and
+    /// `CUDNN_DEFAULT_MATH` versions of algorithms where `CUDNN_TENSOR_OP_MATH` may
+    /// be available) for cudnnConvolutionForward(), using memory allocated via
+    /// cudaMalloc(), and outputs performance metrics to a user-allocated array
+    /// of cudnnConvolutionFwdAlgoPerf_t. These metrics are written in sorted
+    /// fashion where the first element has the lowest compute time. The total
+    /// number of resulting algorithms can be queried through the API
+    /// `cudnnGetConvolutionForwardMaxCount()`.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` -
+    /// * `xDesc` -
+    /// * `wDesc` -
+    /// * `convDesc` -
+    /// * `yDesc` -
+    /// * `requestedAlgoCount` -
+    /// * `returnedAlgoCount` -
+    /// * `perfResults` -
+    /// 
+    pub fn cudnnFindConvolutionForwardAlgorithm(
+        handle: Handle,
+        xDesc: TensorDescriptor,
+        wDesc: FilterDescriptor,
+        convDesc: ConvolutionDescriptor,
+        yDesc: TensorDescriptor,
+        requestedAlgoCount: c_int,
+        returnedAlgoCount: *mut c_int,
+        perfResults: *mut ConvolutionFwdAlgoPerf
     ) -> Status;
 
     /// This function serves as a heuristic for obtaining the best suited algorithm for

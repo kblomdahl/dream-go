@@ -12,18 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use libc::c_void;
 use std::collections::HashMap;
+use std::mem::size_of;
 use std::ptr;
+use std::rc::Rc;
+use std::sync::Arc;
 
-use go::NUM_FEATURES;
-use nn::ffi::cublas;
-use nn::ffi::cuda;
-use nn::ffi::cudnn;
-use nn::ops::*;
+use libc::c_void;
+
+use go::{FEATURE_SIZE, NUM_FEATURES};
+use nn::devices::get_current_device;
+use nn::ffi::{cublas, cuda, cudnn};
 use nn::slots::*;
-use nn::{Type, TYPE};
-use util::max;
+use nn::output_map::*;
+use nn::tensor::Tensor;
+use util::types::f16;
 
 /// The number of features in the neural network architecture.
 const NUM_CHANNELS: usize = 128;
@@ -31,851 +34,76 @@ const NUM_CHANNELS: usize = 128;
 /// The number of residual blocks in the neural network architecture.
 const NUM_LAYERS: usize = 9;
 
-pub trait Graph {
-    /// Returns a pointer to the memory on the GPU that should contain the
-    /// input values.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `size_in_bytes` - the minimum required size of the allocated area
-    /// 
-    fn get_input(&mut self, size_in_bytes: Option<usize>) -> SlotGuard;
+// A __global__ constant that contains `0.0`.
+const ZERO: f32 = 0.0;
 
-    /// Returns a pointer to a named additional variable. If two variables
-    /// shares the same name, then their pointers may alias.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `name` - the name of the variable
-    /// * `size_in_bytes` - the minimum required size of the allocated area
-    fn get_slot(&mut self, name: &'static str, size_in_bytes: usize) -> SlotGuard;
+// A __global__ constant that contains `1.0`.
+const ONE: f32 = 1.0;
 
-    /// Returns the batch size of this graph.
-    fn get_batch_size(&self) -> usize;
+// -------- InferenceType --------
 
-    /// Returns the size (in bytes) of the maximum workspace needed.
-    fn get_workspace_size(&self) -> usize;
+pub trait InferenceType: Copy + Default + Sized {
+    type Tower: InferenceType;
+    type Output: InferenceType;
+
+    fn as_f32(self) -> f32;
 }
 
-pub trait Ops<G: Graph> {
-    /// `output = C(weights, input) + offset`
-    fn convolution(
-        graph: &mut G,
-        input: String,
-        input_data: *const c_void,
-        k: i32,
-        c: i32,
-        h: i32,
-        w: i32,
-        weights: String,
-        offset: String,
-        output: String,
-        output_data: *mut c_void,
-        workspace: *mut c_void,
-        workspace_size: usize
-    );
+impl InferenceType for i8 {
+    type Tower = i8;
+    type Output = f32;
 
-    /// `output_2 = input + C(weights_2, C(weights_1, input) + offset_1) + offset_2`
-    fn residual_block(
-        graph: &mut G,
-        input: String,
-        input_data: *const c_void,
-        k: i32,
-        c: i32,
-        h: i32,
-        w: i32,
-        weights_1c: String,
-        weights_1d: String,
-        weights_2: String,
-        offset_1c: String,
-        offset_1d: String,
-        offset_2: String,
-        output_1c: String,
-        output_1d: String,
-        output_1: String,
-        output_data_1: *mut c_void,
-        output_2: String,
-        output_data_2: *mut c_void,
-        output_workspace: *mut c_void,
-        workspace_1: *mut c_void,
-        workspace_2: *mut c_void,
-        workspace_size: usize,
-    );
-
-    /// `output = weights * input + offset`
-    fn linear(
-        graph: &mut G,
-        input: String,
-        input_data: *const c_void,
-        k: i32,
-        c: i32,
-        weights: String,
-        offset: String,
-        output: String,
-        output_data: *mut c_void,
-        workspace: *mut c_void,
-        workspace_size: usize
-    );
-
-    /// `output = softmax(input)`
-    fn softmax(
-        graph: &mut G,
-        input: String,
-        input_data: *const c_void,
-        output: String,
-        output_data: *mut c_void
-    );
-
-    /// `output = relu(input)`
-    fn relu(
-        graph: &mut G,
-        input: String,
-        input_data: *const c_void,
-        output: String,
-        output_data: *mut c_void
-    );
-
-    /// `output = tanh(input)`
-    fn tanh(
-        graph: &mut G,
-        input: String,
-        input_data: *const c_void,
-        output: String,
-        output_data: *mut c_void
-    );
-
-    /// Returns the additional variable with the given name, if these operations
-    /// requires additional slots. If these operations does not require the use
-    /// of additional variables then it should return `null` and do nothing.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `graph` - the graph to retrieve the slot from
-    /// * `name` - the name of the variable
-    /// * `size_in_bytes` - the minimum required size for the given slot
-    /// 
-    fn get_slot(graph: &mut G, name: &'static str, size_in_bytes: usize) -> SlotGuard;
+    fn as_f32(self) -> f32 { 6.0 * (self as f32) / 127.0 }
 }
 
-pub struct Calibrate;
+impl InferenceType for f16 {
+    type Tower = f16;
+    type Output = f16;
 
-impl Ops<Builder> for Calibrate {
-    fn convolution(
-        graph: &mut Builder,
-        input: String,
-        _input_data: *const c_void,
-        k: i32,
-        c: i32,
-        h: i32,
-        w: i32,
-        weights: String,
-        offset: String,
-        output: String,
-        _output_data: *mut c_void,
-        _workspace: *mut c_void,
-        _workspace_size: usize
-    )
-    {
-        Convolution::calibrate(
-            &graph.tensors[&input],
-            k, c, h, w,
-            &graph.tensors[&weights],
-            &graph.tensors[&offset],
-            &graph.tensors[&output]
-        );
-    }
-
-    fn residual_block(
-        graph: &mut Builder,
-        input: String,
-        _input_data: *const c_void,
-        k: i32,
-        c: i32,
-        h: i32,
-        w: i32,
-        weights_1c: String,
-        weights_1d: String,
-        weights_2: String,
-        offset_1c: String,
-        offset_1d: String,
-        offset_2: String,
-        output_1c: String,
-        output_1d: String,
-        output_1: String,
-        _output_data_1: *mut c_void,
-        output_2: String,
-        _output_data_2: *mut c_void,
-        _output_workspace: *mut c_void,
-        _workspace_1: *mut c_void,
-        _workspace_2: *mut c_void,
-        _workspace_size: usize
-    )
-    {
-        let d_ = 32 * max(1.0, (k as f32 / 176.0).floor()) as i32;
-        let c_ = k - d_;
-
-        // the scale of the two parallel convolutions must match the final
-        // output scale (since we will just copy the results).
-        graph.tensors[&output_1c].set_scale(graph.tensors[&output_1].get_scale());
-        graph.tensors[&output_1d].set_scale(graph.tensors[&output_1].get_scale());
-
-        Convolution::calibrate(
-            &graph.tensors[&input],
-            c_, c, h, w,
-            &graph.tensors[&weights_1c],
-            &graph.tensors[&offset_1c],
-            &graph.tensors[&output_1c]
-        );
-
-        Convolution::calibrate(
-            &graph.tensors[&input],
-            d_, c, h, w,
-            &graph.tensors[&weights_1d],
-            &graph.tensors[&offset_1d],
-            &graph.tensors[&output_1d]
-        );
-
-        Concat::calibrate(
-            &graph.tensors[&output_1c],
-            &graph.tensors[&output_1d],
-            &graph.tensors[&output_1]
-        );
-
-        Convolution::calibrate(
-            &graph.tensors[&output_1],
-            k, c, h, w,
-            &graph.tensors[&weights_2],
-            &graph.tensors[&offset_2],
-            &graph.tensors[&output_2]
-        );
-    }
-
-    fn linear(
-        graph: &mut Builder,
-        input: String,
-        _input_data: *const c_void,
-        k: i32,
-        c: i32,
-        weights: String,
-        offset: String,
-        output: String,
-        _output_data: *mut c_void,
-        _workspace: *mut c_void,
-        _workspace_size: usize
-    )
-    {
-        let output_ = Linear::calibrate(
-            &graph.tensors[&input],
-            k, c,
-            &graph.tensors[&weights],
-            &graph.tensors[&offset],
-        );
-
-        graph.tensors.insert(output.clone(), output_);
-    }
-
-    fn softmax(
-        graph: &mut Builder,
-        input: String,
-        _input_data: *const c_void,
-        output: String,
-        _output_data: *mut c_void
-    )
-    {
-        let output_ = Softmax::calibrate(&graph.tensors[&input]);
-
-        graph.tensors.insert(output.clone(), output_);
-    }
-
-    fn relu(
-        graph: &mut Builder,
-        input: String,
-        _input_data: *const c_void,
-        output: String,
-        _output_data: *mut c_void
-    )
-    {
-        let output_ = Relu::calibrate(&graph.tensors[&input]);
-
-        graph.tensors.insert(output.clone(), output_);
-    }
-
-    fn tanh(
-        graph: &mut Builder,
-        input: String,
-        _input_data: *const c_void,
-        output: String,
-        _output_data: *mut c_void
-    )
-    {
-        let output_ = Tanh::calibrate(&graph.tensors[&input]);
-
-        graph.tensors.insert(output.clone(), output_);
-    }
-
-    fn get_slot(_graph: &mut Builder, _name: &'static str, _size_in_bytes: usize) -> SlotGuard {
-        SlotGuard::null()
-    }
+    fn as_f32(self) -> f32 { f32::from(self) }
 }
 
-struct Allocate;
+impl InferenceType for f32 {
+    type Tower = f32;
+    type Output = f32;
 
-impl Ops<Workspace> for Allocate {
-    fn convolution(
-        workspace: &mut Workspace,
-        input: String,
-        _input_data: *const c_void,
-        _k: i32,
-        _c: i32,
-        _h: i32,
-        _w: i32,
-        weights: String,
-        offset: String,
-        output: String,
-        _output_data: *mut c_void,
-        _workspace: *mut c_void,
-        _workspace_size: usize
-    )
-    {
-        debug_assert!(!workspace.convolutions.contains_key(&output));
-
-        workspace.convolutions.insert(output.clone(), Convolution::new(
-            workspace.handle_dnn,
-            1.0,
-            &workspace.tensors[&input],
-            &workspace.tensors[&weights],
-            1, 1,
-            0.0,
-            &Tensor::default(),
-            &workspace.tensors[&offset],
-            &workspace.tensors[&output],
-            0
-        ));
-    }
-
-    fn residual_block(
-        workspace: &mut Workspace,
-        input: String,
-        _input_data: *const c_void,
-        _k: i32,
-        _c: i32,
-        _h: i32,
-        _w: i32,
-        weights_1c: String,
-        weights_1d: String,
-        weights_2: String,
-        offset_1c: String,
-        offset_1d: String,
-        offset_2: String,
-        output_1c: String,
-        output_1d: String,
-        output_1: String,
-        _output_data_1: *mut c_void,
-        output_2: String,
-        _output_data_2: *mut c_void,
-        _output_workspace: *mut c_void,
-        _workspace_1: *mut c_void,
-        _workspace_2: *mut c_void,
-        _workspace_size: usize
-    )
-    {
-        debug_assert!(!workspace.convolutions.contains_key(&output_1c));
-        debug_assert!(!workspace.convolutions.contains_key(&output_1d));
-        debug_assert!(!workspace.convolutions.contains_key(&output_2));
-
-        workspace.convolutions.insert(output_1c.clone(), Convolution::new(
-            workspace.handle_dnn,
-            1.0,
-            &workspace.tensors[&input],
-            &workspace.tensors[&weights_1c],
-            1, 1,
-            0.0,
-            &Tensor::default(),
-            &workspace.tensors[&offset_1c],
-            &workspace.tensors[&output_1c],
-            workspace.tensors[&output_1c].get_size_in_bytes()
-        ));
-
-        workspace.convolutions.insert(output_1d.clone(), Convolution::new(
-            workspace.handle_dnn,
-            1.0,
-            &workspace.tensors[&input],
-            &workspace.tensors[&weights_1d],
-            2, 2,
-            0.0,
-            &Tensor::default(),
-            &workspace.tensors[&offset_1d],
-            &workspace.tensors[&output_1d],
-            workspace.tensors[&output_1d].get_size_in_bytes()
-        ));
-
-        workspace.concats.insert(output_1.clone(), Concat::new(
-            &workspace.tensors[&output_1c],
-            &workspace.tensors[&output_1d],
-            &workspace.tensors[&output_1]
-        ));
-
-        workspace.convolutions.insert(output_2.clone(), Convolution::new(
-            workspace.handle_dnn,
-            1.0,
-            &workspace.tensors[&output_1],
-            &workspace.tensors[&weights_2],
-            1, 1,
-            1.0,
-            &workspace.tensors[&input],
-            &workspace.tensors[&offset_2],
-            &workspace.tensors[&output_2],
-            0
-        ));
-    }
-
-    fn linear(
-        workspace: &mut Workspace,
-        input: String,
-        _input_data: *const c_void,
-        _k: i32,
-        _c: i32,
-        weights: String,
-        offset: String,
-        output: String,
-        _output_data: *mut c_void,
-        _workspace: *mut c_void,
-        _workspace_size: usize
-    )
-    {
-        workspace.linears.insert(output.clone(), Linear::new(
-            &workspace.tensors[&input],
-            &workspace.tensors[&weights],
-            &workspace.tensors[&offset],
-            &workspace.tensors[&output]
-        ));
-    }
-
-    fn softmax(
-        workspace: &mut Workspace,
-        input: String,
-        _input_data: *const c_void,
-        output: String,
-        _output_data: *mut c_void
-    )
-    {
-        debug_assert!(!workspace.operators.contains_key(&output));
-
-        let output_ = Softmax::new(
-            &workspace.tensors[&input],
-            &workspace.tensors[&output]
-        );
-
-        workspace.operators.insert(output.clone(), output_);
-    }
-
-    fn relu(
-        workspace: &mut Workspace,
-        _input: String,
-        _input_data: *const c_void,
-        output: String,
-        _output_data: *mut c_void
-    )
-    {
-        debug_assert!(!workspace.operators.contains_key(&output));
-
-        workspace.operators.insert(output, Relu::new());
-    }
-
-    fn tanh(
-        workspace: &mut Workspace,
-        _input: String,
-        _input_data: *const c_void,
-        output: String,
-        _output_data: *mut c_void
-    )
-    {
-        debug_assert!(!workspace.operators.contains_key(&output));
-
-        workspace.operators.insert(output.clone(), Tanh::new());
-    }
-
-    fn get_slot(graph: &mut Workspace, name: &'static str, size_in_bytes: usize) -> SlotGuard {
-        if size_in_bytes == 0 {
-            SlotGuard::null()  // unknown size, need to wait until runtime
-        } else {
-            graph.get_slot(name, size_in_bytes)
-        }
-    }
+    fn as_f32(self) -> f32 { self }
 }
 
-pub struct Runtime;
+/// 
+unsafe fn load_to_host<T: InferenceType>(
+    ptr: *const c_void,
+    num_elements: usize,
+    stream: cuda::Stream
+) -> Vec<f32>
+{
+    let mut host = vec! [T::default(); num_elements];
 
-impl Ops<Workspace> for Runtime {
-    fn convolution(
-        workspace: &mut Workspace,
-        input_name: String,
-        input_data: *const c_void,
-        _k: i32,
-        _c: i32,
-        _h: i32,
-        _w: i32,
-        weights_name: String,
-        offset_name: String,
-        output_name: String,
-        output_data: *mut c_void,
-        workspace_data: *mut c_void,
-        workspace_size: usize
-    )
-    {
-        let op = &workspace.convolutions[&output_name];
+    check!(cuda::cudaMemcpyAsync(
+        host.as_mut_ptr() as *mut c_void,
+        ptr,
+        size_of::<T>() * num_elements,
+        cuda::MemcpyKind::DeviceToHost,
+        stream
+    ));
+    check!(cuda::cudaStreamSynchronize(stream));
 
-        op.forward(
-            workspace.handle_dnn,
-            &workspace.tensors[&input_name], input_data,
-            &workspace.tensors[&weights_name],
-            &workspace.tensors[&output_name], output_data,
-            &workspace.tensors[&offset_name],
-            &workspace.tensors[&output_name], output_data,
-            workspace_data, workspace_size,
-            workspace.relu
-        );
-
-        #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- conv2d({})\n= {:?}", output_name, input_name, workspace.tensors[&output_name].fmt_ptr(output_data));
-    }
-
-    fn residual_block(
-        workspace: &mut Workspace,
-        input_name: String,
-        input_data: *const c_void,
-        _k: i32,
-        _c: i32,
-        _h: i32,
-        _w: i32,
-        weights_name_1c: String,
-        weights_name_1d: String,
-        weights_name_2: String,
-        offset_name_1c: String,
-        offset_name_1d: String,
-        offset_name_2: String,
-        output_name_1c: String,
-        output_name_1d: String,
-        output_name_1: String,
-        output_data_1: *mut c_void,
-        output_name_2: String,
-        output_data_2: *mut c_void,
-        output_workspace: *mut c_void,
-        workspace_data_1: *mut c_void,
-        workspace_data_2: *mut c_void,
-        workspace_size: usize
-    )
-    {
-        let op_1c = &workspace.convolutions[&output_name_1c];
-        let op_1d = &workspace.convolutions[&output_name_1d];
-        let op_c = &workspace.concats[&output_name_1];
-        let op_2 = &workspace.convolutions[&output_name_2];
-        let c_size = workspace.tensors[&output_name_1c].get_size_in_bytes() as isize;
-        let output_1c = output_data_1;
-        let output_1d = unsafe { output_data_1.offset(c_size) };
-
-        let mut current_stream = ptr::null();
-
-        unsafe {
-            check!(cudnn::cudnnGetStream(workspace.handle_dnn, &mut current_stream));
-            check!(cuda::cudaEventRecord(op_c.start, current_stream));
-
-            check!(cuda::cudaStreamWaitEvent(op_c.stream_1, op_c.start, 0));
-            check!(cuda::cudaStreamWaitEvent(op_c.stream_2, op_c.start, 0));
-        }
-
-        unsafe {
-            check!(cudnn::cudnnSetStream(workspace.handle_dnn, op_c.stream_1));
-        }
-
-        op_1c.forward(
-            workspace.handle_dnn,
-            &workspace.tensors[&input_name], input_data,
-            &workspace.tensors[&weights_name_1c],
-            &workspace.tensors[&output_name_1c], output_1c,
-            &workspace.tensors[&offset_name_1c],
-            &workspace.tensors[&output_name_1c], output_1c,
-            workspace_data_1, workspace_size,
-            workspace.relu
-        );
-
-        #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- conv2d({})\n= {:?}", output_name_1c, input_name, workspace.tensors[&output_name_1c].fmt_ptr(output_1c));
-
-        unsafe {
-            check!(cudnn::cudnnSetStream(workspace.handle_dnn, op_c.stream_2));
-        }
-
-        op_1d.forward(
-            workspace.handle_dnn,
-            &workspace.tensors[&input_name], input_data,
-            &workspace.tensors[&weights_name_1d],
-            &workspace.tensors[&output_name_1d], output_1d,
-            &workspace.tensors[&offset_name_1d],
-            &workspace.tensors[&output_name_1d], output_1d,
-            workspace_data_2, workspace_size,
-            workspace.relu
-        );
-
-        #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- conv2d({})\n= {:?}", output_name_1d, input_name, workspace.tensors[&output_name_1d].fmt_ptr(output_1d));
-
-        unsafe {
-            check!(cudnn::cudnnSetStream(workspace.handle_dnn, current_stream));
-        }
-
-        op_c.forward(
-            workspace.handle_dnn,
-            &workspace.tensors[&output_name_1c], output_1c,
-            &workspace.tensors[&output_name_1d], output_1d,
-            &workspace.tensors[&output_name_1], output_data_1,
-            output_workspace
-        );
-
-        #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- concat([{}, {}])\n= {:?}", output_name_1, output_name_1c, output_name_1d, workspace.tensors[&output_name_1].fmt_ptr(output_data_1));
-
-        op_2.forward(
-            workspace.handle_dnn,
-            &workspace.tensors[&output_name_1], output_data_1,
-            &workspace.tensors[&weights_name_2],
-            &workspace.tensors[&input_name], input_data,
-            &workspace.tensors[&offset_name_2],
-            &workspace.tensors[&output_name_2], output_data_2,
-            workspace_data_1, workspace_size,
-            workspace.relu
-        );
-
-        #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- conv2d({}) + {}\n= {:?}", output_name_2, output_name_1, input_name, workspace.tensors[&output_name_2].fmt_ptr(output_data_2));
-    }
-
-    fn linear(
-        workspace: &mut Workspace,
-        input_name: String,
-        input_data: *const c_void,
-        k: i32,
-        c: i32,
-        weights_name: String,
-        offset_name: String,
-        output_name: String,
-        output_data: *mut c_void,
-        workspace_data: *mut c_void,
-        workspace_size: usize
-    )
-    {
-        let linear = &workspace.linears[&output_name];
-
-        linear.forward(
-            workspace.handle_blas,
-            workspace.handle_dnn,
-            &workspace.tensors[&input_name], input_data,
-            workspace.batch_size as i32, k, c,
-            &workspace.tensors[&weights_name],
-            &workspace.tensors[&offset_name],
-            &workspace.tensors[&output_name], output_data,
-            workspace_data, workspace_size
-        );
-
-        #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- linear({})\n= {:?}", output_name, input_name, workspace.tensors[&output_name].fmt_ptr(output_data));
-    }
-
-    fn softmax(
-        workspace: &mut Workspace,
-        input_name: String,
-        input_data: *const c_void,
-        output_name: String,
-        output_data: *mut c_void
-    )
-    {
-        Softmax::forward(
-            &workspace.operators[&output_name],
-            workspace.handle_dnn,
-            &workspace.tensors[&input_name], input_data,
-            &workspace.tensors[&output_name], output_data
-        );
-
-        #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- softmax({})\n= {:?}", output_name, input_name, workspace.tensors[&output_name].fmt_ptr(output_data));
-    }
-
-    fn relu(
-        workspace: &mut Workspace,
-        input_name: String,
-        input_data: *const c_void,
-        output_name: String,
-        output_data: *mut c_void
-    )
-    {
-        Relu::forward(
-            &workspace.operators[&output_name],
-            workspace.handle_dnn, workspace.relu,
-            &workspace.tensors[&input_name], input_data,  // input
-            &workspace.tensors[&output_name], output_data  // output
-        );
-
-        #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- relu({})\n= {:?}", output_name, input_name, workspace.tensors[&output_name].fmt_ptr(output_data));
-    }
-
-    fn tanh(
-        workspace: &mut Workspace,
-        input_name: String,
-        input_data: *const c_void,
-        output_name: String,
-        output_data: *mut c_void
-    )
-    {
-        Tanh::forward(
-            &workspace.operators[&output_name],
-            workspace.handle_dnn, workspace.tanh,
-            &workspace.tensors[&input_name], input_data,
-            &workspace.tensors[&output_name], output_data
-        );
-
-        #[cfg(feature = "trace-cuda")]
-        eprintln!("{} <- tanh({})\n= {:?}", output_name, input_name, workspace.tensors[&output_name].fmt_ptr(output_data));
-    }
-
-    fn get_slot(graph: &mut Workspace, name: &'static str, size_in_bytes: usize) -> SlotGuard {
-        graph.get_slot(name, size_in_bytes)
-    }
+    host.into_iter().map(|x| x.as_f32()).collect()
 }
+
+// -------- Graph --------
 
 pub struct Builder {
-    pub(super) tensors: HashMap<String, Tensor>,
-}
-
-pub struct Workspace {
-    pub(super) tensors: HashMap<String, Tensor>,
-
-    // handles for cuBLAS and cuDNN
-    pub(super) handle_blas: cublas::Handle,
-    pub(super) handle_dnn: cudnn::Handle,
-
-    // operators
-    pub(super) concats: HashMap<String, Concat>,
-    pub(super) convolutions: HashMap<String, Convolution>,
-    pub(super) linears: HashMap<String, Linear>,
-    pub(super) operators: HashMap<String, Operator>,
-
-    // activation operators
-    pub(super) relu: cudnn::ActivationDescriptor,
-    pub(super) tanh: cudnn::ActivationDescriptor,
-
-    // workspaces and slots for additional variables
-    pub(super) slots: Slots,
-    pub(super) slots_c: HashMap<String, SlotGuard>,
-    pub(super) workspace_size: usize,
-    pub(super) batch_size: usize,
-
-    // streams and events for concurrent execution
-    pub(super) tower_stream: cuda::Stream,
-    pub(super) policy_stream: cuda::Stream,
-    pub(super) value_stream: cuda::Stream,
-    pub(super) tower_event: cuda::Event,
-}
-
-impl Graph for Builder {
-    fn get_input(&mut self, _size_in_bytes: Option<usize>) -> SlotGuard {
-        SlotGuard::null()
-    }
-
-    fn get_slot(&mut self, _name: &'static str, _size_in_bytes: usize) -> SlotGuard {
-        SlotGuard::null()
-    }
-
-    fn get_batch_size(&self) -> usize {
-        0
-    }
-
-    fn get_workspace_size(&self) -> usize {
-        0
-    }
-}
-
-impl Graph for Workspace {
-    fn get_input(&mut self, size_in_bytes: Option<usize>) -> SlotGuard {
-        self.get_slot("00_input/features:0", size_in_bytes.unwrap_or(0))
-    }
-
-    fn get_slot(&mut self, name: &'static str, size_in_bytes: usize) -> SlotGuard {
-        let name_str = name.to_string();
-
-        if self.slots_c.contains_key(&name_str) {
-            self.slots_c[&name_str].clone()
-        } else {
-            let slot = self.slots.get_slot(name, size_in_bytes);
-
-            self.slots_c.insert(name_str, slot.clone());
-            slot
-        }
-    }
-
-    fn get_batch_size(&self) -> usize {
-        self.batch_size
-    }
-
-    fn get_workspace_size(&self) -> usize {
-        self.workspace_size
-    }
+    tensors: Arc<HashMap<String, Tensor>>,
+    slots: Slots
 }
 
 impl Builder {
     pub fn new(tensors: HashMap<String, Tensor>) -> Builder {
-        let mut g = Builder {
-            tensors: tensors
-        };
-
-        // add the placeholder tensor that represents the input
-        let (data_type, format) = match *TYPE {
-            Type::Half => (cudnn::DataType::Half, cudnn::TensorFormat::NCHW),
-            Type::Int8 => (cudnn::DataType::Int8, cudnn::TensorFormat::NHWC),
-            Type::Single => (cudnn::DataType::Float, cudnn::TensorFormat::NCHW)
-        };
-
-        g.tensors.insert("00_input/output:0".to_string(), Tensor::default()
-            .set_data_type(data_type, format)
-            .set_shape(vec! [0, ::go::NUM_FEATURES as i32, 19, 19])
-            .set_scale(1.0)
-            .clone()
-        );
-
-        // perform the calibration of every tensor so that we can acquire
-        // the correct scaling factors, and types.
-        tower::<Calibrate, _>(&mut g, &SlotGuard::null());
-        value::<Calibrate, _>(&mut g, &SlotGuard::null());
-        policy::<Calibrate, _>(&mut g, &SlotGuard::null());
-
-        // if the entire graph is float-based then force the scale to 1.0
-        // since floating types does the scaling internally (better than we
-        // can).
-        let is_floating_point = g.tensors.values().all(|t| {
-            t.get_data_type().is_floating_point()
-        });
-
-        if is_floating_point {
-            for t in g.tensors.values() {
-                t.set_scale(1.0);
-            }
+        Builder {
+            tensors: Arc::new(tensors),
+            slots: Slots::new()
         }
-
-        #[cfg(feature = "trace-cuda")]
-        {
-            for (key, tensor) in g.tensors.iter() {
-                eprintln!("T[{}] = {:?} {:?}, {:?} scale {}",
-                    key,
-                    tensor.get_shape(),
-                    tensor.get_format(),
-                    tensor.get_data_type(),
-                    tensor.get_scale()
-                );
-            }
-        }
-
-        g.finalize();
-        g
     }
 
     /// Returns a mutable workspace that contains everything you need to
@@ -885,290 +113,1011 @@ impl Builder {
     /// 
     /// * `batch_size` - 
     /// 
-    pub fn get_workspace(&self, batch_size: usize, slots: Slots) -> Workspace {
+    pub fn get_workspace(&self, batch_size: usize) -> Workspace {
+        let mut handle_dnn: cudnn::Handle = ptr::null();
+
+        unsafe {
+            check!(cudnn::cudnnCreate(&mut handle_dnn));
+        }
+
         let mut w = Workspace {
-            tensors: HashMap::new(),
+            batch_size: batch_size,
+            tensors: self.tensors.clone(),
+            slots: self.slots.clone(),
 
             handle_blas: ptr::null(),
-            handle_dnn: ptr::null(),
+            handle_dnn: handle_dnn,
 
-            concats: HashMap::new(),
-            convolutions: HashMap::new(),
-            linears: HashMap::new(),
-            operators: HashMap::new(),
+            tower_finished: ptr::null(),
 
-            relu: ptr::null(),
-            tanh: ptr::null(),
+            tower_stream: ptr::null(),
+            policy_stream: ptr::null(),
+            value_stream: ptr::null(),
 
-            slots: slots,
-            slots_c: HashMap::new(),
-            workspace_size: 0,
-            batch_size: batch_size,
-
-            tower_stream: ptr::null_mut(),
-            policy_stream: ptr::null_mut(),
-            value_stream: ptr::null_mut(),
-            tower_event: ptr::null_mut()
+            c_up: unsafe { Rc::new(UpLayer::new(&handle_dnn, batch_size as i32, &self.tensors)) },
+            c_value: unsafe { Rc::new(ValueLayer::new(&handle_dnn, batch_size as i32, &self.tensors)) },
+            c_policy: unsafe { Rc::new(PolicyLayer::new(&handle_dnn, batch_size as i32, &self.tensors)) },
+            c_residual: (0..NUM_LAYERS).map(|i| unsafe {
+                Rc::new(ResidualLayer::new(&handle_dnn, batch_size as i32, i, &self.tensors))
+            }).collect()
         };
 
-        // adjust the batch size of each tensor (by setting the first dimension), and
-        // create the tensor descriptors so that we can use them during the runtime.
-        for (key, tensor) in self.tensors.iter() {
-            let mut other = tensor.clone();
-            let mut other_shape = other.get_shape().clone();
-
-            unsafe {
-                if other_shape[0] == 0 {
-                    other_shape[0] = batch_size as i32;
-
-                    other.set_shape(other_shape);
-                    other.tensor_desc = other.get_tensor_descriptor();
-                }
-            }
-
-            w.tensors.insert(key.clone(), other);
-        }
-
-        // allocate the pre-determined parts of the array
         unsafe {
             check!(cublas::cublasCreate_v2(&mut w.handle_blas));
-            check!(cudnn::cudnnCreate(&mut w.handle_dnn));
+            check!(cuda::cudaStreamCreateWithFlags(&mut w.tower_stream, 1));
+            check!(cuda::cudaStreamCreateWithFlags(&mut w.policy_stream, 1));
+            check!(cuda::cudaStreamCreateWithFlags(&mut w.value_stream, 1));
+            check!(cuda::cudaEventCreateWithFlags(&mut w.tower_finished, 2));
 
-            #[cfg(feature = "tensor-core")]
-            {
-                check!(cublas::cublasSetMathMode(
-                    w.handle_blas,
-                    cublas::Math::TensorOp
-                ));
+            #[cfg(feature = "tensor-core")] {
+                check!(cublas::cublasSetMathMode(w.handle_blas, cublas::Math::TensorOp));
             }
-
-            check!(cudnn::cudnnCreateActivationDescriptor(&mut w.relu));
-            check!(cudnn::cudnnSetActivationDescriptor(
-                w.relu,
-                cudnn::ActivationMode::Relu,
-                cudnn::NanPropagation::NotPropagateNan,
-                0.0
-            ));
-
-            check!(cudnn::cudnnCreateActivationDescriptor(&mut w.tanh));
-            check!(cudnn::cudnnSetActivationDescriptor(
-                w.tanh,
-                cudnn::ActivationMode::Tanh,
-                cudnn::NanPropagation::NotPropagateNan,
-                0.0
-            ));
-
-            check!(cuda::cudaStreamCreate(&mut w.tower_stream));
-            check!(cuda::cudaStreamCreate(&mut w.policy_stream));
-            check!(cuda::cudaStreamCreate(&mut w.value_stream));
-            check!(cuda::cudaEventCreate(&mut w.tower_event));
         }
 
-        tower::<Allocate, _>(&mut w, &SlotGuard::null());
-        value::<Allocate, _>(&mut w, &SlotGuard::null());
-        policy::<Allocate, _>(&mut w, &SlotGuard::null());
-
-        // determine the maximum observed workspace size
-        let conv_workspace = w.convolutions.values()
-            .map(|c| c.workspace_size)
-            .max().unwrap_or(0);
-        let linear_workspace = w.linears.values()
-            .map(|l| l.workspace_size)
-            .max().unwrap_or(0);
-
-        w.workspace_size = ::std::cmp::max(conv_workspace, linear_workspace);
         w
-    }
-
-    /// Finalize all internal data structures and copies them to
-    /// the GPU.
-    pub fn finalize(&mut self) {
-        // copy the weights to the device if that has not been done already.
-        for (name, tensor) in self.tensors.iter_mut() {
-            unsafe {
-                if tensor.has_shape() {
-                    tensor.filter_desc = tensor.get_filter_descriptor();
-                    tensor.tensor_desc = tensor.get_tensor_descriptor();
-                    tensor.copy_to_device();
-
-                    // check that the weights on the GPU are approximately the
-                    // same as the CPU weights.
-                    tensor.check(&name);
-                }
-            }
-        }
     }
 }
 
+pub struct Workspace {
+    batch_size: usize,
+    tensors: Arc<HashMap<String, Tensor>>,
+    slots: Slots,
+
+    handle_dnn: cudnn::Handle,
+    handle_blas: cublas::Handle,
+
+    tower_finished: cuda::Event,
+
+    tower_stream: cuda::Stream,
+    policy_stream: cuda::Stream,
+    value_stream: cuda::Stream,
+
+    c_up: Rc<UpLayer>,
+    c_value: Rc<ValueLayer>,
+    c_policy: Rc<PolicyLayer>,
+    c_residual: Vec<Rc<ResidualLayer>>
+}
+
 impl Workspace {
-    /// Release (to the memory pool) any temporary memory that was allocated for
-    /// this workspace during the last run.
-    pub fn clear(&mut self) {
-        self.slots_c.clear();
-    }
+    // pass
 }
 
 impl Drop for Workspace {
     fn drop(&mut self) {
         unsafe {
-            cuda::cudaEventDestroy(self.tower_event);
+            cuda::cudaEventDestroy(self.tower_finished);
+
             cuda::cudaStreamDestroy(self.value_stream);
             cuda::cudaStreamDestroy(self.policy_stream);
             cuda::cudaStreamDestroy(self.tower_stream);
 
-            cudnn::cudnnDestroyActivationDescriptor(self.tanh);
-            cudnn::cudnnDestroyActivationDescriptor(self.relu);
-
-            cudnn::cudnnDestroy(self.handle_dnn);
             cublas::cublasDestroy_v2(self.handle_blas);
+            cudnn::cudnnDestroy(self.handle_dnn);
         }
     }
 }
 
-/// 
-pub fn tower<O: Ops<G>, G: Graph>(graph: &mut G, input: &SlotGuard) -> SlotGuard {
-    let batch_size = graph.get_batch_size();
-    let residual_1 = O::get_slot(graph, "residual_1", 4 * batch_size * NUM_CHANNELS * 361);
-    let residual_2 = O::get_slot(graph, "residual_2", 4 * batch_size * NUM_CHANNELS * 361);
-    let residual_3 = O::get_slot(graph, "residual_3", 4 * batch_size * NUM_CHANNELS * 361);
-    let workspace_size = graph.get_workspace_size();
-    let workspace_1 = O::get_slot(graph, "workspace_1", workspace_size);
-    let workspace_2 = O::get_slot(graph, "workspace_2", workspace_size);
+struct UpLayer {
+    input: cudnn::TensorDescriptor,
+    output: cudnn::TensorDescriptor,
+    offset: cudnn::TensorDescriptor,
+    filter: cudnn::FilterDescriptor,
+    relu: cudnn::ActivationDescriptor,
+    descr: cudnn::ConvolutionDescriptor,
+    fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
 
-    /*
-    #[cfg(feature = "trace-cuda")]
-    eprintln!("00_input/output:0\n= {:?}", Tensor::default()
-        .set_data_type(cudnn::DataType::Int8, cudnn::TensorFormat::NHWC)
-        .set_shape(vec! [batch_size as i32, 36, 19, 19])
-        .set_scale(1.0)
-        .fmt_ptr(input.ptr)
-    );
-    */
+    alpha: f32
+}
 
-    O::convolution(
-        graph,
-        "00_input/output:0".to_string(), **input,
-        NUM_CHANNELS as i32, NUM_FEATURES as i32, 3, 3,
-        "01_upsample/weights:0".to_string(),
-        "01_upsample/offset:0".to_string(),
-        "01_upsample/output:0".to_string(), *residual_1,
-        *workspace_1, workspace_size
-    );
+impl Drop for UpLayer {
+    fn drop(&mut self) {
+        unsafe {
+            cudnn::cudnnDestroyTensorDescriptor(self.input);
+            cudnn::cudnnDestroyTensorDescriptor(self.output);
+            cudnn::cudnnDestroyTensorDescriptor(self.offset);
+            cudnn::cudnnDestroyFilterDescriptor(self.filter);
+            cudnn::cudnnDestroyActivationDescriptor(self.relu);
+            cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
+        }
+    }
+}
 
-    for i in 2..(NUM_LAYERS + 2) {
-        let input_name = if i == 2 {
-            "01_upsample/output:0".to_string()
-        } else {
-            format!("{:02}_residual/output_2:0", i - 1)
+impl UpLayer {
+    /// Create a single convolutional layer.
+    ///
+    /// # Arguments
+    /// 
+    /// * `handle` - The cuDNN handle
+    /// * `n` - The number of images.
+    /// * `tensors` - 
+    /// 
+    unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> UpLayer {
+        let weights = &tensors["01_upsample/weights:0"];
+        let mut out = UpLayer {
+            input: ptr::null(),
+            output: ptr::null(),
+            offset: ptr::null(),
+            filter: ptr::null(),
+            relu: ptr::null(),
+            descr: ptr::null(),
+
+            fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
+            alpha: weights.scale / (127.0 * 6.0)
         };
 
-        O::residual_block(
-            graph,
-            input_name, *residual_1,
-            NUM_CHANNELS as i32, NUM_CHANNELS as i32, 3, 3,
-            format!("{:02}_residual/weights_1c:0", i),
-            format!("{:02}_residual/weights_1d:0", i),
-            format!("{:02}_residual/weights_2:0", i),
-            format!("{:02}_residual/offset_1c:0", i),
-            format!("{:02}_residual/offset_1d:0", i),
-            format!("{:02}_residual/offset_2:0", i),
-            format!("{:02}_residual/output_1c:0", i),
-            format!("{:02}_residual/output_1d:0", i),
-            format!("{:02}_residual/output_1:0", i), *residual_2,
-            format!("{:02}_residual/output_2:0", i), *residual_1, *residual_3,
-            *workspace_1, *workspace_2, workspace_size
-        );
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.input,
+            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::DataType::Int8x4,
+            n, NUM_FEATURES as i32, 19, 19
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.output));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.output,
+            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::DataType::Int8x4,
+            n, NUM_CHANNELS as i32, 19, 19
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.offset,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            1, NUM_CHANNELS as i32, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter));
+        check!(cudnn::cudnnSetFilter4dDescriptor(
+            out.filter,
+            cudnn::DataType::Int8x4,
+            cudnn::TensorFormat::NCHWVECTC,
+            NUM_CHANNELS as i32, NUM_FEATURES as i32, 3, 3
+        ));
+
+        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu));
+        check!(cudnn::cudnnSetActivationDescriptor(
+            out.relu,
+            cudnn::ActivationMode::Relu,
+            cudnn::NanPropagation::NotPropagateNan,
+            0.0
+        ));
+
+        check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr));
+        check!(cudnn::cudnnSetConvolution2dDescriptor(
+            out.descr,
+            1, 1, 1, 1, 1, 1,
+            cudnn::ConvolutionMode::CrossCorrelation,
+            cudnn::DataType::Int32
+        ));
+
+        #[cfg(feature = "tensor-core")] {
+            check!(cudnn::cudnnSetConvolutionMathType(out.descr, cudnn::MathType::TensorOpMath));
+        }
+
+        // determine the best algorithm to use for this convolution
+        let mut num_fwd_algo = 0;
+
+        check!(cudnn::cudnnFindConvolutionForwardAlgorithm(
+            *handle,
+            out.input,
+            out.filter,
+            out.descr,
+            out.output,
+            1, &mut num_fwd_algo, &mut out.fwd_algo
+        ));
+
+        assert!(num_fwd_algo > 0);
+
+        out
     }
 
-    residual_1
+    unsafe fn forward<T: InferenceType>(
+        &self,
+        workspace: &mut Workspace,
+        input: &SlotGuard
+    ) -> SlotGuard
+    {
+        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
+
+        let device_id = get_current_device();
+        let weights = &workspace.tensors["01_upsample/weights:0"];
+        let offset = &workspace.tensors["01_upsample/offset:0"];
+
+        offset.copy_to_device(device_id, workspace.tower_stream);
+        weights.copy_to_device(device_id, workspace.tower_stream);
+
+        // perform the forward convolution
+        let workspace_1 = workspace.slots.get_slot(Slot::Workspace_1, self.fwd_algo.memory);
+        let output = workspace.slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * NUM_CHANNELS * 361);
+
+        check!(cudnn::cudnnConvolutionBiasActivationForward(
+            workspace.handle_dnn,
+            &self.alpha,
+            self.input, **input,
+            self.filter, weights.get(device_id),
+            self.descr, self.fwd_algo.algo,
+            *workspace_1, self.fwd_algo.memory,
+            &ZERO,
+            self.output, *output,
+            self.offset, offset.get(device_id),
+            self.relu,
+            self.output, *output,
+        ));
+
+        output
+    }
 }
 
-/// 
-pub fn policy<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> SlotGuard {
-    let batch_size = graph.get_batch_size();
-    let policy_1 = O::get_slot(graph, "policy_1", 4 * batch_size * 362);
-    let policy_out = graph.get_slot("99_output/policy:0", 4 * batch_size * 722);
-    let workspace_size = graph.get_workspace_size();
-    let workspace_1 = O::get_slot(graph, "workspace_1", workspace_size);
+struct ResidualLayer {
+    tensor: cudnn::TensorDescriptor,
+    offset: cudnn::TensorDescriptor,
+    filter: cudnn::FilterDescriptor,
+    relu: cudnn::ActivationDescriptor,
+    descr: cudnn::ConvolutionDescriptor,
+    fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
 
-    O::convolution(
-        graph,
-        format!("{:02}_residual/output_2:0", NUM_LAYERS + 1), **residual_1,
-        2, NUM_CHANNELS as i32, 1, 1,
-        format!("{:02}p_policy/downsample:0", NUM_LAYERS + 2),
-        format!("{:02}p_policy/offset:0", NUM_LAYERS + 2),
-        format!("{:02}p_policy/output_1:0", NUM_LAYERS + 2), *policy_out,
-        *workspace_1, workspace_size
-    );
-
-    O::linear(
-        graph,
-        format!("{:02}p_policy/output_1:0", NUM_LAYERS + 2), *policy_out,
-        362, 722,
-        format!("{:02}p_policy/weights:0", NUM_LAYERS + 2),
-        format!("{:02}p_policy/bias:0", NUM_LAYERS + 2),
-        format!("{:02}p_policy/output_2:0", NUM_LAYERS + 2), *policy_1,
-        *workspace_1, workspace_size
-    );
-
-    O::softmax(
-        graph,
-        format!("{:02}p_policy/output_2:0", NUM_LAYERS + 2), *policy_1,
-        format!("{:02}p_policy/output_3:0", NUM_LAYERS + 2), *policy_out
-    );
-
-    policy_out
+    count: usize,
+    alpha1: f32,
+    alpha2: f32
 }
 
-/// 
-pub fn value<O: Ops<G>, G: Graph>(graph: &mut G, residual_1: &SlotGuard) -> SlotGuard {
-    let batch_size = graph.get_batch_size();
-    let value_1 = O::get_slot(graph, "value_1", 4 * batch_size * 361);
-    let value_out = graph.get_slot("99_output/value:0", 4 * batch_size * 256);
-    let workspace_size = graph.get_workspace_size();
-    let workspace_2 = O::get_slot(graph, "workspace_2", workspace_size);
+impl Drop for ResidualLayer {
+    fn drop(&mut self) {
+        unsafe {
+            cudnn::cudnnDestroyTensorDescriptor(self.tensor);
+            cudnn::cudnnDestroyTensorDescriptor(self.offset);
+            cudnn::cudnnDestroyFilterDescriptor(self.filter);
+            cudnn::cudnnDestroyActivationDescriptor(self.relu);
+            cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
+        }
+    }
+}
 
-    O::convolution(
-        graph,
-        format!("{:02}_residual/output_2:0", NUM_LAYERS + 1), **residual_1,
-        1, NUM_CHANNELS as i32, 1, 1,
-        format!("{:02}v_value/downsample:0", NUM_LAYERS + 2),
-        format!("{:02}v_value/offset:0", NUM_LAYERS + 2),
-        format!("{:02}v_value/output_1:0", NUM_LAYERS + 2), *value_1,
-        *workspace_2, workspace_size
-    );
+impl ResidualLayer {
+    /// Create a layer that takes the final output of the residual block and
+    /// transforms it into a scalar value.
+    ///
+    /// # Arguments
+    /// 
+    /// * `handle` - The cuDNN handle
+    /// * `n` - The number of images.
+    /// * `i` - What number of residual block this is
+    /// * `tensors` - 
+    /// 
+    unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> ResidualLayer {
+        let weights_1 = &tensors[&format!("{:02}_residual/weights_1:0", 2 + i)];
+        let weights_2 = &tensors[&format!("{:02}_residual/weights_2:0", 2 + i)];
+        let mut out = ResidualLayer {
+            tensor: ptr::null(),
+            offset: ptr::null(),
+            filter: ptr::null(),
+            relu: ptr::null(),
+            descr: ptr::null(),
+            fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
 
-    O::linear(
-        graph,
-        format!("{:02}v_value/output_1:0", NUM_LAYERS + 2), *value_1,
-        256, 361,
-        format!("{:02}v_value/weights_1:0", NUM_LAYERS + 2),
-        format!("{:02}v_value/bias_1:0", NUM_LAYERS + 2),
-        format!("{:02}v_value/output_2:0", NUM_LAYERS + 2), *value_out,
-        *workspace_2, workspace_size
-    );
+            count: i,
+            alpha1: weights_1.scale / 127.0,
+            alpha2: weights_2.scale / 127.0,
+        };
 
-    O::relu(
-        graph,
-        format!("{:02}v_value/output_2:0", NUM_LAYERS + 2), *value_out,
-        format!("{:02}v_value/output_3:0", NUM_LAYERS + 2), *value_out
-    );
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.tensor));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.tensor,
+            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::DataType::Int8x4,
+            n, NUM_CHANNELS as i32, 19, 19
+        ));
 
-    O::linear(
-        graph,
-        format!("{:02}v_value/output_3:0", NUM_LAYERS + 2), *value_out,
-        1, 256,
-        format!("{:02}v_value/weights_2:0", NUM_LAYERS + 2),
-        format!("{:02}v_value/bias_2:0", NUM_LAYERS + 2),
-        format!("{:02}v_value/output_4:0", NUM_LAYERS + 2), *value_1,
-        *workspace_2, workspace_size
-    );
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.offset,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            1, NUM_CHANNELS as i32, 1, 1
+        ));
 
-    O::tanh(
-        graph,
-        format!("{:02}v_value/output_4:0", NUM_LAYERS + 2), *value_1,
-        format!("{:02}v_value/output_5:0", NUM_LAYERS + 2), *value_out
-    );
+        check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter));
+        check!(cudnn::cudnnSetFilter4dDescriptor(
+            out.filter,
+            cudnn::DataType::Int8x4,
+            cudnn::TensorFormat::NCHWVECTC,
+            NUM_CHANNELS as i32, NUM_CHANNELS as i32, 3, 3
+        ));
 
-    value_out
+        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu));
+        check!(cudnn::cudnnSetActivationDescriptor(
+            out.relu,
+            cudnn::ActivationMode::Relu,
+            cudnn::NanPropagation::NotPropagateNan,
+            0.0
+        ));
+
+        check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr));
+        check!(cudnn::cudnnSetConvolution2dDescriptor(
+            out.descr,
+            1, 1, 1, 1, 1, 1,
+            cudnn::ConvolutionMode::CrossCorrelation,
+            cudnn::DataType::Int32
+        ));
+
+        #[cfg(feature = "tensor-core")] {
+            check!(cudnn::cudnnSetConvolutionMathType(out.descr, cudnn::MathType::TensorOpMath));
+        }
+
+        // determine the best algorithm to use for this convolution
+        let mut num_fwd_algo = 0;
+
+        check!(cudnn::cudnnFindConvolutionForwardAlgorithm(
+            *handle,
+            out.tensor,
+            out.filter,
+            out.descr,
+            out.tensor,
+            1, &mut num_fwd_algo, &mut out.fwd_algo
+        ));
+
+        assert!(num_fwd_algo > 0);
+
+        out
+    }
+
+    unsafe fn forward<T: InferenceType>(
+        &self,
+        workspace: &mut Workspace,
+        input: SlotGuard
+    ) -> SlotGuard
+    {
+        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
+
+        let device_id = get_current_device();
+        let weights_1 = &workspace.tensors[&format!("{:02}_residual/weights_1:0", 2 + self.count)];
+        let weights_2 = &workspace.tensors[&format!("{:02}_residual/weights_2:0", 2 + self.count)];
+        let offset_1 = &workspace.tensors[&format!("{:02}_residual/offset_1:0", 2 + self.count)];
+        let offset_2 = &workspace.tensors[&format!("{:02}_residual/offset_2:0", 2 + self.count)];
+
+        weights_1.copy_to_device(device_id, workspace.tower_stream);
+        weights_2.copy_to_device(device_id, workspace.tower_stream);
+        offset_1.copy_to_device(device_id, workspace.tower_stream);
+        offset_2.copy_to_device(device_id, workspace.tower_stream);
+
+        // perform the forward convolution (1)
+        let workspace_r = workspace.slots.get_slot(Slot::Workspace_r, self.fwd_algo.memory);
+        let residual_2 = workspace.slots.get_slot(Slot::Residual_2, size_of::<T::Tower>() * workspace.batch_size * NUM_CHANNELS * 361);
+
+        check!(cudnn::cudnnConvolutionBiasActivationForward(
+            workspace.handle_dnn,
+            &self.alpha1,
+            self.tensor, *input,
+            self.filter, weights_1.get(device_id),
+            self.descr, self.fwd_algo.algo,
+            *workspace_r, self.fwd_algo.memory,
+            &ZERO,
+            self.tensor, *residual_2,
+            self.offset, offset_1.get(device_id),
+            self.relu,
+            self.tensor, *residual_2
+        ));
+
+        // perform the forward convolution (2)
+        check!(cudnn::cudnnConvolutionBiasActivationForward(
+            workspace.handle_dnn,
+            &self.alpha2,
+            self.tensor, *residual_2,
+            self.filter, weights_2.get(device_id),
+            self.descr, self.fwd_algo.algo,
+            *workspace_r, self.fwd_algo.memory,
+            &ONE,
+            self.tensor, *input,
+            self.offset, offset_2.get(device_id),
+            self.relu,
+            self.tensor, *input
+        ));
+
+        input
+    }
+}
+
+struct ValueLayer {
+    input: cudnn::TensorDescriptor,
+    offset: cudnn::TensorDescriptor,
+    filter: cudnn::FilterDescriptor,
+    relu: cudnn::ActivationDescriptor,
+    descr: cudnn::ConvolutionDescriptor,
+    fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
+
+    value_1: cudnn::TensorDescriptor,
+    value_2: cudnn::TensorDescriptor,
+    value_3: cudnn::TensorDescriptor,
+    bias_1: cudnn::TensorDescriptor,
+    bias_2: cudnn::TensorDescriptor,
+    tanh: cudnn::ActivationDescriptor,
+
+    alpha1: f32,
+    alpha2: f32
+}
+
+impl Drop for ValueLayer {
+    fn drop(&mut self) {
+        unsafe {
+            cudnn::cudnnDestroyTensorDescriptor(self.input);
+            cudnn::cudnnDestroyTensorDescriptor(self.offset);
+            cudnn::cudnnDestroyFilterDescriptor(self.filter);
+            cudnn::cudnnDestroyActivationDescriptor(self.relu);
+            cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
+
+            cudnn::cudnnDestroyTensorDescriptor(self.value_1);
+            cudnn::cudnnDestroyTensorDescriptor(self.value_2);
+            cudnn::cudnnDestroyTensorDescriptor(self.value_3);
+            cudnn::cudnnDestroyTensorDescriptor(self.bias_1);
+            cudnn::cudnnDestroyTensorDescriptor(self.bias_2);
+            cudnn::cudnnDestroyActivationDescriptor(self.tanh);
+        }
+    }
+}
+
+impl ValueLayer {
+    /// Create a layer that takes the final output of the residual block and
+    /// transforms it into a scalar value.
+    ///
+    /// # Arguments
+    /// 
+    /// * `handle` - The cuDNN handle
+    /// * `n` - The number of images.
+    /// * `tensors` - 
+    /// 
+    unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> ValueLayer {
+        let weights_1 = &tensors[&format!("{:02}v_value/downsample:0", 2 + NUM_LAYERS)];
+        let mut out = ValueLayer {
+            input: ptr::null(),
+            offset: ptr::null(),
+            filter: ptr::null(),
+            relu: ptr::null(),
+            descr: ptr::null(),
+            fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
+
+            value_1: ptr::null(),
+            value_2: ptr::null(),
+            value_3: ptr::null(),
+            bias_1: ptr::null(),
+            bias_2: ptr::null(),
+            tanh: ptr::null(),
+
+            alpha1: weights_1.scale / 127.0,
+            alpha2: 6.0 / 127.0
+        };
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.input,
+            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::DataType::Int8x4,
+            n, NUM_CHANNELS as i32, 19, 19
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_1));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.value_1,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            n, 1, 19, 19
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_2));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.value_2,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            n, 256, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_3));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.value_3,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            n, 1, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.offset,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            1, 1, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias_1));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.bias_1,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            1, 256, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias_2));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.bias_2,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            1, 1, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter));
+        check!(cudnn::cudnnSetFilter4dDescriptor(
+            out.filter,
+            cudnn::DataType::Int8x4,
+            cudnn::TensorFormat::NCHWVECTC,
+            1, NUM_CHANNELS as i32, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu));
+        check!(cudnn::cudnnSetActivationDescriptor(
+            out.relu,
+            cudnn::ActivationMode::Relu,
+            cudnn::NanPropagation::NotPropagateNan,
+            0.0
+        ));
+
+        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.tanh));
+        check!(cudnn::cudnnSetActivationDescriptor(
+            out.tanh,
+            cudnn::ActivationMode::Tanh,
+            cudnn::NanPropagation::NotPropagateNan,
+            0.0
+        ));
+
+        check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr));
+        check!(cudnn::cudnnSetConvolution2dDescriptor(
+            out.descr,
+            0, 0, 1, 1, 1, 1,
+            cudnn::ConvolutionMode::CrossCorrelation,
+            cudnn::DataType::Int32
+        ));
+
+        #[cfg(feature = "tensor-core")] {
+            check!(cudnn::cudnnSetConvolutionMathType(out.descr, cudnn::MathType::TensorOpMath));
+        }
+
+        // determine the best algorithm to use for this convolution
+        let mut num_fwd_algo = 0;
+
+        check!(cudnn::cudnnFindConvolutionForwardAlgorithm(
+            *handle,
+            out.input,
+            out.filter,
+            out.descr,
+            out.value_1,
+            1, &mut num_fwd_algo, &mut out.fwd_algo
+        ));
+
+        assert!(num_fwd_algo > 0);
+
+        out
+    }
+
+    unsafe fn forward<T: InferenceType>(
+        &self,
+        workspace: &mut Workspace,
+        output_set: &OutputSet,
+        output_map: &mut OutputMap<Vec<f32>>,
+        input: &SlotGuard
+    ) -> SlotGuard
+    {
+        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.value_stream));
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.value_stream));
+
+        let device_id = get_current_device();
+        let weights_1 = &workspace.tensors[&format!("{:02}v_value/downsample:0", 2 + NUM_LAYERS)];
+        let weights_2 = &workspace.tensors[&format!("{:02}v_value/weights_1:0", 2 + NUM_LAYERS)];
+        let weights_3 = &workspace.tensors[&format!("{:02}v_value/weights_2:0", 2 + NUM_LAYERS)];
+        let offset_1 = &workspace.tensors[&format!("{:02}v_value/offset:0", 2 + NUM_LAYERS)];
+        let offset_2 = &workspace.tensors[&format!("{:02}v_value/bias_1:0", 2 + NUM_LAYERS)];
+        let offset_3 = &workspace.tensors[&format!("{:02}v_value/bias_2:0", 2 + NUM_LAYERS)];
+
+        weights_1.copy_to_device(device_id, workspace.value_stream);
+        weights_2.copy_to_device(device_id, workspace.value_stream);
+        weights_3.copy_to_device(device_id, workspace.value_stream);
+        offset_1.copy_to_device(device_id, workspace.value_stream);
+        offset_2.copy_to_device(device_id, workspace.value_stream);
+        offset_3.copy_to_device(device_id, workspace.value_stream);
+
+        // perform the forward convolution
+        let workspace_v = workspace.slots.get_slot(Slot::Workspace_v, self.fwd_algo.memory);
+        let value_1 = workspace.slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 361);
+
+        check!(cudnn::cudnnConvolutionBiasActivationForward(
+            workspace.handle_dnn,
+            &self.alpha1,
+            self.input, **input,
+            self.filter, weights_1.get(device_id),
+            self.descr, self.fwd_algo.algo,
+            *workspace_v, self.fwd_algo.memory,
+            &ZERO,
+            self.value_1, *value_1,
+            self.offset, offset_1.get(device_id),
+            self.relu,
+            self.value_1, *value_1
+        ));
+
+        output_set.contains(Output::ValueDown).map(|key| { output_map.put(key, load_to_host::<T::Output>(*value_1, workspace.batch_size * 361, workspace.value_stream)) });
+
+        // perform the feed-forward linear layer (relu)
+        let value_2 = workspace.slots.get_slot(Slot::Value_2, size_of::<T::Output>() * workspace.batch_size * 256);
+        let value_3 = workspace.slots.get_slot(Slot::Value_3, size_of::<T::Output>() * workspace.batch_size * 1);
+
+        check!(cublas::cublasGemmEx(
+            workspace.handle_blas,
+            cublas::Operation::N,
+            cublas::Operation::N,
+            256, workspace.batch_size as i32, 361,  // output, batch_size, input
+            &self.alpha2 as *const f32 as *const c_void,
+            weights_2.get(device_id), cuda::DataType::R32F, 256,  // input_2
+            *value_1, cuda::DataType::R32F, 361,  // input_1
+            &ZERO as *const f32 as *const c_void,
+            *value_2, cuda::DataType::R32F, 256,  // output
+            cuda::DataType::R32F, cublas::GemmAlgo::Dfalt
+        ));
+
+        check!(cudnn::cudnnAddTensor(
+            workspace.handle_dnn,
+            &ONE, self.bias_1, offset_2.get(device_id),
+            &ONE, self.value_2, *value_2
+        ));
+
+        check!(cudnn::cudnnActivationForward(
+            workspace.handle_dnn,
+            self.relu,
+            &ONE, self.value_2, *value_2,  // input
+            &ZERO, self.value_2, *value_2,  // output
+        ));
+
+        // perform the feed-forward linear layer (tanh)
+        check!(cublas::cublasGemmEx(
+            workspace.handle_blas,
+            cublas::Operation::N,
+            cublas::Operation::N,
+            1, workspace.batch_size as i32, 256,  // output, batch_size, input
+            &ONE as *const f32 as *const c_void,
+            weights_3.get(device_id), cuda::DataType::R32F, 1,  // input_2
+            *value_2, cuda::DataType::R32F, 256,  // input_1
+            &ZERO as *const f32 as *const c_void,
+            *value_3, cuda::DataType::R32F, 1,  // output
+            cuda::DataType::R32F, cublas::GemmAlgo::Dfalt
+        ));
+
+        check!(cudnn::cudnnAddTensor(
+            workspace.handle_dnn,
+            &ONE, self.bias_2, offset_3.get(device_id),
+            &ONE, self.value_3, *value_3
+        ));
+
+        check!(cudnn::cudnnActivationForward(
+            workspace.handle_dnn,
+            self.tanh,
+            &ONE, self.value_3, *value_3,  // input
+            &ZERO, self.value_3, *value_3,  // output
+        ));
+
+        value_3
+    }
+}
+
+struct PolicyLayer {
+    input: cudnn::TensorDescriptor,
+    offset: cudnn::TensorDescriptor,
+    filter: cudnn::FilterDescriptor,
+    relu: cudnn::ActivationDescriptor,
+    descr: cudnn::ConvolutionDescriptor,
+    fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
+
+    bias: cudnn::TensorDescriptor,
+
+    policy_1: cudnn::TensorDescriptor,
+    policy_2: cudnn::TensorDescriptor,
+
+    alpha1: f32,
+    alpha2: f32
+}
+
+impl Drop for PolicyLayer {
+    fn drop(&mut self) {
+        unsafe {
+            cudnn::cudnnDestroyTensorDescriptor(self.input);
+            cudnn::cudnnDestroyTensorDescriptor(self.offset);
+            cudnn::cudnnDestroyFilterDescriptor(self.filter);
+            cudnn::cudnnDestroyActivationDescriptor(self.relu);
+            cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
+
+            cudnn::cudnnDestroyTensorDescriptor(self.bias);
+
+            cudnn::cudnnDestroyTensorDescriptor(self.policy_1);
+            cudnn::cudnnDestroyTensorDescriptor(self.policy_2);
+        }
+    }
+}
+
+impl PolicyLayer {
+    /// Create a layer that takes the final output of the residual block and
+    /// transforms it into a policy vector.
+    ///
+    /// # Arguments
+    /// 
+    /// * `handle` - The cuDNN handle
+    /// * `n` - The number of images.
+    /// * `tensors` - 
+    /// 
+    unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> PolicyLayer {
+        let weights_1 = &tensors[&format!("{:02}p_policy/downsample:0", 2 + NUM_LAYERS)];
+        let mut out = PolicyLayer {
+            input: ptr::null(),
+            offset: ptr::null(),
+            filter: ptr::null(),
+            relu: ptr::null(),
+            descr: ptr::null(),
+            fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
+
+            bias: ptr::null(),
+
+            policy_1: ptr::null(),
+            policy_2: ptr::null(),
+
+            alpha1: weights_1.scale / 127.0,
+            alpha2: 6.0 / 127.0
+        };
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.input,
+            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::DataType::Int8x4,
+            n, NUM_CHANNELS as i32, 19, 19
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.policy_1));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.policy_1,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            n, 2, 19, 19
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.policy_2));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.policy_2,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            n, 362, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.offset,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            1, 2, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias));
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.bias,
+            cudnn::TensorFormat::NCHW,
+            cudnn::DataType::Float,
+            1, 362, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter));
+        check!(cudnn::cudnnSetFilter4dDescriptor(
+            out.filter,
+            cudnn::DataType::Int8x4,
+            cudnn::TensorFormat::NCHWVECTC,
+            2, NUM_CHANNELS as i32, 1, 1
+        ));
+
+        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu));
+        check!(cudnn::cudnnSetActivationDescriptor(
+            out.relu,
+            cudnn::ActivationMode::Relu,
+            cudnn::NanPropagation::NotPropagateNan,
+            0.0
+        ));
+
+        check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr));
+        check!(cudnn::cudnnSetConvolution2dDescriptor(
+            out.descr,
+            0, 0, 1, 1, 1, 1,
+            cudnn::ConvolutionMode::CrossCorrelation,
+            cudnn::DataType::Int32
+        ));
+
+        #[cfg(feature = "tensor-core")] {
+            check!(cudnn::cudnnSetConvolutionMathType(out.descr, cudnn::MathType::TensorOpMath));
+        }
+
+        // determine the best algorithm to use for this convolution
+        let mut num_fwd_algo = 0;
+
+        check!(cudnn::cudnnFindConvolutionForwardAlgorithm(
+            *handle,
+            out.input,
+            out.filter,
+            out.descr,
+            out.policy_1,
+            1, &mut num_fwd_algo, &mut out.fwd_algo
+        ));
+
+        assert!(num_fwd_algo > 0);
+
+        out
+    }
+
+    unsafe fn forward<T: InferenceType>(
+        &self,
+        workspace: &mut Workspace,
+        output_set: &OutputSet,
+        output_map: &mut OutputMap<Vec<f32>>,
+        input: &SlotGuard
+    ) -> SlotGuard
+    {
+        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.policy_stream));
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream));
+
+        let device_id = get_current_device();
+        let weights_1 = &workspace.tensors[&format!("{:02}p_policy/downsample:0", 2 + NUM_LAYERS)];
+        let weights_2 = &workspace.tensors[&format!("{:02}p_policy/weights:0", 2 + NUM_LAYERS)];
+        let offset_1 = &workspace.tensors[&format!("{:02}p_policy/offset:0", 2 + NUM_LAYERS)];
+        let offset_2 = &workspace.tensors[&format!("{:02}p_policy/bias:0", 2 + NUM_LAYERS)];
+
+        offset_1.copy_to_device(device_id, workspace.policy_stream);
+        offset_2.copy_to_device(device_id, workspace.policy_stream);
+        weights_1.copy_to_device(device_id, workspace.policy_stream);
+        weights_2.copy_to_device(device_id, workspace.policy_stream);
+
+        // perform the forward convolution
+        let workspace_p = workspace.slots.get_slot(Slot::Workspace_p, self.fwd_algo.memory);
+        let policy_1 = workspace.slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 2 * 361);
+
+        check!(cudnn::cudnnConvolutionBiasActivationForward(
+            workspace.handle_dnn,
+            &self.alpha1,
+            self.input, **input,
+            self.filter, weights_1.get(device_id),
+            self.descr, self.fwd_algo.algo,
+            *workspace_p, self.fwd_algo.memory,
+            &ZERO,
+            self.policy_1, *policy_1,
+            self.offset, offset_1.get(device_id),
+            self.relu,
+            self.policy_1, *policy_1
+        ));
+
+        output_set.contains(Output::PolicyDown).map(|key| { output_map.put(key, load_to_host::<T::Output>(*policy_1, workspace.batch_size * 2 * 361, workspace.policy_stream)) });
+
+        // perform the feed-forward linear layers
+        let policy_2 = workspace.slots.get_slot(Slot::Policy_2, size_of::<T::Output>() * workspace.batch_size * 362);
+        let policy_3 = workspace.slots.get_slot(Slot::Policy_3, size_of::<T::Output>() * workspace.batch_size * 362);
+
+        check!(cublas::cublasGemmEx(
+            workspace.handle_blas,
+            cublas::Operation::N,
+            cublas::Operation::N,
+            362, workspace.batch_size as i32, 722,  // output, batch_size, input
+            &self.alpha2 as *const f32 as *const c_void,
+            weights_2.get(device_id), cuda::DataType::R32F, 362,  // input_2
+            *policy_1, cuda::DataType::R32F, 722,  // input_1
+            &ZERO as *const f32 as *const c_void,
+            *policy_2, cuda::DataType::R32F, 362,  // output
+            cuda::DataType::R32F, cublas::GemmAlgo::Dfalt
+        ));
+
+        check!(cudnn::cudnnAddTensor(
+            workspace.handle_dnn,
+            &ONE, self.bias, offset_2.get(device_id),
+            &ONE, self.policy_2, *policy_2
+        ));
+
+        check!(cudnn::cudnnActivationForward(
+            workspace.handle_dnn,
+            self.relu,
+            &ONE, self.policy_2, *policy_2,  // input
+            &ZERO, self.policy_2, *policy_2,  // output
+        ));
+
+        // softmax activation
+        check!(cudnn::cudnnSoftmaxForward(
+            workspace.handle_dnn,
+            cudnn::SoftmaxAlgorithm::Accurate,
+            cudnn::SoftmaxMode::Channel,
+            &ONE, self.policy_2, *policy_2,  // input
+            &ZERO, self.policy_2, *policy_3,  // output
+        ));
+
+        policy_3
+    }
+}
+
+/// Returns the value and policy tensors obtained from a forward pass
+/// through the neural network.
+///
+/// # Arguments
+///
+/// * `workspace` - the workspace for the current thread
+/// * `features` - the input features
+/// * `outputs` - the outputs to copy to host memory
+///
+pub fn forward<T: InferenceType>(
+    workspace: &mut Workspace,
+    features: &[T],
+    outputs: OutputSet
+) -> OutputMap<Vec<f32>>
+{
+    debug_assert!(features.len() % FEATURE_SIZE == 0);
+    debug_assert!(features.len() / FEATURE_SIZE == workspace.batch_size);
+
+    let mut map = OutputMap::new();
+
+    unsafe {
+        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
+
+        // copy all of the input features into a temporary workspace
+        let input = workspace.slots.get_slot(Slot::Input, size_of::<T>() * features.len());
+        let image_size = NUM_CHANNELS * 361;
+
+        check!(cuda::cudaMemcpyAsync(
+            *input,
+            features.as_ptr() as *const c_void,
+            size_of::<T>() * features.len(),
+            cuda::MemcpyKind::HostToDevice,
+            workspace.tower_stream
+        ));
+
+        // Upsample 32 -> 128 channels
+        let mut residual_1 = workspace.c_up.clone().forward::<T>(workspace, &input);
+
+        outputs.contains(Output::Upsample).map(|key| { map.put(key, load_to_host::<T::Tower>(*residual_1, workspace.batch_size * image_size, workspace.tower_stream)) });
+
+        // residual blocks
+        for i in 0..NUM_LAYERS {
+            let residual = workspace.c_residual[i].clone();
+            let output = ::std::mem::transmute(Output::Residual_00 as u8 + i as u8);
+
+            residual_1 = residual.forward::<T>(workspace, residual_1);
+
+            outputs.contains(output).map(|key| { map.put(key, load_to_host::<T::Output>(*residual_1, workspace.batch_size * NUM_CHANNELS * 361, workspace.tower_stream)) });
+        }
+
+        check!(cuda::cudaEventRecord(workspace.tower_finished, workspace.tower_stream));
+        check!(cuda::cudaStreamWaitEvent(workspace.value_stream, workspace.tower_finished, 0));
+        check!(cuda::cudaStreamWaitEvent(workspace.policy_stream, workspace.tower_finished, 0));
+
+        // run the value and policy head, then wait for them to finish (if
+        // they are requested)
+        let value = workspace.c_value.clone().forward::<T>(workspace, &outputs, &mut map, &residual_1);
+        let policy = workspace.c_policy.clone().forward::<T>(workspace, &outputs, &mut map, &residual_1);
+
+        outputs.contains(Output::Value).map(|key| { map.put(key, load_to_host::<T::Output>(*value, workspace.batch_size, workspace.value_stream)) });
+        outputs.contains(Output::Policy).map(|key| { map.put(key, load_to_host::<T::Output>(*policy, workspace.batch_size * 362, workspace.policy_stream)) });
+    }
+
+    // pretty-print the tensor to stderr if logging is turned on
+    if cfg!(feature = "trace-cuda") {
+        for name in outputs.iter() {
+            let mut dbg = String::new();
+            let host = map.get(name);
+
+            for (i, value) in host.iter().enumerate() {
+                if i > 0 { dbg += ", "; }
+
+                dbg += &format!("{:.4}", value);
+            }
+
+            eprintln!("{:?} = [{}]", name, dbg);
+        }
+    }
+
+    map
 }

@@ -40,12 +40,16 @@ impl Order for CHW {
     }
 }
 
-/// Implementation of `Order` for the data format `NHWC`.
-pub struct HWC;
+/// Implementation of `Order` for the data format `NCHW_VECT_C`.
+#[allow(non_camel_case_types)]
+pub struct CHW_VECT_C;
 
-impl Order for HWC {
+impl Order for CHW_VECT_C {
     fn index(c: usize, i: usize) -> usize {
-        i * 36 + c
+        let c_ = c / 4;
+        let c__ = c % 4;
+
+        4 * (c_ * 361 + i) + c__
     }
 }
 
@@ -58,11 +62,11 @@ pub trait Features {
     /// * `color` - the color of the current player
     /// * `symmetry` - the symmetry to use
     ///
-    fn get_features<T: From<f32> + Copy, O: Order>(
+    fn get_features<O: Order>(
         &self,
         color: Color,
         symmetry: symmetry::Transform
-    ) -> Vec<T>;
+    ) -> Vec<i8>;
 }
 
 impl Features for Board {
@@ -119,14 +123,14 @@ impl Features for Board {
     ///
     /// * `color` - the color of the current player
     ///
-    fn get_features<T: From<f32> + Copy, O: Order>(
+    fn get_features<O: Order>(
         &self,
         color: Color,
         symmetry: symmetry::Transform
-    ) -> Vec<T>
+    ) -> Vec<i8>
     {
-        let c_0: T = T::from(0.0);
-        let c_1: T = T::from(1.0);
+        let c_0: i8 = 0;
+        let c_1: i8 = 127;
 
         let mut features = vec! [c_0; FEATURE_SIZE];
         let symmetry_table = symmetry.get_table();
@@ -143,7 +147,7 @@ impl Features for Board {
             }
         }
 
-        // board state (historic)
+        // board state (one-hot historic)
         for (i, index) in self.history.iter().enumerate() {
             if index == 361 {
                 // pass

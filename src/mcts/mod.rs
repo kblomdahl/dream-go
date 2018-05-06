@@ -30,15 +30,13 @@ use std::thread::{self, JoinHandle};
 use time;
 
 use go::sgf::*;
-use go::{symmetry, Board, Color, CHW, HWC, Features, Score};
+use go::{symmetry, Board, Color, CHW_VECT_C, Features, Score};
 use mcts::time_control::{TimeStrategy, RolloutLimit};
 use mcts::predict::{PredictService, PredictGuard, PredictRequest};
-use nn::{Network, Type, TYPE};
-use util::array::*;
+use nn::Network;
 use util::b85;
 use util::config;
 use util::min;
-use util::types::*;
 
 pub enum GameResult {
     Resign(String, Board, Color, f32),
@@ -105,14 +103,7 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, B
 
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
-        let response = server.send(PredictRequest::Ask({
-            match *TYPE {
-                Type::Int8 => Array::from(board.get_features::<q8, HWC>(color, t)),
-                Type::Half => Array::from(board.get_features::<f16, CHW>(color, t)),
-                Type::Single => Array::from(board.get_features::<f32, CHW>(color, t))
-            }
-        }));
-
+        let response = server.send(PredictRequest::Ask(board.get_features::<CHW_VECT_C>(color, t)));
         let (value, original_policy) = if let Some(x) = response {
             x.unwrap()
         } else {
@@ -123,7 +114,7 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, B
         // with -Inf, while keeping the pass move (361) untouched so that there
         // is always at least one valid move.
         let mut policy = vec! [0.0f32; 362];
-        policy[361] = original_policy.get(361);  // copy passing move
+        policy[361] = original_policy[361];  // copy `pass` move
 
         for i in 0..361 {
             let j = t.inverse().apply(i);
@@ -132,7 +123,7 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, B
             if !board.is_valid(color, x, y) {
                 policy[j] = ::std::f32::NEG_INFINITY;
             } else {
-                policy[j] = original_policy.get(i);
+                policy[j] = original_policy[i];
             }
         }
 
@@ -183,7 +174,7 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, B
             }
         }
 
-        Some((0.5 * value.get() + 0.5, policy.into_boxed_slice()))
+        Some((0.5 * value + 0.5, policy.into_boxed_slice()))
     })
 }
 

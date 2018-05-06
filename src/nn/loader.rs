@@ -14,18 +14,13 @@
 
 use std::collections::HashMap;
 use std::fs::File;
+use std::intrinsics::unlikely;
 use std::io::{BufReader, Read};
 use std::path::Path;
 use std::char;
 
-use nn::ops::Tensor;
+use nn::tensor::Tensor;
 use util::b85;
-use util::types::*;
-
-struct JsonTensor {
-    scale: f32,
-    values: Option<Box<[f16]>>
-}
 
 /// Step the iterator forward until the character given `stop` character is
 /// encountered. The character `stop` is also skipped.
@@ -44,7 +39,7 @@ fn skip_until<I>(iter: &mut I, stop: char) -> String
         if let Some(ch) = iter.next() {
             let ch = char::from_u32(ch as u32).unwrap();
 
-            if ch == stop {
+            if unsafe { unlikely(ch == stop) } {
                 break
             }
 
@@ -59,14 +54,14 @@ fn skip_until<I>(iter: &mut I, stop: char) -> String
 
 /// An iterator that parse entries with the following format:
 /// 
-/// `"name": { "t": "...", v: "..." }`
+/// `"name": { "s": "...", v: "..." }`
 /// 
 struct JsonEntryIter<I: Iterator<Item=u8>> {
     iter: I
 }
 
 impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
-    type Item = (String, JsonTensor);
+    type Item = (String, Tensor);
 
     fn next(&mut self) -> Option<Self::Item> {
         // skip until the quote before the name
@@ -81,10 +76,7 @@ impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
         // object by iterating over the properties
         skip_until(&mut self.iter, '{');
 
-        let mut tensor = JsonTensor {
-            scale: 1.0,
-            values: None
-        };
+        let mut tensor = Tensor::default();
 
         loop {
             skip_until(&mut self.iter, '"');
@@ -94,11 +86,11 @@ impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
             let value = skip_until(&mut self.iter, '"');
 
             if key == "s" {
-                let array = b85::decode::<f16>(&value).unwrap();
+                let array = b85::decode::<f32, _>(&value).unwrap();
 
-                tensor.scale = f32::from(array[0]);
+                tensor.scale = array[0];
             } else if key == "v" {
-                tensor.values = b85::decode::<f16>(&value);
+                tensor.set_host(b85::decode::<u8, _>(&value).unwrap());
             } else {
                 break
             }
@@ -129,15 +121,8 @@ pub fn load(path: &Path) -> Option<HashMap<String, Tensor>> {
             iter: BufReader::new(file).bytes().map(|ch| ch.unwrap())
         };
 
-        for (name, mut json) in iter {
-            debug_assert!(json.scale > 0.0, "scale is non-positive for layer {} -- {}", name, json.scale);
-
-            let mut t = Tensor::default();
-
-            t.set_scale(json.scale);
-            if let Some(host) = json.values.take() {
-                t.set_host(host);
-            }
+        for (name, t) in iter {
+            debug_assert!(t.scale > 0.0, "scale is non-positive for layer {} -- {}", name, t.scale);
 
             out.insert(name, t);
         }
@@ -147,3 +132,23 @@ pub fn load(path: &Path) -> Option<HashMap<String, Tensor>> {
         None
     }
 }
+
+/*
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use test::{Bencher};
+
+    use nn::loader::load;
+
+    #[bench]
+    fn load_json(b: &mut Bencher) {
+        b.iter(|| {
+            let out = load(Path::new("dream_go.json"));
+
+            assert!(out.is_some());
+            out
+        });
+    }
+}
+*/

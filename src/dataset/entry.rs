@@ -33,13 +33,17 @@ enum PolicyEntry {
 
 impl PolicyEntry {
     /// Returns a slice containing the full policy of this entry.
-    fn to_slice(&self) -> Box<[f16]> {
+    fn to_slice(&self) -> Vec<f32> {
         match *self {
-            PolicyEntry::Full(ref input) => b85::decode(input).unwrap(),
+            PolicyEntry::Full(ref input) => {
+                b85::decode::<f16, _>(input).unwrap().into_iter()
+                    .map(|value| f32::from(value))
+                    .collect()
+            },
             PolicyEntry::Partial(index) => {
-                let mut policy = vec! [f16::from(0.0); 362];
-                policy[index] = f16::from(1.0);
-                policy.into_boxed_slice()
+                let mut policy = vec! [0.0; 362];
+                policy[index] = 1.0;
+                policy
             }
         }
     }
@@ -65,8 +69,8 @@ impl<'a> Iterator for EntryIterator<'a> {
     fn next(&mut self) -> Option<Entry> {
         self.entries.pop()
             .map(|(ref board, current_color, ref policy)| {
-                let features = board.get_features::<f16, CHW>(current_color, symmetry::Transform::Identity);
-                let mut policy: Box<[f16]> = if self.server.is_some() && policy.is_partial() {
+                let features = board.get_features::<CHW>(current_color, symmetry::Transform::Identity);
+                let mut policy: Vec<f32> = if self.server.is_some() && policy.is_partial() {
                     // if this is a partial policy then perform a search at this
                     // board position and output the result as the policy
                     let num_threads = ::std::cmp::max(
@@ -82,7 +86,7 @@ impl<'a> Iterator for EntryIterator<'a> {
                         current_color
                     );
 
-                    tree.softmax::<f16>()
+                    tree.softmax::<f32>()
                 } else {
                     policy.to_slice()
                 };
@@ -92,7 +96,7 @@ impl<'a> Iterator for EntryIterator<'a> {
 
                 Entry::new(
                     &features,
-                    f16::from(if current_color == self.winner { 1.0 } else { -1.0 }),
+                    if current_color == self.winner { 1.0 } else { -1.0 },
                     &policy
                 )
             })
@@ -109,12 +113,12 @@ impl<'a> ExactSizeIterator for EntryIterator<'a> {
 pub struct Entry {
     /// The current board state, where the last bit represents whether the
     /// current player won the game.
-    pub features_and_winner: Box<[u8]>,
+    pub features_and_winner: Vec<u8>,
 
     /// The probabilities that each move should be played for the given
     /// features, encoded in HW format with one additional element at the
     /// end for the `pass` move.
-    pub policy: Box<[u8]>
+    pub policy: Vec<u8>
 }
 
 impl Entry {
@@ -228,13 +232,13 @@ impl Entry {
     /// * `winner` - the winner
     /// * `policy` - the policy vector
     ///
-    fn new(features: &[f16], winner: f16, policy: &[f16]) -> Entry {
+    fn new(features: &[i8], winner: f32, policy: &[f32]) -> Entry {
         let mut features = features.to_vec();
-        features.push(winner);
+        features.push(if winner > 0.0 { 127 } else { 0 });
 
         Entry {
-            features_and_winner: f16_to_bits(&features),
-            policy: f16_to_u8(policy)
+            features_and_winner: i8_to_bits(&features),
+            policy: f32_to_u8(policy)
         }
     }
 
@@ -258,7 +262,7 @@ impl Entry {
 ///
 /// * `array` - the array of 16-bit floating point numbers to serialize
 ///
-fn f16_to_bits(array: &[f16]) -> Box<[u8]> {
+fn i8_to_bits(array: &[i8]) -> Vec<u8> {
     let cursor_len = if array.len() % 8 == 0 {
         array.len() / 8
     } else {
@@ -266,10 +270,9 @@ fn f16_to_bits(array: &[f16]) -> Box<[u8]> {
     };
 
     let mut cursor = vec! [0; cursor_len];
-    let c_1: f16 = f16::from(1.0);
 
     for (i, &value) in array.into_iter().enumerate() {
-        if value == c_1 {
+        if value != 0 {
             let j = i / 8;
             let k = i % 8;
 
@@ -277,7 +280,7 @@ fn f16_to_bits(array: &[f16]) -> Box<[u8]> {
         }
     }
 
-    cursor.into_boxed_slice()
+    cursor
 }
 
 /// Returns an array of floating point serialized (and compressed) as
@@ -287,14 +290,14 @@ fn f16_to_bits(array: &[f16]) -> Box<[u8]> {
 ///
 /// * `array` - the array of 16-bit floating point numbers to serialize
 ///
-fn f16_to_u8(array: &[f16]) -> Box<[u8]> {
+fn f32_to_u8(array: &[f32]) -> Vec<u8> {
     let mut cursor = vec! [0; array.len()];
 
     for (i, &value) in array.into_iter().enumerate() {
-        cursor[i] = (255.0 * f32::from(value)).round() as u8;
+        cursor[i] = (255.0 * value).round() as u8;
     }
 
-    cursor.into_boxed_slice()
+    cursor
 }
 
 #[cfg(test)]
@@ -303,10 +306,8 @@ mod tests {
 
     #[test]
     fn to_bits() {
-        let floats = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0f32].into_iter()
-            .map(|&v| f16::from(v))
-            .collect::<Vec<f16>>();
-        let bits = f16_to_bits(&floats);
+        let floats = vec! [127, 0, 0, 0, 0, 127, 0, 127];
+        let bits = i8_to_bits(&floats);
 
         assert_eq!(bits.len(), 1);
         assert_eq!(bits[0], 133);
@@ -314,12 +315,10 @@ mod tests {
 
     #[test]
     fn to_u8() {
-        let floats = [1.0, 1.0, 0.5, 0.2, 0.7, 0.3, 0.1, 0.8f32].into_iter()
-            .map(|&v| f16::from(v))
-            .collect::<Vec<f16>>();
-        let quan = f16_to_u8(&floats);
+        let floats = vec! [1.0, 1.0, 0.5, 0.2, 0.7, 0.3, 0.1, 0.8f32];
+        let quan = f32_to_u8(&floats);
 
         assert_eq!(quan.len(), 8);
-        assert_eq!(quan.to_vec(), vec! [255, 255, 128, 51, 179, 77, 25, 204]);
+        assert_eq!(quan.to_vec(), vec! [255, 255, 128, 51, 179, 77, 26, 204]);
     }
 }

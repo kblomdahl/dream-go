@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod array;
 pub mod b85;
 pub mod config;
 pub mod types;
-pub mod singleton;
 
 /// Returns the smallest of `x` and `y`.
 /// 

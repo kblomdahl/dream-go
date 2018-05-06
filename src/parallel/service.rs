@@ -34,6 +34,15 @@ pub trait ServiceImpl {
     /// the user.
     fn get_thread_count() -> usize;
 
+    /// Setup the initial state of the current thread. This is the first
+    /// function called for each worker thread.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `index` -
+    /// 
+    fn setup_thread(index: usize);
+
     /// Perform sanity checks before a worker threads goes to sleep.
     /// 
     /// # Arguments
@@ -178,11 +187,15 @@ impl<I: ServiceImpl + 'static> Service<I> {
 
         Service {
             workers: (0..num_threads)
-                .map(|_| {
+                .map(|i| {
                     let inner = inner.clone();
                     let state = state.clone();
 
-                    thread::spawn(move || worker_thread::<I>(state, inner))
+                    thread::spawn(move || {
+                        I::setup_thread(i);
+
+                        worker_thread::<I>(state, inner)
+                    })
                 })
                 .collect(),
 

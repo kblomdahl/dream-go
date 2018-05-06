@@ -40,15 +40,59 @@ lazy_static! {
     };
 }
 
-/// Decode a RFC 1924 (Ascii85) encoded string of FP32 values and returns
-/// an array of the FP32 numbers it represents.
+pub trait FromB85<T> {
+    fn decode(bits: [u8; 4], output: &mut Vec<T>);
+}
+
+impl FromB85<u8> for u8 {
+    fn decode(bits: [u8; 4], output: &mut Vec<u8>) {
+        output.push(bits[3]);
+        output.push(bits[2]);
+        output.push(bits[1]);
+        output.push(bits[0]);
+    }
+}
+
+impl FromB85<i8> for i8 {
+    fn decode(bits: [u8; 4], output: &mut Vec<i8>) {
+        output.push(unsafe { ::std::mem::transmute::<_, _>(bits[3]) });
+        output.push(unsafe { ::std::mem::transmute::<_, _>(bits[2]) });
+        output.push(unsafe { ::std::mem::transmute::<_, _>(bits[1]) });
+        output.push(unsafe { ::std::mem::transmute::<_, _>(bits[0]) });
+    }
+}
+
+impl FromB85<f16> for f16 {
+    fn decode(bits: [u8; 4], output: &mut Vec<f16>) {
+        output.push(f16::from_bits(u16::from_be(((bits[3] as u16) << 8) | (bits[2] as u16))));
+        output.push(f16::from_bits(u16::from_be(((bits[1] as u16) << 8) | (bits[0] as u16))));
+    }
+}
+
+impl FromB85<f32> for f32 {
+    fn decode(bits: [u8; 4], output: &mut Vec<f32>) {
+        let raw_bits = (bits[0] as u32)
+            | ((bits[1] as u32) << 8)
+            | ((bits[2] as u32) << 16)
+            | ((bits[3] as u32) << 24);
+
+        output.push(f32::from_bits(u32::from_be(raw_bits)));
+    }
+}
+
+/// Decode a RFC 1924 (Ascii85) encoded string of values and returns
+/// an array of the numbers it represents.
 /// 
 /// # Arguments
 /// 
 /// * `input` -
 /// 
-pub fn decode<T: From<f16> + Clone>(input: &str) -> Option<Box<[T]>> {
-    let mut output = vec! [];
+pub fn decode<T, O>(input: &str) -> Option<Vec<O>>
+    where T: FromB85<O> + Clone
+{
+    let decode_table = &*DECODE_85;  // de-ref once
+
+    let mut output = Vec::with_capacity(input.len());
     let mut iter = input.chars();
 
     'outer: loop {
@@ -57,7 +101,7 @@ pub fn decode<T: From<f16> + Clone>(input: &str) -> Option<Box<[T]>> {
 
         for _ in 0..5 {
             if let Some(ch) = iter.next() {
-                let de = unsafe { *DECODE_85.get_unchecked(ch as usize) };
+                let de = unsafe { *decode_table.get_unchecked(ch as usize) };
                 if de < 0 {
                     return None;  // invalid character
                 }
@@ -68,19 +112,13 @@ pub fn decode<T: From<f16> + Clone>(input: &str) -> Option<Box<[T]>> {
             }
         }
 
-        // encode the bits into 16-bit floating point numbers stored in network byte order
-        let mut dst = [0; 4];
+        // transform the `u32` into bytes
+        let dst: [u8; 4] = unsafe { ::std::mem::transmute(acc) };
 
-        for i in 0..4 {
-            dst[i] = acc as u8;
-            acc >>= 8;
-        }
-
-        output.push(T::from(f16::from_bits(u16::from_be(((dst[3] as u16) << 8) | (dst[2] as u16)))));
-        output.push(T::from(f16::from_bits(u16::from_be(((dst[1] as u16) << 8) | (dst[0] as u16)))));
+        T::decode(dst, &mut output);
     }
 
-    Some(output.into_boxed_slice())
+    Some(output)
 }
 
 /// Encode an array of FP32 values as an array of FP16 values, encoded
@@ -129,8 +167,8 @@ mod tests {
         let string = "NJ4Ny";
 
         assert_eq!(
-            decode(string),
-            Some(vec! [3.140625, 2.71875].into_boxed_slice())
+            decode::<f16, _>(string),
+            Some(vec! [f16::from(3.140625), f16::from(2.71875)])
         );
     }
 
@@ -140,9 +178,16 @@ mod tests {
         let string = "06YLd073vn07U>s07n1-";
 
         assert_eq!(
-            decode(string),
-            Some(vec! [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 0.0].into_boxed_slice())
+            decode::<f16, _>(string).map(|it| it.into_iter().map(|value| f32::from(value)).collect()),
+            Some(vec! [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 0.0])
         );
+    }
+
+    #[test]
+    fn _f32() {
+        let string = "000<4";
+
+        assert_eq!(decode::<f32, _>(string), Some(vec! [9.5]));
     }
 
     #[test]
@@ -159,7 +204,11 @@ mod tests {
         ];
 
         for example in examples.into_iter() {
-            assert_eq!(decode(&encode(&example)).unwrap(), example.into_boxed_slice());
+            let result = example.iter()
+                .map(|&value| f16::from(value))
+                .collect::<Vec<f16>>();
+
+            assert_eq!(decode::<f16, _>(&encode(&example)).unwrap(), result);
         }
     }
 }

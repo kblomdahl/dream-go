@@ -22,43 +22,10 @@ use test::Bencher;
 use rand::{Rng, thread_rng};
 
 use dream_go::nn::*;
-use dream_go::util::types::*;
+use dream_go::util::types::f16;
 
 thread_local! {
     static NETWORK: Network = Network::new().unwrap();
-}
-
-/// Benchmark the forward pass through the neural network for the given batch
-/// size and data type.
-/// 
-/// # Arguments
-/// 
-/// * `b` -
-/// * `network` -
-/// * `batch_size` - the batch size to benchmark
-/// 
-fn bench_batch_size_aux<T, R>(
-    b: &mut Bencher,
-    network: &Network,
-    batch_size: usize
-)
-    where T: From<f32> + Clone,
-          R: From<f32> + Clone
-{
-    let mut workspace = network.get_workspace(batch_size);
-    let features = (0..batch_size).flat_map(|_| {
-        let mut input = vec! [T::from(0.0); ::dream_go::go::FEATURE_SIZE];
-
-        for b in input.iter_mut() {
-            *b = T::from(if thread_rng().next_f32() < 0.2 { 1.0 } else { 0.0 });
-        }
-
-        input.into_iter()
-    }).collect::<Vec<T>>();
-
-    b.iter(move || {
-        forward::<T, R>(&mut workspace, &features)
-    });
 }
 
 /// Benchmark the forward pass through the neural network for the given batch
@@ -71,12 +38,28 @@ fn bench_batch_size_aux<T, R>(
 /// 
 fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
     NETWORK.with(|network| {
-        // allocate a feature vector filled with random ones and zeros
-        match *TYPE {
-            Type::Single => bench_batch_size_aux::<f32, f32>(b, network, batch_size),
-            Type::Half => bench_batch_size_aux::<f16, f16>(b, network, batch_size),
-            Type::Int8 => bench_batch_size_aux::<q8, f32>(b, network, batch_size),
-        }
+        let mut workspace = network.get_workspace(batch_size);
+        let features = (0..batch_size).flat_map(|_| {
+            let c_0 = f16::from(0.0);
+            let c_1 = f16::from(1.0);
+            let mut input = vec! [c_0; ::dream_go::go::FEATURE_SIZE];
+
+            for b in input.iter_mut() {
+                *b = if thread_rng().next_f32() < 0.2 { c_1 } else { c_0 };
+            }
+
+            input.into_iter()
+        }).collect::<Vec<_>>();
+
+        b.iter(move || {
+            forward(
+                &mut workspace,
+                &features,
+                OutputSet::new()
+                    .with(Output::Policy)
+                    .with(Output::Value)
+            )
+        });
     });
 }
 

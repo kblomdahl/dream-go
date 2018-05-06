@@ -18,9 +18,9 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use nn::devices::get_current_device;
 use nn::graph;
 use nn::loader;
-use nn::slots;
 
 type WorkspaceQueue = Mutex<Vec<graph::Workspace>>;
 
@@ -58,8 +58,7 @@ impl<'a> Drop for WorkspaceGuard<'a> {
 #[derive(Clone)]
 pub struct Network {
     builder: Arc<graph::Builder>,
-    slots: slots::Slots,
-    workspaces: Arc<Mutex<HashMap<usize, Box<WorkspaceQueue>>>>
+    workspaces: Arc<Mutex<HashMap<(usize, i32), Box<WorkspaceQueue>>>>
 }
 
 unsafe impl Send for Network { }  // this is safe because the Rc<...> is guarded by a Mutex and/or Arc
@@ -90,7 +89,6 @@ impl Network {
             .next()
             .map(|weights| Network {
                 builder: Arc::new(graph::Builder::new(weights)),
-                slots: slots::Slots::new(),
                 workspaces: Arc::new(Mutex::new(HashMap::new()))
             })
     }
@@ -102,8 +100,10 @@ impl Network {
     /// * `batch_size` -
     /// 
     pub fn get_workspace<'a>(&'a self, batch_size: usize) -> WorkspaceGuard<'a> {
+        let device_id = get_current_device();
+        let key = (batch_size, device_id);
         let mut workspaces = self.workspaces.lock().unwrap();
-        let candidates = workspaces.entry(batch_size).or_insert_with(|| Box::new(Mutex::new(vec! [])));
+        let candidates = workspaces.entry(key).or_insert_with(|| Box::new(Mutex::new(vec! [])));
         let candidates_ptr = &mut **candidates as *mut WorkspaceQueue;
         let guard = match candidates.lock().unwrap().pop() {
             Some(workspace) => WorkspaceGuard {
@@ -112,7 +112,7 @@ impl Network {
                 lifetime: ::std::marker::PhantomData::default()
             },
             None => WorkspaceGuard {
-                workspace: Some(self.builder.get_workspace(batch_size, self.slots.clone())),
+                workspace: Some(self.builder.get_workspace(batch_size)),
                 pool: candidates_ptr,
                 lifetime: ::std::marker::PhantomData::default()
             }
