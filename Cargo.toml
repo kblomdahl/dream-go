@@ -22,7 +22,7 @@ opt-level = 1
 debug = true
 
 [dependencies]
-lazy_static = {version = "1.0", features = ["nightly"]}
+lazy_static = "1.0"
 libc = "0.2"
 ordered-float = "0.5"
 rand = "0.4"
