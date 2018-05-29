@@ -9,6 +9,7 @@ Dream Go is an independent implementation of the algorithms and concepts present
 ## Dependencies
 
 * [CUDAv8](https://developer.nvidia.com/cuda-zone) and [cuDNNv6](https://developer.nvidia.com/cudnn) (or higher)
+* [NVIDIA GPU](https://developer.nvidia.com/cuda-gpus) (Compute Capability 6.1 or higher)
 
 ## Dev Dependencies
 
@@ -109,12 +110,11 @@ For the values provided in this example, which generate 2,000,000 examples for t
 
 * 1.0.0 - _Public Release_
 * 0.7.0 - _Acceptance_
-  * Improved compatibility by dropping the (hard) dependency on cuDNN
-* 0.6.0 - _Emergent_
   * First version with a network trained from self-play games
+* 0.6.0 - _Emergent_
   * Improved [neural network architecture](https://github.com/Chicoryn/dream-go/issues/25#issuecomment-377706857)
   * Time and tournament commands for the GTP interface
-  * ~~[DP4A](https://devblogs.nvidia.com/parallelforall/mixed-precision-programming-cuda-8/) implementation~~
+  * Improved performance with [DP4A](https://devblogs.nvidia.com/parallelforall/mixed-precision-programming-cuda-8/)
 * 0.5.0 - _Assessment_
   * Optimize the monte carlo tree search parameters against other engines
   * Optimize neural network size for _best_ performance vs speed ratio
