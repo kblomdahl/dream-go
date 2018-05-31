@@ -6,7 +6,7 @@ license = "Apache-2.0"
 publish = false
 
 [features]
-default = ["tensor-core"]
+default = []
 
 # print (a lot) of debug info during neural network evaluation to stderr
 trace-cuda = []
