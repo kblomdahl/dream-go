@@ -193,17 +193,31 @@ fn argmax(array: &[f32]) -> Option<usize> {
     }
 }
 
-/// Returns the `n`:th smallest element from the given array.
+/// Returns the weighted n:th percentile of the given array, and the sum of
+/// all smaller elements.
 /// 
 /// # Arguments
 /// 
 /// * `array` - 
 /// * `n` - 
 /// 
-fn percentile(array: &[i32], n: usize) -> i32 {
+fn percentile(array: &[i32], total: i32, n: f64) -> (i32, f64) {
     let mut copy = array.to_vec();
-    copy.sort_unstable();
-    copy[n]
+    copy.sort_unstable_by_key(|val| -val);
+
+    // step forward in the array until we have accumulated the requested amount
+    let max_value = (total as f64) * (1.0 - n);
+    let mut so_far = 0.0;
+
+    for val in copy.into_iter() {
+        so_far += val as f64;
+
+        if so_far >= max_value {
+            return (val, so_far);
+        }
+    }
+
+    unreachable!();
 }
 
 /// A monte carlo search tree.
@@ -412,8 +426,8 @@ impl<E: Value> Node<E> {
             (self.value[max_i], max_i)
         } else {
             let t = (temperature as f64).recip();
-            let c_total = self.count.iter().sum::<i32>() as f64;
-            let c_threshold = percentile(&self.count, 358);  // top 10 elements
+            let c_total = self.count.iter().sum::<i32>();
+            let (c_threshold, c_total) = percentile(&self.count, c_total, 0.1);
             let mut s = vec! [::std::f64::NAN; 362];
             let mut s_total = 0.0;
 
