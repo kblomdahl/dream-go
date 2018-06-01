@@ -26,7 +26,6 @@ use nn::ffi::{cublas, cuda, cudnn};
 use nn::slots::*;
 use nn::output_map::*;
 use nn::tensor::Tensor;
-use util::types::f16;
 
 /// The number of features in the neural network architecture.
 const NUM_CHANNELS: usize = 128;
@@ -54,13 +53,6 @@ impl InferenceType for i8 {
     type Output = f32;
 
     fn as_f32(self) -> f32 { 6.0 * (self as f32) / 127.0 }
-}
-
-impl InferenceType for f16 {
-    type Tower = f16;
-    type Output = f16;
-
-    fn as_f32(self) -> f32 { f32::from(self) }
 }
 
 impl InferenceType for f32 {
@@ -300,7 +292,7 @@ impl UpLayer {
         // determine the best algorithm to use for this convolution
         let mut num_fwd_algo = 0;
 
-        check!(cudnn::cudnnFindConvolutionForwardAlgorithm(
+        check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             *handle,
             out.input,
             out.filter,
@@ -451,7 +443,7 @@ impl ResidualLayer {
         // determine the best algorithm to use for this convolution
         let mut num_fwd_algo = 0;
 
-        check!(cudnn::cudnnFindConvolutionForwardAlgorithm(
+        check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             *handle,
             out.tensor,
             out.filter,
@@ -686,7 +678,7 @@ impl ValueLayer {
         // determine the best algorithm to use for this convolution
         let mut num_fwd_algo = 0;
 
-        check!(cudnn::cudnnFindConvolutionForwardAlgorithm(
+        check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             *handle,
             out.input,
             out.filter,
@@ -941,7 +933,7 @@ impl PolicyLayer {
         // determine the best algorithm to use for this convolution
         let mut num_fwd_algo = 0;
 
-        check!(cudnn::cudnnFindConvolutionForwardAlgorithm(
+        check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             *handle,
             out.input,
             out.filter,

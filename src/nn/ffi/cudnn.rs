@@ -708,6 +708,39 @@ extern {
         perfResults: *mut ConvolutionFwdAlgoPerf
     ) -> Status;
 
+    /// This function serves as a heuristic for obtaining the best suited
+    /// algorithm for `cudnnConvolutionForward` for the given layer
+    /// specifications. This function will return all
+    /// algorithms (including `CUDNN_TENSOR_OP_MATH` and `CUDNN_DEFAULT_MATH`
+    /// versions of algorithms where `CUDNN_TENSOR_OP_MATH` may be available)
+    /// sorted by expected (based on internal heuristic) relative performance
+    /// with fastest being index 0 of `perfResults`. For an exhaustive search
+    /// for the fastest algorithm, please use `cudnnFindConvolutionForwardAlgorithm`.
+    /// The total number of resulting algorithms can be queried through the API
+    /// `cudnnGetConvolutionForwardMaxCount()`.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` -
+    /// * `xDesc` -
+    /// * `wDesc` -
+    /// * `convDesc` -
+    /// * `yDesc` -
+    /// * `requestedAlgoCount` -
+    /// * `returnedAlgoCount` -
+    /// * `perfResults` -
+    /// 
+    pub fn cudnnGetConvolutionForwardAlgorithm_v7(
+        handle: Handle,
+        xDesc: TensorDescriptor,
+        wDesc: FilterDescriptor,
+        convDesc: ConvolutionDescriptor,
+        yDesc: TensorDescriptor,
+        requestedAlgoCount: c_int,
+        returnedAlgoCount: *mut c_int,
+        perfResults: *mut ConvolutionFwdAlgoPerf
+    ) -> Status;
+
     /// This function serves as a heuristic for obtaining the best suited algorithm for
     /// `cudnnConvolutionForward` for the given layer specifications. Based on the input
     /// preference, this function will either return the fastest algorithm or the fastest algorithm
