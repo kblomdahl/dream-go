@@ -445,7 +445,7 @@ impl<E: Value> Node<E> {
             if s_total < ::std::f64::MIN_POSITIVE {
                 (0.5, thread_rng().gen_range(0, 362))
             } else {
-                let threshold = s_total * thread_rng().next_f64();
+                let threshold = s_total * thread_rng().gen::<f64>();
                 let max_i = (0..362).filter(|&i| s[i] >= threshold).next().unwrap();
 
                 (self.value[max_i], max_i)
@@ -810,7 +810,8 @@ pub fn to_pretty<'a, E: Value>(root: &'a Node<E>) -> ToPretty<'a, E> {
 #[cfg(test)]
 mod tests {
     use test::{self, Bencher};
-    use rand::{XorShiftRng, Rng};
+    use rand::rngs::SmallRng;
+    use rand::{Rng, FromEntropy};
     use go::*;
     use mcts::tree::*;
 
@@ -841,8 +842,8 @@ mod tests {
         assert_eq!(argmax(&array), Some(234));
     }
 
-    fn get_prior_distribution(rng: &mut Rng) -> Box<[f32]> {
-        let mut prior: Vec<f32> = (0..362).map(|_| rng.next_f32()).collect();
+    fn get_prior_distribution(rng: &mut SmallRng) -> Box<[f32]> {
+        let mut prior: Vec<f32> = (0..362).map(|_| rng.gen::<f32>()).collect();
         let sum_recip: f32 = prior.iter().map(|&f| f).sum();
 
         for i in 0..362 {
@@ -853,7 +854,7 @@ mod tests {
     }
 
     unsafe fn bench_test<E: Value>(b: &mut Bencher) {
-        let mut rng = XorShiftRng::new_unseeded();
+        let mut rng = SmallRng::from_entropy();
         let mut root = Node::<E>::new(Color::Black, 0.5, get_prior_distribution(&mut rng));
 
         for t in 0..800 {
@@ -882,7 +883,7 @@ mod tests {
             let trace = probe::<E>(&mut root, &mut board).unwrap();
             let &(_, color, _) = trace.last().unwrap();
             let next_color = color.opposite();
-            let (value, policy) = (rng.next_f32(), get_prior_distribution(&mut rng));
+            let (value, policy) = (rng.gen::<f32>(), get_prior_distribution(&mut rng));
 
             insert::<E>(&trace, next_color, value, policy);
         }

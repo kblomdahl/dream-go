@@ -388,7 +388,7 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
     // limit the maximum number of moves to `2 * 19 * 19` to avoid the
     // engine playing pointless capture sequences at the end of the game
     // that does not change the final result.
-    let allow_resign = thread_rng().next_f32() < 0.95;
+    let allow_resign = thread_rng().gen::<f32>() < 0.95;
     let mut root = None;
 
     while count < 722 {
@@ -522,7 +522,7 @@ fn policy_play_one(server: &PredictGuard) -> GameResult {
                 .filter(|p| p.is_finite())
                 .map(|p| p.powf(temperature))
                 .sum::<f32>();
-            let threshold = policy_sum * thread_rng().next_f32();
+            let threshold = policy_sum * thread_rng().gen::<f32>();
             let mut so_far = 0.0f32;
             let mut best = None;
 

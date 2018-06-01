@@ -42,7 +42,7 @@ fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
             let mut input = vec! [0i8; ::dream_go::go::FEATURE_SIZE];
 
             for b in input.iter_mut() {
-                *b = if thread_rng().next_f32() < 0.2 { 127 } else { 0 };
+                *b = if thread_rng().gen::<f32>() < 0.2 { 127 } else { 0 };
             }
 
             input.into_iter()

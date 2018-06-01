@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::{thread_rng, Rng, Open01};
+use rand::distributions::Open01;
+use rand::{thread_rng, Rng};
 
 use util::config;
 
@@ -165,8 +166,8 @@ fn standard_normal() -> f32 {
         let mut y = 0.0f32;
 
         while -2.0 * y < x * x {
-            let Open01(x_) = thread_rng().gen::<Open01<f32>>();
-            let Open01(y_) = thread_rng().gen::<Open01<f32>>();
+            let x_ = thread_rng().sample::<f32, _>(Open01);
+            let y_ = thread_rng().sample::<f32, _>(Open01);
 
             x = x_.ln() / ZIG_NORM_R;
             y = y_.ln();
@@ -183,7 +184,7 @@ fn standard_normal() -> f32 {
     // ZIGNOR variant from Doornik 2005)
     loop {
         let i = thread_rng().gen::<u8>() as usize;
-        let Open01(f) = thread_rng().gen::<Open01<f32>>();
+        let f = thread_rng().sample::<f32, _>(Open01);
         let u = 2.0 * f - 1.0;
         let x = u * ZIG_NORM_X[i];
 
@@ -213,7 +214,7 @@ fn gamma_large(c: f32, d: f32) -> f32 {
         }
 
         let v = v_cbrt * v_cbrt * v_cbrt;
-        let Open01(u) = thread_rng().gen::<Open01<f32>>();
+        let u = thread_rng().sample::<f32, _>(Open01);
         let x_sqr = x * x;
 
         if u < 1.0 - 0.0331 * x_sqr * x_sqr
@@ -233,7 +234,7 @@ fn gamma_large(c: f32, d: f32) -> f32 {
 /// * `d` - 
 /// 
 fn gamma_small(inv_shape: f32, c: f32, d: f32) -> f32 {
-    let Open01(u) = thread_rng().gen::<Open01<f32>>();
+    let u = thread_rng().sample::<f32, _>(Open01);
 
     gamma_large(c, d) * u.powf(inv_shape)
 }
