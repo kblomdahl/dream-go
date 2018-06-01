@@ -138,7 +138,7 @@ impl TimeSettings for ByoYomi {
         if self.main_time < 0.0 {
             let mut overtime = -self.main_time;
 
-            while overtime > self.byo_yomi_time {
+            while overtime > self.byo_yomi_time && self.byo_yomi_periods > 0 {
                 overtime -= self.byo_yomi_time;
                 self.byo_yomi_periods -= 1;
             }
