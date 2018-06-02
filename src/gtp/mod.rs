@@ -356,7 +356,7 @@ impl Gtp {
             }
             self.search_tree = Some(tree);
 
-            if value < 0.025 {  // 2.5% chance of winning
+            if value < 0.1 {  // 10% chance of winning
                 success!(id, "resign");
                 None
             } else if index >= 361 {  // passing move
