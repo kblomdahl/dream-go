@@ -70,7 +70,7 @@ impl<'a> Iterator for EntryIterator<'a> {
         self.entries.pop()
             .map(|(ref board, current_color, ref policy)| {
                 let features = board.get_features::<CHW>(current_color, symmetry::Transform::Identity);
-                let mut policy: Vec<f32> = if self.server.is_some() && policy.is_partial() {
+                let policy: Vec<f32> = if self.server.is_some() && policy.is_partial() {
                     // if this is a partial policy then perform a search at this
                     // board position and output the result as the policy
                     let num_threads = ::std::cmp::max(
@@ -90,9 +90,6 @@ impl<'a> Iterator for EntryIterator<'a> {
                 } else {
                     policy.to_slice()
                 };
-
-                // transform the policy using the same symmetry as the features
-                symmetry::apply(&mut policy, symmetry::Transform::Identity);
 
                 Entry::new(
                     &features,
