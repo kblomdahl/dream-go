@@ -62,6 +62,13 @@ impl InferenceType for f32 {
     fn as_f32(self) -> f32 { self }
 }
 
+/// Copy the value of the given tensor from the device to the host.
+/// 
+/// # Arguments
+/// 
+/// * `ptr` - the memory address on the device
+/// * `num_elements` - the number of elements to copy
+/// * `stream` - the stream to execute the copy on
 /// 
 unsafe fn load_to_host<T: InferenceType>(
     ptr: *const c_void,
@@ -168,10 +175,6 @@ pub struct Workspace {
     c_value: Rc<ValueLayer>,
     c_policy: Rc<PolicyLayer>,
     c_residual: Vec<Rc<ResidualLayer>>
-}
-
-impl Workspace {
-    // pass
 }
 
 impl Drop for Workspace {
@@ -1010,13 +1013,6 @@ impl PolicyLayer {
             workspace.handle_dnn,
             &ONE, self.bias, offset_2.get(device_id),
             &ONE, self.policy_2, *policy_2
-        ));
-
-        check!(cudnn::cudnnActivationForward(
-            workspace.handle_dnn,
-            self.relu,
-            &ONE, self.policy_2, *policy_2,  // input
-            &ZERO, self.policy_2, *policy_2,  // output
         ));
 
         // softmax activation

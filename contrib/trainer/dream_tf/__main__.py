@@ -168,12 +168,12 @@ def residual_block(x, mode, params):
         # the 1st convolution
         y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = batch_norm(y, conv_1, mode, params, suffix='_1')
-        y = tf.nn.relu6(y, name='output_1')
+        y = tf.nn.relu6(y)
 
         # the 2nd convolution
         y = tf.nn.conv2d(y, tf.cast(conv_2, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = batch_norm(y, conv_2, mode, params, suffix='_2')
-        y = tf.nn.relu6(y + x, name='output_2')
+        y = tf.nn.relu6(y + x)
 
         return y
 
@@ -213,11 +213,11 @@ def value_head(x, mode, params):
         """ Returns the result of the forward inference pass on `x` """
         y = tf.nn.conv2d(x, tf.cast(downsample, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = batch_norm(y, downsample, mode, params)
-        y = tf.nn.relu6(y)
+        y = tf.nn.relu(y)
 
         y = tf.reshape(y, (-1, 361))
         y = tf.matmul(y, tf.cast(weights_1, tf.float16)) + tf.cast(bias_1, tf.float16)
-        y = tf.nn.relu6(y)
+        y = tf.nn.relu(y)
         y = tf.matmul(y, tf.cast(weights_2, tf.float16)) + tf.cast(bias_2, tf.float16)
 
         return tf.cast(tf.nn.tanh(y), tf.float32)
@@ -253,12 +253,12 @@ def policy_head(x, mode, params):
         """ Returns the result of the forward inference pass on `x` """
         y = tf.nn.conv2d(x, tf.cast(downsample, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = batch_norm(y, downsample, mode, params)
-        y = tf.nn.relu6(y)
+        y = tf.nn.relu(y)
 
         y = tf.reshape(y, (-1, 722))
         y = tf.matmul(y, tf.cast(weights, tf.float16)) + tf.cast(bias, tf.float16)
 
-        return tf.cast(y, tf.float32)
+        return tf.to_float(y)
 
     return _forward(x)
 
@@ -326,7 +326,6 @@ class DumpHook(tf.train.SessionRunHook):
             }
 
         json.dump(output, sys.stdout, sort_keys=True)
-
 
 # -------- Input Pipeline --------
 
@@ -428,11 +427,12 @@ def get_dataset(files, batch_size=1, is_training=True):
         """ Zeros out the history planes for 25% of the features. """
         HISTORY_MASK = np.asarray([1.0] * NUM_FEATURES, 'f2')
         HISTORY_MASK[5:11] = 0.0
+        HISTORY_MASK = tf.constant(HISTORY_MASK, tf.float16, (NUM_FEATURES, 1, 1))
 
         random = tf.random_uniform((), 0, 100, tf.int32)
         features = tf.case(
             [
-                (tf.less(random, 25), lambda: features * tf.reshape(HISTORY_MASK, (-1, 1, 1))),
+                (tf.less(random, 25), lambda: features * HISTORY_MASK),
                 (tf.less(random, 35), lambda: _shuffle_history(features)),
             ],
             default=lambda: features
