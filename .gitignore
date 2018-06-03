@@ -3,6 +3,7 @@ bin/
 data/
 dist/
 models/
+rls/
 target/
 *~
 *.bin
