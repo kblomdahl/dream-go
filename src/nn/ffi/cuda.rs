@@ -125,6 +125,7 @@ extern {
     pub fn cudaFreeHost(hostPtr: *const c_void) -> Error;
     pub fn cudaMalloc(devPtr: *mut *mut c_void, size: usize) -> Error;
     pub fn cudaMallocHost(hostPtr: *mut *mut c_void, size: usize) -> Error;
+    pub fn cudaMemset(devPtr: *mut c_void, value: u8, size: usize) -> Error;
     pub fn cudaMemcpy(dst: *mut c_void, src: *const c_void, count: usize, kind: MemcpyKind) -> Error;
     pub fn cudaMemcpyAsync(dst: *mut c_void, src: *const c_void, count: usize, kind: MemcpyKind, stream: Stream) -> Error;
 

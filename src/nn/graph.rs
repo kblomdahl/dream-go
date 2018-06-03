@@ -33,11 +33,21 @@ const NUM_CHANNELS: usize = 128;
 /// The number of residual blocks in the neural network architecture.
 const NUM_LAYERS: usize = 9;
 
-// A __global__ constant that contains `0.0`.
+/// A __global__ constant that contains `0.0`.
 const ZERO: f32 = 0.0;
 
-// A __global__ constant that contains `1.0`.
+/// A __global__ constant that contains `1.0`.
 const ONE: f32 = 1.0;
+
+/// A __global__ constant that contains approximately `6.0`. This is necessary
+/// because we quantize to the range `[-127, +127]` which contains `0` and then
+/// `127` in each direction so a total of `1 + 2*127 = 255` elements. This means
+/// the maximum value that can be represented is:
+/// 
+/// `2.0 * SIX / 255.0 * 127.0`
+/// 
+/// Which we can solve for the value of `SIX` when the maximum value is 6.0.
+const SIX: f32 = (6.0 / 127.0) * 255.0 / 2.0;
 
 // -------- InferenceType --------
 
@@ -227,7 +237,7 @@ impl UpLayer {
     /// * `tensors` - 
     /// 
     unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> UpLayer {
-        let weights = &tensors["01_upsample/weights:0"];
+        let weights = &tensors["01_upsample/conv_1:0"];
         let mut out = UpLayer {
             input: ptr::null(),
             output: ptr::null(),
@@ -237,7 +247,7 @@ impl UpLayer {
             descr: ptr::null(),
 
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
-            alpha: weights.scale / (127.0 * 6.0)
+            alpha: weights.scale / (127.0 * SIX)
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
@@ -319,8 +329,8 @@ impl UpLayer {
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
 
         let device_id = get_current_device();
-        let weights = &workspace.tensors["01_upsample/weights:0"];
-        let offset = &workspace.tensors["01_upsample/offset:0"];
+        let weights = &workspace.tensors["01_upsample/conv_1:0"];
+        let offset = &workspace.tensors["01_upsample/conv_1/offset:0"];
 
         offset.copy_to_device(device_id, workspace.tower_stream);
         weights.copy_to_device(device_id, workspace.tower_stream);
@@ -384,8 +394,8 @@ impl ResidualLayer {
     /// * `tensors` - 
     /// 
     unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> ResidualLayer {
-        let weights_1 = &tensors[&format!("{:02}_residual/weights_1:0", 2 + i)];
-        let weights_2 = &tensors[&format!("{:02}_residual/weights_2:0", 2 + i)];
+        let weights_1 = &tensors[&format!("{:02}_residual/conv_1:0", 2 + i)];
+        let weights_2 = &tensors[&format!("{:02}_residual/conv_2:0", 2 + i)];
         let mut out = ResidualLayer {
             tensor: ptr::null(),
             offset: ptr::null(),
@@ -470,10 +480,10 @@ impl ResidualLayer {
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
 
         let device_id = get_current_device();
-        let weights_1 = &workspace.tensors[&format!("{:02}_residual/weights_1:0", 2 + self.count)];
-        let weights_2 = &workspace.tensors[&format!("{:02}_residual/weights_2:0", 2 + self.count)];
-        let offset_1 = &workspace.tensors[&format!("{:02}_residual/offset_1:0", 2 + self.count)];
-        let offset_2 = &workspace.tensors[&format!("{:02}_residual/offset_2:0", 2 + self.count)];
+        let weights_1 = &workspace.tensors[&format!("{:02}_residual/conv_1:0", 2 + self.count)];
+        let weights_2 = &workspace.tensors[&format!("{:02}_residual/conv_2:0", 2 + self.count)];
+        let offset_1 = &workspace.tensors[&format!("{:02}_residual/conv_1/offset:0", 2 + self.count)];
+        let offset_2 = &workspace.tensors[&format!("{:02}_residual/conv_2/offset:0", 2 + self.count)];
 
         weights_1.copy_to_device(device_id, workspace.tower_stream);
         weights_2.copy_to_device(device_id, workspace.tower_stream);
@@ -566,7 +576,7 @@ impl ValueLayer {
     /// * `tensors` - 
     /// 
     unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> ValueLayer {
-        let weights_1 = &tensors[&format!("{:02}v_value/downsample:0", 2 + NUM_LAYERS)];
+        let weights_1 = &tensors[&format!("{:02}v_value/conv_1:0", 2 + NUM_LAYERS)];
         let mut out = ValueLayer {
             input: ptr::null(),
             offset: ptr::null(),
@@ -583,7 +593,7 @@ impl ValueLayer {
             tanh: ptr::null(),
 
             alpha1: weights_1.scale / 127.0,
-            alpha2: 6.0 / 127.0
+            alpha2: SIX / 127.0
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
@@ -707,12 +717,12 @@ impl ValueLayer {
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.value_stream));
 
         let device_id = get_current_device();
-        let weights_1 = &workspace.tensors[&format!("{:02}v_value/downsample:0", 2 + NUM_LAYERS)];
-        let weights_2 = &workspace.tensors[&format!("{:02}v_value/weights_1:0", 2 + NUM_LAYERS)];
-        let weights_3 = &workspace.tensors[&format!("{:02}v_value/weights_2:0", 2 + NUM_LAYERS)];
-        let offset_1 = &workspace.tensors[&format!("{:02}v_value/offset:0", 2 + NUM_LAYERS)];
-        let offset_2 = &workspace.tensors[&format!("{:02}v_value/bias_1:0", 2 + NUM_LAYERS)];
-        let offset_3 = &workspace.tensors[&format!("{:02}v_value/bias_2:0", 2 + NUM_LAYERS)];
+        let weights_1 = &workspace.tensors[&format!("{:02}v_value/conv_1:0", 2 + NUM_LAYERS)];
+        let weights_2 = &workspace.tensors[&format!("{:02}v_value/linear_1:0", 2 + NUM_LAYERS)];
+        let weights_3 = &workspace.tensors[&format!("{:02}v_value/linear_2:0", 2 + NUM_LAYERS)];
+        let offset_1 = &workspace.tensors[&format!("{:02}v_value/conv_1/offset:0", 2 + NUM_LAYERS)];
+        let offset_2 = &workspace.tensors[&format!("{:02}v_value/linear_1/offset:0", 2 + NUM_LAYERS)];
+        let offset_3 = &workspace.tensors[&format!("{:02}v_value/linear_2/offset:0", 2 + NUM_LAYERS)];
 
         weights_1.copy_to_device(device_id, workspace.value_stream);
         weights_2.copy_to_device(device_id, workspace.value_stream);
@@ -770,6 +780,8 @@ impl ValueLayer {
             &ONE, self.value_2, *value_2,  // input
             &ZERO, self.value_2, *value_2,  // output
         ));
+
+        output_set.contains(Output::ValueGemm).map(|key| { output_map.put(key, load_to_host::<T::Output>(*value_2, workspace.batch_size * 256, workspace.value_stream)) });
 
         // perform the feed-forward linear layer (tanh)
         check!(cublas::cublasGemmEx(
@@ -847,7 +859,7 @@ impl PolicyLayer {
     /// * `tensors` - 
     /// 
     unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> PolicyLayer {
-        let weights_1 = &tensors[&format!("{:02}p_policy/downsample:0", 2 + NUM_LAYERS)];
+        let weights_1 = &tensors[&format!("{:02}p_policy/conv_1:0", 2 + NUM_LAYERS)];
         let mut out = PolicyLayer {
             input: ptr::null(),
             offset: ptr::null(),
@@ -862,7 +874,7 @@ impl PolicyLayer {
             policy_2: ptr::null(),
 
             alpha1: weights_1.scale / 127.0,
-            alpha2: 6.0 / 127.0
+            alpha2: SIX / 127.0
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
@@ -962,10 +974,10 @@ impl PolicyLayer {
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream));
 
         let device_id = get_current_device();
-        let weights_1 = &workspace.tensors[&format!("{:02}p_policy/downsample:0", 2 + NUM_LAYERS)];
-        let weights_2 = &workspace.tensors[&format!("{:02}p_policy/weights:0", 2 + NUM_LAYERS)];
-        let offset_1 = &workspace.tensors[&format!("{:02}p_policy/offset:0", 2 + NUM_LAYERS)];
-        let offset_2 = &workspace.tensors[&format!("{:02}p_policy/bias:0", 2 + NUM_LAYERS)];
+        let weights_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1:0", 2 + NUM_LAYERS)];
+        let weights_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1:0", 2 + NUM_LAYERS)];
+        let offset_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1/offset:0", 2 + NUM_LAYERS)];
+        let offset_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1/offset:0", 2 + NUM_LAYERS)];
 
         offset_1.copy_to_device(device_id, workspace.policy_stream);
         offset_2.copy_to_device(device_id, workspace.policy_stream);
@@ -974,7 +986,7 @@ impl PolicyLayer {
 
         // perform the forward convolution
         let workspace_p = workspace.slots.get_slot(Slot::Workspace_p, self.fwd_algo.memory);
-        let policy_1 = workspace.slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 2 * 361);
+        let policy_1 = workspace.slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 722);
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -1019,7 +1031,7 @@ impl PolicyLayer {
         check!(cudnn::cudnnSoftmaxForward(
             workspace.handle_dnn,
             cudnn::SoftmaxAlgorithm::Accurate,
-            cudnn::SoftmaxMode::Channel,
+            cudnn::SoftmaxMode::Instance,
             &ONE, self.policy_2, *policy_2,  // input
             &ZERO, self.policy_2, *policy_3,  // output
         ));

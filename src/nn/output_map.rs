@@ -22,20 +22,21 @@ pub enum Output {
     Upsample = 2,
     PolicyDown = 3,
     ValueDown = 4,
+    ValueGemm = 5,
 
-    Residual_00 = 5,
-    Residual_01 = 6,
-    Residual_02 = 7,
-    Residual_03 = 8,
-    Residual_04 = 9,
-    Residual_05 = 10,
-    Residual_06 = 11,
-    Residual_07 = 12,
-    Residual_08 = 13,
+    Residual_00 = 6,
+    Residual_01 = 7,
+    Residual_02 = 8,
+    Residual_03 = 9,
+    Residual_04 = 10,
+    Residual_05 = 11,
+    Residual_06 = 12,
+    Residual_07 = 13,
+    Residual_08 = 14,
 }
 
 /// The total number of elements in the `Output` enum.
-const OUTPUT_SIZE: usize = 14;
+const OUTPUT_SIZE: usize = 15;
 
 pub struct OutputMap<T> {
     array: [Option<T>; OUTPUT_SIZE]
@@ -47,7 +48,7 @@ impl<T> OutputMap<T> {
             array: [
                 None, None, None, None, None,
                 None, None, None, None, None,
-                None, None, None, None,
+                None, None, None, None, None,
             ]
         }
     }

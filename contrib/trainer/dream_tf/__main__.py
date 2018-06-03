@@ -33,28 +33,24 @@ from .orthogonal_initializer import orthogonal_initializer
 
 NUM_FEATURES = 32  # the total number of input features
 MAX_STEPS = 524288000  # the default total number of examples to train over
-BATCH_SIZE = 1024  # the default number of examples per batch
+BATCH_SIZE = 256  # the default number of examples per batch
 
 DUMP_OPS = 'DumpOps'  # the graph collection that contains all dump operations
 NORM_OPS = 'NormOps'  # the graph collection that contains all weights to be normalized
 
 # -------- Graph Components --------
 
-def batch_norm(x, weights, mode, params, suffix=None):
+def batch_norm(x, weights, mode, params):
     """ Batch normalization layer. """
-    if not suffix:
-        suffix = ''
-
     num_channels = weights.shape[3]
     ones_op = tf.ones_initializer()
     zeros_op = tf.zeros_initializer()
 
-    with tf.variable_scope('batch_norm', reuse=tf.AUTO_REUSE):
-        scale = tf.get_variable('scale'+suffix, (num_channels,), tf.float32, ones_op, trainable=False)
-        mean = tf.get_variable('mean'+suffix, (num_channels,), tf.float32, zeros_op, trainable=False)
-        variance = tf.get_variable('variance'+suffix, (num_channels,), tf.float32, ones_op, trainable=False)
-
-    offset = tf.get_variable('offset'+suffix, (num_channels,), tf.float32, zeros_op, trainable=True)
+    with tf.variable_scope(weights.op.name.split('/')[-1]):
+        scale = tf.get_variable('scale', (num_channels,), tf.float32, ones_op, trainable=False)
+        mean = tf.get_variable('mean', (num_channels,), tf.float32, zeros_op, trainable=False)
+        variance = tf.get_variable('variance', (num_channels,), tf.float32, ones_op, trainable=False)
+        offset = tf.get_variable('offset', (num_channels,), tf.float32, zeros_op, trainable=True)
 
     # fix the weights so that they appear in the _correct_ order according
     # to cuDNN.
@@ -87,8 +83,10 @@ def batch_norm(x, weights, mode, params, suffix=None):
         tf.reshape(scale / std_, (weights_.shape[0], 1, 1, 1, 1))
     )
 
-    # quantize the weights to [-128, +127] and the offset to the same range
-    # but as a floating point number as required by cuDNN.
+    # quantize the weights to [-127, +127] and the offset to the same range
+    # but as a floating point number as required by cuDNN. Note that this range
+    # contains 255 values for the range [-6.0, +6.0] for the offset, so the
+    # step size becomes `(12.0 / 255.0)`
     weights_max = tf.reduce_max(tf.abs(weights_))
     weights_q, weights_qmin, weights_qmax = tf.quantize(
         weights_,
@@ -99,7 +97,9 @@ def batch_norm(x, weights, mode, params, suffix=None):
         'HALF_AWAY_FROM_ZERO'
     )
 
-    tf.add_to_collection(DUMP_OPS, [offset, 127.0 / 6.0 * offset_, 'f4', tf.constant(6.0)])
+    step_size = 12.0 / 255.0
+
+    tf.add_to_collection(DUMP_OPS, [offset, offset_ / step_size, 'f4', tf.constant(127.0 * step_size)])
     tf.add_to_collection(DUMP_OPS, [weights, weights_q, 'i1', tf.reduce_max([tf.abs(weights_qmin), tf.abs(weights_qmax)])])
 
     def _forward(x):
@@ -156,8 +156,8 @@ def residual_block(x, mode, params):
     init_op = orthogonal_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('weights_1', (3, 3, num_channels, num_channels), tf.float32, init_op)
-    conv_2 = tf.get_variable('weights_2', (3, 3, num_channels, num_channels), tf.float32, init_op)
+    conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op)
+    conv_2 = tf.get_variable('conv_2', (3, 3, num_channels, num_channels), tf.float32, init_op)
 
     tf.add_to_collection(NORM_OPS, conv_1)
     tf.add_to_collection(NORM_OPS, conv_2)
@@ -167,12 +167,12 @@ def residual_block(x, mode, params):
 
         # the 1st convolution
         y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = batch_norm(y, conv_1, mode, params, suffix='_1')
+        y = batch_norm(y, conv_1, mode, params)
         y = tf.nn.relu6(y)
 
         # the 2nd convolution
         y = tf.nn.conv2d(y, tf.cast(conv_2, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = batch_norm(y, conv_2, mode, params, suffix='_2')
+        y = batch_norm(y, conv_2, mode, params)
         y = tf.nn.relu6(y + x)
 
         return y
@@ -196,29 +196,29 @@ def value_head(x, mode, params):
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    downsample = tf.get_variable('downsample', (1, 1, num_channels, 1), tf.float32, init_op)
-    weights_1 = tf.get_variable('weights_1', (361, 256), tf.float32, init_op)
-    weights_2 = tf.get_variable('weights_2', (256, 1), tf.float32, init_op)
-    bias_1 = tf.get_variable('bias_1', (256,), tf.float32, zeros_op)
-    bias_2 = tf.get_variable('bias_2', (1,), tf.float32, zeros_op)
+    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op)
+    linear_1 = tf.get_variable('linear_1', (361, 256), tf.float32, init_op)
+    linear_2 = tf.get_variable('linear_2', (256, 1), tf.float32, init_op)
+    offset_1 = tf.get_variable('linear_1/offset', (256,), tf.float32, zeros_op)
+    offset_2 = tf.get_variable('linear_2/offset', (1,), tf.float32, zeros_op)
 
-    tf.add_to_collection(NORM_OPS, downsample)
+    tf.add_to_collection(NORM_OPS, conv_1)
 
-    tf.add_to_collection(DUMP_OPS, [weights_1, weights_1, 'f4'])
-    tf.add_to_collection(DUMP_OPS, [weights_2, weights_2, 'f4'])
-    tf.add_to_collection(DUMP_OPS, [bias_1, bias_1, 'f4'])
-    tf.add_to_collection(DUMP_OPS, [bias_2, bias_2, 'f4'])
+    tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f4'])
+    tf.add_to_collection(DUMP_OPS, [linear_2, linear_2, 'f4'])
+    tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f4'])
+    tf.add_to_collection(DUMP_OPS, [offset_2, offset_2, 'f4'])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
-        y = tf.nn.conv2d(x, tf.cast(downsample, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = batch_norm(y, downsample, mode, params)
+        y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
+        y = batch_norm(y, conv_1, mode, params)
         y = tf.nn.relu(y)
 
         y = tf.reshape(y, (-1, 361))
-        y = tf.matmul(y, tf.cast(weights_1, tf.float16)) + tf.cast(bias_1, tf.float16)
+        y = tf.matmul(y, tf.cast(linear_1, tf.float16)) + tf.cast(offset_1, tf.float16)
         y = tf.nn.relu(y)
-        y = tf.matmul(y, tf.cast(weights_2, tf.float16)) + tf.cast(bias_2, tf.float16)
+        y = tf.matmul(y, tf.cast(linear_2, tf.float16)) + tf.cast(offset_2, tf.float16)
 
         return tf.cast(tf.nn.tanh(y), tf.float32)
 
@@ -240,23 +240,23 @@ def policy_head(x, mode, params):
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    downsample = tf.get_variable('downsample', (1, 1, num_channels, 2), tf.float32, init_op)
-    weights = tf.get_variable('weights', (722, 362), tf.float32, init_op)
-    bias = tf.get_variable('bias', (362,), tf.float32, zeros_op)
+    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 2), tf.float32, init_op)
+    linear_1 = tf.get_variable('linear_1', (722, 362), tf.float32, init_op)
+    offset_1 = tf.get_variable('linear_1/offset', (362,), tf.float32, zeros_op)
 
-    tf.add_to_collection(NORM_OPS, downsample)
+    tf.add_to_collection(NORM_OPS, conv_1)
 
-    tf.add_to_collection(DUMP_OPS, [weights, weights, 'f4'])
-    tf.add_to_collection(DUMP_OPS, [bias, bias, 'f4'])
+    tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f4'])
+    tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f4'])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
-        y = tf.nn.conv2d(x, tf.cast(downsample, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = batch_norm(y, downsample, mode, params)
+        y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
+        y = batch_norm(y, conv_1, mode, params)
         y = tf.nn.relu(y)
 
         y = tf.reshape(y, (-1, 722))
-        y = tf.matmul(y, tf.cast(weights, tf.float16)) + tf.cast(bias, tf.float16)
+        y = tf.matmul(y, tf.cast(linear_1, tf.float16)) + tf.cast(offset_1, tf.float16)
 
         return tf.to_float(y)
 
@@ -271,11 +271,11 @@ def tower(x, mode, params):
     num_inputs = NUM_FEATURES
 
     with tf.variable_scope('01_upsample'):
-        upsample = tf.get_variable('weights', (3, 3, num_inputs, num_channels), tf.float32, init_op)
-        tf.add_to_collection(NORM_OPS, upsample)
+        conv_1 = tf.get_variable('conv_1', (3, 3, num_inputs, num_channels), tf.float32, init_op)
+        tf.add_to_collection(NORM_OPS, conv_1)
 
-        y = tf.nn.conv2d(x, tf.cast(upsample, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = batch_norm(y, upsample, mode, params)
+        y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
+        y = batch_norm(y, conv_1, mode, params)
         y = tf.nn.relu6(y)
 
     for i in range(num_blocks):
@@ -432,8 +432,8 @@ def get_dataset(files, batch_size=1, is_training=True):
         random = tf.random_uniform((), 0, 100, tf.int32)
         features = tf.case(
             [
-                (tf.less(random, 25), lambda: features * HISTORY_MASK),
-                (tf.less(random, 35), lambda: _shuffle_history(features)),
+                (tf.less(random, 10), lambda: features * HISTORY_MASK),
+                (tf.less(random, 15), lambda: _shuffle_history(features)),
             ],
             default=lambda: features
         )
@@ -632,7 +632,7 @@ if not model_dir:
 params = {
     'steps': args.steps[0] if args.steps else MAX_STEPS,
     'batch_size': args.batch_size[0] if args.batch_size else BATCH_SIZE,
-    'learning_rate': 0.001 if args.warm_start else 0.01,
+    'learning_rate': 3e-5 if args.warm_start else 0.003,
 
     'num_channels': 128,
     'num_blocks': 9,
@@ -701,10 +701,25 @@ elif args.dump:
     for _ in predictor:
         pass
 elif args.print:
-    # print the value of the given tensors from the latest checkpoint, or if no
-    # tensors are given all available tensors.
+    # tensors are given then print all available tensors with some statistics.
     if not args.files:
-        print(nn.get_variable_names())
+        out = {}
+
+        for var in nn.get_variable_names():
+            value = np.asarray(nn.get_variable_value(var))
+
+            out[var] = {
+                'mean': float(np.average(value)),
+                'std': float(np.std(value))
+            }
+
+        print(json.dumps(
+            out,
+            default=lambda x: float(x) if x != int(x) else int(x),  # handle `Decimal` types
+            sort_keys=True,
+            separators=(',', ': '),
+            indent=4
+        ))
     else:
         for var in args.files:
             value = nn.get_variable_value(var)

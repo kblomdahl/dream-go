@@ -84,10 +84,7 @@ impl PredictState {
         let mut outputs = nn::forward(
             workspace,
             features_list,
-            OutputSet::new().with(Output::Policy)
-                            .with(Output::Value)
-                            //.with(Output::ValueDown)
-                            //.with(Output::PolicyDown)
+            OutputSet::new().with(Output::Policy).with(Output::Value)
         );
 
         let value_list = outputs.take(Output::Value);

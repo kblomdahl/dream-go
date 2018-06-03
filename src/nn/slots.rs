@@ -117,6 +117,7 @@ impl Slots {
 
             unsafe {
                 check!(cuda::cudaMalloc(&mut ptr, slot.size_in_bytes));
+                check!(cuda::cudaMemset(ptr, 0, slot.size_in_bytes));
 
                 debug_assert!(slot.size_in_bytes == 0 || !ptr.is_null(), "Failed to allocate CUDA buffer of size {} (expected size {})", slot.size_in_bytes, size_in_bytes);
             }
