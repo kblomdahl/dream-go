@@ -33,12 +33,15 @@ from .orthogonal_initializer import orthogonal_initializer
 
 NUM_FEATURES = 32  # the total number of input features
 MAX_STEPS = 524288000  # the default total number of examples to train over
-BATCH_SIZE = 256  # the default number of examples per batch
+BATCH_SIZE = 1024  # the default number of examples per batch
 
 DUMP_OPS = 'DumpOps'  # the graph collection that contains all dump operations
-NORM_OPS = 'NormOps'  # the graph collection that contains all weights to be normalized
 
 # -------- Graph Components --------
+
+def normalize_constraint(x):
+    """ Returns a constraint that set `tf.norm(x) = 1` """
+    return x / tf.norm(x)
 
 def batch_norm(x, weights, mode, params):
     """ Batch normalization layer. """
@@ -156,11 +159,8 @@ def residual_block(x, mode, params):
     init_op = orthogonal_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op)
-    conv_2 = tf.get_variable('conv_2', (3, 3, num_channels, num_channels), tf.float32, init_op)
-
-    tf.add_to_collection(NORM_OPS, conv_1)
-    tf.add_to_collection(NORM_OPS, conv_2)
+    conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint)
+    conv_2 = tf.get_variable('conv_2', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint)
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
@@ -196,13 +196,11 @@ def value_head(x, mode, params):
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op)
+    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op, constraint=normalize_constraint)
     linear_1 = tf.get_variable('linear_1', (361, 256), tf.float32, init_op)
     linear_2 = tf.get_variable('linear_2', (256, 1), tf.float32, init_op)
     offset_1 = tf.get_variable('linear_1/offset', (256,), tf.float32, zeros_op)
     offset_2 = tf.get_variable('linear_2/offset', (1,), tf.float32, zeros_op)
-
-    tf.add_to_collection(NORM_OPS, conv_1)
 
     tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f4'])
     tf.add_to_collection(DUMP_OPS, [linear_2, linear_2, 'f4'])
@@ -240,11 +238,9 @@ def policy_head(x, mode, params):
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 2), tf.float32, init_op)
+    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 2), tf.float32, init_op, constraint=normalize_constraint)
     linear_1 = tf.get_variable('linear_1', (722, 362), tf.float32, init_op)
     offset_1 = tf.get_variable('linear_1/offset', (362,), tf.float32, zeros_op)
-
-    tf.add_to_collection(NORM_OPS, conv_1)
 
     tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f4'])
     tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f4'])
@@ -271,8 +267,7 @@ def tower(x, mode, params):
     num_inputs = NUM_FEATURES
 
     with tf.variable_scope('01_upsample'):
-        conv_1 = tf.get_variable('conv_1', (3, 3, num_inputs, num_channels), tf.float32, init_op)
-        tf.add_to_collection(NORM_OPS, conv_1)
+        conv_1 = tf.get_variable('conv_1', (3, 3, num_inputs, num_channels), tf.float32, init_op, constraint=normalize_constraint)
 
         y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = batch_norm(y, conv_1, mode, params)
@@ -291,6 +286,19 @@ def tower(x, mode, params):
         v = value_head(y, mode, params)
 
     return v, p
+
+def adversarial(value_hat, policy_hat, gradient=True):
+    """ Returns the probability that the current player is black. """
+
+    zeros_op = tf.zeros_initializer()
+
+    with tf.variable_scope('xx_adversarial', reuse=tf.AUTO_REUSE):
+        offset = tf.get_variable('offset', (1,), tf.float32, zeros_op)
+
+        if not gradient:
+            offset = tf.stop_gradient(offset)
+
+        return tf.sigmoid(value_hat + offset)
 
 
 # -------- Calibration / Dump functions --------
@@ -343,15 +351,16 @@ def get_dataset(files, batch_size=1, is_training=True):
         features = features_and_value[0:feature_size].astype('f2')
         value = np.asarray(1.0 if features_and_value[feature_size] > 0 else -1.0, 'f4')
         policy = policy.astype('f4') / 255.0
+        is_black = features[0].astype('f4')
 
-        return features, value, policy
+        return features, value, policy, is_black
 
     def _parse(features_and_value, policy):
         return tuple(
-            tf.py_func(_parse_py, [features_and_value, policy], [tf.float16, tf.float32, tf.float32])
+            tf.py_func(_parse_py, [features_and_value, policy], [tf.float16, tf.float32, tf.float32, tf.float32])
         )
 
-    def _augment(features, value, policy):
+    def _augment(features, value, policy, is_black):
         def _identity(image):
             return tf.identity(image)
 
@@ -405,14 +414,14 @@ def get_dataset(files, batch_size=1, is_training=True):
 
         value = tf.reshape(value, [1])
 
-        return features, value, policy
+        return features, value, policy, is_black
 
-    def _fix_shape(features, value, policy):
+    def _fix_shape(features, value, policy, is_black):
         features = tf.reshape(features, [NUM_FEATURES, 19, 19])
         value = tf.reshape(value, [1])
         policy = tf.reshape(policy, [362])
 
-        return features, value, policy
+        return features, value, policy, is_black
 
     def _shuffle_history(features):
         features = tf.split(features, (5, 6, NUM_FEATURES - 11), 0)
@@ -423,7 +432,7 @@ def get_dataset(files, batch_size=1, is_training=True):
             features[2]
         ], axis=0)
 
-    def _fix_history(features, value, policy):
+    def _fix_history(features, value, policy, is_black):
         """ Zeros out the history planes for 25% of the features. """
         HISTORY_MASK = np.asarray([1.0] * NUM_FEATURES, 'f2')
         HISTORY_MASK[5:11] = 0.0
@@ -438,7 +447,7 @@ def get_dataset(files, batch_size=1, is_training=True):
             default=lambda: features
         )
 
-        return features, value, policy
+        return features, value, policy, is_black
 
     with tf.device('cpu:0'):
         dataset = tf.data.FixedLengthRecordDataset(files, num_bytes + 362)
@@ -458,9 +467,8 @@ def get_dataset(files, batch_size=1, is_training=True):
 
 def input_fn(files, batch_size, is_training):
     return get_dataset(files, batch_size, is_training).map(
-        lambda features, value, policy: (features, {'value': value, 'policy': policy})
+        lambda features, value, policy, is_black: (features, {'value': value, 'policy': policy, 'is_black': is_black})
     )
-
 
 # -------- Model function --------
 
@@ -468,6 +476,9 @@ def model_fn(features, labels, mode, params):
     value_hat, policy_hat = tower(features, mode, params)
 
     if labels:
+        is_black_nograd = adversarial(value_hat, policy_hat, gradient=False)
+        is_black_hat = adversarial(tf.stop_gradient(value_hat), tf.stop_gradient(policy_hat))
+
         # determine the loss for each of the components:
         #
         # - L2 regularization
@@ -482,32 +493,43 @@ def model_fn(features, labels, mode, params):
             labels=tf.stop_gradient(labels['policy']),
             logits=policy_hat
         ))
+        loss_black_nograd = tf.reduce_mean(tf.squared_difference(
+            tf.stop_gradient(labels['is_black']),
+            is_black_nograd
+        ))
+        loss_black = tf.reduce_mean(tf.squared_difference(
+            tf.stop_gradient(labels['is_black']),
+            is_black_hat
+        ))
 
-        loss = loss_policy + loss_value
+        loss = loss_policy + loss_value - loss_black_nograd
         tf.add_to_collection(LOSS, loss)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             # set an initial learning rate and then rely on the `LearningRateScheduler`
             # hook to decrease it when the loss plateaus
-            global_step = tf.train.get_global_step()
             learning_rate = tf.Variable(params['learning_rate'], False, name='lr')
-            optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
-            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
 
             tf.add_to_collection(LEARNING_RATE, learning_rate)
 
-            with tf.control_dependencies(update_ops):
+            # update the adversarial network first
+            adversarial_optimizer = tf.train.AdamOptimizer()
+            adversarial_train_op = adversarial_optimizer.minimize(loss_black)
+
+            # after the adversarial network has been updated, update the main
+            # network
+            global_step = tf.train.get_global_step()
+            optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+
+            with tf.control_dependencies(update_ops + [adversarial_train_op]):
                 gradients, variables = zip(*optimizer.compute_gradients(
                     loss,
                     aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
                     colocate_gradients_with_ops=True
                 ))
 
-                apply_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
-
-            with tf.control_dependencies([apply_op]):
-                train_ops = [tf.assign(var, var / tf.norm(var)) for var in tf.get_collection(NORM_OPS)]
-                train_op = tf.group(train_ops)
+                train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
 
             # during training it is very useful to plot the norm of the gradients at
             # each tensor so that we can detect the cause of any exploding gradients
@@ -515,7 +537,8 @@ def model_fn(features, labels, mode, params):
             for grad, var in zip(gradients, variables):
                 var_name = var.op.name
 
-                tf.summary.scalar('gradients/' + var_name, tf.norm(grad))
+                if grad is not None:
+                    tf.summary.scalar('gradients/' + var_name, tf.norm(grad))
                 tf.summary.scalar('norms/' + var_name, tf.norm(var))
 
             tf.summary.scalar('learning_rate', learning_rate)
@@ -524,6 +547,7 @@ def model_fn(features, labels, mode, params):
 
         tf.summary.scalar('loss/policy', loss_policy)
         tf.summary.scalar('loss/value', loss_value)
+        tf.summary.scalar('loss/is_black', loss_black_nograd)
 
         # evalutation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look
@@ -545,7 +569,8 @@ def model_fn(features, labels, mode, params):
             'accuracy/policy_5': tf.metrics.mean(policy_5),
             'accuracy/value': tf.metrics.mean(value_1),
             'loss/policy': tf.metrics.mean(loss_policy),
-            'loss/value': tf.metrics.mean(loss_value)
+            'loss/value': tf.metrics.mean(loss_value),
+            'loss/is_black': tf.metrics.mean(loss_black_nograd)
         }
     else:
         loss = None
@@ -656,7 +681,7 @@ config = tf.estimator.RunConfig(
 if args.warm_start:
     warm_start_from = tf.estimator.WarmStartSettings(
         ckpt_to_initialize_from=args.warm_start[0],
-        vars_to_warm_start='[0-9].*'  # only layers
+        vars_to_warm_start='[0-9x].*'  # only layers
     )
 else:
     warm_start_from = None
