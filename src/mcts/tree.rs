@@ -842,12 +842,16 @@ mod tests {
         assert_eq!(argmax(&array), Some(234));
     }
 
-    fn get_prior_distribution(rng: &mut SmallRng) -> Box<[f32]> {
+    fn get_prior_distribution(rng: &mut SmallRng, board: Board, color: Color) -> Box<[f32]> {
         let mut prior: Vec<f32> = (0..362).map(|_| rng.gen::<f32>()).collect();
         let sum_recip: f32 = prior.iter().map(|&f| f).sum();
 
         for i in 0..362 {
-            prior[i] *= sum_recip;
+            if i == 361 || board.is_valid(color, X[i] as usize, Y[i] as usize) {
+                prior[i] *= sum_recip;
+            } else {
+                prior[i] = ::std::f32::NEG_INFINITY;
+            }
         }
 
         prior.into_boxed_slice()
@@ -855,7 +859,7 @@ mod tests {
 
     unsafe fn bench_test<E: Value>(b: &mut Bencher) {
         let mut rng = SmallRng::from_entropy();
-        let mut root = Node::<E>::new(Color::Black, 0.5, get_prior_distribution(&mut rng));
+        let mut root = Node::<E>::new(Color::Black, 0.5, get_prior_distribution(&mut rng, Board::new(), Color::Black));
 
         for t in 0..800 {
             let mut board = Board::new();
@@ -870,7 +874,7 @@ mod tests {
             for i in 0..362 {
                 // because of numeric instabilities and approximations the answers may
                 // be slightly different
-                const EPS: f32 = 1e-1;
+                const EPS: f32 = 1e-4;
 
                 assert!(
                     (dst_asm[i] - dst_ref[i]).abs() < EPS,
@@ -883,7 +887,7 @@ mod tests {
             let trace = probe::<E>(&mut root, &mut board).unwrap();
             let &(_, color, _) = trace.last().unwrap();
             let next_color = color.opposite();
-            let (value, policy) = (rng.gen::<f32>(), get_prior_distribution(&mut rng));
+            let (value, policy) = (rng.gen::<f32>(), get_prior_distribution(&mut rng, board, next_color));
 
             insert::<E>(&trace, next_color, value, policy);
         }
