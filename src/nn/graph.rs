@@ -319,11 +319,12 @@ impl UpLayer {
         out
     }
 
-    unsafe fn forward<T: InferenceType>(
+    unsafe fn forward<'a, T: InferenceType>(
         &self,
         workspace: &mut Workspace,
-        input: &SlotGuard
-    ) -> SlotGuard
+        slots: &'a SlotsGuard,
+        input: &SlotGuard<'a>
+    ) -> SlotGuard<'a>
     {
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
@@ -336,8 +337,8 @@ impl UpLayer {
         weights.copy_to_device(device_id, workspace.tower_stream);
 
         // perform the forward convolution
-        let workspace_1 = workspace.slots.get_slot(Slot::Workspace_1, self.fwd_algo.memory);
-        let output = workspace.slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * NUM_CHANNELS * 361);
+        let workspace_1 = slots.get_slot(Slot::Workspace_1, self.fwd_algo.memory, workspace.tower_stream);
+        let output = slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * NUM_CHANNELS * 361, workspace.tower_stream);
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -470,11 +471,12 @@ impl ResidualLayer {
         out
     }
 
-    unsafe fn forward<T: InferenceType>(
+    unsafe fn forward<'a, T: InferenceType>(
         &self,
         workspace: &mut Workspace,
-        input: SlotGuard
-    ) -> SlotGuard
+        slots: &'a SlotsGuard,
+        input: SlotGuard<'a>
+    ) -> SlotGuard<'a>
     {
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
@@ -491,8 +493,8 @@ impl ResidualLayer {
         offset_2.copy_to_device(device_id, workspace.tower_stream);
 
         // perform the forward convolution (1)
-        let workspace_r = workspace.slots.get_slot(Slot::Workspace_r, self.fwd_algo.memory);
-        let residual_2 = workspace.slots.get_slot(Slot::Residual_2, size_of::<T::Tower>() * workspace.batch_size * NUM_CHANNELS * 361);
+        let workspace_r = slots.get_slot(Slot::Workspace_r, self.fwd_algo.memory, workspace.tower_stream);
+        let residual_2 = slots.get_slot(Slot::Residual_2, size_of::<T::Tower>() * workspace.batch_size * NUM_CHANNELS * 361, workspace.tower_stream);
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -705,13 +707,14 @@ impl ValueLayer {
         out
     }
 
-    unsafe fn forward<T: InferenceType>(
+    unsafe fn forward<'a, T: InferenceType>(
         &self,
         workspace: &mut Workspace,
+        slots: &'a SlotsGuard,
         output_set: &OutputSet,
         output_map: &mut OutputMap<Vec<f32>>,
-        input: &SlotGuard
-    ) -> SlotGuard
+        input: &SlotGuard<'a>
+    ) -> SlotGuard<'a>
     {
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.value_stream));
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.value_stream));
@@ -732,8 +735,8 @@ impl ValueLayer {
         offset_3.copy_to_device(device_id, workspace.value_stream);
 
         // perform the forward convolution
-        let workspace_v = workspace.slots.get_slot(Slot::Workspace_v, self.fwd_algo.memory);
-        let value_1 = workspace.slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 361);
+        let workspace_v = slots.get_slot(Slot::Workspace_v, self.fwd_algo.memory, workspace.value_stream);
+        let value_1 = slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 361, workspace.value_stream);
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -752,8 +755,8 @@ impl ValueLayer {
         output_set.contains(Output::ValueDown).map(|key| { output_map.put(key, load_to_host::<T::Output>(*value_1, workspace.batch_size * 361, workspace.value_stream)) });
 
         // perform the feed-forward linear layer (relu)
-        let value_2 = workspace.slots.get_slot(Slot::Value_2, size_of::<T::Output>() * workspace.batch_size * 256);
-        let value_3 = workspace.slots.get_slot(Slot::Value_3, size_of::<T::Output>() * workspace.batch_size * 1);
+        let value_2 = slots.get_slot(Slot::Value_2, size_of::<T::Output>() * workspace.batch_size * 256, workspace.value_stream);
+        let value_3 = slots.get_slot(Slot::Value_3, size_of::<T::Output>() * workspace.batch_size * 1, workspace.value_stream);
 
         check!(cublas::cublasGemmEx(
             workspace.handle_blas,
@@ -962,13 +965,14 @@ impl PolicyLayer {
         out
     }
 
-    unsafe fn forward<T: InferenceType>(
+    unsafe fn forward<'a, T: InferenceType>(
         &self,
         workspace: &mut Workspace,
+        slots: &'a SlotsGuard,
         output_set: &OutputSet,
         output_map: &mut OutputMap<Vec<f32>>,
-        input: &SlotGuard
-    ) -> SlotGuard
+        input: &SlotGuard<'a>
+    ) -> SlotGuard<'a>
     {
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.policy_stream));
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream));
@@ -985,8 +989,8 @@ impl PolicyLayer {
         weights_2.copy_to_device(device_id, workspace.policy_stream);
 
         // perform the forward convolution
-        let workspace_p = workspace.slots.get_slot(Slot::Workspace_p, self.fwd_algo.memory);
-        let policy_1 = workspace.slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 722);
+        let workspace_p = slots.get_slot(Slot::Workspace_p, self.fwd_algo.memory, workspace.policy_stream);
+        let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 722, workspace.policy_stream);
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -1005,8 +1009,8 @@ impl PolicyLayer {
         output_set.contains(Output::PolicyDown).map(|key| { output_map.put(key, load_to_host::<T::Output>(*policy_1, workspace.batch_size * 2 * 361, workspace.policy_stream)) });
 
         // perform the feed-forward linear layers
-        let policy_2 = workspace.slots.get_slot(Slot::Policy_2, size_of::<T::Output>() * workspace.batch_size * 362);
-        let policy_3 = workspace.slots.get_slot(Slot::Policy_3, size_of::<T::Output>() * workspace.batch_size * 362);
+        let policy_2 = slots.get_slot(Slot::Policy_2, size_of::<T::Output>() * workspace.batch_size * 362, workspace.policy_stream);
+        let policy_3 = slots.get_slot(Slot::Policy_3, size_of::<T::Output>() * workspace.batch_size * 362, workspace.policy_stream);
 
         check!(cublas::cublasGemmEx(
             workspace.handle_blas,
@@ -1058,13 +1062,14 @@ pub fn forward<T: InferenceType>(
     debug_assert!(features.len() % FEATURE_SIZE == 0);
     debug_assert!(features.len() / FEATURE_SIZE == workspace.batch_size);
 
+    let slots = workspace.slots.lock();
     let mut map = OutputMap::new();
 
     unsafe {
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
 
         // copy all of the input features into a temporary workspace
-        let input = workspace.slots.get_slot(Slot::Input, size_of::<T>() * features.len());
+        let input = slots.get_slot(Slot::Input, size_of::<T>() * features.len(), workspace.tower_stream);
         let image_size = NUM_CHANNELS * 361;
 
         check!(cuda::cudaMemcpyAsync(
@@ -1076,7 +1081,7 @@ pub fn forward<T: InferenceType>(
         ));
 
         // Upsample 32 -> 128 channels
-        let mut residual_1 = workspace.c_up.clone().forward::<T>(workspace, &input);
+        let mut residual_1 = workspace.c_up.clone().forward::<T>(workspace, &slots, &input);
 
         outputs.contains(Output::Upsample).map(|key| { map.put(key, load_to_host::<T::Tower>(*residual_1, workspace.batch_size * image_size, workspace.tower_stream)) });
 
@@ -1085,7 +1090,7 @@ pub fn forward<T: InferenceType>(
             let residual = workspace.c_residual[i].clone();
             let output = ::std::mem::transmute(Output::Residual_00 as u8 + i as u8);
 
-            residual_1 = residual.forward::<T>(workspace, residual_1);
+            residual_1 = residual.forward::<T>(workspace, &slots, residual_1);
 
             outputs.contains(output).map(|key| { map.put(key, load_to_host::<T::Output>(*residual_1, workspace.batch_size * NUM_CHANNELS * 361, workspace.tower_stream)) });
         }
@@ -1096,8 +1101,8 @@ pub fn forward<T: InferenceType>(
 
         // run the value and policy head, then wait for them to finish (if
         // they are requested)
-        let value = workspace.c_value.clone().forward::<T>(workspace, &outputs, &mut map, &residual_1);
-        let policy = workspace.c_policy.clone().forward::<T>(workspace, &outputs, &mut map, &residual_1);
+        let value = workspace.c_value.clone().forward::<T>(workspace, &slots, &outputs, &mut map, &residual_1);
+        let policy = workspace.c_policy.clone().forward::<T>(workspace, &slots, &outputs, &mut map, &residual_1);
 
         outputs.contains(Output::Value).map(|key| { map.put(key, load_to_host::<T::Output>(*value, workspace.batch_size, workspace.value_stream)) });
         outputs.contains(Output::Policy).map(|key| { map.put(key, load_to_host::<T::Output>(*policy, workspace.batch_size * 362, workspace.policy_stream)) });

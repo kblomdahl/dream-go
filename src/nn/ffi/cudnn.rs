@@ -19,7 +19,8 @@ use nn::ffi::cuda::{self, Stream};
 #[allow(dead_code)]
 pub enum ActivationMode {
     Relu = 1,
-    Tanh = 2
+    Tanh = 2,
+    Identity = 5,
 }
 
 #[repr(i32)]
@@ -38,6 +39,7 @@ pub enum ConvolutionMode {
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[allow(dead_code)]
 pub enum ConvolutionFwdAlgo {
+    ImplicitGemm = 0,
     ImplicitPrecompGemm = 1,
     Winograd = 6,
     WinogradNonFused = 7

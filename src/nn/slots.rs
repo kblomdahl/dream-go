@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use libc::c_void;
+use std::cell::RefCell;
 use std::ptr;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use nn::devices::{MAX_DEVICES, get_current_device};
@@ -63,6 +63,65 @@ impl Slots {
         }
     }
 
+    pub fn lock(&self) -> SlotsGuard {
+        let device_id = get_current_device() as usize;
+
+        SlotsGuard {
+            device_id: device_id,
+
+            pool: self.inner.clone(),
+            inner: RefCell::new(vec! [])
+        }
+    }
+}
+
+pub struct SlotsGuard {
+    device_id: usize,
+
+    pool: Arc<Mutex<SlotsInner>>,
+    inner: RefCell<Vec<SlotInner>>
+}
+
+impl Drop for SlotsGuard {
+    fn drop(&mut self) {
+        let global = &mut self.pool.lock().unwrap()[self.device_id];
+        let mut inner = self.inner.borrow_mut();
+        let used_slots = inner.iter_mut().enumerate();
+
+        for (i, slot) in used_slots.filter(|(_, slot)| slot.size_in_bytes > 0) {
+            while global.len() <= i {
+                global.push(SlotInner {
+                    ptr: vec! [],
+                    size_in_bytes: 0
+                });
+            }
+
+            let global_slot = &mut global[i];
+
+            if global_slot.size_in_bytes < slot.size_in_bytes {
+                // if all of the refs in the global pool are too small, then
+                // throw them all away and replace them with out refs
+                for ptr in global_slot.ptr.splice(.., slot.ptr.drain(..)) {
+                    unsafe { check!(cuda::cudaFree(ptr)) };
+                }
+
+                global_slot.size_in_bytes = slot.size_in_bytes;
+            } else if slot.size_in_bytes < global_slot.size_in_bytes {
+                // the global pool grew in our absence, so throw away our
+                // refs
+                for ptr in slot.ptr.drain(..) {
+                    unsafe { check!(cuda::cudaFree(ptr)) };
+                }
+            } else {
+                debug_assert!(slot.size_in_bytes == global_slot.size_in_bytes);
+
+                global_slot.ptr.extend(slot.ptr.drain(..));
+            }
+        }
+    }
+}
+
+impl SlotsGuard {
     /// Returns a pointer to a named additional variable. If two variables
     /// shares the same name, then their pointers may alias.
     /// 
@@ -70,105 +129,117 @@ impl Slots {
     /// 
     /// * `name` - the name of the variable
     /// * `size_in_bytes` - the minimum required size of the allocated area
-    pub fn get_slot(&self, name: Slot, size_in_bytes: usize) -> SlotGuard {
-        let device_id = get_current_device();
-        let mut inner = self.inner.lock().unwrap();
-        let slot = {
-            let device_id = device_id as usize;
-            let slot_pos = name as usize;
+    /// * `stream` - the stream that will use the memory
+    /// 
+    pub fn get_slot<'a>(&'a self, name: Slot, size_in_bytes: usize, stream: cuda::Stream) -> SlotGuard<'a> {
+        let slot_pos = name as usize;
 
-            while inner[device_id].len() <= slot_pos {
-                inner[device_id].push(SlotInner {
-                    ptr: vec! [],
-                    size_in_bytes: 0
-                });
-            }
+        // check if the slot exists in the local pool
+        let mut inner = self.inner.borrow_mut();
 
-            &mut inner[device_id][slot_pos]
-        };
+        if inner.len() > slot_pos && !inner[slot_pos].ptr.is_empty() {
+            let ref mut slot = inner[slot_pos];
+            let ptr = slot.ptr.pop().unwrap();
 
-        if slot.size_in_bytes < size_in_bytes {
-            // all of the stored pointers are too small, they will need to be
-            // re-allocated. But that will be done on-demand, here we just free
-            // them
-            let num_ptr = slot.ptr.len();
-
-            for p in slot.ptr.drain(0..num_ptr) {
-                unsafe {
-                    check!(cuda::cudaFree(p));
-                }
-            }
-
-            slot.size_in_bytes = size_in_bytes;
+            return SlotGuard {
+                name: name,
+                ptr: ptr,
+                size_in_bytes: slot.size_in_bytes,
+                inner: &self.inner
+            };
         }
 
-        if let Some(ptr) = slot.ptr.pop() {
+        // if there is no local slot, then move (or allocate) one slot from the
+        // global pool to the local pool
+        let mut global = self.pool.lock().unwrap();
+        let slot = {
+            let device_id = self.device_id as usize;
+            let global = &mut global[device_id];
+
+            if global.len() <= slot_pos {
+                None
+            } else {
+                let slot = &mut global[slot_pos];
+
+                if slot.size_in_bytes < size_in_bytes || slot.ptr.is_empty() {
+                    None
+                } else {
+                    Some(slot)
+                }
+            }
+        };
+
+        if let Some(slot) = slot {
+            let ptr = slot.ptr.pop().unwrap();
+
             debug_assert!(slot.size_in_bytes == 0 || !ptr.is_null());
 
             SlotGuard {
                 name: name,
-                device_id: device_id,
-                ptr: Rc::new(ptr),
+                ptr: ptr,
                 size_in_bytes: slot.size_in_bytes,
-                inner: Some(self.inner.clone())
+                inner: &self.inner
             }
         } else {
             let mut ptr: *mut c_void = ptr::null_mut();
 
             unsafe {
-                check!(cuda::cudaMalloc(&mut ptr, slot.size_in_bytes));
-                check!(cuda::cudaMemset(ptr, 0, slot.size_in_bytes));
+                check!(cuda::cudaMalloc(&mut ptr, size_in_bytes));
+                check!(cuda::cudaMemsetAsync(ptr, 0, size_in_bytes, stream));
 
-                debug_assert!(slot.size_in_bytes == 0 || !ptr.is_null(), "Failed to allocate CUDA buffer of size {} (expected size {})", slot.size_in_bytes, size_in_bytes);
+                debug_assert!(size_in_bytes == 0 || !ptr.is_null(), "Failed to allocate CUDA buffer of size {}", size_in_bytes);
             }
 
             SlotGuard {
                 name: name,
-                device_id: device_id,
-                ptr: Rc::new(ptr),
-                size_in_bytes: slot.size_in_bytes,
-                inner: Some(self.inner.clone())
+                ptr: ptr,
+                size_in_bytes: size_in_bytes,
+                inner: &self.inner
             }
         }
     }
 }
 
-#[derive(Clone)]
-pub struct SlotGuard {
+pub struct SlotGuard<'a> {
     name: Slot,
-    device_id: i32,
-    ptr: Rc<*mut c_void>,
+    ptr: *mut c_void,
     size_in_bytes: usize,
 
-    inner: Option<Arc<Mutex<SlotsInner>>>
+    inner: &'a RefCell<Vec<SlotInner>>
 }
 
-impl Drop for SlotGuard {
+impl<'a> Drop for SlotGuard<'a> {
     fn drop(&mut self) {
-        if Rc::strong_count(&self.ptr) == 1 {
-            if let Some(ref inner) = self.inner {
-                let mut inner = inner.lock().unwrap();
-                let slot = &mut inner[self.device_id as usize][self.name as usize];
+        let mut inner = self.inner.borrow_mut();
+        let slot = {
+            let slot_pos = self.name as usize;
 
-                if self.size_in_bytes < slot.size_in_bytes {
-                    // if the slot has grown in our absence then throw our pointer away
-                    unsafe {
-                        cuda::cudaFree(*self.ptr);
-                    }
-                } else if self.size_in_bytes == slot.size_in_bytes {
-                    // return this pointer to the pool
-                    slot.ptr.push(*self.ptr);
-                } else {
-                    unreachable!();
-                }
-            } else {
-                debug_assert!(self.ptr.is_null());
+            while inner.len() <= slot_pos {
+                inner.push(SlotInner {
+                    ptr: vec! [],
+                    size_in_bytes: 0
+                })
             }
+
+            &mut inner[slot_pos]
+        };
+
+        if self.size_in_bytes < slot.size_in_bytes {
+            unreachable!();
+        } else if self.size_in_bytes > slot.size_in_bytes {
+            debug_assert!(slot.ptr.is_empty());
+
+            slot.ptr.push(self.ptr);
+            slot.size_in_bytes = self.size_in_bytes;
+        } else {
+            debug_assert!(self.size_in_bytes == slot.size_in_bytes);
+
+            slot.ptr.push(self.ptr);
         }
     }
 }
 
-impl<'a> ::std::ops::Deref for SlotGuard {
+impl<'a> ::std::ops::Deref for SlotGuard<'a> {
     type Target = *mut c_void;
 
     fn deref(&self) -> &*mut c_void {
