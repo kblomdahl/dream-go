@@ -1,8 +1,8 @@
 .PHONY: build clean docker
 
 VERSION?=0.5.0
-DEVICE?=0
-DB?=upload.dg.io:8080
+DEVICE?=1
+DB?=localhost:3000
 
 all:
 
@@ -11,8 +11,7 @@ clean:
 
 build:
 	mkdir -p .staging/
-	cd ../.. ; cargo build --release
-	cp ../../target/release/dream_go .staging/dream_go
+	rm -rf .staging/code/ && git clone ../.. .staging/code/
 	cp ../../tools/upload2rest.py .staging/upload2rest.py
 	cp ../../tools/sgf2score.py .staging/sgf2score.py
 	cp loop_worker.sh .staging/loop_worker.sh
@@ -32,5 +31,5 @@ docker: build
 	#   where the `dream_go/db` image is available.
 	# 
 	docker run --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=$(DEVICE) \
-		-e DB=$(DB) \
+		-e DB=$(DB) --net=host \
 		-td --rm "dream_go/worker:$(VERSION)"

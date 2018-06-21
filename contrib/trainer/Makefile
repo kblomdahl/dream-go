@@ -13,13 +13,10 @@
 # limitations under the License.
 
 VERSION?=0.5.0
-DEVICE?=0
-DB?=upload.dg.io:8080
+DEVICE?=1
+DB?=localhost:5000
 
-.PHONY: all clean docker-build docker-run docker
-
-all:
-	pip install -r requirements.txt
+.PHONY: clean docker-build docker-run docker
 
 clean:
 	rm -rf .staging/
@@ -34,7 +31,7 @@ docker-run: docker-build
 	docker run --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=$(DEVICE) \
 		-v "$(realpath models):/app/models" \
 		-p 6006:6006 -e DB=$(DB) \
-		--user 1000:1000 \
+		--user 1000:1000 --net=host \
 		-td --rm "dream_go/trainer:$(VERSION)"
 
 docker: docker-run

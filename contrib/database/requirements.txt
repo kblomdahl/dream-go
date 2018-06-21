@@ -1,2 +1,0 @@
-petname
-python-dateutil

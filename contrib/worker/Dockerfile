@@ -1,13 +1,19 @@
-FROM nvidia/cuda:9.1-cudnn7-runtime
-RUN apt-get update -y && apt-get install -y curl python3 gnugo
+FROM nvidia/cuda:9.1-cudnn7-devel
+RUN apt-get update -y && apt-get install -y curl python3 gnugo jq gcc
 
 RUN mkdir -p /app/
-COPY .staging/dream_go /app/dream_go
 COPY .staging/upload2rest.py /app/upload2rest.py
 COPY .staging/sgf2score.py /app/sgf2score.py
 COPY .staging/loop_worker.sh /app/loop_worker.sh
 
-ENV OPTS "--num-samples 1 --batch-size 256 --num-games 256 --num-threads 256"
+COPY .staging/code /app/code
+RUN export LIBRARY_PATH=/usr/local/cuda/lib64/:/usr/local/cuda/lib64/stubs/ && \
+    curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly-2018-05-31 && \
+    cd /app/code/ && \
+    ~/.cargo/bin/cargo build --release && \
+    cp target/release/dream_go /app/dream_go
+
+ENV OPTS "--num-samples 2 --batch-size 256 --num-games 256 --num-threads 256 --num-rollout 6400"
 ENV N "1000"
 
 WORKDIR /app

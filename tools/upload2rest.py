@@ -20,8 +20,10 @@ xxx
 """
 
 import argparse
+import base64
 from datetime import datetime, timezone
 import http.client
+import json
 import re
 import sys
 from urllib.parse import urlencode, urlparse, urlunparse, parse_qs
@@ -80,10 +82,10 @@ rest = http.client.HTTPConnection(url.netloc, timeout=60)
 
 while not sys.stdin.closed:
     if args.sgf:
-        payload = sys.stdin.readline()
+        payload = sys.stdin.readline().strip()
         timestamp = time_from_sgf(payload)
 
-        # convert to raw bytes so that it can be sent over HTTP
+        # convert the payload to bytes
         payload = payload.encode('utf-8')
     elif args.bytes > 0:
         payload = sys.stdin.buffer.read(args.bytes)
@@ -97,7 +99,13 @@ while not sys.stdin.closed:
         break
 
     # upload to the api
-    query['date'] = '%d' % (args.date or timestamp.timestamp(),)
+    body = {}
+
+    for key, value in query.items():
+        body[key] = value[0]
+
+    body['created_at'] = args.date or timestamp.isoformat()
+    body['data'] = base64.b64encode(payload).decode('ascii')
 
     rest.request(
         'POST',
@@ -106,10 +114,11 @@ while not sys.stdin.closed:
             '',  # netloc
             url.path,  # path
             url.params,  # params
-            urlencode(query, doseq=True),  # query
+            '',  # query
             url.fragment  # fragment
         )),
-        payload
+        json.dumps(body),
+        { 'Content-Type': 'application/json' }
     )
 
     # check that we succeeded
