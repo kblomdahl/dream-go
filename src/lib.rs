@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![feature(core_intrinsics, link_llvm_intrinsics)]
-#![feature(stdsimd)]
 #![feature(test)]
 
 #[macro_use] extern crate lazy_static;
