@@ -70,11 +70,14 @@ count = count.tocsc()
 # remove perfect winners and losers as we do not have enough information
 # to determine their rating (would be Inf and -Inf)
 matches = count.nonzero()
+perfect_winners = coo_matrix(count.shape, dtype='?')
+perfect_losers = coo_matrix(count.shape, dtype='?')
 
-perfect_winners = wins[matches] == count[matches]
-perfect_winners = coo_matrix((perfect_winners.getA1(), matches), count.shape, '?')
-perfect_losers = wins[matches] == 0
-perfect_losers = coo_matrix((perfect_losers.getA1(), matches), count.shape, '?')
+for (i, j) in zip(matches[0], matches[1]):
+    if wins[i, j] == count[i, j]:
+        perfect_winners[i, j] = True
+    elif wins[i, j] == 0:
+        perfect_losers[i, j] = True
 
 wins[perfect_winners] = 0
 count[perfect_winners] = 0
@@ -105,8 +108,7 @@ def likelihood(x):
 
 result = minimize(
     likelihood,
-    np.random.uniform(0.0, 1000.0, nr_participants),
-    bounds=[(0, None)] * nr_participants
+    np.random.uniform(0.0, 1000.0, nr_participants)
 )
 
 y = result.x

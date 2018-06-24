@@ -10,9 +10,3 @@ You can monitor the optimization process by running:
 ```bash
 tensorboard --logdir models/
 ```
-
-## Running
-
-```bash
-make docker DEVICE=0 DB=x.y.z.w:8080
-```

@@ -63,7 +63,6 @@ def parse_sgf_content(contents, i):
                 ident = ''
 
                 while i < len(contents) and contents[i].isalpha():
-                    out += contents[i]
                     ident += contents[i]
                     i += 1
 
@@ -76,15 +75,22 @@ def parse_sgf_content(contents, i):
                     return
 
                 i += 1
-                out += '['
 
                 # PropValue  = "[" CValueType "]"
+                value = ''
+
                 while i < len(contents) and contents[i] != ']':
-                    out += contents[i]
+                    value += contents[i]
                     i += 1
 
                 i = skip_ws(contents, i + 1)
-                out += ']'
+
+                # skip comments
+                if ident != 'C':
+                    out += ident
+                    out += '['
+                    out += value
+                    out += ']'
 
         i = skip_ws(contents, i + 1) # skip )
         out += ')'

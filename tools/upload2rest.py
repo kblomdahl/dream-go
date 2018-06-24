@@ -60,7 +60,8 @@ def time_from_sgf(sgf):
         except ValueError:
             pass
 
-        return d.astimezone(timezone.utc) if d else datetime.utcnow()
+        if d:
+            return d.astimezone(timezone.utc) if d.tzinfo else d
 
     return datetime.utcnow()
 
@@ -107,23 +108,35 @@ while not sys.stdin.closed:
     body['created_at'] = args.date or timestamp.isoformat()
     body['data'] = base64.b64encode(payload).decode('ascii')
 
-    rest.request(
-        'POST',
-        urlunparse((
-            '',  # schema
-            '',  # netloc
-            url.path,  # path
-            url.params,  # params
-            '',  # query
-            url.fragment  # fragment
-        )),
-        json.dumps(body),
-        { 'Content-Type': 'application/json' }
-    )
+    #
+    def try_to_request(count):
+        try:
+            rest.request(
+                'POST',
+                urlunparse((
+                    '',  # schema
+                    '',  # netloc
+                    url.path,  # path
+                    url.params,  # params
+                    '',  # query
+                    url.fragment  # fragment
+                )),
+                json.dumps(body),
+                { 'Content-Type': 'application/json' }
+            )
 
-    # check that we succeeded
-    resp = rest.getresponse()
-    resp.read()
+            # check that we succeeded
+            resp = rest.getresponse()
+            resp.read()
+
+            return resp
+        except:
+            if count >= 3:
+                return resp  # give up
+            else:
+                return try_to_request(count + 1)
+
+    resp = try_to_request(0)
 
     if resp.status != 200:
         print(payload)

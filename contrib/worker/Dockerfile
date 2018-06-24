@@ -8,7 +8,7 @@ COPY .staging/loop_worker.sh /app/loop_worker.sh
 
 COPY .staging/code /app/code
 RUN export LIBRARY_PATH=/usr/local/cuda/lib64/:/usr/local/cuda/lib64/stubs/ && \
-    curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly-2018-05-31 && \
+    curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly && \
     cd /app/code/ && \
     ~/.cargo/bin/cargo build --release && \
     cp target/release/dream_go /app/dream_go

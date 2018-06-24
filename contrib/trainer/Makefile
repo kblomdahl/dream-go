@@ -13,25 +13,14 @@
 # limitations under the License.
 
 VERSION?=0.5.0
-DEVICE?=1
-DB?=localhost:5000
 
-.PHONY: clean docker-build docker-run docker
+.PHONY: all clean
 
-clean:
-	rm -rf .staging/
-
-docker-build:
+all:
 	mkdir -p .staging/
 	cp ../../tools/upload2rest.py .staging/upload2rest.py
 
 	docker build -t "dream_go/trainer:$(VERSION)" .
 
-docker-run: docker-build
-	docker run --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=$(DEVICE) \
-		-v "$(realpath models):/app/models" \
-		-p 6006:6006 -e DB=$(DB) \
-		--user 1000:1000 --net=host \
-		-td --rm "dream_go/trainer:$(VERSION)"
-
-docker: docker-run
+clean:
+	rm -rf .staging/

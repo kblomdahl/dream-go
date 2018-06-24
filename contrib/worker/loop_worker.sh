@@ -14,7 +14,7 @@ while true; do
     NAME=`jq -rj ".[0].name" < network_info.json`
 
     # play some games and then upload them to the database
-    echo "[`date +%H:%m:%S`] tick (gen $NAME)"
+    echo "[`date +%H:%M:%S`] tick (gen $NAME)"
 
     ./dream_go $OPTS --policy-play $N | ./sgf2score.py --all | tee self_play.sgf | ./upload2rest.py --sgf "http://$DB/api/v1/games?category=policy_play&network_id=$ID"
     ./dream_go $OPTS --ex-it --extract self_play.sgf | ./upload2rest.py --bytes 1807 "http://$DB/api/v1/features?network_id=$ID"
