@@ -258,19 +258,23 @@ pub fn add(x: &mut [f32], shape: f32) {
     let mut g = vec! [0.0f32; x.len()];
 
     for i in 0..(x.len()) {
-        let g_ = gamma_small(inv_shape, c, d);
+        if x[i].is_finite() {
+            let g_ = gamma_small(inv_shape, c, d);
 
-        g_sum += g_;
-        g[i] = g_;
+            g_sum += g_;
+            g[i] = g_;
+        }
     }
 
     // add the distribution to the given array with a
-    // mixing constant of 0.2
+    // mixing constant of `DIRICHLET_NOISE`.
     let g_recip = g_sum.recip();
     let beta = *config::DIRICHLET_NOISE;
 
     for i in 0..(x.len()) {
-        x[i] = (1.0 - beta) * x[i] + beta * g[i] * g_recip;
+        if x[i].is_finite() {
+            x[i] = (1.0 - beta) * x[i] + beta * g[i] * g_recip;
+        }
     }
 }
 
