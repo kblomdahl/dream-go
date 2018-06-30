@@ -1,8 +1,5 @@
 #!/bin/sh
 
-export DB="localhost:5000"
-export N=2
-
 while true ; do
     echo "[`date +%H:%M:%S`] tick"
 
