@@ -109,7 +109,7 @@ while not sys.stdin.closed:
     body['data'] = base64.b64encode(payload).decode('ascii')
 
     #
-    def try_to_request(count):
+    def try_to_request(count=0):
         try:
             rest.request(
                 'POST',
@@ -132,11 +132,11 @@ while not sys.stdin.closed:
             return resp
         except:
             if count >= 3:
-                return resp  # give up
+                return  # give up
             else:
                 return try_to_request(count + 1)
 
-    resp = try_to_request(0)
+    resp = try_to_request()
 
-    if resp.status != 200:
+    if resp and resp.status != 200:
         print(payload)
