@@ -70,8 +70,8 @@ count = count.tocsc()
 # remove perfect winners and losers as we do not have enough information
 # to determine their rating (would be Inf and -Inf)
 matches = count.nonzero()
-perfect_winners = coo_matrix(count.shape, dtype='?')
-perfect_losers = coo_matrix(count.shape, dtype='?')
+perfect_winners = dok_matrix(count.shape, dtype='?')
+perfect_losers = dok_matrix(count.shape, dtype='?')
 
 for (i, j) in zip(matches[0], matches[1]):
     if wins[i, j] == count[i, j]:
