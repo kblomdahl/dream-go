@@ -113,8 +113,9 @@ For the values provided in this example, which generate 2,000,000 examples for t
   * First version with a network trained from self-play games
 * 0.6.0 - _Emergent_
   * Time and tournament commands for the GTP interface
-  * Improved [neural network architecture](https://github.com/Chicoryn/dream-go/issues/25#issuecomment-377706857)
+  * Improved [neural network architecture and training](https://github.com/Chicoryn/dream-go/issues/25#issuecomment-377706857)
   * Improved performance with [DP4A](https://devblogs.nvidia.com/parallelforall/mixed-precision-programming-cuda-8/)
+  * Multi GPU support
 * 0.5.0 - _Assessment_
   * Optimize the monte carlo tree search parameters against other engines
   * Optimize neural network size for _best_ performance vs speed ratio
