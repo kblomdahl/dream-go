@@ -36,6 +36,7 @@ MAX_STEPS = 524288000  # the default total number of examples to train over
 BATCH_SIZE = 1024  # the default number of examples per batch
 
 DUMP_OPS = 'DumpOps'  # the graph collection that contains all dump operations
+ADVERSARIAL_OPS = 'AdversarialOps'  # the graph collection that contains all training operations for adversarial networks
 
 # -------- Graph Components --------
 
@@ -139,7 +140,6 @@ def batch_norm(x, weights, mode, params):
 
     return _forward(x)
 
-
 def residual_block(x, mode, params):
     """
     A single residual block as described by DeepMind.
@@ -178,7 +178,6 @@ def residual_block(x, mode, params):
         return y
 
     return _forward(x)
-
 
 def value_head(x, mode, params):
     """
@@ -221,7 +220,6 @@ def value_head(x, mode, params):
         return tf.cast(tf.nn.tanh(y), tf.float32)
 
     return _forward(x)
-
 
 def policy_head(x, mode, params):
     """
@@ -300,12 +298,25 @@ def adversarial(value_hat, policy_hat, gradient=True):
 
         return tf.sigmoid(value_hat + offset)
 
+class RunAdversarialOpsHook(tf.train.SessionRunHook):
+    """ Runs the adversarial training op `n` number of times for each global
+    step. """
+
+    def __init__(self):
+        self.train_steps = 3
+
+    def before_run(self, run_context):
+        train_ops = tf.get_collection(ADVERSARIAL_OPS)
+
+        if train_ops:
+            for _ in range(self.train_steps):
+                run_context.session.run(train_ops)
 
 # -------- Calibration / Dump functions --------
 
 class DumpHook(tf.train.SessionRunHook):
-    """ A hook that prints print all tensors registered in the `DUMP_OPS`
-    graph collection to standard output at the end of the session. """
+    """ A hook that prints all tensors registered in the `DUMP_OPS` graph
+    collection to standard output at the end of the session. """
 
     def end(self, session):
         import sys
@@ -464,7 +475,6 @@ def get_dataset(files, batch_size=1, is_training=True):
 
         return dataset
 
-
 def input_fn(files, batch_size, is_training):
     return get_dataset(files, batch_size, is_training).map(
         lambda features, value, policy, is_black: (features, {'value': value, 'policy': policy, 'is_black': is_black})
@@ -476,12 +486,8 @@ def model_fn(features, labels, mode, params):
     value_hat, policy_hat = tower(features, mode, params)
 
     if labels:
-        is_black_nograd = adversarial(value_hat, policy_hat, gradient=False)
-        is_black_hat = adversarial(tf.stop_gradient(value_hat), tf.stop_gradient(policy_hat))
-
         # determine the loss for each of the components:
         #
-        # - L2 regularization
         # - Value head
         # - Policy head
         #
@@ -493,13 +499,22 @@ def model_fn(features, labels, mode, params):
             labels=tf.stop_gradient(labels['policy']),
             logits=policy_hat
         ))
+
+        # determine the adversarial losses that gets applied to the global
+        # step, with no adversarial gradients, and the adversarial steps (with
+        # no global gradients).
+        #
+        # The adversarial loss is a combination of the following losses:
+        #
+        # - Is Black
+        #
         loss_black_nograd = tf.reduce_mean(tf.squared_difference(
             tf.stop_gradient(labels['is_black']),
-            is_black_nograd
+            adversarial(value_hat, policy_hat, gradient=False)
         ))
         loss_black = tf.reduce_mean(tf.squared_difference(
             tf.stop_gradient(labels['is_black']),
-            is_black_hat
+            adversarial(tf.stop_gradient(value_hat), tf.stop_gradient(policy_hat))
         ))
 
         loss = loss_policy + loss_value - loss_black_nograd
@@ -516,13 +531,15 @@ def model_fn(features, labels, mode, params):
             adversarial_optimizer = tf.train.AdamOptimizer()
             adversarial_train_op = adversarial_optimizer.minimize(loss_black)
 
+            tf.add_to_collection(ADVERSARIAL_OPS, adversarial_train_op)
+
             # after the adversarial network has been updated, update the main
             # network
             global_step = tf.train.get_global_step()
             optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
 
-            with tf.control_dependencies(update_ops + [adversarial_train_op]):
+            with tf.control_dependencies(update_ops):
                 gradients, variables = zip(*optimizer.compute_gradients(
                     loss,
                     aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
@@ -698,7 +715,7 @@ nn = tf.estimator.Estimator(
 if args.start or args.resume:
     nn.train(
         input_fn=lambda: input_fn(args.files, params['batch_size'], True),
-        hooks=hooks + [LearningRateScheduler()],
+        hooks=hooks + [LearningRateScheduler(), RunAdversarialOpsHook()],
         steps=params['steps'] // params['batch_size']
     )
 elif args.verify:
