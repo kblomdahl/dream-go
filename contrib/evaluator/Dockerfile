@@ -20,7 +20,7 @@ RUN pip3 install -r /app/requirements.txt
 RUN pip install gomill
 
 ENV TZ "UTC"
-ENV N "5"
+ENV N "4"
 
 WORKDIR /app
 ENTRYPOINT ["/app/loop_eval.sh"]

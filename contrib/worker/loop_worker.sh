@@ -7,7 +7,7 @@ while true; do
     # - id
     # - name (for pretty-print)
     # - data
-    curl -s "http://$DB/api/v1/networks?limit=1&full=true" > network_info.json
+    curl -gs "http://$DB/api/v1/networks?sort[elo]=desc&limit=1&full=true" > network_info.json
     jq -rj ".[0].data" < network_info.json > dream_go.json
 
     ID=`jq -rj ".[0].id" < network_info.json`
