@@ -334,7 +334,7 @@ impl Gtp {
 
             eprintln!("{}", mcts::tree::to_pretty(&tree));
 
-            let last_log = if !*config::NO_SABAKI {
+            let last_log = if *config::WITH_SABAKI {
                 Some(format!("{}", mcts::tree::to_sgf::<Sabaki, _>(&tree, &board, false)))
             } else {
                 None
@@ -553,7 +553,7 @@ impl Gtp {
                 let known_commands = KNOWN_COMMANDS.iter()
                     .cloned()
                     .filter(|&c| {
-                        !c.starts_with("sabaki-") || !*config::NO_SABAKI
+                        !c.starts_with("sabaki-") || *config::WITH_SABAKI
                     }).collect::<Vec<&str>>();
 
                 success!(id, known_commands.join("\n"));
@@ -614,7 +614,7 @@ impl Gtp {
                     let black = black as f32;
                     let white = white as f32 + self.komi;
 
-                    if !*config::NO_SABAKI {
+                    if *config::WITH_SABAKI {
                         self.last_log = format!("({})", rollout);
                     }
 

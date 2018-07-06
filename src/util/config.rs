@@ -64,7 +64,7 @@ lazy_static! {
     };
 
     /// Whether to include Sabaki extentions amongst the GTP commands.
-    pub static ref NO_SABAKI: bool = has_opt("--no-sabaki");
+    pub static ref WITH_SABAKI: bool = has_opt("--with-sabaki");
 
     /// Whether to think in the background during idle time.
     pub static ref NO_PONDER: bool = has_opt("--no-ponder");

@@ -52,7 +52,7 @@ fn main() {
             println!("  --num-samples <n>     The number of games to extract from each game record");
             println!("  --batch-size <n>      The number parallel rollouts to perform on the GPU");
             println!("  --no-ponder           Do not think in the background during idle time");
-            println!("  --no-sabaki           Do not include Sabaki extensions amongst the GTP commands");
+            println!("  --with-sabaki         Include Sabaki extensions amongst the GTP commands");
         },
 
         Procedure::Extract(ex_it) => {
