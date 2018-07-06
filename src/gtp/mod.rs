@@ -19,16 +19,16 @@ use std::time::Instant;
 
 use go::sgf::*;
 use go::{Board, Color, Score, StoneStatus};
-use mcts::predict::{self, PredictService};
 use mcts::time_control;
 use mcts;
-use nn::Network;
 use util::config;
 
+mod ponder_service;
 mod time_settings;
 mod vertex;
 
 use gtp::vertex::*;
+use gtp::ponder_service::PonderService;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
@@ -109,8 +109,7 @@ lazy_static! {
 }
 
 struct Gtp {
-    service: Option<PredictService>,
-    search_tree: Option<mcts::tree::Node<mcts::tree::DefaultValue>>,
+    ponder: PonderService,
     last_log: String,
     history: Vec<Board>,
     komi: f32,
@@ -276,21 +275,6 @@ impl Gtp {
         }
     }
 
-    /// Create the `PredictService` if it does not exist, and then returns the
-    /// current service.
-    fn open_service(&mut self) -> &Option<PredictService> {
-        if self.service.is_none() {
-            match Network::new() {
-                None => {},
-                Some(network) => {
-                    self.service = Some(predict::service(network));
-                }
-            }
-        }
-
-        &self.service
-    }
-
     /// Generate a move using the monte carlo tree search engine for the given
     /// color, using the stored search tree if available.
     /// 
@@ -304,17 +288,17 @@ impl Gtp {
     /// * `is_cleanup` - determine whether this is a clean-up move
     /// 
     fn generate_move(&mut self, id: Option<usize>, color: Color, is_cleanup: bool) -> Option<Vertex> {
-        self.open_service();
-
-        if let Some(ref service) = self.service {
-            let board = self.history.last().unwrap();
-            let mut search_tree = self.search_tree.take().and_then(|tree| {
-                if tree.color != color {
-                    mcts::tree::Node::forward(tree, 361)  // pass
-                } else {
-                    Some(tree)
-                }
-            });
+        let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[color as usize].remaining();
+        let board = self.history.last().unwrap();
+        let result = self.ponder.service(|service, search_tree, _p_state| {
+            let mut search_tree = if search_tree.color != color {
+                // passing moves are not recorded in the GTP protocol, so we
+                // will just assume the other player passed once if we are in
+                // this situation
+                mcts::tree::Node::forward(search_tree, 361)
+            } else {
+                Some(search_tree)
+            };
 
             // disqualify the `pass` move if we are doing clean-up and the board
             // is not scoreable.
@@ -324,7 +308,6 @@ impl Gtp {
                 }
             }
 
-            let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[color as usize].remaining();
             let (value, index, tree) = if main_time.is_finite() && byo_yomi_time.is_finite() {
                 let total_visits = search_tree.as_ref()
                     .map(|tree| tree.total_count)
@@ -351,28 +334,42 @@ impl Gtp {
 
             eprintln!("{}", mcts::tree::to_pretty(&tree));
 
-            if !*config::NO_SABAKI {
-                self.last_log = format!("{}", mcts::tree::to_sgf::<Sabaki, _>(&tree, &board, false));
+            let last_log = if !*config::NO_SABAKI {
+                Some(format!("{}", mcts::tree::to_sgf::<Sabaki, _>(&tree, &board, false)))
+            } else {
+                None
+            };
+
+            let (vertex, tree, other) = if index >= 361 {  // passing move
+                (None, mcts::tree::Node::forward(tree, 361), board.clone())
+            } else {
+                let (x, y) = (mcts::tree::X[index] as usize, mcts::tree::Y[index] as usize);
+                let mut other = board.clone();
+
+                other.place(color, x, y);
+                (Some(Vertex { x: x, y: y }), mcts::tree::Node::forward(tree, index), other)
+            };
+
+            ((value, vertex, last_log), tree, (other, color.opposite()))
+        });
+
+        if let Ok((value, vertex, last_log)) = result {
+            if let Some(last_log) = last_log {
+                self.last_log = last_log;
             }
-            self.search_tree = Some(tree);
 
             if value < 0.1 {  // 10% chance of winning
                 success!(id, "resign");
                 None
-            } else if index >= 361 {  // passing move
-                success!(id, "pass");
-                None
-            } else {
-                let vertex = Vertex {
-                    x: mcts::tree::X[index] as usize,
-                    y: mcts::tree::Y[index] as usize
-                };
-
+            } else if let Some(vertex) = vertex {  // passing move
                 success!(id, &format!("{}", vertex));
                 Some(vertex)
+            } else {
+                success!(id, "pass");
+                None
             }
         } else {
-            error!(id, "unable to load network weights");
+            error!(id, result.err().unwrap());
 
             None
         }
@@ -442,10 +439,8 @@ impl Gtp {
     /// * `prior` - whether to show the _prior_ as the heatmap
     /// 
     fn heatmap(&mut self, id: Option<usize>, color: Color, prior: bool) {
-        self.open_service();
-
-        if let Some(ref service) = self.service {
-            let board = self.history.last().unwrap();
+        let board = self.history.last().unwrap();
+        let result = self.ponder.service(|service, search_tree, p_state| {
             let (_value, _index, tree) = mcts::predict::<mcts::tree::DefaultValue, _>(
                 &service.lock(),
                 None,
@@ -479,9 +474,13 @@ impl Gtp {
                 Gtp::to_heatmap(&tree.softmax())
             };
 
+            (json, Some(search_tree), p_state)
+        });
+
+        if let Ok(json) = result {
             success!(id, &format!("#sabaki{}", json));
         } else {
-            error!(id, "unable to load network weights");
+            error!(id, result.err().unwrap());
         }
     }
 
@@ -510,7 +509,7 @@ impl Gtp {
             },
             Command::ClearBoard => {
                 self.history = vec! [Board::new()];
-                self.search_tree = None;
+                self.ponder = PonderService::new();
                 success!(id, "");
             },
             Command::Komi(komi) => {
@@ -528,33 +527,14 @@ impl Gtp {
                     let board = self.history.last().unwrap();
 
                     if vertex.is_pass() {
-                        self.search_tree = self.search_tree.take().and_then(|tree| {
-                            if tree.color == color {
-                                mcts::tree::Node::forward(tree, 361)
-                            } else if let Some(tree) = mcts::tree::Node::forward(tree, 361) {
-                                mcts::tree::Node::forward(tree, 361)
-                            } else {
-                                None
-                            }
-                        });
+                        self.ponder.forward(color, None);
 
                         Some(board.clone())
                     } else if board.is_valid(color, vertex.x, vertex.y) {
                         let mut other = board.clone();
-                        other.place(color, vertex.x, vertex.y);
-                        self.search_tree = self.search_tree.take().and_then(|tree| {
-                            let index = 19 * vertex.y + vertex.x;
 
-                            if tree.color == color {
-                                mcts::tree::Node::forward(tree, index)
-                            } else if let Some(tree) = mcts::tree::Node::forward(tree, 361) {
-                                // if it is not that players turn, then there is an implied
-                                // passing move from the opponent
-                                mcts::tree::Node::forward(tree, index)
-                            } else {
-                                None
-                            }
-                        });
+                        other.place(color, vertex.x, vertex.y);
+                        self.ponder.forward(color, Some((vertex.x, vertex.y)));
 
                         Some(other)
                     } else {
@@ -601,13 +581,6 @@ impl Gtp {
                     board.place(color, vertex.x, vertex.y);
 
                     self.history.push(board);
-                    self.search_tree = self.search_tree.take().and_then(|tree| {
-                        mcts::tree::Node::forward(tree, 19 * vertex.y + vertex.x)
-                    });
-                } else {
-                    self.search_tree = self.search_tree.take().and_then(|tree| {
-                        mcts::tree::Node::forward(tree, 361)
-                    });
                 }
 
                 // update the remaining main time, saturating at zero instead of
@@ -622,10 +595,8 @@ impl Gtp {
                 self.generate_move_log(id);
             },
             Command::FinalScore => {
-                self.open_service();
-
-                if let Some(ref service) = self.service {
-                    let board = self.history.last().unwrap();
+                let board = self.history.last().unwrap();
+                let result = self.ponder.service(|service, search_tree, p_state| {
                     let next_color = match board.last_played() {
                         Some(color) => color.opposite(),
                         _ => Color::Black,
@@ -633,6 +604,10 @@ impl Gtp {
                     let (finished, rollout) = mcts::greedy_score(&service.lock(), &board, next_color);
                     let (black, white) = board.get_guess_score(&finished);
 
+                    ((black, white, rollout), Some(search_tree), p_state)
+                });
+
+                if let Ok((black, white, rollout)) = result {
                     eprintln!("Black: {}", black);
                     eprintln!("White: {} + {}", white, self.komi);
 
@@ -651,19 +626,22 @@ impl Gtp {
                         success!(id, &format!("W+{:.1}", white - black));
                     }
                 } else {
-                    error!(id, "");
+                    error!(id, result.err().unwrap());
                 }
             },
             Command::FinalStatusList(status) => {
-                self.open_service();
-
-                if let Some(ref service) = self.service {
-                    let board = self.history.last().unwrap();
+                let board = self.history.last().unwrap();
+                let result = self.ponder.service(|service, search_tree, p_state| {
                     let next_color = match board.last_played() {
                         Some(color) => color.opposite(),
                         _ => Color::Black,
                     };
                     let (finished, _rollout) = mcts::greedy_score(&service.lock(), &board, next_color);
+
+                    (finished, Some(search_tree), p_state)
+                });
+
+                if let Ok(finished) = result {
                     let status_list = board.get_stone_status(&finished);
                     let vertices = status_list.into_iter()
                         .filter_map(|(index, stone_status)| {
@@ -682,27 +660,32 @@ impl Gtp {
 
                     success!(id, vertices.join(" "));
                 } else {
-                    error!(id, "could not load network weights");
+                    error!(id, result.err().unwrap());
                 }
             },
             Command::RegGenMove(color) => {
-                self.search_tree = None;
+                self.ponder = PonderService::new();
                 self.generate_move(id, color, false);
             },
             Command::Undo => {
                 if self.history.len() > 1 {
                     self.history.pop();
-                    self.search_tree = None;
+
+                    // update the ponder state with the new board position
+                    let board = self.history.last().unwrap().clone();
+                    let next_color = match board.last_played() {
+                        Some(color) => color.opposite(),
+                        None => Color::Black
+                    };
+
+                    self.ponder = PonderService::with_board(board, next_color);
+
                     success!(id, "");
                 } else {
                     error!(id, "cannot undo");
                 }
             },
             Command::TimeSettingsNone => {
-                // ensure the neural network weights are loaded since we do not
-                // want that to be part of the allocated time
-                self.open_service();
-
                 for &c in &[Color::Black, Color::White] {
                     self.time_settings[c as usize] = Box::new(time_settings::None::new());
                 }
@@ -710,10 +693,6 @@ impl Gtp {
                 success!(id, "");
             },
             Command::TimeSettingsAbsolute(main_time) => {
-                // ensure the neural network weights are loaded since we do not
-                // want that to be part of the allocated time
-                self.open_service();
-
                 for &c in &[Color::Black, Color::White] {
                     self.time_settings[c as usize] = Box::new(time_settings::Absolute::new(main_time));
                 }
@@ -721,10 +700,6 @@ impl Gtp {
                 success!(id, "");
             },
             Command::TimeSettingsByoYomi(main_time, byo_yomi_time, byo_yomi_stones) => {
-                // ensure the neural network weights are loaded since we do not
-                // want that to be part of the allocated time
-                self.open_service();
-
                 for &c in &[Color::Black, Color::White] {
                     self.time_settings[c as usize] = Box::new(time_settings::ByoYomi::new(
                         main_time,
@@ -736,10 +711,6 @@ impl Gtp {
                 success!(id, "");
             },
             Command::TimeSettingsCanadian(main_time, byo_yomi_time, byo_yomi_stones) => {
-                // ensure the neural network weights are loaded since we do not
-                // want that to be part of the allocated time
-                self.open_service();
-
                 for &c in &[Color::Black, Color::White] {
                     self.time_settings[c as usize] = Box::new(time_settings::Canadian::new(
                         main_time,
@@ -753,9 +724,6 @@ impl Gtp {
             Command::TimeLeft(color, main_time, byo_yomi_stones) => {
                 let c = color as usize;
 
-                // ensure the neural network weights are loaded since we do not
-                // want that to be part of the allocated time
-                self.open_service();
                 self.time_settings[c].time_left(main_time, byo_yomi_stones);
             }
         }
@@ -769,8 +737,7 @@ pub fn run() {
     let stdin = ::std::io::stdin();
     let stdin_lock = stdin.lock();
     let mut gtp = Gtp {
-        service: None,
-        search_tree: None,
+        ponder: PonderService::new(),
         last_log: "{}".to_string(),
         history: vec! [Board::new()],
         komi: 7.5,

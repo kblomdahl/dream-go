@@ -66,6 +66,9 @@ lazy_static! {
     /// Whether to include Sabaki extentions amongst the GTP commands.
     pub static ref NO_SABAKI: bool = has_opt("--no-sabaki");
 
+    /// Whether to think in the background during idle time.
+    pub static ref NO_PONDER: bool = has_opt("--no-ponder");
+
     /// The target number of rollouts for each search tree.
     pub static ref NUM_ROLLOUT: usize = get_opt("--num-rollout").unwrap_or(1600);
 

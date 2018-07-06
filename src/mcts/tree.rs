@@ -655,7 +655,7 @@ impl<'a, S: SgfCoordinate, E: Value + 'a> fmt::Display for ToSgf<'a, S, E> {
                 for x in 0..19 {
                     match self.starting_point.at(x, y) {
                         None => Ok(()),
-                        Some(Color::Black) => write!(fmt, "AB[{}", S::to_sgf(x, y)),
+                        Some(Color::Black) => write!(fmt, "AB[{}]", S::to_sgf(x, y)),
                         Some(Color::White) => write!(fmt, "AW[{}]", S::to_sgf(x, y))
                     }?
                 }

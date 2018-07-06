@@ -29,7 +29,7 @@ pub enum TimeStrategyResult {
 
 pub trait TimeStrategy {
     /// Checking if this time period has expired, and if so calls `predicate` to
-    /// determine whether we should attemp to extend it further.
+    /// determine whether we should attempt to extend it further.
     /// 
     /// # Arguments
     /// 
