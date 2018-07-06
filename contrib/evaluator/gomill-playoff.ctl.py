@@ -22,7 +22,7 @@ for bin in glob('./dist/*'):
 
     if re.match(r'[a-z_]+$', name):
         players[name] = Player(
-            [bin, '--num-rollout', '3200'],
+            [bin, '--no-ponder', '--num-rollout', '3200'],
             startup_gtp_commands=[
                 #"kgs-time_settings byoyomi 0 5 1"  # 5 seconds byo-yomi
             ],
