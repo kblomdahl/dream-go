@@ -37,6 +37,7 @@ BATCH_SIZE = 1024  # the default number of examples per batch
 
 DUMP_OPS = 'DumpOps'  # the graph collection that contains all dump operations
 ADVERSARIAL_OPS = 'AdversarialOps'  # the graph collection that contains all training operations for adversarial networks
+ADVERSARIAL_VARS = 'AdversarialVars'  # the graph collection that contains all variables for adversarial networks
 
 # -------- Graph Components --------
 
@@ -264,7 +265,7 @@ def tower(x, mode, params):
     num_channels = params['num_channels']
     num_inputs = NUM_FEATURES
 
-    with tf.variable_scope('01_upsample'):
+    with tf.variable_scope('01_upsample', reuse=tf.AUTO_REUSE):
         conv_1 = tf.get_variable('conv_1', (3, 3, num_inputs, num_channels), tf.float32, init_op, constraint=normalize_constraint)
 
         y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -272,20 +273,20 @@ def tower(x, mode, params):
         y = tf.nn.relu6(y)
 
     for i in range(num_blocks):
-        with tf.variable_scope('{:02d}_residual'.format(2 + i)):
+        with tf.variable_scope('{:02d}_residual'.format(2 + i), reuse=tf.AUTO_REUSE):
             y = residual_block(y, mode, params)
 
     # policy head
-    with tf.variable_scope('{:02d}p_policy'.format(2 + num_blocks)):
+    with tf.variable_scope('{:02d}p_policy'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
         p = policy_head(y, mode, params)
 
     # value head
-    with tf.variable_scope('{:02d}v_value'.format(2 + num_blocks)):
+    with tf.variable_scope('{:02d}v_value'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
         v = value_head(y, mode, params)
 
     return v, p
 
-def adversarial(value_hat, policy_hat, gradient=True):
+def adversarial(value_hat, policy_hat):
     """ Returns the probability that the current player is black. """
 
     zeros_op = tf.zeros_initializer()
@@ -293,10 +294,9 @@ def adversarial(value_hat, policy_hat, gradient=True):
     with tf.variable_scope('xx_adversarial', reuse=tf.AUTO_REUSE):
         offset = tf.get_variable('offset', (1,), tf.float32, zeros_op)
 
-        if not gradient:
-            offset = tf.stop_gradient(offset)
+        tf.add_to_collection(ADVERSARIAL_VARS, offset)
 
-        return tf.sigmoid(value_hat + offset)
+    return tf.sigmoid(value_hat + offset)
 
 class RunAdversarialOpsHook(tf.train.SessionRunHook):
     """ Runs the adversarial training op `n` number of times for each global
@@ -508,16 +508,12 @@ def model_fn(features, labels, mode, params):
         #
         # - Is Black
         #
-        loss_black_nograd = tf.reduce_mean(tf.squared_difference(
-            tf.stop_gradient(labels['is_black']),
-            adversarial(value_hat, policy_hat, gradient=False)
-        ))
         loss_black = tf.reduce_mean(tf.squared_difference(
             tf.stop_gradient(labels['is_black']),
-            adversarial(tf.stop_gradient(value_hat), tf.stop_gradient(policy_hat))
+            adversarial(value_hat, policy_hat)
         ))
 
-        loss = loss_policy + loss_value - loss_black_nograd
+        loss = loss_policy + loss_value - loss_black
         tf.add_to_collection(LOSS, loss)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
@@ -529,7 +525,11 @@ def model_fn(features, labels, mode, params):
 
             # update the adversarial network first
             adversarial_optimizer = tf.train.AdamOptimizer()
-            adversarial_train_op = adversarial_optimizer.minimize(loss_black)
+            adversarial_vars = tf.get_collection(ADVERSARIAL_VARS)
+            adversarial_train_op = adversarial_optimizer.minimize(
+                loss_black,
+                var_list=adversarial_vars
+            )
 
             tf.add_to_collection(ADVERSARIAL_OPS, adversarial_train_op)
 
@@ -542,6 +542,7 @@ def model_fn(features, labels, mode, params):
             with tf.control_dependencies(update_ops):
                 gradients, variables = zip(*optimizer.compute_gradients(
                     loss,
+                    var_list=list(set(tf.trainable_variables()) - set(adversarial_vars)),
                     aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
                     colocate_gradients_with_ops=True
                 ))
@@ -564,7 +565,7 @@ def model_fn(features, labels, mode, params):
 
         tf.summary.scalar('loss/policy', loss_policy)
         tf.summary.scalar('loss/value', loss_value)
-        tf.summary.scalar('loss/is_black', loss_black_nograd)
+        tf.summary.scalar('loss/is_black', loss_black)
 
         # evalutation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look
@@ -587,7 +588,7 @@ def model_fn(features, labels, mode, params):
             'accuracy/value': tf.metrics.mean(value_1),
             'loss/policy': tf.metrics.mean(loss_policy),
             'loss/value': tf.metrics.mean(loss_value),
-            'loss/is_black': tf.metrics.mean(loss_black_nograd)
+            'loss/is_black': tf.metrics.mean(loss_black)
         }
     else:
         loss = None
