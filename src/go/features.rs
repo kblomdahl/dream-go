@@ -215,8 +215,10 @@ impl Features for Board {
         }
 
         // global properties
-        let is_black = if color == Color::Black { c_1 } else { c_0 };
-        let is_white = if color == Color::White { c_1 } else { c_0 };
+        let c_komi: i8 = (63.5 + (63.5 * self.komi) / 7.5).round() as i8;
+
+        let is_black = if color == Color::Black { c_komi } else { c_0 };
+        let is_white = if color == Color::White { c_komi } else { c_0 };
 
         for index in 0..361 {
             let other = symmetry_table[index] as usize;

@@ -1,3 +1,4 @@
+blosc
 numpy
 scipy
 tensorflow-gpu

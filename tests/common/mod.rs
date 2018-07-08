@@ -14,7 +14,7 @@
 //
 
 use dream_go::go::symmetry::Transform;
-use dream_go::go::{Board, Color, Features, Score, CHW};
+use dream_go::go::{DEFAULT_KOMI, Board, Color, Features, Score, CHW};
 use dream_go::mcts;
 use dream_go::nn;
 
@@ -46,7 +46,7 @@ pub fn playout_game(src: &str, max_moves: Option<usize>) -> Board {
         static ref MOVE: Regex = Regex::new(r";([BW])\[([a-z]*)\]").unwrap();
     }
 
-    let mut board = Board::new();
+    let mut board = Board::new(DEFAULT_KOMI);
     let mut count = 1;
 
     for cap in MOVE.captures_iter(src) {

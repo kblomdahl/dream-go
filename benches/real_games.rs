@@ -19,7 +19,7 @@ extern crate test;
 
 use test::Bencher;
 
-use dream_go::go::{Board, Color, CHW};
+use dream_go::go::{DEFAULT_KOMI, Board, Color, CHW};
 use dream_go::go::symmetry::Transform;
 
 /// Benchmark the full playout of a game as a serie of `is_valid` and `place` calls.
@@ -87,7 +87,7 @@ fn playout(b: &mut Bencher) {
     ];
 
     b.iter(|| {
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
 
         for &(color, x, y) in rina_fujisawa_jeong_chio.iter() {
             debug_assert!(board.is_valid(color, x, y));
@@ -127,7 +127,7 @@ fn get_features_16(b: &mut Bencher) {
         (Color::Black,  5,  2), (Color::White, 10,  8)
     ];
 
-    let mut board = Board::new();
+    let mut board = Board::new(DEFAULT_KOMI);
 
     for &(color, x, y) in lee_sedol_alphago_4_78.iter() {
         assert!(board.is_valid(color, x, y));
@@ -184,7 +184,7 @@ fn get_features_32(b: &mut Bencher) {
         (Color::Black,  8,  9), (Color::White,  4,  1), (Color::Black,  5,  2)
     ];
 
-    let mut board = Board::new();
+    let mut board = Board::new(DEFAULT_KOMI);
 
     for &(color, x, y) in rina_fujisawa_zhiying_yu.iter() {
         assert!(board.is_valid(color, x, y));

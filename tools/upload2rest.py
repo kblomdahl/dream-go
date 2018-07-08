@@ -24,7 +24,9 @@ import base64
 from datetime import datetime, timezone
 import http.client
 import json
+import gzip
 import re
+import struct
 import sys
 from urllib.parse import urlencode, urlparse, urlunparse, parse_qs
 
@@ -65,14 +67,43 @@ def time_from_sgf(sgf):
 
     return datetime.utcnow()
 
+def read_tfrecord(input):
+    """ Read a binary TFRecord from the given input stream, and return the raw
+    bytes. """
+
+    # Each TFRecord has the following format, we will only read the first 8
+    # bytes in order to fetch the `length`, and then assume the rest of the
+    # record looks correct.
+    #
+    # ```
+    # uint64 length
+    # uint32 masked_crc32_of_length
+    # byte   data[length]
+    # uint32 masked_crc32_of_data
+    # ```
+    #
+    length_bytes = b''
+
+    while len(length_bytes) < 8:
+        length_bytes += input.read(8 - len(length_bytes))
+
+    length = struct.unpack('<Q', length_bytes)[0] + 8
+    remaining = b''
+
+    while len(remaining) < length:
+        remaining += input.read(length - len(remaining))
+
+    return length_bytes + remaining
+
 parser = argparse.ArgumentParser(description='Upload data from standard input')
 parser.add_argument('--sgf', action='store_true')
+parser.add_argument('--tfrecord', action='store_true')
 parser.add_argument('--bytes', type=int, nargs='?')
 parser.add_argument('--date', type=int, nargs='?', help='Override the default date')
 parser.add_argument('host', nargs=1)
 
 args = parser.parse_args(sys.argv[1:])
-if not args.sgf and not args.bytes:
+if not args.sgf and not args.bytes and not args.tfrecord:
     parser.print_help()
     quit()
 
@@ -88,6 +119,9 @@ while not sys.stdin.closed:
 
         # convert the payload to bytes
         payload = payload.encode('utf-8')
+    elif args.tfrecord:
+        payload = read_tfrecord(sys.stdin.buffer)
+        timestamp = datetime.utcnow()
     elif args.bytes > 0:
         payload = sys.stdin.buffer.read(args.bytes)
         timestamp = datetime.utcnow()
@@ -122,7 +156,8 @@ while not sys.stdin.closed:
                     url.fragment  # fragment
                 )),
                 json.dumps(body),
-                { 'Content-Type': 'application/json' }
+                { 'Content-Type': 'application/json'},
+                encode_chunked=True
             )
 
             # check that we succeeded
@@ -130,13 +165,15 @@ while not sys.stdin.closed:
             resp.read()
 
             return resp
-        except:
-            if count >= 3:
-                return  # give up
-            else:
+        except Exception as e:
+            if count < 3:
                 return try_to_request(count + 1)
+            else:
+                print(e)
+
+                return None
 
     resp = try_to_request()
 
-    if resp and resp.status != 200:
+    if not resp or resp.status != 200:
         print(payload)

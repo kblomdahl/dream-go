@@ -19,7 +19,7 @@ while true ; do
 
         # put an instance of the $N latest networks into `dist/`
         rm -rf dist/ && mkdir -p dist/
-        curl -gs "http://$DB/api/v1/networks?limit=$N&full=true" \
+        curl --compressed -gs "http://$DB/api/v1/networks?limit=$N&full=true" \
             > /tmp/network_list.json
 
         for i in $(seq 0 $N); do
@@ -32,7 +32,7 @@ while true ; do
         done
 
         # put an instance of the strongest network into `dist/`
-        curl -gs "http://$DB/api/v1/networks?sort[elo]=desc&limit=1&full=true" \
+        curl --compressed -gs "http://$DB/api/v1/networks?sort[elo]=desc&limit=1&full=true" \
             > /tmp/best_network.json
         NAME=`jq -r ".[].name" < /tmp/best_network.json`
 
@@ -48,10 +48,10 @@ while true ; do
 
         # fetch **all** previous qualifying games and compute the ELO of each
         # network based on them.
-        curl -gs "http://$DB/api/v1/evaluation_games?limit=500000" \
+        curl --compressed -gs "http://$DB/api/v1/evaluation_games?limit=500000" \
             | jq -r '.[].data' \
             | ./sgf2elo.py > /tmp/network_elo.txt
-        curl -gs "http://$DB/api/v1/networks?limit=500000" \
+        curl --compressed -gs "http://$DB/api/v1/networks?limit=500000" \
             > /tmp/network_list.json
 
         # update the ELO of each network

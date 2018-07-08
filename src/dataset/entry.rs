@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use go::{Board, Color, Features, symmetry, CHW};
+use dataset::tfrecord;
+use go::{self, Board, Color, Features, symmetry, CHW};
 use mcts::predict::PredictGuard;
 use mcts::time_control;
 use mcts;
@@ -22,6 +23,7 @@ use util::types::*;
 
 use std::io;
 
+use blosc;
 use rand::{self, Rng};
 use regex::Regex;
 
@@ -68,7 +70,7 @@ impl<'a> Iterator for EntryIterator<'a> {
 
     fn next(&mut self) -> Option<Entry> {
         self.entries.pop()
-            .map(|(ref board, current_color, ref policy)| {
+            .and_then(|(ref board, current_color, ref policy)| {
                 let features = board.get_features::<CHW>(current_color, symmetry::Transform::Identity);
                 let policy: Vec<f32> = if self.server.is_some() && policy.is_partial() {
                     // if this is a partial policy then perform a search at this
@@ -92,9 +94,9 @@ impl<'a> Iterator for EntryIterator<'a> {
                 };
 
                 Entry::new(
-                    &features,
+                    features,
                     if current_color == self.winner { 1.0 } else { -1.0 },
-                    &policy
+                    policy
                 )
             })
     }
@@ -108,14 +110,7 @@ impl<'a> ExactSizeIterator for EntryIterator<'a> {
 
 #[derive(Clone)]
 pub struct Entry {
-    /// The current board state, where the last bit represents whether the
-    /// current player won the game.
-    pub features_and_winner: Vec<u8>,
-
-    /// The probabilities that each move should be played for the given
-    /// features, encoded in HW format with one additional element at the
-    /// end for the `pass` move.
-    pub policy: Vec<u8>
+    example: Vec<u8>
 }
 
 impl Entry {
@@ -140,8 +135,18 @@ impl Entry {
             static ref WINNER: Regex = Regex::new(r"RE\[([^\]]*)\]").unwrap();
             static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
             static ref MOVE: Regex = Regex::new(r";([BW])\[([a-z]*)\](?:P\[([^\]]*)\])?").unwrap();
+            static ref KOMI: Regex = Regex::new(r"KM\[([^\]]*)\]").unwrap();
         }
-
+        let komi = {
+            if let Some(caps) = KOMI.captures(src) {
+                match caps[1].parse::<f32>() {
+                    Err(_) => { return None; },
+                    Ok(komi) => komi
+                }
+            } else {
+                go::DEFAULT_KOMI
+            }
+        };
         let winner = {
             if let Some(caps) = WINNER.captures(src) {
                 match caps[1].chars().nth(0) {
@@ -155,7 +160,7 @@ impl Entry {
         };
 
         let mut entries: Vec<(Board, Color, PolicyEntry)> = vec! [];
-        let mut board = Board::new();
+        let mut board = Board::new(komi);
         let mut pass_count = 0;
         let size = board.size();
 
@@ -220,8 +225,7 @@ impl Entry {
         })
     }
 
-    /// Returns an entry with the given values stored as compressed FP16
-    /// buffers.
+    /// Returns an entry with the given values stored as compressed protobufs.
     ///
     /// # Arguments
     ///
@@ -229,14 +233,15 @@ impl Entry {
     /// * `winner` - the winner
     /// * `policy` - the policy vector
     ///
-    fn new(features: &[i8], winner: f32, policy: &[f32]) -> Entry {
-        let mut features = features.to_vec();
-        features.push(if winner > 0.0 { 127 } else { 0 });
+    fn new(features: Vec<i8>, winner: f32, policy: Vec<f32>) -> Option<Entry> {
+        let ctx = blosc::Context::new();
+        let example = tfrecord::encode(
+            ctx.compress(&i8_to_u8(&features)).into(),
+            f32_to_u8(&[winner / 2.0 + 0.5]),
+            ctx.compress(&f32_to_u8(&policy)).into()
+        ).ok();
 
-        Entry {
-            features_and_winner: i8_to_bits(&features),
-            policy: f32_to_u8(policy)
-        }
+        example.map(|ex| Entry { example: ex })
     }
 
     /// Write a binary representation of this entry to the given formatter.
@@ -248,44 +253,32 @@ impl Entry {
     pub fn write_into<T>(&self, f: &mut T) -> io::Result<()>
         where T: io::Write
     {
-        f.write_all(&self.features_and_winner)?;
-        f.write_all(&self.policy)
+        f.write_all(&self.example)
     }
 }
 
-/// Returns an array of bits, where the i:th bit is set if `array[i] = 1.0`.
-///
+/// Returns an array of signed integers that has been zig-zag encoded.
+/// 
 /// # Arguments
-///
-/// * `array` - the array of 16-bit floating point numbers to serialize
-///
-fn i8_to_bits(array: &[i8]) -> Vec<u8> {
-    let cursor_len = if array.len() % 8 == 0 {
-        array.len() / 8
-    } else {
-        1 + array.len() / 8
-    };
-
-    let mut cursor = vec! [0; cursor_len];
+/// 
+/// * `array` - the array of signed integers to serialize
+/// 
+fn i8_to_u8(array: &[i8]) -> Vec<u8> {
+    let mut cursor = vec! [0; array.len()];
 
     for (i, &value) in array.into_iter().enumerate() {
-        if value != 0 {
-            let j = i / 8;
-            let k = i % 8;
-
-            cursor[j] |= 1 << (7 - k);
-        }
+        cursor[i] = unsafe { ::std::mem::transmute(value) };
     }
 
     cursor
 }
 
 /// Returns an array of floating point serialized (and compressed) as
-/// a byte array of FP16.
+/// a byte array.
 ///
 /// # Arguments
 ///
-/// * `array` - the array of 16-bit floating point numbers to serialize
+/// * `array` - the array of 32-bit floating point numbers to serialize
 ///
 fn f32_to_u8(array: &[f32]) -> Vec<u8> {
     let mut cursor = vec! [0; array.len()];
@@ -299,23 +292,5 @@ fn f32_to_u8(array: &[f32]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use dataset::entry::*;
-
-    #[test]
-    fn to_bits() {
-        let floats = vec! [127, 0, 0, 0, 0, 127, 0, 127];
-        let bits = i8_to_bits(&floats);
-
-        assert_eq!(bits.len(), 1);
-        assert_eq!(bits[0], 133);
-    }
-
-    #[test]
-    fn to_u8() {
-        let floats = vec! [1.0, 1.0, 0.5, 0.2, 0.7, 0.3, 0.1, 0.8f32];
-        let quan = f32_to_u8(&floats);
-
-        assert_eq!(quan.len(), 8);
-        assert_eq!(quan.to_vec(), vec! [255, 255, 128, 51, 179, 77, 26, 204]);
-    }
+    // pass
 }

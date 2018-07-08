@@ -23,7 +23,7 @@ while true; do
         # fetch the latest batch of features from the database
         LIMIT=500000
 
-        curl -s "http://$DB/api/v1/features?limit=$LIMIT" | jq -r '.[].data' | base64 --decode > /tmp/features.bin
+        curl --compressed -sg "http://$DB/api/v1/features?limit=$LIMIT" | jq -r '.[].data' | base64 --decode > /tmp/features.tfrecord
 
         # if this is the first network then train from scratch, otherwise perform
         # a warm start from the latest model.
@@ -31,9 +31,9 @@ while true; do
         name=`petname -w3 -s_`
 
         if [ "$warm_start" = "." ] || [ "$warm_start" = "models" ] ; then
-            python3 -m dream_tf --name "$name" --start /tmp/features.bin
+            python3 -m dream_tf --name "$name" --start /tmp/features.tfrecord
         else
-            python3 -m dream_tf --name "$name" --start --warm-start "$warm_start" --steps $((20 * $LIMIT)) /tmp/features.bin
+            python3 -m dream_tf --name "$name" --start --warm-start "$warm_start" --steps $((20 * $LIMIT)) /tmp/features.tfrecord
         fi
 
         # upload the final weights to the database

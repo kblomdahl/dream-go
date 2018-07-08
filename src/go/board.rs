@@ -29,6 +29,9 @@ pub struct Board {
     /// Stack containing the six most recent `vertices`.
     pub(super) history: CircularBuf,
 
+    /// The komi used for this game.
+    pub(super) komi: f32,
+
     /// The total number of moves that has been played on this board.
     pub(super) count: u16,
 
@@ -43,10 +46,11 @@ pub struct Board {
 }
 
 impl Board {
-    pub fn new() -> Board {
+    pub fn new(komi: f32) -> Board {
         Board {
             inner: BoardFast::new(),
             history: CircularBuf::new(),
+            komi: komi,
             count: 0,
             last_played: None,
             zobrist_hash: 0,
@@ -58,6 +62,18 @@ impl Board {
     #[inline]
     pub fn size(&self) -> usize {
         19
+    }
+
+    /// Returns the komi of this board.
+    #[inline]
+    pub fn komi(&self) -> f32 {
+        self.komi
+    }
+
+    /// Sets the komi of this board.
+    #[inline]
+    pub fn set_komi(&mut self, komi: f32) {
+        self.komi = komi;
     }
 
     /// Returns the number of moves that has been played on this board.
@@ -239,6 +255,8 @@ impl Hash for Board {
         for z in self.zobrist_history.iter() {
             state.write_u64(z);
         }
+
+        state.write_u32(self.komi.to_bits());
     }
 }
 
@@ -264,7 +282,7 @@ mod tests {
     /// board.
     #[test]
     fn capture() {
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
 
         board.place(Color::Black,  9,  9);
         board.place(Color::White,  8,  9);
@@ -278,7 +296,7 @@ mod tests {
     /// Test that it is possible to capture a group of stones in the corner.
     #[test]
     fn capture_group() {
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
 
         board.place(Color::Black, 0, 1);
         board.place(Color::Black, 1, 0);
@@ -300,7 +318,7 @@ mod tests {
     /// with two adjacent neighbours of the opposite color.
     #[test]
     fn suicide_corner() {
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
 
         board.place(Color::White, 0, 0);
         board.place(Color::Black, 1, 0);
@@ -315,7 +333,7 @@ mod tests {
     /// of a ponnuki.
     #[test]
     fn suicide_middle() {
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
 
         board.place(Color::Black,  9,  9);
         board.place(Color::White,  8,  9);
@@ -332,7 +350,7 @@ mod tests {
     /// corner ko.
     #[test]
     fn ko() {
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
 
         board.place(Color::Black, 0, 0);
         board.place(Color::Black, 0, 2);

@@ -180,7 +180,7 @@ mod tests {
         // . . . . .
         // X . . . X
         //
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
         board.place(Color::Black,  0,  0);
         board.place(Color::Black,  0, 18);
         board.place(Color::Black, 18,  0);
@@ -218,7 +218,7 @@ mod tests {
         // . . . . .
         // . . . . .
         //
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
         board.place(Color::White, 3, 3);
         board.place(Color::Black, 2, 3);
         board.place(Color::Black, 3, 2);
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn ladder_escape() {
         // test a standard ladder pattern with a stone on the diagonal
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
         board.place(Color::White,  3,  3);
         board.place(Color::White, 15, 15);  // ladder breaking
         board.place(Color::Black,  2,  3);
@@ -300,7 +300,7 @@ mod tests {
             (Color::Black,  4, 12), (Color::White,  3, 12), (Color::Black,  3, 11)
         ];
 
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
 
         for &(color, x, y) in moves.into_iter() {
             board.place(color, x, y);

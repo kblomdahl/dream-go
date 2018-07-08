@@ -646,7 +646,8 @@ impl<'a, S: SgfCoordinate, E: Value + 'a> fmt::Display for ToSgf<'a, S, E> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         if self.meta {
             // add the standard SGF prefix
-            write!(fmt, "(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]PL[{}]",
+            write!(fmt, "(;GM[1]FF[4]SZ[19]RU[Chinese]KM[{:.1}]PL[{}]",
+                self.starting_point.komi(),
                 if self.root.color == Color::Black { "B" } else { "W" }
             )?;
 
@@ -859,10 +860,10 @@ mod tests {
 
     unsafe fn bench_test<E: Value>(b: &mut Bencher) {
         let mut rng = SmallRng::from_entropy();
-        let mut root = Node::<E>::new(Color::Black, 0.5, get_prior_distribution(&mut rng, Board::new(), Color::Black));
+        let mut root = Node::<E>::new(Color::Black, 0.5, get_prior_distribution(&mut rng, Board::new(DEFAULT_KOMI), Color::Black));
 
         for t in 0..800 {
-            let mut board = Board::new();
+            let mut board = Board::new(DEFAULT_KOMI);
             let mut dst_ref = [0.0f32; 368];
             let mut dst_asm = [0.0f32; 368];
 

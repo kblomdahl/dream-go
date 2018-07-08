@@ -3,7 +3,7 @@ Version: 0.5.0
 Section: games
 Priority: optional
 Architecture: amd64
-Depends: libc6 (>= 2.15), dpkg (>= 1.15.4)
+Depends: libc6 (>= 2.15), dpkg (>= 1.15.4), libblosc1 (>= 1.7.0-1)
 Maintainer: Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 Homepage: https://github.com/chicoryn/dream-go
 Vcs-Git: https://github.com/Chicoryn/dream-go.git

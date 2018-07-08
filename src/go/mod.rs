@@ -31,3 +31,5 @@ pub use self::board::*;
 pub use self::features::*;
 pub use self::ladder::*;
 pub use self::score::*;
+
+pub const DEFAULT_KOMI: f32 = 7.5;

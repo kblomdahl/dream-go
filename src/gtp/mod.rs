@@ -18,7 +18,7 @@ use std::io::BufRead;
 use std::time::Instant;
 
 use go::sgf::*;
-use go::{Board, Color, Score, StoneStatus};
+use go::{DEFAULT_KOMI, Board, Color, Score, StoneStatus};
 use mcts::time_control;
 use mcts;
 use util::config;
@@ -93,7 +93,7 @@ lazy_static! {
     static ref BOARD_SIZE: Regex = Regex::new(r"^boardsize +([0-9]+)").unwrap();
     static ref HEATMAP: Regex = Regex::new(r"^heatmap +([bw])").unwrap();
     static ref HEATMAP_PRIOR: Regex = Regex::new(r"^heatmap-nn +([bw])").unwrap();
-    static ref KOMI: Regex = Regex::new(r"^komi +([0-9\.]+)").unwrap();
+    static ref KOMI: Regex = Regex::new(r"^komi +(-?[0-9\.]+)").unwrap();
     static ref PLAY: Regex = Regex::new(r"^play +([bBwW]) +([a-z][0-9]+|pass)").unwrap();
     static ref KNOWN_COMMAND: Regex = Regex::new(r"^known_command +([^ ]+)").unwrap();
     static ref GENMOVE: Regex = Regex::new(r"^genmove +([bw])").unwrap();
@@ -503,17 +503,31 @@ impl Gtp {
                 if size != 19 {
                     error!(id, "unacceptable size");
                 } else {
-                    self.history = vec! [Board::new()];
+                    self.history = vec! [Board::new(self.komi)];
                     success!(id, "");
                 }
             },
             Command::ClearBoard => {
-                self.history = vec! [Board::new()];
-                self.ponder = PonderService::new();
+                self.history = vec! [Board::new(self.komi)];
+                self.ponder = PonderService::new(Board::new(self.komi), Color::Black);
                 success!(id, "");
             },
             Command::Komi(komi) => {
                 self.komi = komi;
+                for board in self.history.iter_mut() {
+                    (*board).set_komi(komi);
+                }
+
+                // restart the pondering service, since we have been thinking
+                // with the wrong komi.
+                let board = self.history.last().unwrap().clone();
+                let next_color = match board.last_played() {
+                    Some(color) => color.opposite(),
+                    None => Color::Black
+                };
+
+                self.ponder = PonderService::new(board, next_color);
+
                 success!(id, "");
             },
             Command::Heatmap(color) => {
@@ -664,7 +678,9 @@ impl Gtp {
                 }
             },
             Command::RegGenMove(color) => {
-                self.ponder = PonderService::new();
+                let board = self.history.last().unwrap().clone();
+
+                self.ponder = PonderService::new(board, color);
                 self.generate_move(id, color, false);
             },
             Command::Undo => {
@@ -678,7 +694,7 @@ impl Gtp {
                         None => Color::Black
                     };
 
-                    self.ponder = PonderService::with_board(board, next_color);
+                    self.ponder = PonderService::new(board, next_color);
 
                     success!(id, "");
                 } else {
@@ -737,10 +753,10 @@ pub fn run() {
     let stdin = ::std::io::stdin();
     let stdin_lock = stdin.lock();
     let mut gtp = Gtp {
-        ponder: PonderService::new(),
+        ponder: PonderService::new(Board::new(DEFAULT_KOMI), Color::Black),
         last_log: "{}".to_string(),
-        history: vec! [Board::new()],
-        komi: 7.5,
+        history: vec! [Board::new(DEFAULT_KOMI)],
+        komi: DEFAULT_KOMI,
         time_settings: [
             Box::new(time_settings::None::new()),
             Box::new(time_settings::None::new()),
@@ -803,6 +819,7 @@ mod tests {
     fn komi() {
         assert_eq!(Gtp::parse_line("1 komi 0.5"), Some((Some(1), Command::Komi(0.5))));
         assert_eq!(Gtp::parse_line("komi 10"), Some((None, Command::Komi(10.0))));
+        assert_eq!(Gtp::parse_line("komi -7.5"), Some((None, Command::Komi(-7.5))));
     }
 
     #[test]

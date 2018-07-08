@@ -24,6 +24,7 @@ import json
 import math
 from datetime import datetime
 
+import blosc
 import numpy as np
 import tensorflow as tf
 
@@ -351,25 +352,46 @@ class DumpHook(tf.train.SessionRunHook):
 def get_dataset(files, batch_size=1, is_training=True):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
-    num_bytes = math.ceil((361 * NUM_FEATURES + 1) / 8.0)
+    def _blosc_decompress_to_i1(features):
+        return np.fromstring(blosc.decompress(features), 'i1')
 
-    def _decode_and_split(x):
-        return tf.split(tf.decode_raw(x, tf.uint8), (num_bytes, 362))
+    def _blosc_decompress_to_u1(features):
+        return np.fromstring(blosc.decompress(features), 'u1')
 
-    def _parse_py(features_and_value, policy):
-        feature_size = 361 * NUM_FEATURES
-        features_and_value = np.unpackbits(features_and_value)
-        features = features_and_value[0:feature_size].astype('f2')
-        value = np.asarray(1.0 if features_and_value[feature_size] > 0 else -1.0, 'f4')
-        policy = policy.astype('f4') / 255.0
-        is_black = features[0].astype('f4')
+    def _parse(record):
+        example = tf.parse_single_example(record, {
+            "features": tf.VarLenFeature(tf.string),
+            "value": tf.FixedLenFeature([], tf.string),
+            "policy": tf.VarLenFeature(tf.string),
+        })
+
+        features = tf.decode_raw(tf.sparse_tensor_to_dense(example['features'], default_value=""), tf.uint8)
+        policy = tf.decode_raw(tf.sparse_tensor_to_dense(example['policy'], default_value=""), tf.uint8)
+        value = tf.decode_raw(example['value'], tf.uint8)
+
+        # decompress, and unzigzag the `features` array
+        features = tf.py_func(_blosc_decompress_to_i1, [features], tf.int8, False)
+        features = tf.cast(features, tf.float16) / 127.0
+
+        # map `value` to the range [-1, +1] as a floating-point number
+        value = 2.0 * tf.cast(value, tf.float32) / 255.0 - 1.0
+
+        # decompress, and map `policy` the the range [0, 1] as a floating-point
+        # number
+        policy = tf.py_func(_blosc_decompress_to_u1, [policy], [tf.uint8], False)
+        policy = tf.cast(policy, tf.float32) / 255.0
+
+        # calculate the `is_black` label based on the input features
+        is_black = tf.cast(features[0], tf.float32)
 
         return features, value, policy, is_black
 
-    def _parse(features_and_value, policy):
-        return tuple(
-            tf.py_func(_parse_py, [features_and_value, policy], [tf.float16, tf.float32, tf.float32, tf.float32])
-        )
+    def _fix_shape(features, value, policy, is_black):
+        features = tf.reshape(features, [NUM_FEATURES, 19, 19])
+        value = tf.reshape(value, [1])
+        policy = tf.reshape(policy, [362])
+
+        return features, value, policy, is_black
 
     def _augment(features, value, policy, is_black):
         def _identity(image):
@@ -427,13 +449,6 @@ def get_dataset(files, batch_size=1, is_training=True):
 
         return features, value, policy, is_black
 
-    def _fix_shape(features, value, policy, is_black):
-        features = tf.reshape(features, [NUM_FEATURES, 19, 19])
-        value = tf.reshape(value, [1])
-        policy = tf.reshape(policy, [362])
-
-        return features, value, policy, is_black
-
     def _shuffle_history(features):
         features = tf.split(features, (5, 6, NUM_FEATURES - 11), 0)
 
@@ -461,16 +476,14 @@ def get_dataset(files, batch_size=1, is_training=True):
         return features, value, policy, is_black
 
     with tf.device('cpu:0'):
-        dataset = tf.data.FixedLengthRecordDataset(files, num_bytes + 362)
-        dataset = dataset.map(_decode_and_split)
-        dataset = dataset.map(_parse)
+        dataset = tf.data.TFRecordDataset(files, num_parallel_reads=2)
+        dataset = dataset.map(_parse, num_parallel_calls=4)
+        dataset = dataset.map(_fix_shape)
         if is_training:
             dataset = dataset.repeat()
-            dataset = dataset.map(_augment)
-            dataset = dataset.map(_fix_history)
+            dataset = dataset.map(_augment, num_parallel_calls=4)
+            dataset = dataset.map(_fix_history, num_parallel_calls=4)
             dataset = dataset.shuffle(393408)
-        else:
-            dataset = dataset.map(_fix_shape)
         dataset = dataset.batch(batch_size)
 
         return dataset

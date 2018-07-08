@@ -49,13 +49,13 @@ impl fmt::Display for GameResult {
         let iso8601 = time::strftime("%Y-%m-%dT%H:%M:%S%z", &now).unwrap();
 
         match *self {
-            GameResult::Resign(ref sgf, _, winner, _) => {
-                write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[7.5]RE[{}+Resign]{})", iso8601, winner, sgf)
+            GameResult::Resign(ref sgf, ref board, winner, _) => {
+                write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[{:.1}]RE[{}+Resign]{})", iso8601, board.komi(), winner, sgf)
             },
             GameResult::Ended(ref sgf, ref board) => {
                 let (black, white) = board.get_score();
                 let black = black as f32;
-                let white = white as f32 + 7.5;
+                let white = white as f32 + board.komi();
                 let winner = {
                     if black > white {
                         format!("B+{:.1}", black - white)
@@ -66,7 +66,7 @@ impl fmt::Display for GameResult {
                     }
                 };
 
-                write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[7.5]RE[{}]{})", iso8601, winner, sgf)
+                write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[{:.1}]RE[{}]{})", iso8601, board.komi(), winner, sgf)
             }
         }
     }
@@ -381,6 +381,28 @@ pub fn predict<E, T>(
     predict_aux::<E, T>(server, num_workers, time_control, starting_tree, starting_point, starting_color)
 }
 
+/// Returns a weighted random komi between `-7.5` to `7.5`, with the most common
+/// ones being `7.5`, `6.5`, and `0.5`.
+/// 
+/// - 40% chance of `7.5`
+/// - 40% chance of `6.5`
+/// - 10% chance of `0.5`
+/// - 10% chance of a random komi between `-7.5` and `7.5`.
+/// 
+fn get_random_komi() -> f32 {
+    let value = thread_rng().gen::<f32>();
+
+    if value < 0.4 {
+        7.5
+    } else if value < 0.8 {
+        6.5
+    } else if value < 0.9 {
+        0.5
+    } else {
+        15.0 * (value - 0.9) / 0.1 - 7.5
+    }
+}
+
 /// Play a game against the engine and return the result of the game.
 /// 
 /// # Arguments
@@ -390,7 +412,7 @@ pub fn predict<E, T>(
 /// 
 fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> GameResult
 {
-    let mut board = Board::new();
+    let mut board = Board::new(get_random_komi());
     let mut sgf = String::new();
     let mut current = Color::Black;
     let mut pass_count = 0;
@@ -511,7 +533,7 @@ pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, P
 /// 
 fn policy_play_one(server: &PredictGuard) -> GameResult {
     let mut temperature = (*config::TEMPERATURE + 1e-3).recip();
-    let mut board = Board::new();
+    let mut board = Board::new(get_random_komi());
     let mut sgf = String::new();
     let mut current = Color::Black;
     let mut pass_count = 0;
@@ -665,4 +687,20 @@ pub fn greedy_score(server: &PredictGuard, board: &Board, next_color: Color) -> 
     }
 
     (board, sgf)
+}
+
+#[cfg(test)]
+mod tests {
+    use mcts;
+
+    #[test]
+    fn get_random_komi() {
+        // i do not like the use of randomness in tests, but I do not see much
+        // choice here
+        for _ in 0..10000 {
+            let komi = mcts::get_random_komi();
+
+            assert!(komi >= -7.5 && komi <= 7.5, "komi is {}", komi);
+        }
+    }
 }

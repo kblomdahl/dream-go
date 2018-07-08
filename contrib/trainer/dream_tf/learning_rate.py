@@ -133,7 +133,7 @@ class LearningRateScheduler(tf.train.SessionRunHook):
             # decrease the learning rate if we are not certain whether the slope
             # is decreasing or not
             if steps > LearningRateScheduler.THRESHOLD and p < 0.51 and rp < 0.51:
-                if learning_rate < 1e-8:
+                if learning_rate < 1e-5:
                     run_context.request_stop()
 
                 run_context.session.run([self.learning_rate_op, self.last_decrease_op], feed_dict={

@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn score_black() {
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
         board.place(Color::Black, 0, 0);
 
         assert!(!board.is_scoreable());
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn score_white() {
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
         board.place(Color::White, 0, 0);
 
         assert!(!board.is_scoreable());
@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn score_black_white() {
-        let mut board = Board::new();
+        let mut board = Board::new(DEFAULT_KOMI);
         board.place(Color::White, 1, 0);
         board.place(Color::White, 0, 1);
         board.place(Color::White, 1, 1);

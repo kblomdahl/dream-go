@@ -106,12 +106,6 @@ impl Drop for PonderService {
 }
 
 impl PonderService {
-    /// Returns a service that will ponder, starting from an empty board
-    /// position (with `Black` to play next).
-    pub fn new() -> PonderService {
-        PonderService::with_board(Board::new(), Color::Black)
-    }
-
     /// Returns a service that will ponder, starting from the given board
     /// position.
     /// 
@@ -120,7 +114,7 @@ impl PonderService {
     /// * `board` - the initial board.
     /// * `next_color` - the color of the player whose turn it is.
     /// 
-    pub fn with_board(board: Board, next_color: Color) -> PonderService {
+    pub fn new(board: Board, next_color: Color) -> PonderService {
         let is_running = Arc::new(AtomicBool::new(!*config::NO_PONDER));
         let is_running_worker = is_running.clone();
 

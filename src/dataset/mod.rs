@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod entry;
+mod tfrecord;
 
 use std::fs::File;
 use std::io::{self, BufReader, BufRead};
