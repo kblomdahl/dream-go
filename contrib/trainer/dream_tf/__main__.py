@@ -476,7 +476,7 @@ def get_dataset(files, batch_size=1, is_training=True):
         return features, value, policy, is_black
 
     with tf.device('cpu:0'):
-        dataset = tf.data.TFRecordDataset(files, num_parallel_reads=2)
+        dataset = tf.data.TFRecordDataset(files, num_parallel_reads=4)
         dataset = dataset.map(_parse, num_parallel_calls=4)
         dataset = dataset.map(_fix_shape)
         if is_training:
@@ -688,7 +688,7 @@ if not model_dir:
 params = {
     'steps': args.steps[0] if args.steps else MAX_STEPS,
     'batch_size': args.batch_size[0] if args.batch_size else BATCH_SIZE,
-    'learning_rate': 3e-5 if args.warm_start else 0.003,
+    'learning_rate': 3e-5 if args.warm_start else 3e-4,
 
     'num_channels': 128,
     'num_blocks': 9,
