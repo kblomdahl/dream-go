@@ -30,12 +30,6 @@ lazy_static! {
     pub static ref Y: Box<[u8]> = (0..361).map(|i| (i / 19) as u8).collect::<Vec<u8>>().into_boxed_slice();
 }
 
-pub trait Value {
-    unsafe fn update<E: Value>(trace: &NodeTrace<E>, color: Color, value: f32);
-    fn get<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]);
-    fn get_ref<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]);
-}
-
 /// An implementation of the _Polynomial UCT_ as suggested in the AlphaGo Zero
 /// paper [1].
 /// 
@@ -45,7 +39,7 @@ pub struct PUCT;
 
 impl PUCT {
     #[inline(always)]
-    unsafe fn get_impl<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
+    unsafe fn get_impl(node: &Node, value: &[f32], dst: &mut [f32]) {
         use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
 
         let sqrt_n = ((1 + node.total_count) as f32).sqrt();
@@ -63,17 +57,23 @@ impl PUCT {
 
     #[allow(unused_attributes)]
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn get_avx2<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
+    unsafe fn get_avx2(node: &Node, value: &[f32], dst: &mut [f32]) {
         // since there is no real _trickery_ in this function except the
         // usage of the AVX2 SIMD instructions for addition, multiplication,
         // etc, we rely on LLVM to do all of the optimizations.
         PUCT::get_impl(node, value, dst);
     }
-}
 
-impl Value for PUCT {
+    /// Update the trace backwards with the given value (and color).
+    /// 
+    /// # Arguments
+    /// 
+    /// * `trace` - 
+    /// * `color` - 
+    /// * `value` - 
+    /// 
     #[inline]
-    unsafe fn update<E: Value>(trace: &NodeTrace<E>, color: Color, value: f32) {
+    unsafe fn update(trace: &NodeTrace, color: Color, value: f32) {
         for &(node, _, index) in trace.iter() {
             let value_ = if color == (*node).color { value } else { 1.0 - value };
 
@@ -96,8 +96,9 @@ impl Value for PUCT {
     /// * `value` - the winrates to use in the calculations
     /// * `dst` - output array for the UCT value
     /// 
+    #[cfg(test)]
     #[inline(always)]
-    fn get_ref<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
+    fn get_ref(node: &Node, value: &[f32], dst: &mut [f32]) {
         unsafe { PUCT::get_impl(node, value, dst) };
     }
 
@@ -110,7 +111,7 @@ impl Value for PUCT {
     /// * `dst` - output array for the UCT value
     /// 
     #[inline(always)]
-    fn get<E: Value>(node: &Node<E>, value: &[f32], dst: &mut [f32]) {
+    fn get(node: &Node, value: &[f32], dst: &mut [f32]) {
         if is_x86_feature_detected!("avx2")  {
             unsafe { PUCT::get_avx2(node, value, dst) };
         } else {
@@ -118,8 +119,6 @@ impl Value for PUCT {
         }
     }
 }
-
-pub type DefaultValue = PUCT;
 
 /// Returns the index of the maximum value in the given array. If multiple
 /// indices share the same value, then which is returned is undefined.
@@ -221,7 +220,7 @@ fn percentile(array: &[i32], total: i32, n: f64) -> (i32, f64) {
 }
 
 /// A monte carlo search tree.
-pub struct Node<E: Value> {
+pub struct Node {
     /// Spinlock used to protect the data in this node during modifications.
     lock: Mutex,
 
@@ -252,10 +251,10 @@ pub struct Node<E: Value> {
     expanding: [bool; 362],
 
     /// The sub-tree that each edge points towards.
-    children: [*mut Node<E>; 362]
+    children: [*mut Node; 362]
 }
 
-impl<E: Value> Drop for Node<E> {
+impl Drop for Node {
     fn drop(&mut self) {
         for &child in self.children.iter() {
             if !child.is_null() {
@@ -265,7 +264,7 @@ impl<E: Value> Drop for Node<E> {
     }
 }
 
-impl<E: Value> Node<E> {
+impl Node {
     /// Returns an empty search tree with the given starting color and prior
     /// values.
     /// 
@@ -274,7 +273,7 @@ impl<E: Value> Node<E> {
     /// * `color` - the color of the first players color
     /// * `prior` - the prior values of the nodes
     /// 
-    pub fn new(color: Color, value: f32, prior: Box<[f32]>) -> Node<E> {
+    pub fn new(color: Color, value: f32, prior: Box<[f32]>) -> Node {
         assert_eq!(prior.len(), 362);
 
         // copy the prior values into an array size that is dividable
@@ -341,7 +340,7 @@ impl<E: Value> Node<E> {
         }
 
         let mut uct = [::std::f32::NEG_INFINITY; 368];
-        E::get::<E>(self, &self.value, &mut uct);
+        PUCT::get(self, &self.value, &mut uct);
 
         for i in children {
             // do not output nodes that has not been visited to reduce the
@@ -384,7 +383,7 @@ impl<E: Value> Node<E> {
     /// * `self` - the search tree to pluck the child from
     /// * `index` - the move to pluck the sub-tree for
     /// 
-    pub fn forward(mut self, index: usize) -> Option<Node<E>> {
+    pub fn forward(mut self, index: usize) -> Option<Node> {
         let child = self.children[index];
 
         if child.is_null() {
@@ -520,7 +519,7 @@ impl<E: Value> Node<E> {
         // to pick to make it possible to do it with SIMD.
         let mut uct = [::std::f32::NEG_INFINITY; 368];
 
-        E::get::<E>(self, &value, &mut uct);
+        PUCT::get(self, &value, &mut uct);
 
         // greedy selection based on the maximum ucb1 value, failing if someone else
         // is already expanding the node we want to expand.
@@ -544,7 +543,7 @@ impl<E: Value> Node<E> {
     }
 }
 
-pub type NodeTrace<E> = Vec<(*mut Node<E>, Color, usize)>;
+pub type NodeTrace = Vec<(*mut Node, Color, usize)>;
 
 /// Probe down the search tree, while updating the given board with the
 /// moves the traversed edges represents, and return a list of the
@@ -556,15 +555,13 @@ pub type NodeTrace<E> = Vec<(*mut Node<E>, Color, usize)>;
 /// * `root` - the search tree to probe into
 /// * `board` - the board to update with the traversed moves
 /// 
-pub unsafe fn probe<E>(root: &mut Node<E>, board: &mut Board) -> Option<NodeTrace<E>>
-    where E: Value
-{
+pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
     let mut trace = vec! [];
     let mut current = root;
 
     loop {
         if let Some(next_child) = current.select(!trace.is_empty()) {
-            trace.push((current as *mut Node<E>, current.color, next_child));
+            trace.push((current as *mut Node, current.color, next_child));
 
             if next_child != 361 {  // not a passing move
                 let (x, y) = (X[next_child] as usize, Y[next_child] as usize);
@@ -610,9 +607,7 @@ pub unsafe fn probe<E>(root: &mut Node<E>, board: &mut Board) -> Option<NodeTrac
 /// * `value` -
 /// * `prior` -
 /// 
-pub unsafe fn insert<E>(trace: &NodeTrace<E>, color: Color, value: f32, prior: Box<[f32]>)
-    where E: Value
-{
+pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Box<[f32]>) {
     if let Some(&(node, _, index)) = trace.last() {
         let mut next = Box::new(Node::new(color, value, prior));
         if index == 361 {
@@ -630,19 +625,19 @@ pub unsafe fn insert<E>(trace: &NodeTrace<E>, color: Color, value: f32, prior: B
         }
     }
 
-    E::update::<E>(trace, color, value);
+    PUCT::update(trace, color, value);
 }
 
-/// Type alias for `Node<E>` that acts as a wrapper for calling `as_sgf` from
+/// Type alias for `Node` that acts as a wrapper for calling `as_sgf` from
 /// within a `write!` macro.
-pub struct ToSgf<'a, S: SgfCoordinate, E: Value + 'a> {
+pub struct ToSgf<'a, S: SgfCoordinate> {
     _coordinate_format: ::std::marker::PhantomData<S>,
     starting_point: Board,
-    root: &'a Node<E>,
+    root: &'a Node,
     meta: bool
 }
 
-impl<'a, S: SgfCoordinate, E: Value + 'a> fmt::Display for ToSgf<'a, S, E> {
+impl<'a, S: SgfCoordinate> fmt::Display for ToSgf<'a, S> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         if self.meta {
             // add the standard SGF prefix
@@ -683,9 +678,8 @@ impl<'a, S: SgfCoordinate, E: Value + 'a> fmt::Display for ToSgf<'a, S, E> {
 /// * `starting_point` -
 /// * `meta` - whether to include the SGF meta data (rules, etc.)
 /// 
-pub fn to_sgf<'a, S, E>(root: &'a Node<E>, starting_point: &Board, meta: bool) -> ToSgf<'a, S, E>
-    where S: SgfCoordinate,
-          E: Value
+pub fn to_sgf<'a, S>(root: &'a Node, starting_point: &Board, meta: bool) -> ToSgf<'a, S>
+    where S: SgfCoordinate
 {
     ToSgf {
         _coordinate_format: ::std::marker::PhantomData::default(),
@@ -719,11 +713,11 @@ impl fmt::Display for PrettyVertex {
 }
 
 /// Iterator that traverse the most likely path down a search tree
-pub struct GreedyPath<'a, E: Value + 'a> {
-    current: &'a Node<E>,
+pub struct GreedyPath<'a> {
+    current: &'a Node,
 }
 
-impl<'a, E: Value + 'a> Iterator for GreedyPath<'a, E> {
+impl<'a> Iterator for GreedyPath<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<usize> {
@@ -741,13 +735,13 @@ impl<'a, E: Value + 'a> Iterator for GreedyPath<'a, E> {
     }
 }
 
-/// Type alias for `Node<E>` that acts as a wrapper for calling `as_sgf` from
+/// Type alias for `Node` that acts as a wrapper for calling `as_sgf` from
 /// within a `write!` macro.
-pub struct ToPretty<'a, E: Value + 'a> {
-    root: &'a Node<E>,
+pub struct ToPretty<'a> {
+    root: &'a Node,
 }
 
-impl<'a, E: Value + 'a> fmt::Display for ToPretty<'a, E> {
+impl<'a> fmt::Display for ToPretty<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         let mut children = (0..362).collect::<Vec<usize>>();
         children.sort_by_key(|&i| -self.root.count[i]);
@@ -804,7 +798,7 @@ impl<'a, E: Value + 'a> fmt::Display for ToPretty<'a, E> {
 /// * `root` -
 /// * `starting_point` -
 /// 
-pub fn to_pretty<'a, E: Value>(root: &'a Node<E>) -> ToPretty<'a, E> {
+pub fn to_pretty<'a>(root: &'a Node) -> ToPretty<'a> {
     ToPretty { root: root }
 }
 
@@ -858,9 +852,9 @@ mod tests {
         prior.into_boxed_slice()
     }
 
-    unsafe fn bench_test<E: Value>(b: &mut Bencher) {
+    unsafe fn bench_test(b: &mut Bencher) {
         let mut rng = SmallRng::from_entropy();
-        let mut root = Node::<E>::new(Color::Black, 0.5, get_prior_distribution(&mut rng, Board::new(DEFAULT_KOMI), Color::Black));
+        let mut root = Node::new(Color::Black, 0.5, get_prior_distribution(&mut rng, Board::new(DEFAULT_KOMI), Color::Black));
 
         for t in 0..800 {
             let mut board = Board::new(DEFAULT_KOMI);
@@ -869,8 +863,8 @@ mod tests {
 
             // check so that the reference and asm implementation gives back the same
             // value
-            E::get::<E>(&root, &root.value, &mut dst_asm);
-            E::get_ref::<E>(&root, &root.value, &mut dst_ref);
+            PUCT::get(&root, &root.value, &mut dst_asm);
+            PUCT::get_ref(&root, &root.value, &mut dst_ref);
 
             for i in 0..362 {
                 // because of numeric instabilities and approximations the answers may
@@ -885,12 +879,12 @@ mod tests {
             }
 
             // expand the tree by one probe so that the root values change
-            let trace = probe::<E>(&mut root, &mut board).unwrap();
+            let trace = probe(&mut root, &mut board).unwrap();
             let &(_, color, _) = trace.last().unwrap();
             let next_color = color.opposite();
             let (value, policy) = (rng.gen::<f32>(), get_prior_distribution(&mut rng, board, next_color));
 
-            insert::<E>(&trace, next_color, value, policy);
+            insert(&trace, next_color, value, policy);
         }
 
         // benchmark the value function only
@@ -899,7 +893,7 @@ mod tests {
         b.iter(|| {
             let mut dst = test::black_box([0.0f32; 368]);
 
-            E::get::<E>(&root, &root.value, &mut dst);
+            PUCT::get(&root, &root.value, &mut dst);
             dst
         });
 
@@ -907,6 +901,6 @@ mod tests {
 
     #[bench]
     fn puct(b: &mut Bencher) {
-        unsafe { bench_test::<PUCT>(b); }
+        unsafe { bench_test(b); }
     }
 }

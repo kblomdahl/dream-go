@@ -80,9 +80,9 @@ impl ByoYomi {
 }
 
 impl TimeStrategy for ByoYomi {
-    fn try_extend<E: tree::Value, F: Fn() -> bool>(
+    fn try_extend<F: Fn() -> bool>(
         &self,
-        root: &tree::Node<E>,
+        root: &tree::Node,
         predicate: F,
         factor: f32
     ) -> TimeStrategyResult

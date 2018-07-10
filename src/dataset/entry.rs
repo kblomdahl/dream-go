@@ -79,7 +79,7 @@ impl<'a> Iterator for EntryIterator<'a> {
                         *config::NUM_THREADS / *config::NUM_GAMES,
                         1
                     );
-                    let (_, _, tree) = mcts::predict::<mcts::tree::DefaultValue, _>(
+                    let (_, _, tree) = mcts::predict::<_>(
                         self.server.as_ref().unwrap(),
                         Some(num_threads),
                         time_control::RolloutLimit::new(*config::NUM_ROLLOUT),

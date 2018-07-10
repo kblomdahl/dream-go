@@ -33,9 +33,9 @@ impl RolloutLimit {
 }
 
 impl TimeStrategy for RolloutLimit {
-    fn try_extend<E: tree::Value, F: Fn() -> bool>(
+    fn try_extend<F: Fn() -> bool>(
         &self,
-        root: &tree::Node<E>,
+        root: &tree::Node,
         _predicate: F,
         _factor: f32
     ) -> TimeStrategyResult

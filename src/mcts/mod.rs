@@ -191,9 +191,9 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, B
 
 /// The shared variables between the master and each worker thread in the `predict` function.
 #[derive(Clone)]
-struct ThreadContext<E: tree::Value + Clone + Send, T: TimeStrategy + Clone + Send> {
+struct ThreadContext<T: TimeStrategy + Clone + Send> {
     /// The root of the monte carlo tree.
-    root: Arc<UnsafeCell<tree::Node<E>>>,
+    root: Arc<UnsafeCell<tree::Node>>,
 
     /// The initial board position at the root the tree.
     starting_point: Board,
@@ -205,7 +205,7 @@ struct ThreadContext<E: tree::Value + Clone + Send, T: TimeStrategy + Clone + Se
     remaining: Arc<AtomicIsize>,
 }
 
-unsafe impl<E: tree::Value + Clone + Send, T: TimeStrategy + Clone + Send> Send for ThreadContext<E, T> { }
+unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
 
 
 /// Worker that probes into the given monte carlo search tree until the context
@@ -216,16 +216,15 @@ unsafe impl<E: tree::Value + Clone + Send, T: TimeStrategy + Clone + Send> Send 
 /// * `context` - 
 /// * `server` - 
 /// 
-fn predict_worker<E, T>(context: ThreadContext<E, T>, server: PredictGuard)
-    where E: tree::Value + Clone + Send + 'static,
-          T: TimeStrategy + Clone + Send + 'static
+fn predict_worker<T>(context: ThreadContext<T>, server: PredictGuard)
+    where T: TimeStrategy + Clone + Send + 'static
 {
     let root = unsafe { &mut *context.root.get() };
 
     while !time_control::is_done(root, &context.time_strategy) {
         loop {
             let mut board = context.starting_point.clone();
-            let trace = unsafe { tree::probe::<E>(root, &mut board) };
+            let trace = unsafe { tree::probe(root, &mut board) };
 
             if let Some(trace) = trace {
                 let &(_, color, _) = trace.last().unwrap();
@@ -234,7 +233,7 @@ fn predict_worker<E, T>(context: ThreadContext<E, T>, server: PredictGuard)
 
                 if let Some((value, policy)) = result {
                     unsafe {
-                        tree::insert::<E>(&trace, next_color, value, policy);
+                        tree::insert(&trace, next_color, value, policy);
                         break
                     }
                 } else {
@@ -258,16 +257,15 @@ fn predict_worker<E, T>(context: ThreadContext<E, T>, server: PredictGuard)
 /// * `starting_point` - 
 /// * `starting_color` - 
 /// 
-fn predict_aux<E, T>(
+fn predict_aux<T>(
     server: &PredictGuard,
     num_workers: usize,
     time_strategy: T,
-    starting_tree: Option<tree::Node<E>>,
+    starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
-) -> (f32, usize, tree::Node<E>)
-    where E: tree::Value + Clone + Send + 'static,
-          T: TimeStrategy + Clone + Send + 'static
+) -> (f32, usize, tree::Node)
+    where T: TimeStrategy + Clone + Send + 'static
 {
     // if we have a starting tree given, then re-use that tree (after some sanity
     // checks), otherwise we need to query the neural network about what the
@@ -320,7 +318,7 @@ fn predict_aux<E, T>(
     } else {
         0
     };
-    let context: ThreadContext<E, T> = ThreadContext {
+    let context: ThreadContext<T> = ThreadContext {
         root: Arc::new(UnsafeCell::new(starting_tree)),
         starting_point: starting_point.clone(),
 
@@ -332,7 +330,7 @@ fn predict_aux<E, T>(
         let context = context.clone();
         let server = server.clone_static();
 
-        thread::spawn(move || predict_worker::<E, T>(context, server))
+        thread::spawn(move || predict_worker::<T>(context, server))
     }).collect::<Vec<JoinHandle<()>>>();
 
     // wait for all threads to terminate to avoid any zombie processes
@@ -365,20 +363,19 @@ fn predict_aux<E, T>(
 /// * `starting_point` -
 /// * `starting_color` -
 /// 
-pub fn predict<E, T>(
+pub fn predict<T>(
     server: &PredictGuard,
     num_workers: Option<usize>,
     time_control: T,
-    starting_tree: Option<tree::Node<E>>,
+    starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
-) -> (f32, usize, tree::Node<E>)
-    where E: tree::Value + Clone + Send + 'static,
-          T: TimeStrategy + Clone + Send + 'static
+) -> (f32, usize, tree::Node)
+    where T: TimeStrategy + Clone + Send + 'static
 {
     let num_workers = num_workers.unwrap_or(*config::NUM_THREADS);
 
-    predict_aux::<E, T>(server, num_workers, time_control, starting_tree, starting_point, starting_color)
+    predict_aux::<T>(server, num_workers, time_control, starting_tree, starting_point, starting_color)
 }
 
 /// Returns a weighted random komi between `-7.5` to `7.5`, with the most common
@@ -426,7 +423,7 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
 
     while count < 722 {
         let num_workers = *config::NUM_THREADS / num_parallel.load(Ordering::Acquire);
-        let (value, index, tree) = predict_aux::<tree::DefaultValue, _>(
+        let (value, index, tree) = predict_aux::<_>(
             &server,
             num_workers,
             RolloutLimit::new(*config::NUM_ROLLOUT),

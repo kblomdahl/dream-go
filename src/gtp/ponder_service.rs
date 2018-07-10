@@ -24,7 +24,7 @@ use mcts::tree;
 use mcts;
 use nn::Network;
 
-type SearchTree = tree::Node<tree::DefaultValue>;
+type SearchTree = tree::Node;
 type PonderResult = Result<(PredictService, SearchTree, Board, Color), &'static str>;
 
 unsafe impl Send for SearchTree {}
@@ -37,9 +37,9 @@ pub struct PonderTimeControl {
 }
 
 impl TimeStrategy for PonderTimeControl {
-    fn try_extend<E: tree::Value, F: Fn() -> bool>(
+    fn try_extend<F: Fn() -> bool>(
         &self,
-        _root: &tree::Node<E>,
+        _root: &SearchTree,
         _predicate: F,
         _factor: f32
     ) -> TimeStrategyResult
@@ -72,7 +72,7 @@ fn ponder_worker(
     is_running: Arc<AtomicBool>
 ) -> PonderResult
 {
-    let (_, _, next_tree) = mcts::predict::<tree::DefaultValue, _>(
+    let (_, _, next_tree) = mcts::predict::<_>(
         &service.lock(),
         None,
         PonderTimeControl { is_running: is_running },

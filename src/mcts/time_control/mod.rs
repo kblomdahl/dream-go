@@ -38,9 +38,9 @@ pub trait TimeStrategy {
     ///   extended.
     /// * `factor` - asd
     /// 
-    fn try_extend<E: tree::Value, F: Fn() -> bool>(
+    fn try_extend<F: Fn() -> bool>(
         &self,
-        root: &tree::Node<E>,
+        root: &tree::Node,
         predicate: F,
         factor: f32
     ) -> TimeStrategyResult;
@@ -54,7 +54,7 @@ pub trait TimeStrategy {
 /// 
 /// * `root` - the tree to check for stability
 /// 
-fn is_stable<E: tree::Value>(root: &tree::Node<E>) -> bool {
+fn is_stable(root: &tree::Node) -> bool {
     let mut max_visits = 0;
     let mut max_wins = 0;
 
@@ -78,7 +78,7 @@ fn is_stable<E: tree::Value>(root: &tree::Node<E>) -> bool {
 /// 
 /// * `root` - the tree to get the lower bound for
 /// 
-fn min_promote_rollouts<E: tree::Value>(root: &tree::Node<E>) -> usize {
+fn min_promote_rollouts(root: &tree::Node) -> usize {
     let mut top_1 = 0;
 
     for i in 1..362 {
@@ -106,8 +106,8 @@ fn min_promote_rollouts<E: tree::Value>(root: &tree::Node<E>) -> usize {
 /// [1] _Hendrik Baier_ and _Mark H.M. Winands_, "Time Management for
 ///     Monte-Carlo Tree Search in Go", https://pdfs.semanticscholar.org/a2e6/299fd3c8ab17e3a1a783d518688b55bb2363.pdf
 /// 
-pub fn is_done<E, T>(root: &tree::Node<E>, ticket: &T) -> bool
-    where E: tree::Value, T: TimeStrategy
+pub fn is_done<T>(root: &tree::Node, ticket: &T) -> bool
+    where T: TimeStrategy
 {
     if root.total_count == 0 {
         false
