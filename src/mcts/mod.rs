@@ -15,12 +15,22 @@
 mod argmax;
 mod dirichlet;
 mod global_cache;
+mod greedy_score;
+mod policy_play;
 pub mod predict;
+mod self_play;
 mod spin;
 pub mod tree;
 pub mod time_control;
 
-use ordered_float::OrderedFloat;
+/* -------- Exports -------- */
+
+pub use self::greedy_score::*;
+pub use self::self_play::*;
+pub use self::policy_play::*;
+
+/* -------- Code -------- */
+
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
 use std::fmt;
@@ -397,294 +407,10 @@ fn get_random_komi() -> f32 {
     } else if value < 0.9 {
         0.5
     } else {
-        15.0 * (value - 0.9) / 0.1 - 7.5
+        let value = thread_rng().gen_range::<i32>(-8, 8);
+
+        value as f32 + 0.5
     }
-}
-
-/// Play a game against the engine and return the result of the game.
-/// 
-/// # Arguments
-/// 
-/// * `server` - the server to use during evaluation
-/// * `num_parallel` - the number of games that are being played in parallel
-/// 
-fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> GameResult
-{
-    let mut board = Board::new(get_random_komi());
-    let mut sgf = String::new();
-    let mut current = Color::Black;
-    let mut pass_count = 0;
-    let mut count = 0;
-
-    // limit the maximum number of moves to `2 * 19 * 19` to avoid the
-    // engine playing pointless capture sequences at the end of the game
-    // that does not change the final result.
-    let allow_resign = thread_rng().gen::<f32>() < 0.95;
-    let mut root = None;
-
-    while count < 722 {
-        let num_workers = *config::NUM_THREADS / num_parallel.load(Ordering::Acquire);
-        let (value, index, tree) = predict_aux::<_>(
-            &server,
-            num_workers,
-            RolloutLimit::new(*config::NUM_ROLLOUT),
-            root,
-            &board,
-            current
-        );
-
-        debug_assert!(0.0 <= value && value <= 1.0);
-        debug_assert!(index < 362);
-
-        let policy = tree.softmax();
-        let (_, prior_index) = tree.prior();
-        let value_sgf = if current == Color::Black { 2.0 * value - 1.0 } else { -2.0 * value + 1.0 };
-
-        if allow_resign && value < 0.05 {  // resign the game if the evaluation looks bad
-            return GameResult::Resign(sgf, board, current.opposite(), -value);
-        } else if index == 361 {  // passing move
-            sgf += &format!(";{}[]P[{}]V[{}]", current, b85::encode(&policy), value_sgf);
-            pass_count += 1;
-
-            if pass_count >= 2 {
-                return GameResult::Ended(sgf, board)
-            }
-
-            root = tree::Node::forward(tree, 361);
-        } else {
-            let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
-
-            sgf += &format!(";{}[{}]P[{}]V[{}]",
-                current,
-                CGoban::to_sgf(x, y),
-                b85::encode(&policy),
-                value_sgf
-            );
-            if prior_index != 361 {
-                sgf += &format!("TR[{}]",
-                    CGoban::to_sgf(
-                        tree::X[prior_index] as usize,
-                        tree::Y[prior_index] as usize
-                    )
-                );
-            };
-
-            pass_count = 0;
-            board.place(current, x, y);
-            root = tree::Node::forward(tree, index);
-        }
-
-        current = current.opposite();
-        count += 1;
-    }
-
-    GameResult::Ended(sgf, board)
-}
-
-/// Play games against the engine and return the result of the games
-/// over the channel.
-/// 
-/// # Arguments
-/// 
-/// * `network` - the neural network to use during evaluation
-/// * `num_games` - the number of games to generate
-/// 
-pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, PredictService) {
-    let server = predict::service(network);
-    let (sender, receiver) = channel();
-
-    // spawn the worker threads that generate the self-play games
-    let num_parallel = ::std::cmp::min(num_games, *config::NUM_GAMES);
-    let num_workers = Arc::new(AtomicUsize::new(num_parallel));
-    let processed = Arc::new(AtomicUsize::new(0));
-
-    for _ in 0..num_parallel {
-        let num_workers = num_workers.clone();
-        let processed = processed.clone();
-        let sender = sender.clone();
-        let server = server.lock().clone_static();
-
-        thread::spawn(move || {
-            while processed.fetch_add(1, Ordering::SeqCst) < num_games {
-                let result = self_play_one(&server, &num_workers);
-
-                if sender.send(result).is_err() {
-                    break
-                }
-            }
-
-            num_workers.fetch_sub(1, Ordering::Release);
-        });
-    }
-
-    (receiver, server)
-}
-
-/// Play a game against the engine and return the result of the game.
-/// This is different from `self_play` because this method does not
-/// perform any search and only plays stochastically according
-/// to the policy network.
-/// 
-/// # Arguments
-/// 
-/// * `server` - the server to use during evaluation
-/// 
-fn policy_play_one(server: &PredictGuard) -> GameResult {
-    let mut temperature = (*config::TEMPERATURE + 1e-3).recip();
-    let mut board = Board::new(get_random_komi());
-    let mut sgf = String::new();
-    let mut current = Color::Black;
-    let mut pass_count = 0;
-    let mut count = 0;
-
-    while pass_count < 2 && count < 722 && !board.is_scoreable() {
-        let result = forward(&server, &board, current);
-        if result.is_none() {
-            break
-        }
-
-        let (_, policy) = result.unwrap();
-
-        // pick a move stochastically according to its prior value with the
-        // specified temperature (to priority strongly suggested moves, and
-        // avoid picking _noise_ moves).
-        let index = {
-            let policy_sum = policy.iter()
-                .filter(|p| p.is_finite())
-                .map(|p| p.powf(temperature))
-                .sum::<f32>();
-            let threshold = policy_sum * thread_rng().gen::<f32>();
-            let mut so_far = 0.0f32;
-            let mut best = None;
-
-            for i in 0..362 {
-                if policy[i].is_finite() {
-                    so_far += policy[i].powf(temperature);
-
-                    if so_far >= threshold {
-                        best = Some(i);
-                        break
-                    }
-                }
-            }
-
-            best  // if nothing, then pass
-        };
-
-        if let Some(index) = index {
-            if index == 361 {  // pass
-                sgf += &format!(";{}[]", current);
-                pass_count += 1;
-            } else {  // normal move
-                let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
-
-                sgf += &format!(";{}[{}]", current, CGoban::to_sgf(x, y));
-                pass_count = 0;
-                board.place(current, x, y);
-            }
-        } else {  // no valid moves remaining
-            sgf += &format!(";{}[]", current);
-            pass_count += 1;
-        }
-
-        // continue with the next turn
-        temperature = min(5.0, 1.03 * temperature);
-        current = current.opposite();
-        count += 1;
-    }
-
-    // if the receiver has terminated then quit
-    GameResult::Ended(sgf, board)
-}
-
-/// Play games against the engine and return the results of the game over
-/// the returned channel. This is different from `self_play` because this
-/// method does not perform any search and only plays stochastically according
-/// to the policy network.
-/// 
-/// # Arguments
-/// 
-/// * `network` - the neural network to use during evaluation
-/// * `num_games` - 
-/// 
-pub fn policy_play(network: Network, num_games: usize) -> (Receiver<GameResult>, PredictService) {
-    let server = predict::service(network);
-    let (sender, receiver) = channel();
-
-    // spawn the worker threads that generate the self-play games
-    let num_workers = ::std::cmp::min(*config::NUM_GAMES, num_games);
-    let remaining = Arc::new(AtomicUsize::new(num_games));
-
-    for _ in 0..num_workers {
-        let remaining = remaining.clone();
-        let sender = sender.clone();
-        let server = server.lock().clone_static();
-
-        thread::spawn(move || {
-            while remaining.load(Ordering::Acquire) > 0 {
-                remaining.fetch_sub(1, Ordering::AcqRel);
-
-                let result = policy_play_one(&server);
-
-                if sender.send(result).is_err() {
-                    break
-                }
-            }
-        });
-    }
-
-    (receiver, server)
-}
-
-/// Play the given board until the end using the policy of the neural network
-/// in a greedy manner (ignoring the pass move every time) until it is scoreable
-/// according to the TT-rules.
-/// 
-/// # Arguments
-/// 
-/// * `server` - the server to use during evaluation
-/// * `board` - the board to score
-/// * `next_color` - the color of the player whose turn it is to play
-/// 
-pub fn greedy_score(server: &PredictGuard, board: &Board, next_color: Color) -> (Board, String) {
-    let mut board = board.clone();
-    let mut sgf = String::new();
-    let mut current = next_color;
-    let mut pass_count = 0;
-    let mut count = 0;
-
-    while count < 722 && pass_count < 2 && !board.is_scoreable() {
-        let result = forward(&server, &board, current);
-        if result.is_none() {
-            break
-        }
-
-        let (_, policy) = result.unwrap();
-
-        // pick a move stochastically according to its prior value with the
-        // specified temperature (to priority strongly suggested moves, and
-        // avoid picking _noise_ moves).
-        let index = (0..361)
-            .filter(|&i| policy[i].is_finite())
-            .max_by_key(|&i| OrderedFloat(policy[i]));
-
-        if let Some(index) = index {
-            let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
-
-            sgf += &format!(";{}[{}]", current, Sabaki::to_sgf(x, y));
-            pass_count = 0;
-            board.place(current, x, y);
-        } else {  // no valid moves remaining
-            sgf += &format!(";{}[]", current);
-            pass_count += 1;
-        }
-
-        // continue with the next turn
-        current = current.opposite();
-        count += 1;
-    }
-
-    (board, sgf)
 }
 
 #[cfg(test)]
