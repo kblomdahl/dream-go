@@ -9,7 +9,7 @@ Dream Go is an independent implementation of the algorithms and concepts present
 ## Dependencies
 
 * [CUDAv8](https://developer.nvidia.com/cuda-zone) and [cuDNNv6](https://developer.nvidia.com/cudnn) (or higher)
-* [NVIDIA GPU](https://developer.nvidia.com/cuda-gpus) (Compute Capability 6.0 or higher)
+* [NVIDIA GPU](https://developer.nvidia.com/cuda-gpus) (Compute Capability 6.1 or higher)
 
 ## Dev Dependencies
 
