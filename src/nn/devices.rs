@@ -28,7 +28,7 @@ lazy_static! {
         };
 
         if devices.is_empty() {
-            panic!("No device available with the required compute capacity (6.1)");
+            panic!("No device available with the required compute capacity (6.0)");
         }
 
         devices
@@ -79,10 +79,10 @@ fn compute_capability(device_id: i32) -> (i32, i32) {
 /// 
 /// There is no flag that NVIDIA expose to determine this, so we
 /// determine this by the CUDA version (>= 8) and the compute
-/// capabilities (6.1+).
+/// capabilities (6.0+).
 pub fn is_supported(device_id: i32) -> bool {
-    let (major, minor) = compute_capability(device_id);
+    let (major, _minor) = compute_capability(device_id);
     let version = runtime_version();
 
-    version >= 8000 && (major == 6 && minor >= 1 || major >= 7)
+    version >= 8000 && major >= 6
 }
