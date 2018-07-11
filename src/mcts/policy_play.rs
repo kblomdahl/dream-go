@@ -12,9 +12,64 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use ordered_float::OrderedFloat;
+
 use go::{Board, Color};
 use util::config;
 use mcts::*;
+
+/// pick the move from the policy by taking the top 80% of the policy, and then
+/// choosing a move from the remains (weighted by the moves policy value)
+/// 
+/// # Arguments
+/// 
+/// * `policy` - 
+/// * `temperature` - 
+/// 
+fn policy_choose(policy: &[f32], temperature: f32) -> Option<usize> {
+    let mut candidates = (0..362).collect::<Vec<usize>>();
+    let mut subtotals = [0.0f32; 362];
+
+    candidates.sort_unstable_by_key(|&i| OrderedFloat(-policy[i]));
+
+    // calculate the subtotals for the sorted candidates so that we can
+    // efficiently determine the cutoff point, using binary search.
+    for i in 0..362 {
+        let j = candidates[i];
+        let value = policy[j].powf(temperature);
+
+        if value.is_finite() {
+            subtotals[i] = if i > 0 { subtotals[i-1] + value } else { value };
+        } else {
+            subtotals[i] = if i > 0 { subtotals[i-1] } else { 0.0 };
+        }
+    }
+
+    // if there are no valid moves remaining then pass, otherwise pick
+    // a random move using binary search over the `subtotals`.
+    if subtotals[361] > 0.0 {
+        let threshold = 0.8 * thread_rng().gen::<f32>() * subtotals[361];
+        let mut index = match subtotals.binary_search_by_key(&OrderedFloat(threshold), |&s| OrderedFloat(s)) {
+            Ok(i) => i,
+            Err(i) => i
+        };
+
+        // if the binary search found one of the invalid moves then step
+        // backward, and then forward again iff we landed on a move with
+        // no preceeding legal move.
+        while index > 0 && subtotals[index - 1] == subtotals[index] {
+            index -= 1;
+        }
+
+        while subtotals[index] == 0.0 {
+            index += 1;
+        }
+
+        Some(candidates[index])
+    } else {
+        None
+    }
+}
 
 /// Play a game against the engine and return the result of the game.
 /// This is different from `self_play` because this method does not
@@ -27,69 +82,40 @@ use mcts::*;
 /// 
 fn policy_play_one(server: &PredictGuard) -> GameResult {
     let mut temperature = (*config::TEMPERATURE + 1e-3).recip();
-    let mut board = Board::new(get_random_komi());
     let mut sgf = String::new();
-    let mut current = Color::Black;
+
+    // loop until we run or of legal moves, the board is fully scoreable, or
+    // we have played 722 moves in total.
+    let mut board = Board::new(get_random_komi());
+    let mut color = Color::Black;
     let mut pass_count = 0;
-    let mut count = 0;
 
-    while pass_count < 2 && count < 722 && !board.is_scoreable() {
-        let result = forward(&server, &board, current);
-        if result.is_none() {
-            break
-        }
-
-        let (_, policy) = result.unwrap();
-
-        // pick a move stochastically according to its prior value with the
-        // specified temperature (to priority strongly suggested moves, and
-        // avoid picking _noise_ moves).
-        let index = {
-            let policy_sum = policy.iter()
-                .filter(|p| p.is_finite())
-                .map(|p| p.powf(temperature))
-                .sum::<f32>();
-            let threshold = policy_sum * thread_rng().gen::<f32>();
-            let mut so_far = 0.0f32;
-            let mut best = None;
-
-            for i in 0..362 {
-                if policy[i].is_finite() {
-                    so_far += policy[i].powf(temperature);
-
-                    if so_far >= threshold {
-                        best = Some(i);
-                        break
-                    }
-                }
+    while pass_count < 2 && board.count() < 722 {
+        let result = forward(&server, &board, color);
+        let index = if let Some((_value, policy)) = result {
+            match policy_choose(&policy, temperature) {
+                Some(index) => index,
+                None => 361
             }
-
-            best  // if nothing, then pass
+        } else {
+            break;  // failure?
         };
 
-        if let Some(index) = index {
-            if index == 361 {  // pass
-                sgf += &format!(";{}[]", current);
-                pass_count += 1;
-            } else {  // normal move
-                let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
-
-                sgf += &format!(";{}[{}]", current, CGoban::to_sgf(x, y));
-                pass_count = 0;
-                board.place(current, x, y);
-            }
-        } else {  // no valid moves remaining
-            sgf += &format!(";{}[]", current);
+        if index == 361 {
+            sgf += &format!(";{}[]", color);
             pass_count += 1;
+        } else {
+            let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
+
+            board.place(color, x, y);
+            sgf += &format!(";{}[{}]", color, Sabaki::to_sgf(x, y));
+            pass_count = 0;
         }
 
-        // continue with the next turn
         temperature = min(5.0, 1.03 * temperature);
-        current = current.opposite();
-        count += 1;
+        color = color.opposite();
     }
 
-    // if the receiver has terminated then quit
     GameResult::Ended(sgf, board)
 }
 
