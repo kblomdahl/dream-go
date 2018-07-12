@@ -156,8 +156,7 @@ while not sys.stdin.closed:
                     url.fragment  # fragment
                 )),
                 json.dumps(body),
-                { 'Content-Type': 'application/json'},
-                encode_chunked=True
+                { 'Content-Type': 'application/json'}
             )
 
             # check that we succeeded
