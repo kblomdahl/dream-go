@@ -1,5 +1,5 @@
 FROM nvidia/cuda:9.1-cudnn7-devel
-RUN apt-get update -y && apt-get install -y curl python3 gnugo jq gcc
+RUN apt-get update -y && apt-get install -y curl python3 gnugo jq gcc libblosc-dev
 
 RUN mkdir -p /app/
 COPY .staging/upload2rest.py /app/upload2rest.py

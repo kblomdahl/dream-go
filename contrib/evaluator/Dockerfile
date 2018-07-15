@@ -1,6 +1,6 @@
 FROM nvidia/cuda:9.1-cudnn7-devel
 RUN apt-get update -y && apt-get install -y \
-    curl python python-pip python3 python3-pip jq gcc
+    curl python python-pip python3 python3-pip jq gcc libblosc-dev
 
 RUN mkdir -p /app/
 COPY .staging/sgf2big.py /app/sgf2big.py

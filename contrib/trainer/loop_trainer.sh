@@ -21,7 +21,7 @@ while true; do
         echo "[`date +%H:%M:%S`] tick"
 
         # fetch the latest batch of features from the database
-        LIMIT=500000
+        LIMIT=1000000
 
         curl --compressed -sg "http://$DB/api/v1/features?limit=$LIMIT" | jq -r '.[].data' | base64 --decode > /tmp/features.tfrecord
 
