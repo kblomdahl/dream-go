@@ -144,6 +144,8 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, B
         //
         // we skip the first symmetry because it is the identity symmetry, which
         // is always a symmetry for any board.
+        let mut moved = (0..361).collect::<Vec<_>>();
+
         for &t in &SYMM[1..8] {
             if !symmetry::is_symmetric(board, t) {
                 continue;
@@ -161,13 +163,19 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, B
                     visited[j] = true;
 
                     let src = ::std::cmp::max(i, j);
-                    let dst = ::std::cmp::min(i, j);
+                    let mut dst = ::std::cmp::min(i, j);
+
+                    while moved[dst] != dst {
+                        dst = moved[dst];
+                    }
 
                     if policy[src].is_finite() {
                         assert!(policy[dst].is_finite());
 
                         policy[dst] += policy[src];
                         policy[src] = ::std::f32::NEG_INFINITY;
+
+                        moved[src] = dst;
                     }
                 }
             }
