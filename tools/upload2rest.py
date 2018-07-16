@@ -85,7 +85,11 @@ def read_tfrecord(input):
     length_bytes = b''
 
     while len(length_bytes) < 8:
-        length_bytes += input.read(8 - len(length_bytes))
+        buf = input.read(8 - len(length_bytes))
+        if not buf:
+            return None
+
+        length_bytes += buf
 
     length = struct.unpack('<Q', length_bytes)[0] + 8
     remaining = b''
