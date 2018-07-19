@@ -13,7 +13,7 @@ while true; do
     NUM_FEATURES=`curl -sg "http://$DB/api/v1/networks?sort[elo]=desc&limit=1" | jq -r '.[].number_of_features'`
     ANY_UNRATED=`curl -sg "http://$DB/api/v1/networks?limit=50000" | jq 'select(.[].elo == null)'`
 
-    if test $NUM_FEATURES -lt 40000 -o -n "$ANY_UNRATED" ; then
+    if test $NUM_FEATURES -lt 100000 -o -n "$ANY_UNRATED" ; then
         echo "[`date +%H:%M:%S`] waiting ($NUM_FEATURES)"
 
         sleep 300
@@ -23,7 +23,9 @@ while true; do
         # fetch the latest batch of features from the database
         LIMIT=1000000
 
-        curl --compressed -sg "http://$DB/api/v1/features?limit=$LIMIT" | jq -r '.[].data' | base64 --decode > /tmp/features.tfrecord
+        curl -sg "http://$DB/api/v1/features?limit=$LIMIT" | \
+            jq -r --stream 'select(.[0][1] == "data" and .[1]) | .[1]' | \
+            base64 --decode > /tmp/features.tfrecord
 
         # if this is the first network then train from scratch, otherwise perform
         # a warm start from the latest model.
