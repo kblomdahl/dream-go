@@ -483,7 +483,7 @@ def get_dataset(files, batch_size=1, is_training=True):
             dataset = dataset.repeat()
             dataset = dataset.map(_augment, num_parallel_calls=8)
             dataset = dataset.map(_fix_history, num_parallel_calls=8)
-            dataset = dataset.shuffle(393408)
+            dataset = dataset.shuffle(524288)
         dataset = dataset.batch(batch_size)
 
         return dataset
