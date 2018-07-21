@@ -31,7 +31,7 @@ for bin in glob('./dist/*'):
 
 names = sorted([name for name in players.keys()])
 matchups = list([
-    Matchup(name_1, name_2, alternating=True, number_of_games=20)
+    Matchup(name_1, name_2, alternating=True, number_of_games=31)
     for (i, name_1) in enumerate(names)
     for name_2 in names[i+1:]
 ])

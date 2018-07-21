@@ -44,7 +44,7 @@ def score_game(sgf):
         # start-up our judge (gnugo)
         gnugo = Popen(
             ['/usr/games/gnugo',
-             '--score', 'aftermath',
+             '--score', 'estimate',
              '--chinese-rules', '--positional-superko',
              '-l', sgf_file.name],
             stdin=DEVNULL,

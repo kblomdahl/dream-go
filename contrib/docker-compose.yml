@@ -10,17 +10,6 @@ services:
     volumes:
       - ./trainer/models:/app/models
 
-  evaluator:
-    image: 'dream_go/evaluator:0.5.0'
-    deploy:
-      resources:
-        limits:
-          cpus: '8'
-    environment:
-      NVIDIA_VISIBLE_DEVICES: 0
-      DB: localhost:5000
-    network_mode: 'host'
-
   worker:
     image: 'dream_go/worker:0.5.0'
     deploy:
