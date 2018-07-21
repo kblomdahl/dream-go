@@ -8,12 +8,12 @@ while true; do
     # wait until:
     #
     # - all networks has been rated
-    # - the best rated network has at least 40,000 played games
+    # - the best rated network has at least 200,000 played games
     #
     NUM_FEATURES=`curl -sg "http://$DB/api/v1/networks?sort[elo]=desc&limit=1" | jq -r '.[].number_of_features'`
     ANY_UNRATED=`curl -sg "http://$DB/api/v1/networks?limit=50000" | jq 'select(.[].elo == null)'`
 
-    if test $NUM_FEATURES -lt 100000 -o -n "$ANY_UNRATED" ; then
+    if test $NUM_FEATURES -lt 200000 -o -n "$ANY_UNRATED" ; then
         echo "[`date +%H:%M:%S`] waiting ($NUM_FEATURES)"
 
         sleep 300

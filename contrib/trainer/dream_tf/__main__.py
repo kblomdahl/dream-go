@@ -477,12 +477,12 @@ def get_dataset(files, batch_size=1, is_training=True):
 
     with tf.device('cpu:0'):
         dataset = tf.data.TFRecordDataset(files, num_parallel_reads=4)
-        dataset = dataset.map(_parse, num_parallel_calls=4)
+        dataset = dataset.map(_parse, num_parallel_calls=8)
         dataset = dataset.map(_fix_shape)
         if is_training:
             dataset = dataset.repeat()
-            dataset = dataset.map(_augment, num_parallel_calls=4)
-            dataset = dataset.map(_fix_history, num_parallel_calls=4)
+            dataset = dataset.map(_augment, num_parallel_calls=8)
+            dataset = dataset.map(_fix_history, num_parallel_calls=8)
             dataset = dataset.shuffle(393408)
         dataset = dataset.batch(batch_size)
 
