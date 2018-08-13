@@ -66,7 +66,6 @@ impl Counter for Two {
     type Output = usize;
 
     fn get(&self) -> Self::Output { self.other }
-
     fn add(&mut self, index: usize) -> bool {
         if index != self.other {
             self.other = index;

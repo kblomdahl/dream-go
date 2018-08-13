@@ -33,7 +33,7 @@ use util::b85;
 fn skip_until<I>(iter: &mut I, stop: char) -> String
     where I: Iterator<Item=u8>
 {
-    let mut out: String = String::new();
+    let mut out: String = String::with_capacity(32);
 
     loop {
         if let Some(ch) = iter.next() {
@@ -106,6 +106,32 @@ impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
     }
 }
 
+/// Load all tensors in the given buffer and returns a map from
+/// their name to description. If we failed to load any tensors
+/// from the given file then `None` is returned.
+/// 
+/// # Arguments
+/// 
+/// * `path` -
+/// 
+fn load_aux<I: Iterator<Item=u8>>(reader: I) -> Option<HashMap<String, Tensor>> {
+    let mut out: HashMap<String, Tensor> = HashMap::new();
+    let iter = JsonEntryIter { iter: reader };
+
+    for (name, t) in iter {
+        debug_assert!(t.scale > 0.0, "scale is non-positive for layer {} -- {}", name, t.scale);
+
+        out.insert(name, t);
+    }
+
+    // an empty result-set is an error
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 /// Load all tensors in the given file and returns a map from
 /// their name to description. If we failed to load any tensors
 /// from the given file then `None` is returned.
@@ -116,39 +142,33 @@ impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
 /// 
 pub fn load(path: &Path) -> Option<HashMap<String, Tensor>> {
     if let Ok(file) = File::open(path) {
-        let mut out: HashMap<String, Tensor> = HashMap::new();
-        let mut iter = JsonEntryIter {
-            iter: BufReader::new(file).bytes().map(|ch| ch.unwrap())
-        };
-
-        for (name, t) in iter {
-            debug_assert!(t.scale > 0.0, "scale is non-positive for layer {} -- {}", name, t.scale);
-
-            out.insert(name, t);
-        }
-
-        Some(out)
+        load_aux(BufReader::new(file).bytes().map(|ch| ch.unwrap()))
     } else {
         None
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-    use test::{Bencher};
+    use nn::loader::load_aux;
 
-    use nn::loader::load;
+    #[test]
+    fn empty_json() {
+        let out = load_aux("".as_bytes().into_iter().map(|ch| *ch));
 
-    #[bench]
-    fn load_json(b: &mut Bencher) {
-        b.iter(|| {
-            let out = load(Path::new("dream_go.json"));
+        assert!(out.is_none());
+    }
 
-            assert!(out.is_some());
-            out
-        });
+    #[test]
+    fn load_json() {
+        let out = load_aux("{\"11v_value/linear_2/offset:0\": {\"s\": \"(^d>V\", \"v\": \"(^d>V\"}}".as_bytes().into_iter().map(|ch| *ch));
+        assert!(out.is_some());
+
+        // verify internal values
+        let out = out.unwrap();
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out["11v_value/linear_2/offset:0"].scale, 0.13704996);
+        assert_eq!(out["11v_value/linear_2/offset:0"].size_in_bytes, 4);
     }
 }
-*/

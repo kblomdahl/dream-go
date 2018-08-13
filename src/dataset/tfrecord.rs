@@ -170,3 +170,27 @@ pub fn encode(features: Vec<u8>, winner: Vec<u8>, policy: Vec<u8>) -> io::Result
 
     Ok(out.into_inner())
 }
+
+#[cfg(test)]
+mod tests {
+    use ::dataset::tfrecord;
+
+    #[test]
+    fn encode_tfrecord() {
+        let features = vec! [0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
+        let winner = vec! [0x10, 0x11, 0x12, 0x13];
+        let policy = vec! [0xf0, 0xf1, 0xf2, 0xf3];
+
+        assert_eq!(
+            tfrecord::encode(features, winner, policy).unwrap(),
+            vec! [
+                65, 0, 0, 0, 0, 0, 0, 0, 0, 169, 194, 171, 10, 63, 10,
+                22, 10, 8, 102, 101, 97, 116, 117, 114, 101, 115, 18,
+                10, 10, 8, 10, 6, 10, 11, 12, 13, 14, 15, 10, 18, 10,
+                6, 112, 111, 108, 105, 99, 121, 18, 8, 10, 6, 10, 4,
+                240, 241, 242, 243, 10, 17, 10, 5, 118, 97, 108, 117,
+                101, 18, 8, 10, 6, 10, 4, 16, 17, 18, 19, 75, 5, 43, 44
+            ]
+        );
+    }
+}
