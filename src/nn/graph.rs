@@ -27,12 +27,6 @@ use nn::slots::*;
 use nn::output_map::*;
 use nn::tensor::Tensor;
 
-/// The number of features in the neural network architecture.
-const NUM_CHANNELS: usize = 128;
-
-/// The number of residual blocks in the neural network architecture.
-const NUM_LAYERS: usize = 9;
-
 /// A __global__ constant that contains `0.0`.
 const ZERO: f32 = 0.0;
 
@@ -100,6 +94,16 @@ unsafe fn load_to_host<T: InferenceType>(
     host.into_iter().map(|x| x.as_f32()).collect()
 }
 
+/// Returns the integer square root of `x`.
+/// 
+/// # Arguments
+/// 
+/// * `x` - the number to take the square root of.
+/// 
+fn isqrt(x: usize) -> i32 {
+    (x as f32).sqrt() as i32
+}
+
 // -------- Graph --------
 
 pub struct Builder {
@@ -124,15 +128,22 @@ impl Builder {
     /// 
     pub fn get_workspace(&self, batch_size: usize) -> Workspace {
         let mut handle_dnn: cudnn::Handle = ptr::null();
-
         unsafe {
             check!(cudnn::cudnnCreate(&mut handle_dnn));
         }
+
+        let c_up = unsafe { Rc::new(UpLayer::new(&handle_dnn, batch_size as i32, &self.tensors)) };
+        let c_residual = unsafe { (2..100).filter_map(|i| {
+            ResidualLayer::new(&handle_dnn, batch_size as i32, i, &self.tensors).map(|x| Rc::new(x))
+        }).collect::<Vec<Rc<ResidualLayer>>>() };
+        let c_value = unsafe { Rc::new(ValueLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)) };
+        let c_policy = unsafe { Rc::new(PolicyLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)) };
 
         let mut w = Workspace {
             batch_size: batch_size,
             tensors: self.tensors.clone(),
             slots: self.slots.clone(),
+            num_channels: c_residual[0].num_channels,
 
             handle_blas: ptr::null(),
             handle_dnn: handle_dnn,
@@ -143,12 +154,10 @@ impl Builder {
             policy_stream: ptr::null(),
             value_stream: ptr::null(),
 
-            c_up: unsafe { Rc::new(UpLayer::new(&handle_dnn, batch_size as i32, &self.tensors)) },
-            c_value: unsafe { Rc::new(ValueLayer::new(&handle_dnn, batch_size as i32, &self.tensors)) },
-            c_policy: unsafe { Rc::new(PolicyLayer::new(&handle_dnn, batch_size as i32, &self.tensors)) },
-            c_residual: (0..NUM_LAYERS).map(|i| unsafe {
-                Rc::new(ResidualLayer::new(&handle_dnn, batch_size as i32, i, &self.tensors))
-            }).collect()
+            c_up: c_up,
+            c_value: c_value,
+            c_policy: c_policy,
+            c_residual: c_residual
         };
 
         unsafe {
@@ -171,6 +180,7 @@ pub struct Workspace {
     batch_size: usize,
     tensors: Arc<HashMap<String, Tensor>>,
     slots: Slots,
+    num_channels: usize,
 
     handle_dnn: cudnn::Handle,
     handle_blas: cublas::Handle,
@@ -238,6 +248,7 @@ impl UpLayer {
     /// 
     unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> UpLayer {
         let weights = &tensors["01_upsample/conv_1:0"];
+        let num_channels = weights.size_in_elements / (9 * NUM_FEATURES);
         let mut out = UpLayer {
             input: ptr::null(),
             output: ptr::null(),
@@ -263,7 +274,7 @@ impl UpLayer {
             out.output,
             cudnn::TensorFormat::NCHWVECTC,
             cudnn::DataType::Int8x4,
-            n, NUM_CHANNELS as i32, 19, 19
+            n, num_channels as i32, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset));
@@ -271,7 +282,7 @@ impl UpLayer {
             out.offset,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Float,
-            1, NUM_CHANNELS as i32, 1, 1
+            1, num_channels as i32, 1, 1
         ));
 
         check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter));
@@ -279,7 +290,7 @@ impl UpLayer {
             out.filter,
             cudnn::DataType::Int8x4,
             cudnn::TensorFormat::NCHWVECTC,
-            NUM_CHANNELS as i32, NUM_FEATURES as i32, 3, 3
+            num_channels as i32, NUM_FEATURES as i32, 3, 3
         ));
 
         check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu));
@@ -337,8 +348,9 @@ impl UpLayer {
         weights.copy_to_device(device_id, workspace.tower_stream);
 
         // perform the forward convolution
+        let num_channels = offset.size_in_elements;
         let workspace_1 = slots.get_slot(Slot::Workspace_1, self.fwd_algo.memory, workspace.tower_stream);
-        let output = slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * NUM_CHANNELS * 361, workspace.tower_stream);
+        let output = slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * num_channels * 361, workspace.tower_stream);
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -365,6 +377,7 @@ struct ResidualLayer {
     relu: cudnn::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
+    num_channels: usize,
 
     count: usize,
     alpha1: f32,
@@ -391,12 +404,20 @@ impl ResidualLayer {
     /// 
     /// * `handle` - The cuDNN handle
     /// * `n` - The number of images.
-    /// * `i` - What number of residual block this is
+    /// * `i` - The index of the layer.
     /// * `tensors` - 
     /// 
-    unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> ResidualLayer {
-        let weights_1 = &tensors[&format!("{:02}_residual/conv_1:0", 2 + i)];
-        let weights_2 = &tensors[&format!("{:02}_residual/conv_2:0", 2 + i)];
+    unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Option<ResidualLayer> {
+        let weights_1 = tensors.get(&format!("{:02}_residual/conv_1:0", i));
+        let weights_2 = tensors.get(&format!("{:02}_residual/conv_2:0", i));
+
+        if weights_1.is_none() || weights_2.is_none() {
+            return None;
+        }
+
+        let weights_1 = weights_1.unwrap();
+        let weights_2 = weights_2.unwrap();
+        let num_channels = isqrt(weights_1.size_in_elements / 9);
         let mut out = ResidualLayer {
             tensor: ptr::null(),
             offset: ptr::null(),
@@ -404,6 +425,7 @@ impl ResidualLayer {
             relu: ptr::null(),
             descr: ptr::null(),
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
+            num_channels: num_channels as usize,
 
             count: i,
             alpha1: weights_1.scale / 127.0,
@@ -415,7 +437,7 @@ impl ResidualLayer {
             out.tensor,
             cudnn::TensorFormat::NCHWVECTC,
             cudnn::DataType::Int8x4,
-            n, NUM_CHANNELS as i32, 19, 19
+            n, num_channels as i32, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset));
@@ -423,7 +445,7 @@ impl ResidualLayer {
             out.offset,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Float,
-            1, NUM_CHANNELS as i32, 1, 1
+            1, num_channels as i32, 1, 1
         ));
 
         check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter));
@@ -431,7 +453,7 @@ impl ResidualLayer {
             out.filter,
             cudnn::DataType::Int8x4,
             cudnn::TensorFormat::NCHWVECTC,
-            NUM_CHANNELS as i32, NUM_CHANNELS as i32, 3, 3
+            num_channels as i32, num_channels as i32, 3, 3
         ));
 
         check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu));
@@ -468,7 +490,7 @@ impl ResidualLayer {
 
         assert!(num_fwd_algo > 0);
 
-        out
+        Some(out)
     }
 
     unsafe fn forward<'a, T: InferenceType>(
@@ -482,19 +504,21 @@ impl ResidualLayer {
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream));
 
         let device_id = get_current_device();
-        let weights_1 = &workspace.tensors[&format!("{:02}_residual/conv_1:0", 2 + self.count)];
-        let weights_2 = &workspace.tensors[&format!("{:02}_residual/conv_2:0", 2 + self.count)];
-        let offset_1 = &workspace.tensors[&format!("{:02}_residual/conv_1/offset:0", 2 + self.count)];
-        let offset_2 = &workspace.tensors[&format!("{:02}_residual/conv_2/offset:0", 2 + self.count)];
+        let weights_1 = &workspace.tensors[&format!("{:02}_residual/conv_1:0", self.count)];
+        let weights_2 = &workspace.tensors[&format!("{:02}_residual/conv_2:0", self.count)];
+        let offset_1 = &workspace.tensors[&format!("{:02}_residual/conv_1/offset:0", self.count)];
+        let offset_2 = &workspace.tensors[&format!("{:02}_residual/conv_2/offset:0", self.count)];
 
         weights_1.copy_to_device(device_id, workspace.tower_stream);
         weights_2.copy_to_device(device_id, workspace.tower_stream);
         offset_1.copy_to_device(device_id, workspace.tower_stream);
         offset_2.copy_to_device(device_id, workspace.tower_stream);
 
+        debug_assert!(offset_1.size_in_elements == offset_2.size_in_elements);
+
         // perform the forward convolution (1)
         let workspace_r = slots.get_slot(Slot::Workspace_r, self.fwd_algo.memory, workspace.tower_stream);
-        let residual_2 = slots.get_slot(Slot::Residual_2, size_of::<T::Tower>() * workspace.batch_size * NUM_CHANNELS * 361, workspace.tower_stream);
+        let residual_2 = slots.get_slot(Slot::Residual_2, size_of::<T::Tower>() * workspace.batch_size * self.num_channels * 361, workspace.tower_stream);
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -544,6 +568,7 @@ struct ValueLayer {
     bias_2: cudnn::TensorDescriptor,
     tanh: cudnn::ActivationDescriptor,
 
+    count: usize,
     alpha1: f32,
     alpha2: f32
 }
@@ -575,10 +600,12 @@ impl ValueLayer {
     /// 
     /// * `handle` - The cuDNN handle
     /// * `n` - The number of images.
+    /// * `i` - The index of the layer.
     /// * `tensors` - 
     /// 
-    unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> ValueLayer {
-        let weights_1 = &tensors[&format!("{:02}v_value/conv_1:0", 2 + NUM_LAYERS)];
+    unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> ValueLayer {
+        let weights_1 = &tensors[&format!("{:02}v_value/conv_1:0", i)];
+        let num_channels = weights_1.size_in_elements as i32;
         let mut out = ValueLayer {
             input: ptr::null(),
             offset: ptr::null(),
@@ -594,6 +621,7 @@ impl ValueLayer {
             bias_2: ptr::null(),
             tanh: ptr::null(),
 
+            count: i,
             alpha1: weights_1.scale / 127.0,
             alpha2: SIX / 127.0
         };
@@ -603,7 +631,7 @@ impl ValueLayer {
             out.input,
             cudnn::TensorFormat::NCHWVECTC,
             cudnn::DataType::Int8x4,
-            n, NUM_CHANNELS as i32, 19, 19
+            n, num_channels, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_1));
@@ -659,7 +687,7 @@ impl ValueLayer {
             out.filter,
             cudnn::DataType::Int8x4,
             cudnn::TensorFormat::NCHWVECTC,
-            1, NUM_CHANNELS as i32, 1, 1
+            1, num_channels, 1, 1
         ));
 
         check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu));
@@ -720,12 +748,12 @@ impl ValueLayer {
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.value_stream));
 
         let device_id = get_current_device();
-        let weights_1 = &workspace.tensors[&format!("{:02}v_value/conv_1:0", 2 + NUM_LAYERS)];
-        let weights_2 = &workspace.tensors[&format!("{:02}v_value/linear_1:0", 2 + NUM_LAYERS)];
-        let weights_3 = &workspace.tensors[&format!("{:02}v_value/linear_2:0", 2 + NUM_LAYERS)];
-        let offset_1 = &workspace.tensors[&format!("{:02}v_value/conv_1/offset:0", 2 + NUM_LAYERS)];
-        let offset_2 = &workspace.tensors[&format!("{:02}v_value/linear_1/offset:0", 2 + NUM_LAYERS)];
-        let offset_3 = &workspace.tensors[&format!("{:02}v_value/linear_2/offset:0", 2 + NUM_LAYERS)];
+        let weights_1 = &workspace.tensors[&format!("{:02}v_value/conv_1:0", self.count)];
+        let weights_2 = &workspace.tensors[&format!("{:02}v_value/linear_1:0", self.count)];
+        let weights_3 = &workspace.tensors[&format!("{:02}v_value/linear_2:0", self.count)];
+        let offset_1 = &workspace.tensors[&format!("{:02}v_value/conv_1/offset:0", self.count)];
+        let offset_2 = &workspace.tensors[&format!("{:02}v_value/linear_1/offset:0", self.count)];
+        let offset_3 = &workspace.tensors[&format!("{:02}v_value/linear_2/offset:0", self.count)];
 
         weights_1.copy_to_device(device_id, workspace.value_stream);
         weights_2.copy_to_device(device_id, workspace.value_stream);
@@ -830,6 +858,7 @@ struct PolicyLayer {
     policy_1: cudnn::TensorDescriptor,
     policy_2: cudnn::TensorDescriptor,
 
+    count: usize,
     alpha1: f32,
     alpha2: f32
 }
@@ -859,10 +888,12 @@ impl PolicyLayer {
     /// 
     /// * `handle` - The cuDNN handle
     /// * `n` - The number of images.
+    /// * `i` - The index of the layer.
     /// * `tensors` - 
     /// 
-    unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> PolicyLayer {
-        let weights_1 = &tensors[&format!("{:02}p_policy/conv_1:0", 2 + NUM_LAYERS)];
+    unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> PolicyLayer {
+        let weights_1 = &tensors[&format!("{:02}p_policy/conv_1:0", i)];
+        let num_channels = weights_1.size_in_elements / 2;
         let mut out = PolicyLayer {
             input: ptr::null(),
             offset: ptr::null(),
@@ -876,6 +907,7 @@ impl PolicyLayer {
             policy_1: ptr::null(),
             policy_2: ptr::null(),
 
+            count: i,
             alpha1: weights_1.scale / 127.0,
             alpha2: SIX / 127.0
         };
@@ -885,7 +917,7 @@ impl PolicyLayer {
             out.input,
             cudnn::TensorFormat::NCHWVECTC,
             cudnn::DataType::Int8x4,
-            n, NUM_CHANNELS as i32, 19, 19
+            n, num_channels as i32, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.policy_1));
@@ -925,7 +957,7 @@ impl PolicyLayer {
             out.filter,
             cudnn::DataType::Int8x4,
             cudnn::TensorFormat::NCHWVECTC,
-            2, NUM_CHANNELS as i32, 1, 1
+            2, num_channels as i32, 1, 1
         ));
 
         check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu));
@@ -978,10 +1010,10 @@ impl PolicyLayer {
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream));
 
         let device_id = get_current_device();
-        let weights_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1:0", 2 + NUM_LAYERS)];
-        let weights_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1:0", 2 + NUM_LAYERS)];
-        let offset_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1/offset:0", 2 + NUM_LAYERS)];
-        let offset_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1/offset:0", 2 + NUM_LAYERS)];
+        let weights_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1:0", self.count)];
+        let weights_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1:0", self.count)];
+        let offset_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1/offset:0", self.count)];
+        let offset_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1/offset:0", self.count)];
 
         offset_1.copy_to_device(device_id, workspace.policy_stream);
         offset_2.copy_to_device(device_id, workspace.policy_stream);
@@ -1070,7 +1102,7 @@ pub fn forward<T: InferenceType>(
 
         // copy all of the input features into a temporary workspace
         let input = slots.get_slot(Slot::Input, size_of::<T>() * features.len(), workspace.tower_stream);
-        let image_size = NUM_CHANNELS * 361;
+        let image_size = 361 * workspace.num_channels;
 
         check!(cuda::cudaMemcpyAsync(
             *input,
@@ -1086,13 +1118,15 @@ pub fn forward<T: InferenceType>(
         outputs.contains(Output::Upsample).map(|key| { map.put(key, load_to_host::<T::Tower>(*residual_1, workspace.batch_size * image_size, workspace.tower_stream)) });
 
         // residual blocks
-        for i in 0..NUM_LAYERS {
+        let num_residual = workspace.c_residual.len();
+
+        for i in 0..num_residual {
             let residual = workspace.c_residual[i].clone();
             let output = ::std::mem::transmute(Output::Residual_00 as u8 + i as u8);
 
             residual_1 = residual.forward::<T>(workspace, &slots, residual_1);
 
-            outputs.contains(output).map(|key| { map.put(key, load_to_host::<T::Output>(*residual_1, workspace.batch_size * NUM_CHANNELS * 361, workspace.tower_stream)) });
+            outputs.contains(output).map(|key| { map.put(key, load_to_host::<T::Output>(*residual_1, workspace.batch_size * image_size, workspace.tower_stream)) });
         }
 
         check!(cuda::cudaEventRecord(workspace.tower_finished, workspace.tower_stream));

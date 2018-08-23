@@ -33,6 +33,9 @@ pub struct Tensor {
     /// The size of this tensor in bytes.
     pub size_in_bytes: usize,
 
+    /// The size of this tensor in the number of elements.
+    pub size_in_elements: usize,
+
     /// The scale of this tensor, 
     pub scale: f32
 }
@@ -66,6 +69,7 @@ impl Default for Tensor {
                 AtomicPtr::new(ptr::null_mut()), AtomicPtr::new(ptr::null_mut()),
             ],
             size_in_bytes: 0,
+            size_in_elements: 0,
             scale: 1.0
         }
     }
@@ -83,6 +87,7 @@ impl Tensor {
             }
 
             self.size_in_bytes = size_of::<T>() * data.len();
+            self.size_in_elements = data.len();
 
             check!(cuda::cudaMallocHost(&mut self.host, self.size_in_bytes));
 

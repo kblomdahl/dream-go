@@ -33,10 +33,41 @@ pub enum Output {
     Residual_06 = 12,
     Residual_07 = 13,
     Residual_08 = 14,
+    Residual_09 = 15,
+    Residual_10 = 16,
+    Residual_11 = 17,
+    Residual_12 = 18,
+    Residual_13 = 19,
+    Residual_14 = 20,
+    Residual_15 = 21,
+    Residual_16 = 22,
+    Residual_17 = 23,
+    Residual_18 = 24,
+    Residual_19 = 25,
+    Residual_20 = 26,
+    Residual_21 = 27,
+    Residual_22 = 28,
+    Residual_23 = 29,
+    Residual_24 = 30,
+    Residual_25 = 31,
+    Residual_26 = 32,
+    Residual_27 = 33,
+    Residual_28 = 34,
+    Residual_29 = 35,
+    Residual_30 = 36,
+    Residual_31 = 37,
+    Residual_32 = 38,
+    Residual_33 = 39,
+    Residual_34 = 40,
+    Residual_35 = 41,
+    Residual_36 = 42,
+    Residual_37 = 43,
+    Residual_38 = 44,
+    Residual_39 = 45,
 }
 
 /// The total number of elements in the `Output` enum.
-const OUTPUT_SIZE: usize = 15;
+const OUTPUT_SIZE: usize = 46;
 
 pub struct OutputMap<T> {
     array: [Option<T>; OUTPUT_SIZE]
@@ -49,6 +80,13 @@ impl<T> OutputMap<T> {
                 None, None, None, None, None,
                 None, None, None, None, None,
                 None, None, None, None, None,
+                None, None, None, None, None,
+                None, None, None, None, None,
+                None, None, None, None, None,
+                None, None, None, None, None,
+                None, None, None, None, None,
+                None, None, None, None, None,
+                None,
             ]
         }
     }
