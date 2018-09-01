@@ -104,8 +104,13 @@ impl Tensor {
 
         if self.ptr[device_id].load(Ordering::Relaxed).is_null() {
             let mut ptr = ptr::null_mut();
+            let padded_size_in_bytes = if self.size_in_bytes % 32 == 0 {
+                self.size_in_bytes
+            } else {
+                self.size_in_bytes + (32 - self.size_in_bytes % 32)
+            };
 
-            check!(cuda::cudaMalloc(&mut ptr, self.size_in_bytes));
+            check!(cuda::cudaMalloc(&mut ptr, padded_size_in_bytes));
             check!(cuda::cudaMemcpyAsync(
                 ptr,
                 self.host,
