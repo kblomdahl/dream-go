@@ -160,7 +160,7 @@ pub fn encode(features: Vec<u8>, winner: Vec<u8>, policy: Vec<u8>) -> io::Result
     // byte   data[length]
     // uint32 masked_crc32_of_data
     let record = record.into_inner();
-    let record_len = record.len().to_bytes();
+    let record_len: [u8; 8] = unsafe { ::std::mem::transmute(record.len()) };
     let mut out = Cursor::new(Vec::with_capacity(record.len() + 16));
 
     out.write_all(&record_len)?;

@@ -19,7 +19,7 @@ use std::str::FromStr;
 pub enum Procedure {
     Extract(bool),
     SelfPlay(usize),
-    PolicyPlay(usize),
+    PolicyPlay(usize, bool),
     Gtp,
     Help
 }
@@ -56,7 +56,7 @@ lazy_static! {
     } else if has_opt("--extract") {
         Procedure::Extract(has_opt("--ex-it"))
     } else if has_opt("--policy-play") {
-        Procedure::PolicyPlay(get_opt("--policy-play").unwrap_or(::std::usize::MAX))
+        Procedure::PolicyPlay(get_opt("--policy-play").unwrap_or(::std::usize::MAX), has_opt("--ex-it"))
     } else if has_opt("--self-play") {
         Procedure::SelfPlay(get_opt("--self-play").unwrap_or(1))
     } else {

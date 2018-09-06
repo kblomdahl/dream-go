@@ -212,6 +212,12 @@ impl Entry {
             }
         }
 
+        // if we are not running with --ex-it **and** have full policies, then
+        // do not emit partial policies.
+        if server.is_none() && entries.iter().any(|entry| !entry.2.is_partial()) {
+            entries = entries.into_iter().filter(|entry| !entry.2.is_partial()).collect();
+        }
+
         // instead of plucking `num_samples` examples randomly, just shuffle the
         // list and take the first elements from the array. This avoids picking the
         // same element twice, and automatically handles the case where there are less

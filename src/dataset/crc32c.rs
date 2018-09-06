@@ -64,5 +64,5 @@ pub fn crc32c_masked(array: &[u8]) -> [u8; 4] {
     let crc = crc32c(array);
     let masked_crc = ((crc >> 15) | (crc << 17)).wrapping_add(0xa282ead8u32);
 
-    masked_crc.to_bytes()
+    unsafe { ::std::mem::transmute(masked_crc) }
 }

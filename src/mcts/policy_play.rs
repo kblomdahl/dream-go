@@ -79,10 +79,11 @@ fn policy_choose(policy: &[f32], temperature: f32) -> Option<usize> {
 /// # Arguments
 /// 
 /// * `server` - the server to use during evaluation
+/// * `ex_it` - whether to emit one full policy
 /// 
-fn policy_play_one(server: &PredictGuard) -> GameResult {
+fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
     let mut temperature = (*config::TEMPERATURE + 1e-3).recip();
-    let mut sgf = String::new();
+    let mut sgf = vec! [];
 
     // loop until we run or of legal moves, the board is fully scoreable, or
     // we have played 722 moves in total.
@@ -102,13 +103,13 @@ fn policy_play_one(server: &PredictGuard) -> GameResult {
         };
 
         if index == 361 {
-            sgf += &format!(";{}[]", color);
+            sgf.push((board.clone(), color, format!(";{}[]", color)));
             pass_count += 1;
         } else {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
+            sgf.push((board.clone(), color, format!(";{}[{}]", color, Sabaki::to_sgf(x, y))));
             board.place(color, x, y);
-            sgf += &format!(";{}[{}]", color, Sabaki::to_sgf(x, y));
             pass_count = 0;
         }
 
@@ -116,7 +117,28 @@ fn policy_play_one(server: &PredictGuard) -> GameResult {
         color = color.opposite();
     }
 
-    GameResult::Ended(sgf, board)
+    // if we are running with --ex-it then we need to emit a single full policy
+    if ex_it {
+        let i = thread_rng().gen_range(0, sgf.len());
+        let (value, _index, tree) = predict_aux::<_>(
+            &server,
+            1,
+            RolloutLimit::new(*config::NUM_ROLLOUT),
+            None,
+            &sgf[i].0,
+            sgf[i].1
+        );
+        let policy_sgf = b85::encode(&tree.softmax());
+        let value_sgf = if sgf[i].1 == Color::Black {
+            2.0 * value - 1.0
+        } else {
+            -2.0 * value + 1.0
+        };
+
+        sgf[i].2 = format!("{}P[{}]V[{}]", sgf[i].2, policy_sgf, value_sgf);
+    }
+
+    GameResult::Ended(sgf.into_iter().fold(String::new(), |acc, (_board, _color, sgf)| acc + &sgf), board)
 }
 
 /// Play games against the engine and return the results of the game over
@@ -128,8 +150,9 @@ fn policy_play_one(server: &PredictGuard) -> GameResult {
 /// 
 /// * `network` - the neural network to use during evaluation
 /// * `num_games` - 
+/// * `ex_it` - whether to emit one full policy per game
 /// 
-pub fn policy_play(network: Network, num_games: usize) -> (Receiver<GameResult>, PredictService) {
+pub fn policy_play(network: Network, num_games: usize, ex_it: bool) -> (Receiver<GameResult>, PredictService) {
     let server = predict::service(network);
     let (sender, receiver) = channel();
 
@@ -146,7 +169,7 @@ pub fn policy_play(network: Network, num_games: usize) -> (Receiver<GameResult>,
             while remaining.load(Ordering::Acquire) > 0 {
                 remaining.fetch_sub(1, Ordering::AcqRel);
 
-                let result = policy_play_one(&server);
+                let result = policy_play_one(&server, ex_it);
 
                 if sender.send(result).is_err() {
                     break

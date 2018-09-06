@@ -83,8 +83,8 @@ fn main() {
             }
         },
 
-        Procedure::PolicyPlay(n) => {
-            let (receiver, _server) = mcts::policy_play(load_network(), n);
+        Procedure::PolicyPlay(n, ex_it) => {
+            let (receiver, _server) = mcts::policy_play(load_network(), n, ex_it);
 
             for result in receiver.iter() {
                 println!("{}", result);
