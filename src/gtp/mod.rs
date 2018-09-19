@@ -192,8 +192,13 @@ impl Gtp {
             let byo_yomi_time = caps[2].parse::<f32>().map_err(|_| "syntax error")?;
             let byo_yomi_stones = caps[3].parse::<usize>().map_err(|_| "syntax error")?;
 
-            if byo_yomi_stones == 0 {
+            if byo_yomi_time > 0.0 && byo_yomi_stones == 0 {
+                // we gain extra time every zero stones, so infinite...
                 Ok((id, Command::TimeSettingsNone))
+            } else if byo_yomi_time == 0.0 {
+                // this is effectively absolute time since we gain no extra
+                // time.
+                Ok((id, Command::TimeSettingsAbsolute(main_time)))
             } else {
                 Ok((id, Command::TimeSettingsCanadian(main_time, byo_yomi_time, byo_yomi_stones)))
             }
@@ -886,7 +891,8 @@ mod tests {
 
     #[test]
     fn time_settings() {
-        assert_eq!(Gtp::parse_line("1 time_settings 30.2 0 0"), Some((Some(1), Command::TimeSettingsNone)));
+        assert_eq!(Gtp::parse_line("1 time_settings 0 1 0"), Some((Some(1), Command::TimeSettingsNone)));
+        assert_eq!(Gtp::parse_line("1 time_settings 30.2 0 0"), Some((Some(1), Command::TimeSettingsAbsolute(30.2))));
         assert_eq!(Gtp::parse_line("time_settings 300 3.14 1"), Some((None, Command::TimeSettingsCanadian(300.0, 3.14, 1))));
     }
 
