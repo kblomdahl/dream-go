@@ -17,6 +17,7 @@ If you want to run the supervised or reinforcement learning programs to improve 
 
 * [Python 3.6](https://www.python.org/) with [Tensorflow](https://tensorflow.org/)
 * [Rust](https://www.rust-lang.org) (nightly)
+* [Blosc](http://blosc.org/)
 
 ## Training
 
