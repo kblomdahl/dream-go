@@ -40,7 +40,8 @@ fn main() {
             println!("Usage: ./dream-go [options]");
             println!("");
             println!("  --extract <files...>  Extract a dataset for training from the given SGF files");
-            println!("  --ex-it               When combined with --dataset perform search on any partial policies");
+            println!("  --ex-it               When combined with --extract or --policy-play perform search on");
+            println!("                        any partial policies");
             println!("  --self-play <n>       Extract a dataset from self-play containing n examples");
             println!("  --policy-play <n>     Extract a dataset from self-play using only the policy network");
             println!("  --gtp                 Run GTP client (default)");
