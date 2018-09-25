@@ -1,7 +1,7 @@
 version: '3.6'
 services:
   trainer:
-    image: 'dream_go/trainer:0.5.0'
+    image: 'dream_go/trainer:0.6.0'
     environment:
       NVIDIA_VISIBLE_DEVICES: 0
       DB: localhost:5000
@@ -11,7 +11,7 @@ services:
       - ./trainer/models:/app/models
 
   worker:
-    image: 'dream_go/worker:0.5.0'
+    image: 'dream_go/worker:0.6.0'
     deploy:
       resources:
         limits:

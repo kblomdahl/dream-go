@@ -1,4 +1,4 @@
-# `dream_go/trainer:0.5.0`
+# `dream_go/trainer:0.6.0`
 
 This image is responsible for optimizing the model weights to better predict the
 moves suggested by `dream_go/worker`. The image will do this by reading examples
