@@ -15,10 +15,8 @@
 extern crate dream_go;
 extern crate time;
 
-use dream_go::{dataset, gtp, nn, mcts};
+use dream_go::{gtp, nn, mcts};
 use dream_go::util::config::{self, Procedure};
-
-use std::io::Write;
 
 /// Returns the network weights, panics if it failed to load the weights.
 fn load_network() -> nn::Network {
@@ -33,17 +31,14 @@ fn load_network() -> nn::Network {
 
 /// Main function.
 fn main() {
-    let remaining = config::get_args();
-
     match *config::PROCEDURE {
         Procedure::Help => {
             println!("Usage: ./dream-go [options]");
             println!("");
-            println!("  --extract <files...>  Extract a dataset for training from the given SGF files");
-            println!("  --ex-it               When combined with --extract or --policy-play perform search on");
-            println!("                        any partial policies");
             println!("  --self-play <n>       Extract a dataset from self-play containing n examples");
             println!("  --policy-play <n>     Extract a dataset from self-play using only the policy network");
+            println!("  --ex-it               When combined with --policy-play perform search on some partial");
+            println!("                        policies");
             println!("  --gtp                 Run GTP client (default)");
             println!("");
             println!("Advanced options:");
@@ -54,26 +49,6 @@ fn main() {
             println!("  --batch-size <n>      The number parallel rollouts to perform on the GPU");
             println!("  --no-ponder           Do not think in the background during idle time");
             println!("  --with-sabaki         Include Sabaki extensions amongst the GTP commands");
-        },
-
-        Procedure::Extract(ex_it) => {
-            let server = if ex_it {
-                Some(mcts::predict::service(load_network()))
-            } else {
-                None
-            };
-
-            // write any received policies to standard output
-            let stdout = std::io::stdout();
-            let mut handle = stdout.lock();
-
-            for entry in dataset::of(&remaining, server.as_ref()) {
-                if entry.write_into(&mut handle).is_err() {
-                    break
-                }
-            }
-
-            handle.flush().unwrap();
         },
 
         Procedure::SelfPlay(n) => {

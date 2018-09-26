@@ -22,7 +22,6 @@ opt-level = 1
 debug = true
 
 [dependencies]
-blosc = "0.1"
 lazy_static = {version = "1.1", features = ["nightly"]}
 libc = "0.2"
 ordered-float = "0.5"

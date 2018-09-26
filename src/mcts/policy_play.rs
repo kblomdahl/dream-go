@@ -71,6 +71,26 @@ fn policy_choose(policy: &[f32], temperature: f32) -> Option<usize> {
     }
 }
 
+fn policy_ex_it(server: &PredictGuard, board: &Board, color: Color) -> (String, f32) {
+    let (value, _index, tree) = predict_aux::<_>(
+        &server,
+        1,
+        RolloutLimit::new(*config::NUM_ROLLOUT),
+        None,
+        board,
+        color
+    );
+
+    let policy_sgf = b85::encode(&tree.softmax());
+    let value_sgf = if color == Color::Black {
+        2.0 * value - 1.0
+    } else {
+        -2.0 * value + 1.0
+    };
+
+    (policy_sgf, value_sgf)
+}
+
 /// Play a game against the engine and return the result of the game.
 /// This is different from `self_play` because this method does not
 /// perform any search and only plays stochastically according
@@ -117,25 +137,24 @@ fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
         color = color.opposite();
     }
 
-    // if we are running with --ex-it then we need to emit a single full policy
+    // if we are running with --ex-it then we need compute policies for some
+    // moves.
     if ex_it {
-        let i = thread_rng().gen_range(0, sgf.len());
-        let (value, _index, tree) = predict_aux::<_>(
-            &server,
-            1,
-            RolloutLimit::new(*config::NUM_ROLLOUT),
-            None,
-            &sgf[i].0,
-            sgf[i].1
-        );
-        let policy_sgf = b85::encode(&tree.softmax());
-        let value_sgf = if sgf[i].1 == Color::Black {
-            2.0 * value - 1.0
-        } else {
-            -2.0 * value + 1.0
+        // shuffle the indices randomly, and pluck the `n` first indices
+        let mut indices = (0..sgf.len()).collect::<Vec<_>>();
+        thread_rng().shuffle(&mut indices);
+
+        let num_samples = match *config::NUM_SAMPLES {
+            config::SamplingStrategy::Percent(pct) => (pct * indices.len() as f32) as usize,
+            config::SamplingStrategy::Fixed(num) => num
         };
 
-        sgf[i].2 = format!("{}P[{}]V[{}]", sgf[i].2, policy_sgf, value_sgf);
+        // compute the policy
+        for i in indices.into_iter().take(num_samples) {
+            let (policy_sgf, value_sgf) = policy_ex_it(server, &sgf[i].0, sgf[i].1);
+
+            sgf[i].2 = format!("{}P[{}]V[{:.4}]", sgf[i].2, policy_sgf, value_sgf);
+        }
     }
 
     GameResult::Ended(sgf.into_iter().fold(String::new(), |acc, (_board, _color, sgf)| acc + &sgf), board)
