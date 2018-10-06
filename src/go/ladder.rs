@@ -20,6 +20,35 @@ pub trait Ladder {
     fn is_ladder_escape(&self, color: Color, index: usize) -> bool;
 }
 
+/// Return true if the given group can capture any of its opponents
+/// neighbouring groups.
+///
+/// # Arguments
+///
+/// * `board` - the `vertices` of the board to check
+/// * `color` - the color of the current player
+/// * `index` - the index of the group to check
+///
+fn _can_escape_with_capture(board: &BoardFast, color: Color, index: usize) -> bool {
+    let mut current = index;
+    let opponent = color.opposite() as u8;
+
+    loop {
+        foreach_4d!(board, current, |other_index, value| {
+            if value == opponent && !board.has_n_liberty::<Two>(other_index, 2) {
+                return true;
+            }
+        });
+
+        current = unsafe { *board.next_vertex.get_unchecked(current) as usize };
+        if current == index {
+            break;
+        }
+    }
+
+    false
+}
+
 /// Returns true if playing a stone at the given index successfully
 /// captures some stones in a serie of ataris.
 ///
@@ -33,12 +62,15 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, index: usize) -> bool 
     board.place(color, index);
 
     // if any of the neighbouring opponent groups were reduced to one
-    // liberty then extend into that liberty. if no such group exists
-    // then this is not a ladder capturing move.
+    // liberty (and it cannot counter capture a group) then extend into
+    // that liberty. if no such group exists then this is not a ladder
+    // capturing move.
     let opponent = color.opposite() as u8;
     let opponent_index = find_4d!(board, index, |other_index, value| {
         if value == opponent {
-            if !board.has_n_liberty::<Two>(other_index, 2) {
+            let is_in_atari = !board.has_n_liberty::<Two>(other_index, 2);
+
+            if is_in_atari && !_can_escape_with_capture(&board, color.opposite(), other_index) {
                 Some(board.get_n_liberty::<One>(other_index, 1))
             } else {
                 None
@@ -307,5 +339,39 @@ mod tests {
         }
 
         assert_eq!(board.inner.is_ladder_escape(Color::White, 251), true);
+    }
+
+    // Test that self-atari on the first move is not a ladder.
+    #[test]
+    fn not_ladder_due_to_self_atari() {
+        let moves = [
+            (Color::Black,  1,  2), (Color::White,  2,  4), (Color::Black,  2,  3), (Color::White,  1,  5),
+            (Color::Black,  1,  4)
+        ];
+
+        let mut board = Board::new(DEFAULT_KOMI);
+
+        for &(color, x, y) in moves.into_iter() {
+            board.place(color, x, y);
+        }
+
+        assert_eq!(board.inner.is_ladder_capture(Color::White, 3 * 19 + 1), false);  // (Color::White, 1, 3)
+    }
+
+    // Test that self-atari of a neighbouring group is not a ladder.
+    #[test]
+    fn not_ladder_due_to_self_atari_2() {
+        let moves = [
+            (Color::Black,  3,  4), (Color::White,  2,  4), (Color::Black,  2,  3), (Color::White,  1,  5),
+            (Color::Black,  1,  4)
+        ];
+
+        let mut board = Board::new(DEFAULT_KOMI);
+
+        for &(color, x, y) in moves.into_iter() {
+            board.place(color, x, y);
+        }
+
+        assert_eq!(board.inner.is_ladder_capture(Color::White, 3 * 19 + 1), false);  // (Color::White, 1, 3)
     }
 }
