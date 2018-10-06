@@ -15,10 +15,10 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use go::board_fast::BoardFast;
-use go::color::Color;
-use go::circular_buf::CircularBuf;
-use go::small_set::SmallSet;
+use board_fast::BoardFast;
+use color::Color;
+use circular_buf::CircularBuf;
+use small_set::SmallSet;
 
 /// 
 #[derive(Clone)]

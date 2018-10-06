@@ -15,7 +15,7 @@
 use std::cell::RefCell;
 use std::mem;
 
-use go::Board;
+use board::Board;
 
 fn get_transformation<F, G>(ax: F, ay: G) -> Box<[u16]>
     where F: Fn(i32, i32) -> i32, G: Fn(i32, i32) -> i32

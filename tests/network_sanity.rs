@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+extern crate go;
 #[macro_use] extern crate lazy_static;
 extern crate regex;
 extern crate dream_go;
@@ -20,7 +21,7 @@ extern crate ordered_float;
 mod common;
 
 use common::{playout_file, predict, greedy_score};
-use dream_go::go::{Color};
+use go::{Color};
 use ordered_float::OrderedFloat;
 
 /// Returns the vertex with the maximum value in the given policy.

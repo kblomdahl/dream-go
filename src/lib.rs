@@ -15,6 +15,7 @@
 #![feature(int_to_from_bytes)]
 #![feature(test)]
 
+extern crate go;
 #[macro_use] extern crate lazy_static;
 extern crate libc;
 extern crate ordered_float;
@@ -23,7 +24,6 @@ extern crate regex;
 #[cfg(test)] extern crate test;
 extern crate time;
 
-pub mod go;
 pub mod gtp;
 pub mod mcts;
 pub mod nn;

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use go::board_fast::{BoardFast, One, Two, Three};
-use go::color::Color;
+use board_fast::{BoardFast, One, Two, Three};
+use color::Color;
 
 pub trait Ladder {
     fn is_ladder_capture(&self, color: Color, index: usize) -> bool;

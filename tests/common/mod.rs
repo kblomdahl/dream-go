@@ -13,8 +13,8 @@
 // limitations under the License.
 //
 
-use dream_go::go::symmetry::Transform;
-use dream_go::go::{DEFAULT_KOMI, Board, Color, Features, Score, CHW};
+use go::symmetry::Transform;
+use go::{DEFAULT_KOMI, Board, Color, Features, Score, CHW};
 use dream_go::mcts;
 use dream_go::nn;
 

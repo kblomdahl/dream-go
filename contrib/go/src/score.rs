@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use go::board_fast::BoardFast;
-use go::board::Board;
-use go::color::Color;
+use board_fast::BoardFast;
+use board::Board;
+use color::Color;
 
 use std::collections::VecDeque;
 

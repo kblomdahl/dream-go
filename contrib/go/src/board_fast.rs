@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use go::color::Color;
-use go::zobrist;
+use color::Color;
+use zobrist;
 
 pub trait Counter {
     type Output;
@@ -143,11 +143,9 @@ impl Counter for N {
 /// ```
 macro_rules! foreach_nd {
     ($this:expr, $source:expr, |$index:ident, $value:ident| $stmt:block, $($dir:ident),*) => ({
-        use go::codegen;
-
         $(
             let $index = unsafe {
-                *codegen::$dir.get_unchecked($source) as usize
+                *::codegen::$dir.get_unchecked($source) as usize
             };
             let $value = unsafe {
                 *$this.vertices.get_unchecked($index)
@@ -180,11 +178,9 @@ macro_rules! find_nd {
     });
 
     ($this:expr, $source:expr, |$index:ident, $value:ident| $stmt:block, $dir:ident $(,$rest:ident)*) => ({
-        use go::codegen;
-
         let __result = {
             let $index = unsafe {
-                *codegen::$dir.get_unchecked($source) as usize
+                *::codegen::$dir.get_unchecked($source) as usize
             };
             let $value = unsafe {
                 *$this.vertices.get_unchecked($index)

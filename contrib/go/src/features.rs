@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use go::asm;
-use go::board_fast::*;
-use go::board::Board;
-use go::color::Color;
-use go::ladder::Ladder;
-use go::symmetry;
+use asm;
+use board_fast::*;
+use board::Board;
+use color::Color;
+use ladder::Ladder;
+use symmetry;
 
 /// The number of features that the board will provide.
 pub const NUM_FEATURES: usize = 32;
