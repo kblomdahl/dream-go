@@ -13,4 +13,5 @@ target/
 *.log
 *.sqlite3
 *.xz
+dream_go
 
