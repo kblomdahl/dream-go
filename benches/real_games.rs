@@ -14,13 +14,14 @@
 //
 #![feature(test)]
 
+extern crate go;
 extern crate dream_go;
 extern crate test;
 
 use test::Bencher;
 
-use dream_go::go::{DEFAULT_KOMI, Board, Color, CHW};
-use dream_go::go::symmetry::Transform;
+use go::{DEFAULT_KOMI, Board, Color, CHW};
+use go::symmetry::Transform;
 
 /// Benchmark the full playout of a game as a serie of `is_valid` and `place` calls.
 #[bench]
@@ -136,7 +137,7 @@ fn get_features_16(b: &mut Bencher) {
     }
 
     b.iter(move || {
-        use dream_go::go::Features;
+        use go::Features;
 
         let black = test::black_box(Color::Black);
 
@@ -193,7 +194,7 @@ fn get_features_32(b: &mut Bencher) {
     }
 
     b.iter(move || {
-        use dream_go::go::Features;
+        use go::Features;
 
         let white = test::black_box(Color::White);
 

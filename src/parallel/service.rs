@@ -258,6 +258,39 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
         }
     }
 
+    /// Send all of the given requests to the service and returns the
+    /// responses.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `reqs` -
+    /// 
+    pub fn send_all(&self, reqs: Vec<I::Request>) -> Option<Vec<I::Response>> {
+        if let Ok(mut inner_lock) = self.inner.0.lock() {
+            if inner_lock.is_running {
+                let responses = reqs.into_iter().map(|req| {
+                    let (tx, rx) = one_channel();
+
+                    inner_lock.queue.push((req, tx));
+                    rx
+                }).collect::<Vec<_>>();
+
+                self.inner.1.notify_one();
+
+                // get ride of the lock so that one of the service workers
+                // can acquire it
+                drop(inner_lock);
+
+                // wait for all of the responses
+                responses.into_iter().map(|rx| { OneReceiver::recv(rx) }).collect()
+            } else {
+                None
+            }
+        } else {
+            panic!("Service is unavailable");
+        }
+    }
+
     /// Returns a clone of this guard with a `'static` lifetime. This
     /// is useful for transferring a guard across the thread boundary.
     pub fn clone_static(&self) -> ServiceGuard<'static, I> {

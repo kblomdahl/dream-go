@@ -63,7 +63,7 @@ lazy_static! {
 }
 
 /// Available transformations that are part of the go boards symmetry group.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Transform {
     Identity,
     FlipLR,
@@ -117,6 +117,17 @@ impl Transform {
         }
     }
 }
+
+pub static ALL: [Transform; 8] = [
+    Transform::Identity,
+    Transform::FlipLR,
+    Transform::FlipUD,
+    Transform::Transpose,
+    Transform::TransposeAnti,
+    Transform::Rot90,
+    Transform::Rot180,
+    Transform::Rot270
+];
 
 fn reorder<T: Copy>(src: &[T], dst: &mut [T], mapping: &[u16]) {
     unsafe {

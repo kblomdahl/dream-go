@@ -170,6 +170,12 @@ pub extern fn extract_single_example(
             pass_count += 1;
         }
 
+        // do not output games that had a questionable number of moves (early
+        // resignations, or huge early blunders)
+        if examples.len() < 50 {
+            return -31;
+        }
+
         // if any of the candidate examples has full policies, then only consider
         // those policies.
         let candidate_examples: Vec<usize> = if examples.iter().any(|cand| cand.policy.is_some()) {

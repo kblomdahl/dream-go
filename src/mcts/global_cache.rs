@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use std::hash::{Hash, Hasher};
 use std::ptr;
 
-use go::{Board, Color};
+use go::{Board, Color, symmetry};
 
 /// The maximum number of entries to be stored in the transposition table
 /// before we need to remove the least recently used one.
@@ -150,6 +150,15 @@ impl<K: Clone + Hash + Eq, V: Clone> LruCache<K, V> {
     }
 }
 
+/* -------- get_or_insert -------- */
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct BoardTuple {
+    board: Board,
+    color: Color,
+    symmetry: symmetry::Transform
+}
+
 /// Retrieve the value and policy from the transposition table, if
 /// the `(board, color)`  tuple is not in the transposition table then
 /// it is computed from the given supplier.
@@ -158,34 +167,33 @@ impl<K: Clone + Hash + Eq, V: Clone> LruCache<K, V> {
 /// 
 /// * `board` - the board to get from the table
 /// * `color` - the color to get from the table
+/// * `t` - the symmetry to get from the table
 /// * `supplier` - a function that can be used to compute the value
 ///   and policy if they are missing from the table.
 /// 
 pub fn get_or_insert<F>(
     board: &Board,
     color: Color,
+    t: symmetry::Transform,
     supplier: F
-) -> Option<(f32, Box<[f32]>)>
-    where F: FnOnce() -> Option<(f32, Box<[f32]>)>
+) -> Option<(f32, Vec<f32>)>
+    where F: FnOnce() -> Option<(f32, Vec<f32>)>
 {
     lazy_static! {
-        static ref TABLE: [Mutex<LruCache<Board, (f32, Box<[f32]>)>>; 3] = {
-            let empty = LruCache::with_capacity(0);
-            let black = LruCache::with_capacity(MAX_CACHE_SIZE + 1);
-            let white = LruCache::with_capacity(MAX_CACHE_SIZE + 1);
-
-            debug_assert_eq!(Color::Black as usize, 1);
-            debug_assert_eq!(Color::White as usize, 2);
-
-            [Mutex::new(empty), Mutex::new(black), Mutex::new(white)]
+        static ref TABLE: Mutex<LruCache<BoardTuple, (f32, Vec<f32>)>> = {
+            Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1))
         };
     }
 
-    let table = &TABLE[color as usize];
+    let key = BoardTuple {
+        board: board.clone(),
+        color: color,
+        symmetry: t
+    };
     let existing = {
-        let mut table = table.lock().unwrap();
+        let mut table = TABLE.lock().unwrap();
 
-        table.get(board).map(|&(ref value, ref policy)| {
+        table.get(&key).map(|&(ref value, ref policy)| {
             (value.clone(), policy.clone())
         })
     };
@@ -194,9 +202,9 @@ pub fn get_or_insert<F>(
         Some((value, policy))
     } else {
         if let Some((value, policy)) = supplier() {
-            let mut table = table.lock().unwrap();
+            let mut table = TABLE.lock().unwrap();
 
-            table.insert(board, (value, policy.clone()));
+            table.insert(&key, (value, policy.clone()));
 
             Some((value, policy))
         } else {

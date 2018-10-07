@@ -112,7 +112,7 @@ fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
     let mut pass_count = 0;
 
     while pass_count < 2 && board.count() < 722 {
-        let result = forward(&server, &board, color);
+        let result = full_forward(&server, &board, color);
         let index = if let Some((_value, policy)) = result {
             match policy_choose(&policy, temperature) {
                 Some(index) => index,

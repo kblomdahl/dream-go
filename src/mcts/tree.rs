@@ -202,7 +202,7 @@ impl Node {
     /// * `color` - the color of the first players color
     /// * `prior` - the prior values of the nodes
     /// 
-    pub fn new(color: Color, value: f32, prior: Box<[f32]>) -> Node {
+    pub fn new(color: Color, value: f32, prior: Vec<f32>) -> Node {
         assert_eq!(prior.len(), 362);
 
         // copy the prior values into an array size that is dividable
@@ -319,7 +319,7 @@ impl Node {
             if index == 361 {
                 // we need to record that were was a pass so that we have the correct
                 // pass count in the root node.
-                let prior = vec! [0.0f32; 362].into_boxed_slice();
+                let prior = vec! [0.0f32; 362];
                 let mut next = Node::new(self.color.opposite(), 0.5, prior);
                 next.pass_count = self.pass_count + 1;
 
@@ -536,7 +536,7 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
 /// * `value` -
 /// * `prior` -
 /// 
-pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Box<[f32]>) {
+pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32>) {
     if let Some(&(node, _, index)) = trace.last() {
         let mut next = Box::new(Node::new(color, value, prior));
         if index == 361 {

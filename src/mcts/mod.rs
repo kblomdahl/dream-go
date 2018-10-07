@@ -83,6 +83,60 @@ impl fmt::Display for GameResult {
     }
 }
 
+/// Return the value and policy for the given board position, as the interpolation
+/// of their value for every symmetry.
+///
+/// # Arguments
+///
+/// * `server` - the server to use for predictions
+/// * `board` - the board position to evaluate
+/// * `color` - the color to evaluate for
+///
+fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
+    let mut value = 0.0f32;
+    let mut policy = vec! [0.0f32; 362];
+
+    // find out which symmetries has already been calculated, and which ones has not
+    let mut new_requests = vec! [];
+    let mut new_symmetries = vec! [];
+
+    for &t in &symmetry::ALL {
+        if let Some((other_value, other_policy)) = global_cache::get_or_insert(board, color, t, || { None }) {
+            value += 0.125 * other_value;
+
+            for i in 0..362 {
+                policy[i] += 0.125 * other_policy[i];
+            }
+        } else {
+            new_requests.push(PredictRequest::Ask(board.get_features::<CHW_VECT_C>(color, t)));
+            new_symmetries.push(t);
+        }
+    }
+
+    // calculate any symmetries that were missing, and then accumulate them
+    if let Some(new_responses) = server.send_all(new_requests) {
+        for (resp, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
+            if let Some((other_value, other_policy)) = resp {
+                let (other_value, other_policy) = global_cache::get_or_insert(board, color, t, || {
+                    Some(post_process_forward(board, color, other_value, other_policy, t))
+                }).unwrap();
+
+                value += 0.125 * other_value;
+
+                for i in 0..362 {
+                    policy[i] += 0.125 * other_policy[i];
+                }
+            } else {
+                return None;
+            }
+        }
+
+        Some((value, policy))
+    } else {
+        None
+    }
+}
+
 /// Performs a forward pass through the neural network for the given board
 /// position using a random symmetry to increase entropy.
 /// 
@@ -92,26 +146,10 @@ impl fmt::Display for GameResult {
 /// * `board` - the board position
 /// * `color` - the current player
 /// 
-fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Box<[f32]>)> {
-    lazy_static! {
-        static ref SYMM: Vec<symmetry::Transform> = vec! [
-            symmetry::Transform::Identity,
-            symmetry::Transform::FlipLR,
-            symmetry::Transform::FlipUD,
-            symmetry::Transform::Transpose,
-            symmetry::Transform::TransposeAnti,
-            symmetry::Transform::Rot90,
-            symmetry::Transform::Rot180,
-            symmetry::Transform::Rot270,
-        ];
-    }
+fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
+    let t = *thread_rng().choose(&symmetry::ALL).unwrap();
 
-    global_cache::get_or_insert(board, color, || {
-        // pick a random transformation to apply to the features. This is done
-        // to increase the entropy of the game slightly and to ensure the engine
-        // learns the game is symmetric (which should help generalize)
-        let t = *thread_rng().choose(&SYMM).unwrap();
-
+    global_cache::get_or_insert(board, color, t, || {
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
         let response = server.send(PredictRequest::Ask(board.get_features::<CHW_VECT_C>(color, t)));
@@ -121,91 +159,102 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, B
             return None;
         };
 
-        // copy the policy and replace any invalid moves in the suggested policy
-        // with -Inf, while keeping the pass move (361) untouched so that there
-        // is always at least one valid move.
-        let mut policy = vec! [0.0f32; 362];
-        policy[361] = original_policy[361];  // copy `pass` move
+        Some(post_process_forward(board, color, value, original_policy, t))
+    })
+}
+
+fn post_process_forward(
+    board: &Board,
+    color: Color,
+    value: f32,
+    original_policy: Vec<f32>,
+    t: symmetry::Transform
+) -> (f32, Vec<f32>)
+{
+    // copy the policy and replace any invalid moves in the suggested policy
+    // with -Inf, while keeping the pass move (361) untouched so that there
+    // is always at least one valid move.
+    let mut policy = vec! [0.0f32; 362];
+    policy[361] = original_policy[361];  // copy `pass` move
+
+    for i in 0..361 {
+        let j = t.inverse().apply(i);
+        let (x, y) = (tree::X[j] as usize, tree::Y[j] as usize);
+
+        if !board.is_valid(color, x, y) {
+            policy[j] = ::std::f32::NEG_INFINITY;
+        } else {
+            policy[j] = original_policy[i];
+        }
+    }
+
+    // get ride of symmetric moves, this is mostly useful for the opening.
+    // Once we are past the first ~7 moves the board is usually sufficiently
+    // asymmetric for this to turn into a no-op.
+    //
+    // we skip the first symmetry because it is the identity symmetry, which
+    // is always a symmetry for any board.
+    let mut moved = (0..361).collect::<Vec<_>>();
+
+    for &t in &symmetry::ALL[1..8] {
+        if !symmetry::is_symmetric(board, t) {
+            continue;
+        }
+
+        // figure out which are the useful vertices by eliminating the
+        // symmetries from the board.
+        let mut visited = [false; 368];
 
         for i in 0..361 {
-            let j = t.inverse().apply(i);
-            let (x, y) = (tree::X[j] as usize, tree::Y[j] as usize);
+            let j = t.apply(i);
 
-            if !board.is_valid(color, x, y) {
-                policy[j] = ::std::f32::NEG_INFINITY;
-            } else {
-                policy[j] = original_policy[i];
-            }
-        }
+            if i != j && !visited[i] {
+                visited[i] = true;
+                visited[j] = true;
 
-        // get ride of symmetric moves, this is mostly useful for the opening.
-        // Once we are past the first ~7 moves the board is usually sufficiently
-        // asymmetric for this to turn into a no-op.
-        //
-        // we skip the first symmetry because it is the identity symmetry, which
-        // is always a symmetry for any board.
-        let mut moved = (0..361).collect::<Vec<_>>();
+                let src = ::std::cmp::max(i, j);
+                let mut dst = ::std::cmp::min(i, j);
 
-        for &t in &SYMM[1..8] {
-            if !symmetry::is_symmetric(board, t) {
-                continue;
-            }
+                while moved[dst] != dst {
+                    dst = moved[dst];
+                }
 
-            // figure out which are the useful vertices by eliminating the
-            // symmetries from the board.
-            let mut visited = [false; 368];
+                if policy[src].is_finite() {
+                    assert!(policy[dst].is_finite());
 
-            for i in 0..361 {
-                let j = t.apply(i);
+                    policy[dst] += policy[src];
+                    policy[src] = ::std::f32::NEG_INFINITY;
 
-                if i != j && !visited[i] {
-                    visited[i] = true;
-                    visited[j] = true;
-
-                    let src = ::std::cmp::max(i, j);
-                    let mut dst = ::std::cmp::min(i, j);
-
-                    while moved[dst] != dst {
-                        dst = moved[dst];
-                    }
-
-                    if policy[src].is_finite() {
-                        assert!(policy[dst].is_finite());
-
-                        policy[dst] += policy[src];
-                        policy[src] = ::std::f32::NEG_INFINITY;
-
-                        moved[src] = dst;
-                    }
+                    moved[src] = dst;
                 }
             }
         }
+    }
 
-        // renormalize the policy so that it sums to one after all the pruning that
-        // we have performed.
-        let mut policy_sum: f32 = policy.iter().filter(|p| p.is_finite()).sum();
+    // renormalize the policy so that it sums to one after all the pruning that
+    // we have performed.
+    let mut policy_sum: f32 = policy.iter().filter(|p| p.is_finite()).sum();
 
-        if policy_sum < 1e-6 {  // do not divide by zero
-            policy_sum = 0.0;
-
-            for i in 0..362 {
-                if policy[i].is_finite() {
-                    let value = thread_rng().gen();
-
-                    policy[i] = value;
-                    policy_sum += value;
-                }
-            }
-        }
-
-        let policy_recip = policy_sum.recip();
+    if policy_sum < 1e-6 {  // do not divide by zero
+        policy_sum = 0.0;
 
         for i in 0..362 {
-            policy[i] *= policy_recip;
-        }
+            if policy[i].is_finite() {
+                let value = thread_rng().gen();
 
-        Some((0.5 * value + 0.5, policy.into_boxed_slice()))
-    })
+                policy[i] = value;
+                policy_sum += value;
+            }
+        }
+    }
+
+    let policy_recip = policy_sum.recip();
+
+    for i in 0..362 {
+        policy[i] *= policy_recip;
+    }
+
+    (0.5 * value + 0.5, policy)
 }
 
 /// The shared variables between the master and each worker thread in the `predict` function.
@@ -286,44 +335,37 @@ fn predict_aux<T>(
 ) -> (f32, usize, tree::Node)
     where T: TimeStrategy + Clone + Send + 'static
 {
+    let (starting_value, starting_policy) = {
+        let server = server.clone();
+
+        full_forward(&server, starting_point, starting_color)
+            .unwrap_or_else(|| {
+                let mut policy = vec! [0.0; 362];
+                policy[361] = 1.0;
+
+                (0.5, policy)
+            })
+    };
+
     // if we have a starting tree given, then re-use that tree (after some sanity
     // checks), otherwise we need to query the neural network about what the
     // prior value should be at the root node.
     let mut starting_tree = if let Some(mut starting_tree) = starting_tree {
         assert_eq!(starting_tree.color, starting_color);
 
-        if starting_tree.prior.iter().sum::<f32>() < 1e-4 {
-            // we are missing the prior distribution, this can happend if we
-            // fast-forwarded a passing move, but the pass move had not been
-            // expanded (since we still need to create the node to record
-            // that it was a pass so that we do not lose count of the number
-            // of consecutive passes).
-            let server = server.clone();
-            let (_, policy) = forward(&server, starting_point, starting_color)
-                .unwrap_or_else(|| {
-                    let mut policy = vec! [0.0; 362];
-                    policy[361] = 1.0;
-
-                    (0.5, policy.into_boxed_slice())
-                });
-
-            for i in 0..362 {
-                starting_tree.prior[i] = policy[i];
-            }
+        // replace the prior value of the tree, since it was either:
+        //
+        // - calculated using only one symmetry.
+        // - a pre-expanded pass move, which does not get a prior computed.
+        //
+        for i in 0..362 {
+            starting_tree.prior[i] = starting_policy[i];
         }
 
         starting_tree
     } else {
-        let server = server.clone();
-        let (value, mut policy) = forward(&server, starting_point, starting_color)
-            .unwrap_or_else(|| {
-                let mut policy = vec! [0.0; 362];
-                policy[361] = 1.0;
 
-                (0.5, policy.into_boxed_slice())
-            });
-
-        tree::Node::new(starting_color, value, policy)
+        tree::Node::new(starting_color, starting_value, starting_policy)
     };
 
     // add some dirichlet noise to the root node of the search tree in order to increase

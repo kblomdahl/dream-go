@@ -73,7 +73,7 @@ pub fn greedy_score(server: &PredictGuard, board: &Board, next_color: Color) -> 
     let mut count = 0;
 
     while count < 722 && pass_count < 2 && !board.is_scoreable() {
-        let result = forward(&server, &board, current);
+        let result = full_forward(&server, &board, current);
         if result.is_none() {
             break
         }

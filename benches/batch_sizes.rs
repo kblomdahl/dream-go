@@ -14,6 +14,7 @@
 //
 #![feature(test)]
 
+extern crate go;
 extern crate dream_go;
 extern crate test;
 extern crate rand;
@@ -39,7 +40,7 @@ fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
     NETWORK.with(|network| {
         let mut workspace = network.get_workspace(batch_size);
         let features = (0..batch_size).flat_map(|_| {
-            let mut input = vec! [0i8; ::dream_go::go::FEATURE_SIZE];
+            let mut input = vec! [0i8; ::go::FEATURE_SIZE];
 
             for b in input.iter_mut() {
                 *b = if thread_rng().gen::<f32>() < 0.2 { 127 } else { 0 };
