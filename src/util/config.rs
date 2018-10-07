@@ -98,6 +98,9 @@ lazy_static! {
     pub static ref NUM_SAMPLES: SamplingStrategy = get_opt("--num-samples")
         .unwrap_or(SamplingStrategy::Percent(0.01));
 
+    /// Whether to output extra information for all actions.
+    pub static ref VERBOSE: bool = has_opt("--verbose");
+
     /// The amount of dirtchlet noise to add to the root node of each search
     /// tree. A larger value will result in a more random search, which is
     /// typically desirable during training but not during tournament play.

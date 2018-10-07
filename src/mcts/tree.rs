@@ -675,6 +675,10 @@ impl<'a> fmt::Display for ToPretty<'a> {
         let mut children = (0..362).collect::<Vec<usize>>();
         children.sort_by_key(|&i| -self.root.count[i]);
 
+        if !*config::VERBOSE {
+            children.truncate(10);
+        }
+
         // print a summary containing the total tree size
         let total_value: f32 = (0..362)
             .map(|i| (self.root.count[i] as f32) * self.root.value[i])
