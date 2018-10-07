@@ -1,5 +1,4 @@
-blosc
+cffi
 numpy
 scipy
-tensorflow-gpu
 petname

@@ -24,17 +24,17 @@ import json
 import math
 from datetime import datetime
 
-import blosc
 import numpy as np
 import tensorflow as tf
 
 from tensorflow.python import debug as tf_debug
 from .learning_rate import LEARNING_RATE, LOSS, LearningRateScheduler
-from .orthogonal_initializer import orthogonal_initializer
+from .orthogonal_initializer import orthogonal_initializer, orthogonal_loss
+from .pretty_print import to_sgf_heatmap
 
 NUM_FEATURES = 32  # the total number of input features
 MAX_STEPS = 524288000  # the default total number of examples to train over
-BATCH_SIZE = 1024  # the default number of examples per batch
+BATCH_SIZE = 512  # the default number of examples per batch
 
 DUMP_OPS = 'DumpOps'  # the graph collection that contains all dump operations
 ADVERSARIAL_OPS = 'AdversarialOps'  # the graph collection that contains all training operations for adversarial networks
@@ -45,6 +45,14 @@ ADVERSARIAL_VARS = 'AdversarialVars'  # the graph collection that contains all v
 def normalize_constraint(x):
     """ Returns a constraint that set `tf.norm(x) = 1` """
     return x / tf.norm(x)
+
+def unit_constraint(x):
+    """ Return a constraint that clip `x` to the range [0, 1] """
+    return tf.minimum(tf.maximum(x, 0.0), 1.0)
+
+def relu3(x):
+    """ Returns `min(max(x, 0), 3)`, this is useful to simulate quantized inference. """
+    return tf.minimum(tf.nn.relu(x), 3.09023)
 
 def batch_norm(x, weights, mode, params):
     """ Batch normalization layer. """
@@ -57,20 +65,6 @@ def batch_norm(x, weights, mode, params):
         mean = tf.get_variable('mean', (num_channels,), tf.float32, zeros_op, trainable=False)
         variance = tf.get_variable('variance', (num_channels,), tf.float32, ones_op, trainable=False)
         offset = tf.get_variable('offset', (num_channels,), tf.float32, zeros_op, trainable=True)
-
-    # fix the weights so that they appear in the _correct_ order according
-    # to cuDNN.
-    #
-    # tensorflow: [h, w, in, out]
-    # cudnn:      [out, in, h, w]
-    weights_ = tf.reshape(weights, [
-        weights.shape[0],
-        weights.shape[1],
-        -1,  # weights.shape[2] / 4
-        4,
-        weights.shape[3]
-    ])
-    weights_ = tf.transpose(weights_, [4, 2, 0, 1, 3])
 
     # fold the batch normalization into the convolutional weights and one
     # additional bias term. By scaling the weights and the mean by the
@@ -85,14 +79,28 @@ def batch_norm(x, weights, mode, params):
     std_ = tf.sqrt(variance + 0.001)
     offset_ = offset - mean / std_
     weights_ = tf.multiply(
-        weights_,
-        tf.reshape(scale / std_, (weights_.shape[0], 1, 1, 1, 1))
+        weights,
+        tf.reshape(scale / std_, (1, 1, 1, num_channels))
     )
+
+    # fix the weights so that they appear in the _correct_ order according
+    # to cuDNN.
+    #
+    # tensorflow: [h, w, in, out]
+    # cudnn:      [out, in, h, w]
+    weights_ = tf.reshape(weights_, [
+        weights_.shape[0],
+        weights_.shape[1],
+        -1,  # weights_.shape[2] / 4
+        4,
+        weights_.shape[3]
+    ])
+    weights_ = tf.transpose(weights_, [4, 2, 0, 1, 3])
 
     # quantize the weights to [-127, +127] and the offset to the same range
     # but as a floating point number as required by cuDNN. Note that this range
-    # contains 255 values for the range [-6.0, +6.0] for the offset, so the
-    # step size becomes `(12.0 / 255.0)`
+    # contains 255 values for the range [-3.0, +3.0] for the offset, so the
+    # step size becomes `(6.0 / 255.0)`
     weights_max = tf.reduce_max(tf.abs(weights_))
     weights_q, weights_qmin, weights_qmax = tf.quantize(
         weights_,
@@ -103,7 +111,7 @@ def batch_norm(x, weights, mode, params):
         'HALF_AWAY_FROM_ZERO'
     )
 
-    step_size = 12.0 / 255.0
+    step_size = (2 * 3.09023) / 255.0
 
     tf.add_to_collection(DUMP_OPS, [offset, offset_ / step_size, 'f4', tf.constant(127.0 * step_size)])
     tf.add_to_collection(DUMP_OPS, [weights, weights_q, 'i1', tf.reduce_max([tf.abs(weights_qmin), tf.abs(weights_qmax)])])
@@ -159,10 +167,12 @@ def residual_block(x, mode, params):
     of these convolution before step 2.
     """
     init_op = orthogonal_initializer()
+    half_op = tf.constant_initializer(0.5, tf.float32)
     num_channels = params['num_channels']
 
     conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint)
     conv_2 = tf.get_variable('conv_2', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint)
+    alpha = tf.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=False)
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
@@ -170,12 +180,12 @@ def residual_block(x, mode, params):
         # the 1st convolution
         y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = batch_norm(y, conv_1, mode, params)
-        y = tf.nn.relu6(y)
+        y = relu3(y)
 
         # the 2nd convolution
         y = tf.nn.conv2d(y, tf.cast(conv_2, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = batch_norm(y, conv_2, mode, params)
-        y = tf.nn.relu6(y + x)
+        y = relu3(tf.cast(alpha, tf.float16) * y + tf.cast(1.0 - alpha, tf.float16) * x)
 
         return y
 
@@ -271,7 +281,7 @@ def tower(x, mode, params):
 
         y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
         y = batch_norm(y, conv_1, mode, params)
-        y = tf.nn.relu6(y)
+        y = relu3(y)
 
     for i in range(num_blocks):
         with tf.variable_scope('{:02d}_residual'.format(2 + i), reuse=tf.AUTO_REUSE):
@@ -285,7 +295,7 @@ def tower(x, mode, params):
     with tf.variable_scope('{:02d}v_value'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
         v = value_head(y, mode, params)
 
-    return v, p
+    return v, p, y
 
 def adversarial(value_hat, policy_hat):
     """ Returns the probability that the current player is black. """
@@ -352,39 +362,60 @@ class DumpHook(tf.train.SessionRunHook):
 def get_dataset(files, batch_size=1, is_training=True):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
-    def _blosc_decompress_to_i1(features):
-        return np.fromstring(blosc.decompress(features), 'i1')
+    from cffi import FFI
+    import os
 
-    def _blosc_decompress_to_u1(features):
-        return np.fromstring(blosc.decompress(features), 'u1')
+    ffi = FFI()
+    ffi.cdef("""
+    typedef struct {
+        char features[11552];
+        int index;
+        int color;
+        char policy[905];
+        int winner;
+    } Example;
 
-    def _parse(record):
-        example = tf.parse_single_example(record, {
-            "features": tf.VarLenFeature(tf.string),
-            "value": tf.FixedLenFeature([], tf.string),
-            "policy": tf.VarLenFeature(tf.string),
-        })
+    int extract_single_example(const char*, Example*);
+    """)
 
-        features = tf.decode_raw(tf.sparse_tensor_to_dense(example['features'], default_value=""), tf.uint8)
-        policy = tf.decode_raw(tf.sparse_tensor_to_dense(example['policy'], default_value=""), tf.uint8)
-        value = tf.decode_raw(example['value'], tf.uint8)
+    try:
+        dream_go = ffi.dlopen("./libgo.so")
+    except:
+        print("Cannot load shared library 'go'.")
+        quit(1)
 
-        # decompress, and unzigzag the `features` array
-        features = tf.py_func(_blosc_decompress_to_i1, [features], tf.int8, False)
-        features = tf.cast(features, tf.float16) / 127.0
+    def __parse(line):
+        example = ffi.new("Example[]", 1)
+        result = dream_go.extract_single_example(line, example)
 
-        # map `value` to the range [-1, +1] as a floating-point number
-        value = 2.0 * tf.cast(value, tf.float32) / 255.0 - 1.0
+        if result != 0:
+            features = np.zeros((32, 19, 19), 'f2')
+            value = np.zeros((), 'f4')
+            policy = np.zeros((362,), 'f2')
+            is_black = np.zeros((), 'f4')
+        else:
+            features_hat = ffi.unpack(example[0].features, 11552)
+            policy_hat = ffi.string(example[0].policy)
 
-        # decompress, and map `policy` the the range [0, 1] as a floating-point
-        # number
-        policy = tf.py_func(_blosc_decompress_to_u1, [policy], [tf.uint8], False)
-        policy = tf.cast(policy, tf.float32) / 255.0
+            features = np.fromstring(bytes(features_hat), 'i1').astype('f2') / 127.0
+            value = np.asarray(1.0 if example[0].color == example[0].winner else -1.0, 'f4')
+            policy = np.fromstring(base64.b85decode(policy_hat), 'f2')
+            is_black = np.asarray(1.0 if example[0].color == 1 else 0.0, 'f4')  # Black = 1
 
-        # calculate the `is_black` label based on the input features
-        is_black = tf.cast(features[0], tf.float32)
+            # fix any partial policy
+            policy[example[0].index] = 1.0 - np.sum(policy)
 
         return features, value, policy, is_black
+
+    def _parse(line):
+        return tuple(tf.py_func(
+            __parse,
+            [line],
+            [tf.float16, tf.float32, tf.float16, tf.float32]
+        ))
+
+    def _illegal_policy(features, value, policy, is_black):
+        return tf.not_equal(tf.reduce_sum(policy), 0.0)
 
     def _fix_shape(features, value, policy, is_black):
         features = tf.reshape(features, [NUM_FEATURES, 19, 19])
@@ -476,13 +507,16 @@ def get_dataset(files, batch_size=1, is_training=True):
         return features, value, policy, is_black
 
     with tf.device('cpu:0'):
-        dataset = tf.data.TFRecordDataset(files, num_parallel_reads=4)
-        dataset = dataset.map(_parse, num_parallel_calls=8)
+        num_parallel_calls = max(os.cpu_count() - 8, 4);
+
+        dataset = tf.data.TextLineDataset(files)
+        dataset = dataset.map(_parse, num_parallel_calls=num_parallel_calls)
+        dataset = dataset.filter(_illegal_policy)
         dataset = dataset.map(_fix_shape)
         if is_training:
             dataset = dataset.repeat()
-            dataset = dataset.map(_augment, num_parallel_calls=8)
-            dataset = dataset.map(_fix_history, num_parallel_calls=8)
+            dataset = dataset.map(_augment, num_parallel_calls=4)
+            dataset = dataset.map(_fix_history, num_parallel_calls=4)
             dataset = dataset.shuffle(524288)
         dataset = dataset.batch(batch_size)
 
@@ -496,7 +530,7 @@ def input_fn(files, batch_size, is_training):
 # -------- Model function --------
 
 def model_fn(features, labels, mode, params):
-    value_hat, policy_hat = tower(features, mode, params)
+    value_hat, policy_hat, tower_hat = tower(features, mode, params)
 
     if labels:
         # determine the loss for each of the components:
@@ -526,7 +560,7 @@ def model_fn(features, labels, mode, params):
             adversarial(value_hat, policy_hat)
         ))
 
-        loss = loss_policy + loss_value - loss_black
+        loss = loss_policy + 2.0 * loss_value  # - loss_black
         tf.add_to_collection(LOSS, loss)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
@@ -608,11 +642,13 @@ def model_fn(features, labels, mode, params):
         train_op = None
         eval_metric_ops = {}
 
-    # add a histogram of each activation as well as their maximum value to the
-    # set of predictions so that we can quantize the neural network.
+    # output the predictions, and some other intermediate tensors that may
+    # be useful.
     predictions = {
+        'features': features,
         'value': value_hat,
-        'policy': tf.nn.softmax(policy_hat)
+        'policy': tf.nn.softmax(policy_hat),
+        'tower': tower_hat
     }
 
     # get ride of _worthless_ collections that would just clutter up the
@@ -657,6 +693,7 @@ def parse_args():
     op_group.add_argument('--resume', action='store_true', help='resume training of an existing model')
     op_group.add_argument('--verify', action='store_true', help='evaluate the accuracy of a model')
     op_group.add_argument('--dump', action='store_true', help='print the weights of a model to standard output')
+    op_group.add_argument('--tower', action='store_true', help='print the final tower features to standard output')
     op_group.add_argument('--print', action='store_true', help='print the value of the given tensor')
 
     return parser.parse_args()
@@ -729,7 +766,7 @@ nn = tf.estimator.Estimator(
 if args.start or args.resume:
     nn.train(
         input_fn=lambda: input_fn(args.files, params['batch_size'], True),
-        hooks=hooks + [LearningRateScheduler(), RunAdversarialOpsHook()],
+        hooks=hooks + [LearningRateScheduler()],  #, RunAdversarialOpsHook()],
         steps=params['steps'] // params['batch_size']
     )
 elif args.verify:
@@ -756,6 +793,22 @@ elif args.dump:
 
     for _ in predictor:
         pass
+elif args.tower > 0:
+    predictor = nn.predict(
+        input_fn=lambda: input_fn(args.files, 1, False)
+    )
+    count = 0
+
+    print('(;GM[1]FF[4]SZ[19]')
+    for results in predictor:
+        board_state = to_sgf_heatmap(results['features'], results['tower'])
+
+        print('(;{})'.format(board_state))
+
+        count += 1
+        if count > 100:
+            break
+    print(')')
 elif args.print:
     # tensors are given then print all available tensors with some statistics.
     if not args.files:
@@ -766,7 +819,8 @@ elif args.print:
 
             out[var] = {
                 'mean': float(np.average(value)),
-                'std': float(np.std(value))
+                'std': float(np.std(value)),
+                'orthogonal': float(orthogonal_loss(value))
             }
 
         print(json.dumps(

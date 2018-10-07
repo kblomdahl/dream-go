@@ -63,3 +63,28 @@ def orthogonal_initializer():
         return np.reshape(q, shape) / np.linalg.norm(q, ord=2)
 
     return _init
+
+def orthogonal_loss(x):
+    """ Returns a value that decrease the closer `x` is to being orthogonal. """
+
+    if len(x.shape) < 2:
+        return 0
+
+    # flatten the input shape with the last dimension remaining.
+    num_rows = 1
+
+    for dim in x.shape[:-1]:
+        num_rows *= dim
+    num_cols = x.shape[-1]
+
+    if num_rows < num_cols:
+        flat_shape = (num_cols, num_rows)
+    else:
+        flat_shape = (num_rows, num_cols)
+
+    # calculate how orthogonal this matrix is
+    x = np.reshape(x, flat_shape)
+    x_t = np.transpose(x, [1, 0])
+    i = np.matmul(x, x_t)
+
+    return np.linalg.norm(i - np.identity(i.shape[0]), ord=1)

@@ -33,15 +33,18 @@ const ZERO: f32 = 0.0;
 /// A __global__ constant that contains `1.0`.
 const ONE: f32 = 1.0;
 
-/// A __global__ constant that contains approximately `6.0`. This is necessary
+/// A __global__ constant that contains `0.5`.
+const HALF: f32 = 0.5;
+
+/// A __global__ constant that contains approximately `3.09023`. This is necessary
 /// because we quantize to the range `[-127, +127]` which contains `0` and then
 /// `127` in each direction so a total of `1 + 2*127 = 255` elements. This means
 /// the maximum value that can be represented is:
 /// 
-/// `2.0 * SIX / 255.0 * 127.0`
+/// `2.0 * THREE / 255.0 * 127.0`
 /// 
-/// Which we can solve for the value of `SIX` when the maximum value is 6.0.
-const SIX: f32 = (6.0 / 127.0) * 255.0 / 2.0;
+/// Which we can solve for the value of `THREE` when the maximum value is 3.09023.
+const THREE: f32 = (3.09023 / 127.0) * 255.0 / 2.0;
 
 // -------- InferenceType --------
 
@@ -258,7 +261,7 @@ impl UpLayer {
             descr: ptr::null(),
 
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
-            alpha: weights.scale / (127.0 * SIX)
+            alpha: weights.scale / (127.0 * THREE)
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
@@ -348,9 +351,8 @@ impl UpLayer {
         weights.copy_to_device(device_id, workspace.tower_stream);
 
         // perform the forward convolution
-        let num_channels = offset.size_in_elements;
         let workspace_1 = slots.get_slot(Slot::Workspace_1, self.fwd_algo.memory, workspace.tower_stream);
-        let output = slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * num_channels * 361, workspace.tower_stream);
+        let output = slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361, workspace.tower_stream);
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -429,7 +431,7 @@ impl ResidualLayer {
 
             count: i,
             alpha1: weights_1.scale / 127.0,
-            alpha2: weights_2.scale / 127.0,
+            alpha2: HALF * weights_2.scale / 127.0,
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.tensor));
@@ -512,13 +514,19 @@ impl ResidualLayer {
         weights_1.copy_to_device(device_id, workspace.tower_stream);
         weights_2.copy_to_device(device_id, workspace.tower_stream);
         offset_1.copy_to_device(device_id, workspace.tower_stream);
-        offset_2.copy_to_device(device_id, workspace.tower_stream);
+        if offset_2.copy_to_device(device_id, workspace.tower_stream) {
+            check!(cudnn::cudnnScaleTensor(
+                workspace.handle_dnn,
+                self.offset, offset_2.get(device_id),
+                &HALF
+            ));
+        }
 
         debug_assert!(offset_1.size_in_elements == offset_2.size_in_elements);
 
         // perform the forward convolution (1)
         let workspace_r = slots.get_slot(Slot::Workspace_r, self.fwd_algo.memory, workspace.tower_stream);
-        let residual_2 = slots.get_slot(Slot::Residual_2, size_of::<T::Tower>() * workspace.batch_size * self.num_channels * 361, workspace.tower_stream);
+        let residual_2 = slots.get_slot(Slot::Residual_2, size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361, workspace.tower_stream);
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -542,7 +550,7 @@ impl ResidualLayer {
             self.filter, weights_2.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_r, self.fwd_algo.memory,
-            &ONE,
+            &HALF,
             self.tensor, *input,
             self.offset, offset_2.get(device_id),
             self.relu,
@@ -623,7 +631,7 @@ impl ValueLayer {
 
             count: i,
             alpha1: weights_1.scale / 127.0,
-            alpha2: SIX / 127.0
+            alpha2: THREE / 127.0
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
@@ -909,7 +917,7 @@ impl PolicyLayer {
 
             count: i,
             alpha1: weights_1.scale / 127.0,
-            alpha2: SIX / 127.0
+            alpha2: THREE / 127.0
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
