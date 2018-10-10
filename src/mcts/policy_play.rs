@@ -91,6 +91,39 @@ fn policy_ex_it(server: &PredictGuard, board: &Board, color: Color) -> (String, 
     (policy_sgf, value_sgf)
 }
 
+/// Perform a _search_ of the given board state, using the number of rollouts
+/// specified in `NUM_POLICY_ROLLOUT`.
+///
+/// # Arguments
+///
+/// * `server` - 
+/// * `board` - 
+/// * `color` - 
+///
+fn policy_forward(
+    server: &PredictGuard,
+    board: &Board,
+    color: Color
+) -> Option<(f32, Vec<f32>)>
+{
+    let num_policy_rollout = *config::NUM_POLICY_ROLLOUT;
+
+    if num_policy_rollout <= 1 {
+        full_forward(server, board, color)
+    } else {
+        let (value, _index, tree) = predict_aux::<_>(
+            &server,
+            1,
+            RolloutLimit::new(num_policy_rollout),
+            None,
+            &board,
+            color
+        );
+
+        Some((value, tree.softmax()))
+    }
+}
+
 /// Play a game against the engine and return the result of the game.
 /// This is different from `self_play` because this method does not
 /// perform any search and only plays stochastically according
@@ -112,7 +145,7 @@ fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
     let mut pass_count = 0;
 
     while pass_count < 2 && board.count() < 722 {
-        let result = full_forward(&server, &board, color);
+        let result = policy_forward(&server, &board, color);
         let index = if let Some((_value, policy)) = result {
             match policy_choose(&policy, temperature) {
                 Some(index) => index,

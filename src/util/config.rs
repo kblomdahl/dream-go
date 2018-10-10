@@ -101,6 +101,10 @@ lazy_static! {
     /// Whether to output extra information for all actions.
     pub static ref VERBOSE: bool = has_opt("--verbose");
 
+    /// The number of rollout to perform for each board position when playing
+    /// _according to the policy_.
+    pub static ref NUM_POLICY_ROLLOUT: usize = get_env("POLICY_ROLLOUT").unwrap_or(1);
+
     /// The amount of dirtchlet noise to add to the root node of each search
     /// tree. A larger value will result in a more random search, which is
     /// typically desirable during training but not during tournament play.
