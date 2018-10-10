@@ -47,7 +47,8 @@ pub struct Example {
     index: libc::c_int,
     color: libc::c_int,
     policy: [libc::c_uchar; 905],
-    winner: libc::c_int
+    winner: libc::c_int,
+    number: libc::c_int
 }
 
 struct Candidate {
@@ -84,7 +85,7 @@ pub extern fn extract_single_example(
         static ref WINNER: Regex = Regex::new(r"RE\[([^\]]+)\]").unwrap();
         static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
         static ref KOMI: Regex = Regex::new(r"KM\[([^\]]*)\]").unwrap();
-        static ref MOVE: Regex = Regex::new(r"([BW])\[([^\]]*)\](P\[([^\]]*)\])?").unwrap();
+        static ref MOVE: Regex = Regex::new(r";([BW])\[([^\]]*)\](P\[([^\]]*)\])?").unwrap();
     }
 
     unsafe { CStr::from_ptr(raw_sgf_content) }.to_str().map(|content| {
@@ -199,6 +200,7 @@ pub extern fn extract_single_example(
                     None => EMPTY_POLICY.as_bytes()
                 });
                 (*out).winner = winner as libc::c_int;
+                (*out).number = i as libc::c_int;
             }
 
             0

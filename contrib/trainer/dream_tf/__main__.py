@@ -373,6 +373,7 @@ def get_dataset(files, batch_size=1, is_training=True):
         int color;
         char policy[905];
         int winner;
+        int number;
     } Example;
 
     int extract_single_example(const char*, Example*);
