@@ -15,6 +15,8 @@
 use std::env;
 use std::str::FromStr;
 
+use regex::Regex;
+
 #[derive(PartialEq)]
 pub enum Procedure {
     SelfPlay(usize),
@@ -119,7 +121,8 @@ lazy_static! {
 
     /// The _First Play Urgency_ reduction. Setting this is `1.0` effectively
     /// disables FPU.
-    pub static ref FPU_REDUCE: f32 = get_env("FPU_REDUCE").unwrap_or(0.22);
+    pub static ref FPU_REDUCE: Vec<(i32, f32)> = get_intp_list("FPU_REDUCE")
+        .unwrap_or(vec! [(0, 0.60), (200, 0.50), (800, 0.22)]);
 
     /// The number of virtual losses to add during async probes into the monte
     /// carlo search tree. A higher value avoids multiple probes exploring the
@@ -127,8 +130,8 @@ lazy_static! {
     pub static ref VLOSS_CNT: i32 = get_env("VLOSS_CNT").unwrap_or(1);
 
     /// The UCT exploration rate.
-    pub static ref UCT_EXP: f32 = get_env("UCT_EXP")
-        .unwrap_or(0.88);
+    pub static ref UCT_EXP: Vec<(i32, f32)> = get_intp_list("UCT_EXP")
+        .unwrap_or(vec! [(0, 0.88)]);
 
     /// The rave bias.
     pub static ref RAVE_BIAS: f32 = get_env("RAVE_BIAS")
@@ -164,6 +167,29 @@ pub fn get_env<T: FromStr>(name: &str) -> Option<T> {
     }
 }
 
+pub fn get_intp_list(name: &str) -> Option<Vec<(i32, f32)>> {
+    lazy_static! {
+        static ref POINT: Regex = Regex::new(r"([0-9]+),(0-9\.):?").unwrap();
+    }
+
+    get_env::<String>(name).and_then(|s| {
+        let mut out: Vec<(i32, f32)> = POINT.captures_iter(&s).map(|point| {
+            let x = point[1].parse::<i32>();
+            let y = point[2].parse::<f32>();
+
+            (x.unwrap(), y.unwrap())
+        }).collect();
+
+        out.sort_by_key(|p| { p.0 });
+
+        if out.is_empty() {
+            s.parse::<f32>().ok().map(|v| vec! [(0, v)])
+        } else {
+            Some(out)
+        }
+    })
+}
+
 /// Returns all unnamed arguments given to this program.
 pub fn get_args() -> Vec<String> {
     let mut rest = vec! [];
@@ -182,3 +208,74 @@ pub fn get_args() -> Vec<String> {
 
     rest
 }
+
+fn get_intp_value(points: &Vec<(i32, f32)>, x: i32) -> f32 {
+    if let Some(i) = points.iter().position(|e| e.0 >= x) {
+        let x0 = points.get(if i == 0 { 0 } else { i-1 }).unwrap_or(&points[0]);
+        let x1 = &points[i];
+        let a = if x0.0 >= x1.0 {
+            0.5
+        } else {
+            assert!(x1.0 >= x0.0);
+
+            (x - x0.0) as f32 / (x1.0 - x0.0) as f32
+        };
+
+        (1.0 - a) * x0.1 + a * x1.1
+    } else {
+        points.last().unwrap().1
+    }
+}
+
+/// Returns the UCT exploration constant as a function of the number of
+/// visits to the **current** node.
+///
+/// # Arguments
+///
+/// * `visits` - 
+///
+pub fn get_uct_exp(visits: i32) -> f32 {
+    get_intp_value(&UCT_EXP, visits)
+}
+
+/// Returns the first-play urgency constant as a function of the number of
+/// visits to the **current** node.
+///
+/// # Arguments
+///
+/// * `visits` - 
+///
+pub fn get_fpu_reduce(visits: i32) -> f32 {
+    get_intp_value(&FPU_REDUCE, visits)
+}
+
+#[cfg(test)]
+mod tests {
+    use util::config::*;
+
+    #[test]
+    fn intp_out_of_bounds_1() {
+        assert_eq!(get_intp_value(&vec! [(0, 0.0), (100, 1.0)], -100), 0.0);
+    }
+
+    #[test]
+    fn intp_out_of_bounds_2() {
+        assert_eq!(get_intp_value(&vec! [(0, 0.0), (100, 1.0)], 200), 1.0);
+    }
+
+    #[test]
+    fn intp_lower_edge() {
+        assert_eq!(get_intp_value(&vec! [(0, 0.0), (100, 1.0)], 0), 0.0);
+    }
+
+    #[test]
+    fn intp_upper_edge() {
+        assert_eq!(get_intp_value(&vec! [(0, 0.0), (100, 1.0)], 100), 1.0);
+    }
+
+    #[test]
+    fn intp_mid() {
+        assert_eq!(get_intp_value(&vec! [(0, 0.0), (100, 1.0)], 40), 0.4);
+    }
+}
+

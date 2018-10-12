@@ -27,7 +27,7 @@ debug = true
 go = { path = "contrib/go" }
 lazy_static = {version = "1.1", features = ["nightly"]}
 libc = "0.2"
-ordered-float = "0.5"
+ordered-float = "1.0"
 rand = "0.5"
 regex = {version = "1.0", features = ["unstable"]}
 time = "0.1"

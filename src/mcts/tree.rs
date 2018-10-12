@@ -44,7 +44,7 @@ impl PUCT {
         use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
 
         let sqrt_n = ((1 + node.total_count) as f32).sqrt();
-        let uct_exp = *config::UCT_EXP;
+        let uct_exp = config::get_uct_exp(node.total_count);
 
         for i in 0..362 {
             let count = *node.count.get_unchecked(i);
@@ -437,9 +437,11 @@ impl Node {
             // - constant (this is currently used)
             // - zero
             //
+            let fpu_reduce = config::get_fpu_reduce(self.total_count);
+
             for i in 0..368 {
                 if self.count[i] == 0 {
-                    value[i] = max(0.0, value[i] - *config::FPU_REDUCE);
+                    value[i] = max(0.0, value[i] - fpu_reduce);
                 }
             }
         }
@@ -743,7 +745,7 @@ mod tests {
     use go::*;
     use mcts::tree::*;
 
-    fn get_prior_distribution(rng: &mut SmallRng, board: Board, color: Color) -> Box<[f32]> {
+    fn get_prior_distribution(rng: &mut SmallRng, board: Board, color: Color) -> Vec<f32> {
         let mut prior: Vec<f32> = (0..362).map(|_| rng.gen::<f32>()).collect();
         let sum_recip: f32 = prior.iter().map(|&f| f).sum();
 
@@ -755,7 +757,7 @@ mod tests {
             }
         }
 
-        prior.into_boxed_slice()
+        prior
     }
 
     unsafe fn bench_test(b: &mut Bencher) {
