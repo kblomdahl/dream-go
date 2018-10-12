@@ -1,0 +1,29 @@
+version: '3'
+services:
+  train:
+    build:
+      context: .
+      dockerfile: Dockerfile.train
+      args:
+        - GIT_REV
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    network_mode: host
+    shm_size: 1g
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+      args:
+        - GIT_REV
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1
+    volumes:
+      - ./networks:/app/networks
