@@ -27,3 +27,17 @@ services:
       - CUDA_VISIBLE_DEVICES=0,1
     volumes:
       - ./networks:/app/networks
+
+  board:
+    build:
+      context: .
+      dockerfile: Dockerfile.board
+    environment:
+      - CUDA_VISIBLE_DEVICES=1
+    volumes:
+      - ./models:/app/models
+    network_mode: host
+    shm_size: 1g
+    ulimits:
+      memlock: -1
+      stack: 67108864

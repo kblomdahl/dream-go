@@ -1,0 +1,6 @@
+FROM nvcr.io/nvidia/tensorflow:18.08-py3
+EXPOSE 6006
+RUN apt-get -q update && mkdir -p /app /app/models
+
+WORKDIR /app
+CMD tensorboard --logdir models/
