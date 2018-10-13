@@ -1,6 +1,6 @@
 #!/usr/bin/make -f
 
-VERSION?=0.6.0
+VERSION?=0.6.1
 DIR=dreamgo-$(VERSION)_amd64
 
 .PHONY: clean build

@@ -100,6 +100,9 @@ For the values provided in this example, which generate 2,000,000 examples for t
 * 0.7.0 - _Acceptance_
   * First version with a network trained from self-play games
   * Improved [neural network architecture](https://github.com/Chicoryn/dream-go/issues/25#issuecomment-377706857)
+* 0.6.1 - _Emerged_
+  * Improved [neural network architecture](https://github.com/Chicoryn/dream-go/issues/34#issuecomment-427583828)
+  * Improved reinforcement training environment
 * 0.6.0 - _Emergent_
   * Time and tournament commands for the GTP interface
   * Improved [neural network training](https://github.com/Chicoryn/dream-go/issues/25#issuecomment-377706857)

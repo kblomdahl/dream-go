@@ -1,15 +1,15 @@
 # Copyright (c) 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -511,11 +511,12 @@ def get_dataset(files, batch_size=1, is_training=True):
         num_parallel_calls = max(os.cpu_count() - 8, 4);
 
         dataset = tf.data.TextLineDataset(files)
+        if is_training:
+            dataset = dataset.shuffle(524288, reshuffle_each_iteration=True)
         dataset = dataset.map(_parse, num_parallel_calls=num_parallel_calls)
         dataset = dataset.filter(_illegal_policy)
         dataset = dataset.map(_fix_shape)
         if is_training:
-            dataset = dataset.shuffle(524288, reshuffle_each_iteration=True)
             dataset = dataset.repeat()
             dataset = dataset.map(_augment, num_parallel_calls=4)
             dataset = dataset.map(_fix_history, num_parallel_calls=4)
