@@ -85,7 +85,7 @@ pub extern fn extract_single_example(
         static ref WINNER: Regex = Regex::new(r"RE\[([^\]]+)\]").unwrap();
         static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
         static ref KOMI: Regex = Regex::new(r"KM\[([^\]]*)\]").unwrap();
-        static ref MOVE: Regex = Regex::new(r";([BW])\[([^\]]*)\](P\[([^\]]*)\])?").unwrap();
+        static ref MOVE: Regex = Regex::new(r";([BW])\[([^\]]*)\](?:P\[([^\]]*)\])?").unwrap();
     }
 
     unsafe { CStr::from_ptr(raw_sgf_content) }.to_str().map(|content| {
@@ -196,7 +196,11 @@ pub extern fn extract_single_example(
                 (*out).index = examples[i].index as libc::c_int;
                 (*out).color = examples[i].color as libc::c_int;
                 (*out).policy.clone_from_slice(match examples[i].policy {
-                    Some(ref policy) => policy.as_bytes(),
+                    Some(ref policy) => {
+                        assert!(policy.len() == 905, "illegal policy -- {}", policy);
+
+                        policy.as_bytes()
+                    },
                     None => EMPTY_POLICY.as_bytes()
                 });
                 (*out).winner = winner as libc::c_int;
