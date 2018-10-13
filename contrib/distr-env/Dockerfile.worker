@@ -19,6 +19,7 @@ COPY google-storage-auth.json /app/google-storage-auth.json
 
 ARG GIT_REV
 ENV GOOGLE_APPLICATION_CREDENTIALS /app/google-storage-auth.json
+ENV RUST_BACKTRACE full
 ENV GIT_REV $GIT_REV
 
 WORKDIR /app

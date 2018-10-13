@@ -31,13 +31,16 @@ def score_game(sgf):
             stderr=subprocess.DEVNULL
         )
 
-        for line in gnugo.stdout:
-            line = line.decode('utf-8').strip()
+        try:
+            for line in gnugo.stdout:
+                line = line.decode('utf-8').strip()
 
-            if 'White wins by' in line:  # White wins by 8.5 points
-                return 'W+' + line.split()[3]
-            elif 'Black wins by' in line:  # Black wins by 32.5 points
-                return 'B+' + line.split()[3]
+                if 'White wins by' in line:  # White wins by 8.5 points
+                    return 'W+' + line.split()[3]
+                elif 'Black wins by' in line:  # Black wins by 32.5 points
+                    return 'B+' + line.split()[3]
+        finally:
+            gnugo.communicate()
 
 def clean_game(sgf):
     """ Returns the given game after it has been _cleaned up_. """
@@ -69,7 +72,7 @@ if __name__ == '__main__':
             '--num-rollout', '3200',
             '--num-samples', '1',
             '--ex-it'
-        ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
+        ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
 
         with multiprocessing.Pool() as pool:
             def add_game_record(x):
