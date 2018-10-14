@@ -17,12 +17,12 @@ use util::config;
 use mcts::*;
 
 /// Play a game against the engine and return the result of the game.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `server` - the server to use during evaluation
 /// * `num_parallel` - the number of games that are being played in parallel
-/// 
+///
 fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> GameResult
 {
     let mut board = Board::new(get_random_komi());
@@ -98,12 +98,12 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
 
 /// Play games against the engine and return the result of the games
 /// over the channel.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `network` - the neural network to use during evaluation
 /// * `num_games` - the number of games to generate
-/// 
+///
 pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, PredictService) {
     let server = predict::service(network);
     let (sender, receiver) = channel();

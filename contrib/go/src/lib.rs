@@ -74,13 +74,10 @@ pub extern fn extract_single_example(
     use rand::Rng;
     use regex::Regex;
     use std::ffi::CStr;
+    use sgf::SgfCoordinate;
 
     lazy_static! {
         static ref EMPTY_POLICY: String = "0".repeat(905);
-        static ref LETTERS: [char; 26] = [
-            'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
-            'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'
-        ];
 
         static ref WINNER: Regex = Regex::new(r"RE\[([^\]]+)\]").unwrap();
         static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
@@ -125,8 +122,7 @@ pub extern fn extract_single_example(
         let mut pass_count = 0;
 
         for moves in MOVE.captures_iter(&content) {
-            let x = moves[2].chars().nth(0).and_then(|x| LETTERS.binary_search(&x).ok()).unwrap_or(19);
-            let y = moves[2].chars().nth(1).and_then(|y| LETTERS.binary_search(&y).ok()).unwrap_or(19);
+            let (x, y) = sgf::CGoban::parse(&moves[2]).unwrap_or_else(|_err| { (19, 19) });
             let policy = moves.get(3).map(|input| input.as_str().to_string());
             let current_color = match &moves[1] {
                 "B" => Color::Black,

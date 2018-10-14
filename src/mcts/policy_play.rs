@@ -20,12 +20,12 @@ use mcts::*;
 
 /// pick the move from the policy by taking the top 80% of the policy, and then
 /// choosing a move from the remains (weighted by the moves policy value)
-/// 
+///
 /// # Arguments
-/// 
-/// * `policy` - 
-/// * `temperature` - 
-/// 
+///
+/// * `policy` -
+/// * `temperature` -
+///
 fn policy_choose(policy: &[f32], temperature: f32) -> Option<usize> {
     let mut candidates = (0..362).collect::<Vec<usize>>();
     let mut subtotals = [0.0f32; 362];
@@ -96,9 +96,9 @@ fn policy_ex_it(server: &PredictGuard, board: &Board, color: Color) -> (String, 
 ///
 /// # Arguments
 ///
-/// * `server` - 
-/// * `board` - 
-/// * `color` - 
+/// * `server` -
+/// * `board` -
+/// * `color` -
 ///
 fn policy_forward(
     server: &PredictGuard,
@@ -128,12 +128,12 @@ fn policy_forward(
 /// This is different from `self_play` because this method does not
 /// perform any search and only plays stochastically according
 /// to the policy network.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `server` - the server to use during evaluation
 /// * `ex_it` - whether to emit one full policy
-/// 
+///
 fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
     let mut temperature = (*config::TEMPERATURE + 1e-3).recip();
     let mut sgf = vec! [];
@@ -161,7 +161,7 @@ fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
         } else {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
-            sgf.push((board.clone(), color, format!(";{}[{}]", color, Sabaki::to_sgf(x, y))));
+            sgf.push((board.clone(), color, format!(";{}[{}]", color, CGoban::to_sgf(x, y))));
             board.place(color, x, y);
             pass_count = 0;
         }
@@ -197,13 +197,13 @@ fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
 /// the returned channel. This is different from `self_play` because this
 /// method does not perform any search and only plays stochastically according
 /// to the policy network.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `network` - the neural network to use during evaluation
-/// * `num_games` - 
+/// * `num_games` -
 /// * `ex_it` - whether to emit one full policy per game
-/// 
+///
 pub fn policy_play(network: Network, num_games: usize, ex_it: bool) -> (Receiver<GameResult>, PredictService) {
     let server = predict::service(network);
     let (sender, receiver) = channel();
