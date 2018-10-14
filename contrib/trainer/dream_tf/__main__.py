@@ -750,11 +750,13 @@ config = tf.estimator.RunConfig(
 )
 
 if args.warm_start:
+    steps_to_skip = 10000
     warm_start_from = tf.estimator.WarmStartSettings(
         ckpt_to_initialize_from=args.warm_start[0],
         vars_to_warm_start='[0-9x].*'  # only layers
     )
 else:
+    steps_to_skip = 0
     warm_start_from = None
 
 hooks = [tf_debug.LocalCLIDebugHook()] if args.debug else []
@@ -769,7 +771,7 @@ nn = tf.estimator.Estimator(
 if args.start or args.resume:
     nn.train(
         input_fn=lambda: input_fn(args.files, params['batch_size'], True),
-        hooks=hooks + [LearningRateScheduler()],  #, RunAdversarialOpsHook()],
+        hooks=hooks + [LearningRateScheduler(steps_to_skip)],  #, RunAdversarialOpsHook()],
         steps=params['steps'] // params['batch_size']
     )
 elif args.verify:

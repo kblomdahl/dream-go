@@ -1,15 +1,15 @@
 # Copyright (c) 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -38,6 +38,9 @@ class LearningRateScheduler(tf.train.SessionRunHook):
 
     BUF_SIZE = 4096  # the number of samples to calculate the slope over
     THRESHOLD = 2048  # the minimum distance between two decreases in learning rate
+
+    def __init__(self, steps_to_skip=0):
+        self.steps_to_skip = steps_to_skip
 
     def begin(self):
         self.global_step = tf.train.get_global_step()
@@ -132,7 +135,10 @@ class LearningRateScheduler(tf.train.SessionRunHook):
 
             # decrease the learning rate if we are not certain whether the slope
             # is decreasing or not
-            if steps > LearningRateScheduler.THRESHOLD and p < 0.51 and rp < 0.51:
+            can_lower_rate = global_step > self.steps_to_skip and steps > LearningRateScheduler.THRESHOLD
+            is_not_decreasing = p < 0.51 and rp < 0.51
+
+            if can_lower_rate and is_not_decreasing:
                 if learning_rate < 1e-5:
                     run_context.request_stop()
 
