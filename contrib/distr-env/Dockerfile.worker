@@ -1,18 +1,12 @@
-FROM nvcr.io/nvidia/cuda:10.0-cudnn7-devel
+FROM dream_go/base:latest
+FROM nvcr.io/nvidia/cuda:10.0-cudnn7-runtime-ubuntu18.04
 COPY requirements.txt /tmp/requirements.txt
-RUN apt-get -q update && apt-get -q -y install curl python3 python3-pip gnugo
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly
+RUN apt-get update -qy --no-upgrade && \
+    apt-get install -qy --no-upgrade python3 python3-pip gnugo
 RUN pip3 install -q -r /tmp/requirements.txt
 
-# build the `dream_go` binary
-RUN mkdir -p /app /app/networks
-COPY .staging/worker/. /app/
-ENV LIBRARY_PATH /usr/local/cuda/lib64/:/usr/local/cuda/lib64/stubs/
-RUN cd /app/code && \
-    ~/.cargo/bin/cargo build --release && \
-    cp target/release/dream_go /app/dream_go
-
 # copy the start-up script
+COPY --from=0 /app/dream_go /app/dream_go
 COPY dg_storage.py /app/dg_storage.py
 COPY run_worker.py /app/run_worker.py
 COPY google-storage-auth.json /app/google-storage-auth.json

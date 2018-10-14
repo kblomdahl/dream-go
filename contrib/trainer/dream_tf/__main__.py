@@ -520,8 +520,8 @@ def get_dataset(files, batch_size=1, is_training=True):
             dataset = dataset.repeat()
             dataset = dataset.map(_augment, num_parallel_calls=4)
             dataset = dataset.map(_fix_history, num_parallel_calls=4)
-        dataset = dataset.prefetch(batch_size)
         dataset = dataset.batch(batch_size)
+        dataset = dataset.prefetch(4)
 
         return dataset
 

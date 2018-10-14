@@ -4,27 +4,22 @@ all: staging
 	GIT_REV=`git show-ref -s HEAD` docker-compose build
 
 clean:
+	docker-compose down --rmi 'all'
 	rm -rf .staging
 
 # -------- Staging --------
 
-TRAIN=requirements.txt dream_tf libgo.so
-WORKER=code
+TRAIN=requirements.txt dream_tf
 
-staging: .staging $(WORKER:%=.staging/worker/%) $(TRAIN:%=.staging/train/%)
+staging: .staging .staging/code $(WORKER:%=.staging/worker/%) $(TRAIN:%=.staging/train/%)
 
 .staging:
 	mkdir -p .staging/
-
-.staging/train/libgo.so: ../../target/release/libgo.so
-	cd ../go && cargo build --quiet --release
-	mkdir -p `dirname $@`
-	cp -uf "$^" "$@"
 
 .staging/train/%: ../trainer/%
 	mkdir -p `dirname $@`
 	cp -urf "$^" "$@"
 
-.staging/worker/code: ../../
+.staging/code: ../../
 	rm -rf "$@"
 	git clone "$^" "$@"

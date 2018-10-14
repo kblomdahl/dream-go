@@ -1,5 +1,7 @@
 #!/usr/bin/python
 
+from base64 import standard_b64encode
+from crc32c import crc32
 from datetime import datetime
 from google.cloud import storage
 from os.path import basename, dirname, isfile
@@ -9,6 +11,7 @@ from time import sleep
 import json
 import petname
 import subprocess
+import struct
 import sys
 
 storage_client = storage.Client()
@@ -38,6 +41,16 @@ def get_most_recent_network():
     except ValueError:
         return None
 
+def blob_already_exists(blob, dest_file):
+    if isfile(dest_file):
+        with open(dest_file, 'rb') as file:
+            raw_crc = crc32(file.read())
+
+        encoded = standard_b64encode(struct.pack('>I', raw_crc)).decode('ascii')
+
+        return encoded == blob.crc32c
+    return False
+
 def copy_most_recent_model():
     """ Copy the most recent model to the 'models/' directory """
 
@@ -52,7 +65,7 @@ def copy_most_recent_model():
                 basename(blob.name)
             )
 
-            if not isfile(dest_file):
+            if not blob_already_exists(blob, dest_file):
                 makedirs(dirname(dest_file), exist_ok=True)
                 with open(dest_file, 'wb') as file:
                     print('.', end='', flush=True)
@@ -71,8 +84,9 @@ def copy_most_recent_network():
             basename(best_network.name)
         )
 
-        with open(dest_file, 'wb') as file:
-            best_network.download_to_file(file)
+        if not blob_already_exists(best_network, dest_file):
+            with open(dest_file, 'wb') as file:
+                best_network.download_to_file(file)
 
         return dest_file
     else:
@@ -113,7 +127,7 @@ def copy_most_recent_games():
         dest_file = 'data/{}'.format(basename(blob.name))
         files += (dest_file,)
 
-        if not isfile(dest_file):
+        if not blob_already_exists(blob, dest_file):
             with open(dest_file, 'wb') as file:
                 print('.', end='', flush=True)
 

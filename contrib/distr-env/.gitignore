@@ -1,1 +1,6 @@
+data/
+models/
+networks/
+.staging/
+
 google-storage-auth.json

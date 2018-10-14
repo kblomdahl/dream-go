@@ -1,6 +1,13 @@
 version: '3'
 services:
+  base:
+    image: dream_go/base
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+
   train:
+    image: dream_go/train
     build:
       context: .
       dockerfile: Dockerfile.train
@@ -11,13 +18,13 @@ services:
     volumes:
       - ./data:/app/data
       - ./models:/app/models
-    network_mode: host
     shm_size: 1g
     ulimits:
       memlock: -1
       stack: 67108864
 
   worker:
+    image: dream_go/worker
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -29,6 +36,7 @@ services:
       - ./networks:/app/networks
 
   board:
+    image: dream_go/board
     build:
       context: .
       dockerfile: Dockerfile.board
