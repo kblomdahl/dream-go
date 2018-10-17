@@ -33,7 +33,7 @@ lazy_static! {
 
 /// An implementation of the _Polynomial UCT_ as suggested in the AlphaGo Zero
 /// paper [1].
-/// 
+///
 /// [1] https://www.nature.com/articles/nature24270
 #[derive(Clone)]
 pub struct PUCT;
@@ -66,13 +66,13 @@ impl PUCT {
     }
 
     /// Update the trace backwards with the given value (and color).
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `trace` - 
-    /// * `color` - 
-    /// * `value` - 
-    /// 
+    ///
+    /// * `trace` -
+    /// * `color` -
+    /// * `value` -
+    ///
     #[inline]
     unsafe fn update(trace: &NodeTrace, color: Color, value: f32) {
         for &(node, _, index) in trace.iter() {
@@ -90,13 +90,13 @@ impl PUCT {
     }
 
     /// Reference implementation of the PUCT value function.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `node` -
     /// * `value` - the winrates to use in the calculations
     /// * `dst` - output array for the UCT value
-    /// 
+    ///
     #[cfg(test)]
     #[inline(always)]
     fn get_ref(node: &Node, value: &[f32], dst: &mut [f32]) {
@@ -104,13 +104,13 @@ impl PUCT {
     }
 
     /// Optimized implementation of the PUCT value function.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `node` -
     /// * `value` - the winrates to use in the calculations
     /// * `dst` - output array for the UCT value
-    /// 
+    ///
     #[inline(always)]
     fn get(node: &Node, value: &[f32], dst: &mut [f32]) {
         if is_x86_feature_detected!("avx2")  {
@@ -123,12 +123,12 @@ impl PUCT {
 
 /// Returns the weighted n:th percentile of the given array, and the sum of
 /// all smaller elements.
-/// 
+///
 /// # Arguments
-/// 
-/// * `array` - 
-/// * `n` - 
-/// 
+///
+/// * `array` -
+/// * `n` -
+///
 fn percentile(array: &[i32], total: i32, n: f64) -> (i32, f64) {
     let mut copy = array.to_vec();
     copy.sort_unstable_by_key(|val| -val);
@@ -196,12 +196,12 @@ impl Drop for Node {
 impl Node {
     /// Returns an empty search tree with the given starting color and prior
     /// values.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `color` - the color of the first players color
     /// * `prior` - the prior values of the nodes
-    /// 
+    ///
     pub fn new(color: Color, value: f32, prior: Vec<f32>) -> Node {
         assert_eq!(prior.len(), 362);
 
@@ -306,12 +306,12 @@ impl Node {
     }
 
     /// Returns the sub-tree that contains the exploration of the given move index.
-    /// 
+    ///
     /// # Argumnets
-    /// 
+    ///
     /// * `self` - the search tree to pluck the child from
     /// * `index` - the move to pluck the sub-tree for
-    /// 
+    ///
     pub fn forward(mut self, index: usize) -> Option<Node> {
         let child = self.children[index];
 
@@ -340,16 +340,18 @@ impl Node {
     /// determined as the most visited child. If the temperature is non-zero
     /// then this process is stochastic, so that the probability that a move
     /// is picked is proportional to its visit count.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `temperature` - How random the process should be, if set to +Inf
     ///   then the values are picked completely at random, and if set to 0
     ///   the selection is greedy.
-    /// 
+    ///
     pub fn best(&self, temperature: f32) -> (f32, usize) {
         if temperature <= 9e-2 { // greedy
-            let max_i = (0..362).max_by_key(|&i| self.count[i]).unwrap();
+            let max_i = (0..362)
+                .max_by_key(|&i| (self.count[i], OrderedFloat(self.value[i]), OrderedFloat(self.prior[i])))
+                .unwrap();
 
             (self.value[max_i], max_i)
         } else {
@@ -407,11 +409,11 @@ impl Node {
 
     /// Remove the given move as a valid choice in this search tree by setting
     /// its `value` to negative infinity.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `index` - the index of the child to disqualify
-    /// 
+    ///
     pub fn disqualify(&mut self, index: usize) {
         self.value[index] = ::std::f32::NEG_INFINITY;
         self.count[index] = 0;
@@ -419,11 +421,11 @@ impl Node {
 
     /// Returns the child with the maximum UCT value, and increase its visit count
     /// by one.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `apply_fpu` - whether to use the first-play urgency heuristic 
-    /// 
+    ///
+    /// * `apply_fpu` - whether to use the first-play urgency heuristic
+    ///
     fn select<'a>(&'a mut self, apply_fpu: bool) -> Option<usize> {
         let mut value = self.value.clone();
 
@@ -480,12 +482,12 @@ pub type NodeTrace = Vec<(*mut Node, Color, usize)>;
 /// moves the traversed edges represents, and return a list of the
 /// edges. Which edges to traverse are determined according to the UCT
 /// algorithm.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `root` - the search tree to probe into
 /// * `board` - the board to update with the traversed moves
-/// 
+///
 pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
     let mut trace = vec! [];
     let mut current = root;
@@ -530,14 +532,14 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
 
 /// Insert a new node at the end of the given trace and perform the backup pass
 /// updating the average and AMAF values of all nodes in the trace.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `trace` -
 /// * `color` -
 /// * `value` -
 /// * `prior` -
-/// 
+///
 pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32>) {
     if let Some(&(node, _, index)) = trace.last() {
         let mut next = Box::new(Node::new(color, value, prior));
@@ -602,13 +604,13 @@ impl<'a, S: SgfCoordinate> fmt::Display for ToSgf<'a, S> {
 
 /// Returns a marker that contains all the examined positions of the given
 /// search tree and can be displayed as an SGF file.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `root` -
 /// * `starting_point` -
 /// * `meta` - whether to include the SGF meta data (rules, etc.)
-/// 
+///
 pub fn to_sgf<'a, S>(root: &'a Node, starting_point: &Board, meta: bool) -> ToSgf<'a, S>
     where S: SgfCoordinate
 {
@@ -727,12 +729,12 @@ impl<'a> fmt::Display for ToPretty<'a> {
 /// Returns a marker that contains all the examined positions of the given
 /// search tree and can be pretty-printed to something easily examined by
 /// a human.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `root` -
 /// * `starting_point` -
-/// 
+///
 pub fn to_pretty<'a>(root: &'a Node) -> ToPretty<'a> {
     ToPretty { root: root }
 }

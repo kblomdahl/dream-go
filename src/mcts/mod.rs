@@ -139,13 +139,13 @@ fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f
 
 /// Performs a forward pass through the neural network for the given board
 /// position using a random symmetry to increase entropy.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `workspace` - the workspace to use during the forward pass
 /// * `board` - the board position
 /// * `color` - the current player
-/// 
+///
 fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
     let t = *thread_rng().choose(&symmetry::ALL).unwrap();
 
@@ -278,12 +278,12 @@ unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
 
 /// Worker that probes into the given monte carlo search tree until the context
 /// is exhausted.
-/// 
+///
 /// # Arguments
-/// 
-/// * `context` - 
-/// * `server` - 
-/// 
+///
+/// * `context` -
+/// * `server` -
+///
 fn predict_worker<T>(context: ThreadContext<T>, server: PredictGuard)
     where T: TimeStrategy + Clone + Send + 'static
 {
@@ -316,15 +316,15 @@ fn predict_worker<T>(context: ThreadContext<T>, server: PredictGuard)
 
 /// Predicts the _best_ next move according to the given neural network when applied
 /// to a monte carlo tree search.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `server` - the server to use during evaluation
-/// * `num_workers` - 
-/// * `starting_tree` - 
-/// * `starting_point` - 
-/// * `starting_color` - 
-/// 
+/// * `num_workers` -
+/// * `starting_tree` -
+/// * `starting_point` -
+/// * `starting_color` -
+///
 fn predict_aux<T>(
     server: &PredictGuard,
     num_workers: usize,
@@ -387,15 +387,22 @@ fn predict_aux<T>(
         remaining: Arc::new(AtomicIsize::new(remaining)),
     };
 
-    let handles = (0..num_workers).map(|_| {
+    if num_workers <= 1 {
         let context = context.clone();
         let server = server.clone_static();
 
-        thread::spawn(move || predict_worker::<T>(context, server))
-    }).collect::<Vec<JoinHandle<()>>>();
+        predict_worker::<T>(context, server);
+    } else {
+        let handles = (0..num_workers).map(|_| {
+            let context = context.clone();
+            let server = server.clone_static();
 
-    // wait for all threads to terminate to avoid any zombie processes
-    for handle in handles.into_iter() { handle.join().unwrap(); }
+            thread::spawn(move || predict_worker::<T>(context, server))
+        }).collect::<Vec<JoinHandle<()>>>();
+
+        // wait for all threads to terminate to avoid any zombie processes
+        for handle in handles.into_iter() { handle.join().unwrap(); }
+    }
 
     assert_eq!(Arc::strong_count(&context.root), 1);
 
@@ -415,15 +422,15 @@ fn predict_aux<T>(
 
 /// Predicts the _best_ next move according to the given neural network when applied
 /// to a monte carlo tree search.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `server` - the server to use during evaluation
-/// * `num_workers` - 
+/// * `num_workers` -
 /// * `starting_tree` -
 /// * `starting_point` -
 /// * `starting_color` -
-/// 
+///
 pub fn predict<T>(
     server: &PredictGuard,
     num_workers: Option<usize>,
@@ -441,12 +448,12 @@ pub fn predict<T>(
 
 /// Returns a weighted random komi between `-7.5` to `7.5`, with the most common
 /// ones being `7.5`, `6.5`, and `0.5`.
-/// 
+///
 /// - 40% chance of `7.5`
 /// - 40% chance of `6.5`
 /// - 10% chance of `0.5`
 /// - 10% chance of a random komi between `-7.5` and `7.5`.
-/// 
+///
 fn get_random_komi() -> f32 {
     let value = thread_rng().gen::<f32>();
 
