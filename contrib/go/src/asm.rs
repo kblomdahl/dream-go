@@ -14,11 +14,11 @@
 
 /// Returns the number of elements in the given array that are `0`. The
 /// input arrays length must be a divider of `16` (for SIMD reasons).
-/// 
+///
 /// # Arguments
-/// 
-/// * `array` - 
-/// 
+///
+/// * `array` -
+///
 #[target_feature(enable = "avx,avx2,popcnt")]
 unsafe fn _count_zeros(array: &[u8]) -> usize {
     debug_assert!(array.len() == 384);
@@ -41,11 +41,11 @@ unsafe fn _count_zeros(array: &[u8]) -> usize {
 
 /// Returns the number of elements in the given array that are `0`. The
 /// input arrays length must be a divider of `16` (for SIMD reasons).
-/// 
+///
 /// # Arguments
-/// 
-/// * `array` - 
-/// 
+///
+/// * `array` -
+///
 #[inline(always)]
 pub fn count_zeros(array: &[u8]) -> usize {
     if is_x86_feature_detected!("avx2")  {
@@ -58,7 +58,7 @@ pub fn count_zeros(array: &[u8]) -> usize {
 #[cfg(test)]
 mod tests {
     use test::Bencher;
-    use go::asm;
+    use asm;
 
     #[bench]
     fn count_zeros(b: &mut Bencher) {

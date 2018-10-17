@@ -199,7 +199,9 @@ impl Ladder for BoardFast {
 
 #[cfg(test)]
 mod tests {
-    use go::*;
+    use board::*;
+    use color::*;
+    use ladder::*;
 
     #[test]
     fn ladder_corner_capture() {
@@ -212,7 +214,7 @@ mod tests {
         // . . . . .
         // X . . . X
         //
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
         board.place(Color::Black,  0,  0);
         board.place(Color::Black,  0, 18);
         board.place(Color::Black, 18,  0);
@@ -250,7 +252,7 @@ mod tests {
         // . . . . .
         // . . . . .
         //
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
         board.place(Color::White, 3, 3);
         board.place(Color::Black, 2, 3);
         board.place(Color::Black, 3, 2);
@@ -274,7 +276,7 @@ mod tests {
     #[test]
     fn ladder_escape() {
         // test a standard ladder pattern with a stone on the diagonal
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
         board.place(Color::White,  3,  3);
         board.place(Color::White, 15, 15);  // ladder breaking
         board.place(Color::Black,  2,  3);
@@ -332,7 +334,7 @@ mod tests {
             (Color::Black,  4, 12), (Color::White,  3, 12), (Color::Black,  3, 11)
         ];
 
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
 
         for &(color, x, y) in moves.into_iter() {
             board.place(color, x, y);
@@ -349,7 +351,7 @@ mod tests {
             (Color::Black,  1,  4)
         ];
 
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
 
         for &(color, x, y) in moves.into_iter() {
             board.place(color, x, y);
@@ -366,7 +368,7 @@ mod tests {
             (Color::Black,  1,  4)
         ];
 
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
 
         for &(color, x, y) in moves.into_iter() {
             board.place(color, x, y);

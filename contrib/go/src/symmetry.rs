@@ -142,12 +142,12 @@ fn reorder<T: Copy>(src: &[T], dst: &mut [T], mapping: &[u16]) {
 /// Apply the given symmetry transformation to the tensor in CHW
 /// format, with any left-over elements at the end of the tensor
 /// untouched. The transformation is applied in-place.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `values` -
-/// * `transform` - 
-/// 
+/// * `transform` -
+///
 pub fn apply<T: Copy>(values: &mut [T], transform: Transform) {
     thread_local! {
         static WORKSPACE: RefCell<[i32; 361]> = RefCell::new([0; 361]);
@@ -177,12 +177,12 @@ pub fn apply<T: Copy>(values: &mut [T], transform: Transform) {
 }
 
 /// Returns if the given board is symmetric over the given group.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `board` -
 /// * `transform` -
-/// 
+///
 pub fn is_symmetric(board: &Board, transform: Transform) -> bool {
     let lookup: &[u16] = transform.get_table();
 
@@ -196,7 +196,7 @@ pub fn is_symmetric(board: &Board, transform: Transform) -> bool {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use go::*;
+    use symmetry;
 
     fn test_uniq(values: &[f32]) {
         let u = values.into_iter()

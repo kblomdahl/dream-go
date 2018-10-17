@@ -27,11 +27,11 @@ impl SmallSet {
 
     /// Adds the given value to this set, removing the oldest value if
     /// the set overflows.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `value` - the value to add to the set
-    /// 
+    ///
     pub fn push(&mut self, value: u64) {
         self.buf[self.count] = value;
         self.count += 1;
@@ -42,11 +42,11 @@ impl SmallSet {
     }
 
     /// Returns true if this set contains the given value.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `other` - the value to look for
-    /// 
+    ///
     pub fn contains(&self, other: u64) -> bool {
         (0..16).any(|x| self.buf[x] == other)
     }
@@ -83,7 +83,7 @@ impl<'a> Iterator for SmallIter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use go::small_set::*;
+    use small_set::*;
 
     #[test]
     fn check() {

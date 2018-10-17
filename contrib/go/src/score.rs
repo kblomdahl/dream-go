@@ -66,22 +66,22 @@ pub trait Score {
     ///
     /// This method does not take any komi into account, you will
     /// need to add it yourself.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `finished` - A copy of this board that has been played to
     ///   finish, using some heuristic
-    /// 
+    ///
     fn get_guess_score(&self, finished: &Board) -> (usize, usize);
 
     /// Returns the status of all stones on the board:
-    /// 
+    ///
     /// - **alive** if the stone is present on both
     /// - **dead** if the stone is not present in the _finished_ board
     /// - **seki** if the stone is present on both, but not scoreable
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `finished` - A copy of this board that has been played to
     ///   finish, using some heuristic
     fn get_stone_status(&self, finished: &Board) -> Vec<(usize, StoneStatus)>;
@@ -233,11 +233,13 @@ fn get_territory_distance(board: &BoardFast, color: Color) -> [u8; 368] {
 
 #[cfg(test)]
 mod tests {
-    use go::*;
+    use board::*;
+    use color::*;
+    use score::*;
 
     #[test]
     fn score_black() {
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
         board.place(Color::Black, 0, 0);
 
         assert!(!board.is_scoreable());
@@ -246,7 +248,7 @@ mod tests {
 
     #[test]
     fn score_white() {
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
         board.place(Color::White, 0, 0);
 
         assert!(!board.is_scoreable());
@@ -255,7 +257,7 @@ mod tests {
 
     #[test]
     fn score_black_white() {
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
         board.place(Color::White, 1, 0);
         board.place(Color::White, 0, 1);
         board.place(Color::White, 1, 1);

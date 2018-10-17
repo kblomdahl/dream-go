@@ -20,7 +20,7 @@ use color::Color;
 use circular_buf::CircularBuf;
 use small_set::SmallSet;
 
-/// 
+///
 #[derive(Clone)]
 pub struct Board {
     /// The interior board representation.
@@ -117,12 +117,12 @@ impl Board {
 
     /// Returns true if playing at the given index violated the
     /// super-ko rule.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `color` - the color of the move
     /// * `index` - the index of the move
-    /// 
+    ///
     pub(super) fn _is_ko(&self, color: Color, index: usize) -> bool {
         debug_assert!(self.inner.is_valid(color, index));
 
@@ -276,13 +276,14 @@ impl Eq for Board { }
 
 #[cfg(test)]
 mod tests {
-    use go::*;
+    use board::*;
+    use color::*;
 
     /// Test that it is possible to capture a stone in the middle of the
     /// board.
     #[test]
     fn capture() {
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
 
         board.place(Color::Black,  9,  9);
         board.place(Color::White,  8,  9);
@@ -296,7 +297,7 @@ mod tests {
     /// Test that it is possible to capture a group of stones in the corner.
     #[test]
     fn capture_group() {
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
 
         board.place(Color::Black, 0, 1);
         board.place(Color::Black, 1, 0);
@@ -318,7 +319,7 @@ mod tests {
     /// with two adjacent neighbours of the opposite color.
     #[test]
     fn suicide_corner() {
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
 
         board.place(Color::White, 0, 0);
         board.place(Color::Black, 1, 0);
@@ -333,7 +334,7 @@ mod tests {
     /// of a ponnuki.
     #[test]
     fn suicide_middle() {
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
 
         board.place(Color::Black,  9,  9);
         board.place(Color::White,  8,  9);
@@ -350,7 +351,7 @@ mod tests {
     /// corner ko.
     #[test]
     fn ko() {
-        let mut board = Board::new(DEFAULT_KOMI);
+        let mut board = Board::new(7.5);
 
         board.place(Color::Black, 0, 0);
         board.place(Color::Black, 0, 2);

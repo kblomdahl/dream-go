@@ -89,7 +89,7 @@ impl CircularBuf {
 
 #[cfg(test)]
 mod tests {
-    use go::circular_buf::*;
+    use circular_buf::*;
 
     #[test]
     fn check() {

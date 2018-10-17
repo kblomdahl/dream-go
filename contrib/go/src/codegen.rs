@@ -130,7 +130,7 @@ pub const W: [u16; 361] = [
 
 #[cfg(test)]
 mod tests {
-    use go::codegen::*;
+    use codegen::*;
 
     /// Returns an array that contains the mapping from original index to the
     /// translated vertex according to the given deltas, if the translated
@@ -163,12 +163,12 @@ mod tests {
     }
 
     /// Returns true if all elements in `a` and `b` are equal
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `a` - 
-    /// * `b` - 
-    /// 
+    ///
+    /// * `a` -
+    /// * `b` -
+    ///
     fn array_eq(a: [u16; 361], b: [u16; 361]) -> bool {
         (0..361).all(|i| a[i] == b[i])
     }

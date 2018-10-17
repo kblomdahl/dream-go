@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(test)]
+
 #[macro_use] extern crate lazy_static;
 extern crate libc;
 extern crate rand;
 extern crate regex;
+#[cfg(test)] extern crate test;
 
 mod asm;
 mod board;
