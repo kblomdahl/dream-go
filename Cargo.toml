@@ -21,6 +21,9 @@ trace-mcts = []
 opt-level = 1
 debug = true
 
+[profile.release]
+lto = true
+
 [workspace]
 members = ["contrib/go"]
 
