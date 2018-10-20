@@ -93,8 +93,9 @@ impl fmt::Display for GameResult {
 /// * `color` - the color to evaluate for
 ///
 fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
+    let (initial_policy, indices) = create_initial_policy(board, color);
+    let mut policy = initial_policy.clone();
     let mut value = 0.0f32;
-    let mut policy = vec! [0.0f32; 362];
 
     // find out which symmetries has already been calculated, and which ones has not
     let mut new_requests = vec! [];
@@ -102,11 +103,8 @@ fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f
 
     for &t in &symmetry::ALL {
         if let Some((other_value, other_policy)) = global_cache::get_or_insert(board, color, t, || { None }) {
-            value += 0.125 * other_value;
-
-            for i in 0..362 {
-                policy[i] += 0.125 * other_policy[i];
-            }
+            for i in 0..362 { policy[i] += other_policy[i]; }
+            value += other_value;
         } else {
             new_requests.push(PredictRequest::Ask(board.get_features::<CHW_VECT_C>(color, t)));
             new_symmetries.push(t);
@@ -118,18 +116,21 @@ fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f
         for (resp, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
             if let Some((other_value, other_policy)) = resp {
                 let (other_value, other_policy) = global_cache::get_or_insert(board, color, t, || {
-                    Some(post_process_forward(board, color, other_value, other_policy, t))
+                    let mut identity_policy = initial_policy.clone();
+                    add_valid_candidates(&mut identity_policy, other_policy, &indices, t);
+                    normalize_policy(&mut identity_policy);
+
+                    Some((0.5 + 0.5 * other_value, identity_policy))
                 }).unwrap();
 
-                value += 0.125 * other_value;
-
-                for i in 0..362 {
-                    policy[i] += 0.125 * other_policy[i];
-                }
+                for i in 0..362 { policy[i] += other_policy[i]; }
+                value += other_value;
             } else {
                 return None;
             }
         }
+
+        normalize_policy(&mut policy);
 
         Some((value, policy))
     } else {
@@ -159,102 +160,118 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, V
             return None;
         };
 
-        Some(post_process_forward(board, color, value, original_policy, t))
+        // fix-up the potentially broken policy
+        let (mut policy, indices) = create_initial_policy(board, color);
+        add_valid_candidates(&mut policy, original_policy, &indices, t);
+        normalize_policy(&mut policy);
+
+        Some((0.5 + 0.5 * value, policy))
     })
 }
 
-fn post_process_forward(
+/// Returns a initial accumulator policy where all illegal moves has been set
+/// to _-Inf_, as well as an symmetry elimination mapping for its indices.
+///
+/// # Arguments
+///
+/// * `board` -
+/// * `color` -
+///
+fn create_initial_policy(
     board: &Board,
-    color: Color,
-    value: f32,
-    original_policy: Vec<f32>,
-    t: symmetry::Transform
-) -> (f32, Vec<f32>)
+    color: Color
+) -> (Vec<f32>, Vec<usize>)
 {
-    // copy the policy and replace any invalid moves in the suggested policy
-    // with -Inf, while keeping the pass move (361) untouched so that there
-    // is always at least one valid move.
-    let mut policy = vec! [0.0f32; 362];
-    policy[361] = original_policy[361];  // copy `pass` move
+    // mark all illegal moves as -Inf, which effectively ensures they are never selected by
+    // the tree search.
+    let mut policy = vec! [0.0; 362];
 
     for i in 0..361 {
-        let j = t.inverse().apply(i);
-        let (x, y) = (tree::X[j] as usize, tree::Y[j] as usize);
+        let (x, y) = (tree::X[i] as usize, tree::Y[i] as usize);
 
         if !board.is_valid(color, x, y) {
-            policy[j] = ::std::f32::NEG_INFINITY;
-        } else {
-            policy[j] = original_policy[i];
+            policy[i] = ::std::f32::NEG_INFINITY;
         }
     }
 
-    // get ride of symmetric moves, this is mostly useful for the opening.
-    // Once we are past the first ~7 moves the board is usually sufficiently
-    // asymmetric for this to turn into a no-op.
+    // remove any symmetric moves that does not contribute to the search.
     //
-    // we skip the first symmetry because it is the identity symmetry, which
-    // is always a symmetry for any board.
-    let mut moved = (0..361).collect::<Vec<_>>();
+    // we do this by finding all symmeties which provides symmetric board positions,
+    // then for each candidate move we find the minimum index provided by some
+    // symmetry.
+    let symmetries = symmetry::ALL.iter()
+        .filter(|&t| symmetry::is_symmetric(board, *t))
+        .collect::<Vec<_>>();
+    let mut indices = vec! [0; 362];
+    indices[361] = 361;
 
-    for &t in &symmetry::ALL[1..8] {
-        if !symmetry::is_symmetric(board, t) {
-            continue;
-        }
+    for i in 0..361 {
+        if let Some(target) = symmetries.iter().map(|t| t.apply(i)).min() {
+            indices[i] = target;
 
-        // figure out which are the useful vertices by eliminating the
-        // symmetries from the board.
-        let mut visited = [false; 368];
-
-        for i in 0..361 {
-            let j = t.apply(i);
-
-            if i != j && !visited[i] {
-                visited[i] = true;
-                visited[j] = true;
-
-                let src = ::std::cmp::max(i, j);
-                let mut dst = ::std::cmp::min(i, j);
-
-                while moved[dst] != dst {
-                    dst = moved[dst];
-                }
-
-                if policy[src].is_finite() {
-                    assert!(policy[dst].is_finite());
-
-                    policy[dst] += policy[src];
-                    policy[src] = ::std::f32::NEG_INFINITY;
-
-                    moved[src] = dst;
-                }
+            if i != target {
+                policy[i] = ::std::f32::NEG_INFINITY;
             }
+        } else {
+            unreachable!();
         }
     }
 
-    // renormalize the policy so that it sums to one after all the pruning that
-    // we have performed.
-    let mut policy_sum: f32 = policy.iter().filter(|p| p.is_finite()).sum();
+    (policy, indices)
+}
+
+/// Copy all valid candidates moves from `src` to `dst` applying the given symmetry and
+/// the symmetry elimination map.
+///
+/// # Arguments
+///
+/// * `dst` -
+/// * `src` -
+/// * `indices` - the symmetry elimination map
+/// * `t` - the symmetry
+///
+fn add_valid_candidates(
+    dst: &mut Vec<f32>,
+    src: Vec<f32>,
+    indices: &Vec<usize>,
+    t: symmetry::Transform
+) {
+    // always copy the _passing_ move since it is never an illegal move.
+    dst[361] += src[361];
+
+    // de-transform each index in the source policy, to the identity board position
+    // before adding it to the destination.
+    for i in 0..361 {
+        let j = indices[t.inverse().apply(i)];
+
+        dst[j] += src[i];
+    }
+}
+
+/// Normalize the given vector so that its elements sums to `1.0`.
+///
+/// # Arguments
+///
+/// * `policy` - the vector to normalize in-place
+///
+fn normalize_policy(policy: &mut Vec<f32>) {
+    // re-normalize the policy since we have modified its values
+    let policy_sum: f32 = policy.iter().filter(|p| p.is_finite()).sum();
 
     if policy_sum < 1e-6 {  // do not divide by zero
-        policy_sum = 0.0;
+        dirichlet::add_ex(policy, 0.03, 1.0);
+    } else {
+        let policy_recip = policy_sum.recip();
 
         for i in 0..362 {
-            if policy[i].is_finite() {
-                let value = thread_rng().gen();
-
-                policy[i] = value;
-                policy_sum += value;
-            }
+            policy[i] *= policy_recip;
         }
     }
 
-    let policy_recip = policy_sum.recip();
-
+    // check for NaN
     for i in 0..362 {
-        policy[i] *= policy_recip;
+        assert!(!policy[i].is_nan(), "found NaN at index {}, total sum = {}", i, policy_sum);
     }
-
-    (0.5 * value + 0.5, policy)
 }
 
 /// The shared variables between the master and each worker thread in the `predict` function.
@@ -335,7 +352,7 @@ fn predict_aux<T>(
 ) -> (f32, usize, tree::Node)
     where T: TimeStrategy + Clone + Send + 'static
 {
-    let (starting_value, starting_policy) = {
+    let (starting_value, mut starting_policy) = {
         let server = server.clone();
 
         full_forward(&server, starting_point, starting_color)
@@ -347,10 +364,14 @@ fn predict_aux<T>(
             })
     };
 
+    // add some dirichlet noise to the root node of the search tree in order to increase
+    // the entropy of the search and avoid overfitting to the prior value
+    dirichlet::add(&mut starting_policy, 0.03);
+
     // if we have a starting tree given, then re-use that tree (after some sanity
     // checks), otherwise we need to query the neural network about what the
     // prior value should be at the root node.
-    let mut starting_tree = if let Some(mut starting_tree) = starting_tree {
+    let starting_tree = if let Some(mut starting_tree) = starting_tree {
         assert_eq!(starting_tree.color, starting_color);
 
         // replace the prior value of the tree, since it was either:
@@ -364,13 +385,8 @@ fn predict_aux<T>(
 
         starting_tree
     } else {
-
         tree::Node::new(starting_color, starting_value, starting_policy)
     };
-
-    // add some dirichlet noise to the root node of the search tree in order to increase
-    // the entropy of the search and avoid overfitting to the prior value
-    dirichlet::add(&mut starting_tree.prior, 0.03);
 
     // start-up all of the worker threads, and then start listening for requests on the
     // channel we gave each thread.
