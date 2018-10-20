@@ -71,6 +71,8 @@ if __name__ == '__main__':
             '--policy-play', '1000',
             '--num-rollout', '3200',
             '--num-samples', '1',
+            '--num-games', '32',
+            '--num-threads', '32',
             '--ex-it'
         ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
 

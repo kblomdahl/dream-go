@@ -17,4 +17,4 @@ ENV RUST_BACKTRACE full
 ENV GIT_REV $GIT_REV
 
 WORKDIR /app
-CMD /app/run_worker.py
+CMD timeout 7200 /app/run_worker.py
