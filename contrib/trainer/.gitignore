@@ -1,4 +1,3 @@
-data/
-models/
-*.sgf
+__pycache__/
 *.so
+*.dll

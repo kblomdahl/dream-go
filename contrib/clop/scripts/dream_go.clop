@@ -1,5 +1,5 @@
 Name DreamGo
-Script ./tools/clop_dreamgo.py
+Script ./run_dreamgo.py
 
 # The parameters to tune:
 #

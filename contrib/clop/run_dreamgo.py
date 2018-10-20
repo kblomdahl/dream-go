@@ -44,13 +44,13 @@ from random import random
 import sys
 import os
 
-def play_game(engine_1, engine_2, environ):
+def play_game(engine_1, engine_2, environ_1, environ_2):
     """
     Play a game of the two given engines and returns `W` if the first
     engine won, otherwise `L`.
     """
-    proc_1 = Popen(engine_1, shell=True, stdin=PIPE, stdout=PIPE, stderr=DEVNULL, env=environ)
-    proc_2 = Popen(engine_2, shell=True, stdin=PIPE, stdout=PIPE, stderr=DEVNULL, env=environ)
+    proc_1 = Popen(engine_1, shell=True, stdin=PIPE, stdout=PIPE, stderr=DEVNULL, env=environ_1)
+    proc_2 = Popen(engine_2, shell=True, stdin=PIPE, stdout=PIPE, stderr=DEVNULL, env=environ_2)
 
     def write_both(s):
         """ Write the given bytes to both of the engines. """
@@ -164,10 +164,13 @@ def main():
         parameters[sys.argv[i]] = sys.argv[i+1]
 
     #
+    cwd = os.getcwd()
+
     print(play_game(
-        "/home/kalle/Documents/Code/dream-go/target/release/dream_go",  # engine to be optimized
-        "leela_gtp_opencl --noponder -g -p 1600",  # opponent
-        parameters
+        cwd + "/../../target/release/dream_go --no-ponder --num-rollout 200",  # engine to be optimized
+        cwd + "/../../target/release/dream_go --no-ponder --num-rollout 200",  # opponent
+        parameters,
+        {}
     ))
 
 main()

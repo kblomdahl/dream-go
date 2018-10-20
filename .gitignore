@@ -1,16 +1,7 @@
-__pycache__
-bin/
-data/
-dist/
 rls/
 target/
 *~
-*.bin
-*.dat
-*.gz
-*.json
 *.log
-*.sqlite3
-*.xz
 dream_go
+dream_go.json
 
