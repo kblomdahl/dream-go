@@ -109,7 +109,12 @@ fn policy_forward(
     let num_policy_rollout = *config::NUM_POLICY_ROLLOUT;
 
     if num_policy_rollout <= 1 {
-        full_forward(server, board, color)
+        if let Some((value, mut policy)) = full_forward(server, board, color) {
+            dirichlet::add(&mut policy, 0.03);
+            Some((value, policy))
+        } else {
+            None
+        }
     } else {
         let (value, _index, tree) = predict_aux::<_>(
             &server,
