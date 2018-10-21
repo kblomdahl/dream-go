@@ -132,7 +132,7 @@ fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f
 
         normalize_policy(&mut policy);
 
-        Some((value, policy))
+        Some((value / 8.0, policy))
     } else {
         None
     }
