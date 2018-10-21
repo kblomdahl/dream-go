@@ -4,6 +4,7 @@ version = "0.6.1"
 authors = ["Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>"]
 license = "Apache-2.0"
 publish = false
+build = "build.rs"
 
 [features]
 default = []
