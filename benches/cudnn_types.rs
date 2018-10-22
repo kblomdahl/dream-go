@@ -43,16 +43,16 @@ impl From<q8> for f32 {
 
 /// Benchmark the given cuDNN configuration using a single convolutional
 /// layer.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `bencher` - the benchmarker
 /// * `num_features` - the number of features
 /// * `tensor_format` - the format of the input / output arrays
 /// * `data_type` - the data type of the input / output / weight arrays
 /// * `conv_algo` - the convolutional algorithm to use
 /// * `conv_type` - the data type to use internally in the convolution
-/// 
+///
 unsafe fn bench_conv<T: From<f32> + Clone>(
     bencher: &mut Bencher,
     num_features: usize,
@@ -262,7 +262,7 @@ fn supports_f16() -> bool {
 
     (version_major == 6 && version_minor == 0) ||
     (version_major == 6 && version_minor == 2) ||
-    (version_major == 7 && version_minor == 0)
+    (version_major >= 7)
 }
 
 #[bench]
