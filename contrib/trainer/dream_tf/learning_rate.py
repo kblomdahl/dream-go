@@ -92,7 +92,7 @@ class LearningRateScheduler(tf.train.SessionRunHook):
         if n < 5:
             return 1.0, 0.0
 
-        m, c = np.linalg.lstsq(x, y)[0]
+        m, c = np.linalg.lstsq(x, y, rcond=None)[0]
 
         # estimate the probability that the loss is decreasing based on how
         # well the least squares fit the actual data

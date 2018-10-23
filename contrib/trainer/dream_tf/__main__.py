@@ -37,8 +37,6 @@ MAX_STEPS = 524288000  # the default total number of examples to train over
 BATCH_SIZE = 512  # the default number of examples per batch
 
 DUMP_OPS = 'DumpOps'  # the graph collection that contains all dump operations
-ADVERSARIAL_OPS = 'AdversarialOps'  # the graph collection that contains all training operations for adversarial networks
-ADVERSARIAL_VARS = 'AdversarialVars'  # the graph collection that contains all variables for adversarial networks
 
 # -------- Graph Components --------
 
@@ -297,32 +295,6 @@ def tower(x, mode, params):
 
     return v, p, y
 
-def adversarial(value_hat, policy_hat):
-    """ Returns the probability that the current player is black. """
-
-    zeros_op = tf.zeros_initializer()
-
-    with tf.variable_scope('xx_adversarial', reuse=tf.AUTO_REUSE):
-        offset = tf.get_variable('offset', (1,), tf.float32, zeros_op)
-
-        tf.add_to_collection(ADVERSARIAL_VARS, offset)
-
-    return tf.sigmoid(value_hat + offset)
-
-class RunAdversarialOpsHook(tf.train.SessionRunHook):
-    """ Runs the adversarial training op `n` number of times for each global
-    step. """
-
-    def __init__(self):
-        self.train_steps = 3
-
-    def before_run(self, run_context):
-        train_ops = tf.get_collection(ADVERSARIAL_OPS)
-
-        if train_ops:
-            for _ in range(self.train_steps):
-                run_context.session.run(train_ops)
-
 # -------- Calibration / Dump functions --------
 
 class DumpHook(tf.train.SessionRunHook):
@@ -393,7 +365,6 @@ def get_dataset(files, batch_size=1, is_training=True):
             features = np.zeros((32, 19, 19), 'f2')
             value = np.zeros((), 'f4')
             policy = np.zeros((362,), 'f2')
-            is_black = np.zeros((), 'f4')
         else:
             features_hat = ffi.unpack(example[0].features, 11552)
             policy_hat = ffi.string(example[0].policy)
@@ -401,31 +372,30 @@ def get_dataset(files, batch_size=1, is_training=True):
             features = np.fromstring(bytes(features_hat), 'i1').astype('f2') / 127.0
             value = np.asarray(1.0 if example[0].color == example[0].winner else -1.0, 'f4')
             policy = np.fromstring(base64.b85decode(policy_hat), 'f2')
-            is_black = np.asarray(1.0 if example[0].color == 1 else 0.0, 'f4')  # Black = 1
 
             # fix any partial policy
             policy[example[0].index] = 1.0 - np.sum(policy)
 
-        return features, value, policy, is_black
+        return features, value, policy
 
     def _parse(line):
         return tuple(tf.py_func(
             __parse,
             [line],
-            [tf.float16, tf.float32, tf.float16, tf.float32]
+            [tf.float16, tf.float32, tf.float16]
         ))
 
-    def _illegal_policy(features, value, policy, is_black):
+    def _illegal_policy(features, value, policy):
         return tf.not_equal(tf.reduce_sum(policy), 0.0)
 
-    def _fix_shape(features, value, policy, is_black):
+    def _fix_shape(features, value, policy):
         features = tf.reshape(features, [NUM_FEATURES, 19, 19])
         value = tf.reshape(value, [1])
         policy = tf.reshape(policy, [362])
 
-        return features, value, policy, is_black
+        return features, value, policy
 
-    def _augment(features, value, policy, is_black):
+    def _augment(features, value, policy):
         def _identity(image):
             return tf.identity(image)
 
@@ -479,7 +449,7 @@ def get_dataset(files, batch_size=1, is_training=True):
 
         value = tf.reshape(value, [1])
 
-        return features, value, policy, is_black
+        return features, value, policy
 
     def _shuffle_history(features):
         features = tf.split(features, (5, 6, NUM_FEATURES - 11), 0)
@@ -490,7 +460,7 @@ def get_dataset(files, batch_size=1, is_training=True):
             features[2]
         ], axis=0)
 
-    def _fix_history(features, value, policy, is_black):
+    def _fix_history(features, value, policy):
         """ Zeros out the history planes for 25% of the features. """
         HISTORY_MASK = np.asarray([1.0] * NUM_FEATURES, 'f2')
         HISTORY_MASK[5:11] = 0.0
@@ -505,7 +475,7 @@ def get_dataset(files, batch_size=1, is_training=True):
             default=lambda: features
         )
 
-        return features, value, policy, is_black
+        return features, value, policy
 
     with tf.device('cpu:0'):
         num_parallel_calls = max(os.cpu_count() - 8, 4);
@@ -527,7 +497,7 @@ def get_dataset(files, batch_size=1, is_training=True):
 
 def input_fn(files, batch_size, is_training):
     return get_dataset(files, batch_size, is_training).map(
-        lambda features, value, policy, is_black: (features, {'value': value, 'policy': policy, 'is_black': is_black})
+        lambda features, value, policy: (features, {'value': value, 'policy': policy})
     )
 
 # -------- Model function --------
@@ -550,20 +520,7 @@ def model_fn(features, labels, mode, params):
             logits=policy_hat
         ))
 
-        # determine the adversarial losses that gets applied to the global
-        # step, with no adversarial gradients, and the adversarial steps (with
-        # no global gradients).
-        #
-        # The adversarial loss is a combination of the following losses:
-        #
-        # - Is Black
-        #
-        loss_black = tf.reduce_mean(tf.squared_difference(
-            tf.stop_gradient(labels['is_black']),
-            adversarial(value_hat, policy_hat)
-        ))
-
-        loss = loss_policy + 2.0 * loss_value  # - loss_black
+        loss = loss_policy + 2.0 * loss_value
         tf.add_to_collection(LOSS, loss)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
@@ -573,18 +530,6 @@ def model_fn(features, labels, mode, params):
 
             tf.add_to_collection(LEARNING_RATE, learning_rate)
 
-            # update the adversarial network first
-            adversarial_optimizer = tf.train.AdamOptimizer()
-            adversarial_vars = tf.get_collection(ADVERSARIAL_VARS)
-            adversarial_train_op = adversarial_optimizer.minimize(
-                loss_black,
-                var_list=adversarial_vars
-            )
-
-            tf.add_to_collection(ADVERSARIAL_OPS, adversarial_train_op)
-
-            # after the adversarial network has been updated, update the main
-            # network
             global_step = tf.train.get_global_step()
             optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -592,7 +537,7 @@ def model_fn(features, labels, mode, params):
             with tf.control_dependencies(update_ops):
                 gradients, variables = zip(*optimizer.compute_gradients(
                     loss,
-                    var_list=list(set(tf.trainable_variables()) - set(adversarial_vars)),
+                    var_list=tf.trainable_variables(),
                     aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
                     colocate_gradients_with_ops=True
                 ))
@@ -615,7 +560,6 @@ def model_fn(features, labels, mode, params):
 
         tf.summary.scalar('loss/policy', loss_policy)
         tf.summary.scalar('loss/value', loss_value)
-        tf.summary.scalar('loss/is_black', loss_black)
 
         # evalutation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look
@@ -637,8 +581,7 @@ def model_fn(features, labels, mode, params):
             'accuracy/policy_5': tf.metrics.mean(policy_5),
             'accuracy/value': tf.metrics.mean(value_1),
             'loss/policy': tf.metrics.mean(loss_policy),
-            'loss/value': tf.metrics.mean(loss_value),
-            'loss/is_black': tf.metrics.mean(loss_black)
+            'loss/value': tf.metrics.mean(loss_value)
         }
     else:
         loss = None
@@ -771,7 +714,7 @@ nn = tf.estimator.Estimator(
 if args.start or args.resume:
     nn.train(
         input_fn=lambda: input_fn(args.files, params['batch_size'], True),
-        hooks=hooks + [LearningRateScheduler(steps_to_skip)],  #, RunAdversarialOpsHook()],
+        hooks=hooks + [LearningRateScheduler(steps_to_skip)],
         steps=params['steps'] // params['batch_size']
     )
 elif args.verify:
