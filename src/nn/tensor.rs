@@ -36,7 +36,7 @@ pub struct Tensor {
     /// The size of this tensor in the number of elements.
     pub size_in_elements: usize,
 
-    /// The scale of this tensor, 
+    /// The scale of this tensor,
     pub scale: f32
 }
 
@@ -97,6 +97,10 @@ impl Tensor {
                 self.size_in_bytes
             );
         }
+    }
+
+    pub unsafe fn as_f32(&self) -> f32 {
+        *(self.host as *const f32)
     }
 
     pub unsafe fn copy_to_device(&self, device_id: i32, stream: cuda::Stream) -> bool {

@@ -170,7 +170,9 @@ def residual_block(x, mode, params):
 
     conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint)
     conv_2 = tf.get_variable('conv_2', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint)
-    alpha = tf.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=False)
+    alpha = tf.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=True)
+
+    tf.add_to_collection(DUMP_OPS, [alpha, alpha, 'f4'])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """

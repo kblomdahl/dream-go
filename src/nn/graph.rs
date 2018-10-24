@@ -33,16 +33,13 @@ const ZERO: f32 = 0.0;
 /// A __global__ constant that contains `1.0`.
 const ONE: f32 = 1.0;
 
-/// A __global__ constant that contains `0.5`.
-const HALF: f32 = 0.5;
-
 /// A __global__ constant that contains approximately `3.09023`. This is necessary
 /// because we quantize to the range `[-127, +127]` which contains `0` and then
 /// `127` in each direction so a total of `1 + 2*127 = 255` elements. This means
 /// the maximum value that can be represented is:
-/// 
+///
 /// `2.0 * THREE / 255.0 * 127.0`
-/// 
+///
 /// Which we can solve for the value of `THREE` when the maximum value is 3.09023.
 const THREE: f32 = (3.09023 / 127.0) * 255.0 / 2.0;
 
@@ -70,13 +67,13 @@ impl InferenceType for f32 {
 }
 
 /// Copy the value of the given tensor from the device to the host.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `ptr` - the memory address on the device
 /// * `num_elements` - the number of elements to copy
 /// * `stream` - the stream to execute the copy on
-/// 
+///
 unsafe fn load_to_host<T: InferenceType>(
     ptr: *const c_void,
     num_elements: usize,
@@ -98,11 +95,11 @@ unsafe fn load_to_host<T: InferenceType>(
 }
 
 /// Returns the integer square root of `x`.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `x` - the number to take the square root of.
-/// 
+///
 fn isqrt(x: usize) -> i32 {
     (x as f32).sqrt() as i32
 }
@@ -124,11 +121,11 @@ impl Builder {
 
     /// Returns a mutable workspace that contains everything you need to
     /// perform a forward pass through the network pre-allocated.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `batch_size` - 
-    /// 
+    ///
+    /// * `batch_size` -
+    ///
     pub fn get_workspace(&self, batch_size: usize) -> Workspace {
         let mut handle_dnn: cudnn::Handle = ptr::null();
         unsafe {
@@ -244,11 +241,11 @@ impl UpLayer {
     /// Create a single convolutional layer.
     ///
     /// # Arguments
-    /// 
+    ///
     /// * `handle` - The cuDNN handle
     /// * `n` - The number of images.
-    /// * `tensors` - 
-    /// 
+    /// * `tensors` -
+    ///
     unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> UpLayer {
         let weights = &tensors["01_upsample/conv_1:0"];
         let num_channels = weights.size_in_elements / (9 * NUM_FEATURES);
@@ -383,7 +380,9 @@ struct ResidualLayer {
 
     count: usize,
     alpha1: f32,
-    alpha2: f32
+    alpha2: f32,
+    gate_c: f32,  // carry gate
+    gate_t: f32   // transform gate
 }
 
 impl Drop for ResidualLayer {
@@ -403,15 +402,16 @@ impl ResidualLayer {
     /// transforms it into a scalar value.
     ///
     /// # Arguments
-    /// 
+    ///
     /// * `handle` - The cuDNN handle
     /// * `n` - The number of images.
     /// * `i` - The index of the layer.
-    /// * `tensors` - 
-    /// 
+    /// * `tensors` -
+    ///
     unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Option<ResidualLayer> {
         let weights_1 = tensors.get(&format!("{:02}_residual/conv_1:0", i));
         let weights_2 = tensors.get(&format!("{:02}_residual/conv_2:0", i));
+        let alpha = tensors.get(&format!("{:02}_residual/alpha:0", i));
 
         if weights_1.is_none() || weights_2.is_none() {
             return None;
@@ -420,6 +420,8 @@ impl ResidualLayer {
         let weights_1 = weights_1.unwrap();
         let weights_2 = weights_2.unwrap();
         let num_channels = isqrt(weights_1.size_in_elements / 9);
+        let gate_c = alpha.map(|t| t.as_f32()).unwrap_or(0.5);
+        let gate_t = 1.0 - gate_c;
         let mut out = ResidualLayer {
             tensor: ptr::null(),
             offset: ptr::null(),
@@ -431,7 +433,10 @@ impl ResidualLayer {
 
             count: i,
             alpha1: weights_1.scale / 127.0,
-            alpha2: HALF * weights_2.scale / 127.0,
+            alpha2: gate_t * weights_2.scale / 127.0,
+
+            gate_c: gate_c,
+            gate_t: gate_t
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.tensor));
@@ -518,7 +523,7 @@ impl ResidualLayer {
             check!(cudnn::cudnnScaleTensor(
                 workspace.handle_dnn,
                 self.offset, offset_2.get(device_id),
-                &HALF
+                &self.gate_t
             ));
         }
 
@@ -550,7 +555,7 @@ impl ResidualLayer {
             self.filter, weights_2.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_r, self.fwd_algo.memory,
-            &HALF,
+            &self.gate_c,
             self.tensor, *input,
             self.offset, offset_2.get(device_id),
             self.relu,
@@ -605,12 +610,12 @@ impl ValueLayer {
     /// transforms it into a scalar value.
     ///
     /// # Arguments
-    /// 
+    ///
     /// * `handle` - The cuDNN handle
     /// * `n` - The number of images.
     /// * `i` - The index of the layer.
-    /// * `tensors` - 
-    /// 
+    /// * `tensors` -
+    ///
     unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> ValueLayer {
         let weights_1 = &tensors[&format!("{:02}v_value/conv_1:0", i)];
         let num_channels = weights_1.size_in_elements as i32;
@@ -893,12 +898,12 @@ impl PolicyLayer {
     /// transforms it into a policy vector.
     ///
     /// # Arguments
-    /// 
+    ///
     /// * `handle` - The cuDNN handle
     /// * `n` - The number of images.
     /// * `i` - The index of the layer.
-    /// * `tensors` - 
-    /// 
+    /// * `tensors` -
+    ///
     unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> PolicyLayer {
         let weights_1 = &tensors[&format!("{:02}p_policy/conv_1:0", i)];
         let num_channels = weights_1.size_in_elements / 2;
