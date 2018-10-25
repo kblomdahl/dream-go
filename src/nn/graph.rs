@@ -43,6 +43,9 @@ const ONE: f32 = 1.0;
 /// Which we can solve for the value of `THREE` when the maximum value is 3.09023.
 const THREE: f32 = (3.09023 / 127.0) * 255.0 / 2.0;
 
+/// The number of channels to assume if not given in the network weights file.
+const DEFAULT_NUM_CHANNELS: i32 = 128;
+
 // -------- InferenceType --------
 
 pub trait InferenceType: Copy + Default + Sized {
@@ -92,16 +95,6 @@ unsafe fn load_to_host<T: InferenceType>(
     check!(cuda::cudaStreamSynchronize(stream));
 
     host.into_iter().map(|x| x.as_f32()).collect()
-}
-
-/// Returns the integer square root of `x`.
-///
-/// # Arguments
-///
-/// * `x` - the number to take the square root of.
-///
-fn isqrt(x: usize) -> i32 {
-    (x as f32).sqrt() as i32
 }
 
 // -------- Graph --------
@@ -248,7 +241,9 @@ impl UpLayer {
     ///
     unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> UpLayer {
         let weights = &tensors["01_upsample/conv_1:0"];
-        let num_channels = weights.size_in_elements / (9 * NUM_FEATURES);
+        let num_channels = tensors.get("num_channels:0")
+            .map(|x| { x.as_i32() })
+            .unwrap_or(DEFAULT_NUM_CHANNELS);
         let mut out = UpLayer {
             input: ptr::null(),
             output: ptr::null(),
@@ -419,7 +414,9 @@ impl ResidualLayer {
 
         let weights_1 = weights_1.unwrap();
         let weights_2 = weights_2.unwrap();
-        let num_channels = isqrt(weights_1.size_in_elements / 9);
+        let num_channels = tensors.get("num_channels:0")
+            .map(|x| { x.as_i32() })
+            .unwrap_or(DEFAULT_NUM_CHANNELS);
         let gate_t = alpha.map(|t| t.as_f32()).unwrap_or(0.5);
         let gate_c = 1.0 - gate_t;
         let mut out = ResidualLayer {
@@ -531,7 +528,8 @@ impl ResidualLayer {
 
         // perform the forward convolution (1)
         let workspace_r = slots.get_slot(Slot::Workspace_r, self.fwd_algo.memory, workspace.tower_stream);
-        let residual_2 = slots.get_slot(Slot::Residual_2, size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361, workspace.tower_stream);
+        let residual_2_size = size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361;
+        let residual_2 = slots.get_slot(Slot::Residual_2, residual_2_size, workspace.tower_stream);
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -618,7 +616,9 @@ impl ValueLayer {
     ///
     unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> ValueLayer {
         let weights_1 = &tensors[&format!("{:02}v_value/conv_1:0", i)];
-        let num_channels = weights_1.size_in_elements as i32;
+        let num_channels = tensors.get("num_channels:0")
+            .map(|x| { x.as_i32() })
+            .unwrap_or(DEFAULT_NUM_CHANNELS);
         let mut out = ValueLayer {
             input: ptr::null(),
             offset: ptr::null(),
@@ -906,7 +906,9 @@ impl PolicyLayer {
     ///
     unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> PolicyLayer {
         let weights_1 = &tensors[&format!("{:02}p_policy/conv_1:0", i)];
-        let num_channels = weights_1.size_in_elements / 2;
+        let num_channels = tensors.get("num_channels:0")
+            .map(|x| { x.as_i32() })
+            .unwrap_or(DEFAULT_NUM_CHANNELS);
         let mut out = PolicyLayer {
             input: ptr::null(),
             offset: ptr::null(),

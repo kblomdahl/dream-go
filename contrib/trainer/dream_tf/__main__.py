@@ -276,6 +276,12 @@ def tower(x, mode, params):
     num_channels = params['num_channels']
     num_inputs = NUM_FEATURES
 
+    # store the number of channels in the JSON output so that we do not have to derive
+    # this from the shape later.
+    num_channels_ = tf.constant(num_channels, name='num_channels', dtype=tf.int32)
+
+    tf.add_to_collection(DUMP_OPS, [num_channels_, num_channels_, 'i4'])
+
     with tf.variable_scope('01_upsample', reuse=tf.AUTO_REUSE):
         conv_1 = tf.get_variable('conv_1', (3, 3, num_inputs, num_channels), tf.float32, init_op, constraint=normalize_constraint)
 

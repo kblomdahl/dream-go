@@ -103,6 +103,10 @@ impl Tensor {
         *(self.host as *const f32)
     }
 
+    pub unsafe fn as_i32(&self) -> i32 {
+        *(self.host as *const i32)
+    }
+
     pub unsafe fn copy_to_device(&self, device_id: i32, stream: cuda::Stream) -> bool {
         let device_id = device_id as usize;
 
