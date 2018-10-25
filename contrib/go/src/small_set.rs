@@ -41,14 +41,45 @@ impl SmallSet {
         }
     }
 
+    /// Returns true if this set contains the given value (using AVX2
+    /// instructions).
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - the value to look for
+    ///
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn contains_avx2(&self, other: u64) -> bool {
+        use std::arch::x86_64::*;
+
+        let other = _mm256_set1_epi64x(other as i64);
+
+        for i in 0..4 {
+            let buf = self.buf.get_unchecked(4 * i) as *const u64 as *const __m256i;
+            let value = _mm256_loadu_si256(buf);
+            let mask = _mm256_cmpeq_epi64(other, value);
+
+            if _mm256_movemask_epi8(mask) != 0 {
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// Returns true if this set contains the given value.
     ///
     /// # Arguments
     ///
     /// * `other` - the value to look for
     ///
+    #[inline(always)]
     pub fn contains(&self, other: u64) -> bool {
-        (0..16).any(|x| self.buf[x] == other)
+        if is_x86_feature_detected!("avx2") {
+            unsafe { self.contains_avx2(other) }
+        } else {
+            (0..16).any(|x| self.buf[x] == other)
+        }
     }
 
     /// Returns an iterator over all elements in this set.
@@ -59,6 +90,7 @@ impl SmallSet {
         }
     }
 }
+
 
 /// Iterator over all elements contained within a `SmallSet`.
 pub struct SmallIter<'a> {
@@ -84,6 +116,7 @@ impl<'a> Iterator for SmallIter<'a> {
 #[cfg(test)]
 mod tests {
     use small_set::*;
+    use test::Bencher;
 
     #[test]
     fn check() {
@@ -97,5 +130,18 @@ mod tests {
         assert!(s.contains(2));
         assert!(s.contains(3));
         assert!(!s.contains(4));
+    }
+
+    #[bench]
+    fn contains(b: &mut Bencher) {
+        let mut s = SmallSet::new();
+
+        s.push(1);
+        s.push(2);
+        s.push(3);
+
+        b.iter(|| {
+            s.contains(8)
+        });
     }
 }

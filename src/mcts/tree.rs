@@ -59,9 +59,6 @@ impl PUCT {
     #[allow(unused_attributes)]
     #[target_feature(enable = "avx,avx2")]
     unsafe fn get_avx2(node: &Node, value: &[f32], dst: &mut [f32]) {
-        // since there is no real _trickery_ in this function except the
-        // usage of the AVX2 SIMD instructions for addition, multiplication,
-        // etc, we rely on LLVM to do all of the optimizations.
         PUCT::get_impl(node, value, dst);
     }
 
@@ -113,11 +110,44 @@ impl PUCT {
     ///
     #[inline(always)]
     fn get(node: &Node, value: &[f32], dst: &mut [f32]) {
-        if is_x86_feature_detected!("avx2")  {
+        if is_x86_feature_detected!("avx2") {
             unsafe { PUCT::get_avx2(node, value, dst) };
         } else {
             unsafe { PUCT::get_impl(node, value, dst) };
         }
+    }
+}
+
+unsafe fn do_apply_fpu_safe(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
+    use std::intrinsics::{fsub_fast};
+
+    for i in 0..368 {
+        if *count.get_unchecked(i) == 0 {
+            *value.get_unchecked_mut(i) = max(0.0, fsub_fast(*value.get_unchecked(i), fpu_reduce));
+        }
+    }
+}
+
+#[target_feature(enable = "avx,avx2")]
+unsafe fn do_apply_fpu_avx2(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
+    do_apply_fpu_safe(value, count, fpu_reduce)
+}
+
+/// Apply the first play urgency reduction to all elements in `value` if `count`
+/// is zero.
+///
+/// # Arguments
+///
+/// * `value` - the value of each element
+/// * `count` - the number of visits so far to each element
+/// * `fpu_reduce` - the reduction to apply
+///
+#[inline(always)]
+fn do_apply_fpu(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
+    if is_x86_feature_detected!("avx2") {
+        unsafe { do_apply_fpu_avx2(value, count, fpu_reduce) }
+    } else {
+        unsafe { do_apply_fpu_safe(value, count, fpu_reduce) }
     }
 }
 
@@ -441,11 +471,7 @@ impl Node {
             //
             let fpu_reduce = config::get_fpu_reduce(self.total_count);
 
-            for i in 0..368 {
-                if self.count[i] == 0 {
-                    value[i] = max(0.0, value[i] - fpu_reduce);
-                }
-            }
+            do_apply_fpu(&mut value, &self.count, fpu_reduce);
         }
 
         // compute all UCB1 values for each node before trying to figure out which
@@ -812,5 +838,48 @@ mod tests {
     #[bench]
     fn puct(b: &mut Bencher) {
         unsafe { bench_test(b); }
+    }
+
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn bench_apply_fpu_avx2(b: &mut Bencher) {
+        let mut count = [0; 368];
+
+        for i in 0..10 {
+            count[3*i] = 1;
+        }
+
+        b.iter(|| {
+            let mut value = [0.5; 368];
+
+            do_apply_fpu_avx2(&mut value, &count, 0.22)
+        });
+    }
+
+    #[bench]
+    fn apply_fpu_avx2(b: &mut Bencher) {
+        unsafe {
+            bench_apply_fpu_avx2(b);
+        }
+    }
+
+    unsafe fn bench_apply_fpu_safe(b: &mut Bencher) {
+        let mut count = [0; 368];
+
+        for i in 0..10 {
+            count[3*i] = 1;
+        }
+
+        b.iter(|| {
+            let mut value = [0.5; 368];
+
+            do_apply_fpu_safe(&mut value, &count, 0.22)
+        });
+    }
+
+    #[bench]
+    fn apply_fpu_safe(b: &mut Bencher) {
+        unsafe {
+            bench_apply_fpu_safe(b);
+        }
     }
 }
