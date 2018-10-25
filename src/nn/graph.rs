@@ -420,8 +420,8 @@ impl ResidualLayer {
         let weights_1 = weights_1.unwrap();
         let weights_2 = weights_2.unwrap();
         let num_channels = isqrt(weights_1.size_in_elements / 9);
-        let gate_c = alpha.map(|t| t.as_f32()).unwrap_or(0.5);
-        let gate_t = 1.0 - gate_c;
+        let gate_t = alpha.map(|t| t.as_f32()).unwrap_or(0.5);
+        let gate_c = 1.0 - gate_t;
         let mut out = ResidualLayer {
             tensor: ptr::null(),
             offset: ptr::null(),
