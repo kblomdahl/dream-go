@@ -51,7 +51,7 @@ def dream_go(bin, num_rollout):
         environ=environ,
         is_reliable_scorer=True,
         startup_gtp_commands=[
-            'time_settings 300 1 1'
+            #'time_settings 300 1 1'
         ]
     )
 
@@ -63,7 +63,9 @@ players = {
 for bin in glob(DIST + '/*'):
     name = basename(bin)
 
-    if re.match(r'^dg-v050', name):
+    if re.match(r'.*\.json', name):
+        pass
+    elif re.match(r'^dg-v050', name):
         players[name] = dream_go_v050(bin, ROLLOUTS)
     else:
         players[name] = dream_go(bin, ROLLOUTS)
