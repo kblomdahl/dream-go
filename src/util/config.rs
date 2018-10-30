@@ -119,8 +119,13 @@ lazy_static! {
     pub static ref TEMPERATURE: f32 = get_env("TEMPERATURE")
         .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 0.3 } else { 0.92 });
 
-    /// The _First Play Urgency_ reduction. Setting this is `1.0` effectively
-    /// disables FPU.
+    /// The softmax temperature to use at the end of the _policy head_. This
+    /// temperature is applied for the entire game.
+    pub static ref SOFTMAX_TEMPERATURE: f32 = get_env("SOFTMAX_TEMPERATURE")
+        .unwrap_or(1.0);
+
+    /// The _First Play Urgency_ reduction. Setting this is `1.0`, or `0.0`
+    /// effectively disables FPU.
     pub static ref FPU_REDUCE: Vec<(i32, f32)> = get_intp_list("FPU_REDUCE")
         .unwrap_or(vec! [(0, 0.60), (200, 0.50), (800, 0.22)]);
 

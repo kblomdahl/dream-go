@@ -1072,10 +1072,16 @@ impl PolicyLayer {
             cuda::DataType::R32F, cublas::GemmAlgo::Dfalt
         ));
 
+        // apply the softmax temperature at the _add tensor_ layer since the cuDNN
+        // _softmax_ primitive does not support it directly.
+        lazy_static! {
+            static ref TAU: f32 = 1.0 / config::SOFTMAX_TEMPERATURE;
+        }
+
         check!(cudnn::cudnnAddTensor(
             workspace.handle_dnn,
-            &ONE, self.bias, offset_2.get(device_id),
-            &ONE, self.policy_2, *policy_2
+            &TAU, self.bias, offset_2.get(device_id),
+            &TAU, self.policy_2, *policy_2
         ));
 
         // softmax activation
