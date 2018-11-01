@@ -833,7 +833,7 @@ mod tests {
             let next_color = color.opposite();
             let (value, policy) = (rng.gen::<f32>(), get_prior_distribution(&mut rng, board, next_color));
 
-            insert(&trace, next_color, value, policy, board.count());
+            insert(&trace, next_color, value, policy);
         }
 
         // benchmark the value function only
