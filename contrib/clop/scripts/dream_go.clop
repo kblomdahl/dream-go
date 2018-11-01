@@ -7,9 +7,10 @@ Script ./run_dreamgo.py
 # * Lower bound
 # * Upper bound
 #
-LinearParameter UCT_EXP 0.1 2.5
-IntegerParameter VLOSS_CNT 1 10
-LinearParameter FPU_REDUCE 0 1.0
+LinearParameter UCT_EXP 0.4 1.8
+IntegerParameter VLOSS_CNT 1 8
+LinearParameter FPU_REDUCE 0.01 0.80
+LinearParameter SOFTMAX_TEMPERATURE 0.2 1.0
 
 # Parallelization parameters
 Processor localhost
@@ -20,4 +21,4 @@ DrawElo 0
 
 # Regression parameters
 H 3
-Correlations none
+Correlations all

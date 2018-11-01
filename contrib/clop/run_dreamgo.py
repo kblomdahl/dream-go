@@ -123,7 +123,7 @@ def play_game(engine_1, engine_2, environ_1, environ_2):
         #
         # We use the `final_score` variant here to avoid any incorrect scores due to
         # complicated situations that `estimate_score` fail to take into account.
-        gnugo = Popen('gnugo --chinese-rules --mode gtp', shell=True, stdin=PIPE, stdout=PIPE, stderr=DEVNULL)
+        gnugo = Popen('/usr/games/gnugo --chinese-rules --mode gtp', shell=True, stdin=PIPE, stdout=PIPE, stderr=DEVNULL)
         gnugo.stdin.write(b'komi 7.5\n')
         gnugo.stdin.write(b'boardsize 19\n')
         gnugo.stdin.write(b'clear_board\n')
@@ -167,8 +167,8 @@ def main():
     cwd = os.getcwd()
 
     print(play_game(
-        cwd + "/../../target/release/dream_go --no-ponder --num-rollout 200",  # engine to be optimized
-        cwd + "/../../target/release/dream_go --no-ponder --num-rollout 200",  # opponent
+        cwd + "/../../target/release/dream_go --no-ponder --num-rollout 3200",  # engine to be optimized
+        cwd + "/../../target/release/dream_go --no-ponder --num-rollout 3200",  # opponent
         parameters,
         {}
     ))
