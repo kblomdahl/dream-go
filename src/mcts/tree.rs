@@ -43,11 +43,12 @@ impl PUCT {
     unsafe fn get_impl(node: &Node, value: &[f32], dst: &mut [f32]) {
         use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
 
-        let sqrt_n = ((1 + node.total_count) as f32).sqrt();
-        let uct_exp = config::get_uct_exp(node.total_count);
+        let n = node.total_count + node.vtotal_count;
+        let sqrt_n = ((1 + n) as f32).sqrt();
+        let uct_exp = config::get_uct_exp(n);
 
         for i in 0..362 {
-            let count = *node.count.get_unchecked(i);
+            let count = *node.count.get_unchecked(i) + *node.vcount.get_unchecked(i);
             let prior = *node.prior.get_unchecked(i);
             let value = *value.get_unchecked(i);
             let exp_bonus = fdiv_fast(sqrt_n, (1 + count) as f32);
@@ -72,6 +73,8 @@ impl PUCT {
     ///
     #[inline]
     unsafe fn update(trace: &NodeTrace, color: Color, value: f32) {
+        use std::intrinsics::fdiv_fast;
+
         for &(node, _, index) in trace.iter() {
             let value_ = if color == (*node).color { value } else { 1.0 - value };
 
@@ -79,10 +82,13 @@ impl PUCT {
             // virtual losses we added to the node
             let _guard = (*node).lock.lock();
 
-            (*node).total_count -= *config::VLOSS_CNT - 1;
-            (*node).count[index] -= *config::VLOSS_CNT - 1;
+            (*node).total_count += 1;
             (*node).total_value[index] += value_;
-            (*node).value[index] = (*node).total_value[index] / ((*node).count[index] as f32);
+            (*node).count[index] += 1;
+            (*node).value[index] = fdiv_fast((*node).total_value[index], (*node).count[index] as f32);
+
+            (*node).vtotal_count -= *config::VLOSS_CNT;
+            (*node).vcount[index] -= *config::VLOSS_CNT;
         }
     }
 
@@ -192,8 +198,14 @@ pub struct Node {
     /// The total number of times any edge has been traversed.
     pub total_count: i32,
 
-    /// The number of times each edge has been traversed
+    /// The number of times each edge has been traversed.
     pub count: [i32; 368],
+
+    /// The number of virtual losses each edge has.
+    pub vcount: [i32; 368],
+
+    /// The total number of virtual losses for any edge.
+    pub vtotal_count: i32,
 
     /// The prior value of each edge as indicated by the policy.
     pub prior: [f32; 368],
@@ -249,6 +261,8 @@ impl Node {
             pass_count: 0,
             total_count: 0,
             count: [0; 368],
+            vtotal_count: 0,
+            vcount: [0; 368],
             prior: prior_padding,
             total_value: [0.0; 368],
             value: [value; 368],
@@ -492,9 +506,8 @@ impl Node {
         });
 
         if let Some(max_i) = max_i {
-            self.total_count += *config::VLOSS_CNT;
-            self.count[max_i] += *config::VLOSS_CNT;
-            self.value[max_i] = self.total_value[max_i] / (self.count[max_i] as f32);
+            self.vtotal_count += *config::VLOSS_CNT;
+            self.vcount[max_i] += *config::VLOSS_CNT;
             self.expanding[max_i] = true;
         }
 
@@ -545,8 +558,8 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
             for (node, _, next_child) in trace.into_iter() {
                 let _guard = (*node).lock.lock();
 
-                (*node).total_count -= *config::VLOSS_CNT;
-                (*node).count[next_child] -= *config::VLOSS_CNT;
+                (*node).vtotal_count -= *config::VLOSS_CNT;
+                (*node).vcount[next_child] -= *config::VLOSS_CNT;
             }
 
             return None;
@@ -820,7 +833,7 @@ mod tests {
             let next_color = color.opposite();
             let (value, policy) = (rng.gen::<f32>(), get_prior_distribution(&mut rng, board, next_color));
 
-            insert(&trace, next_color, value, policy);
+            insert(&trace, next_color, value, policy, board.count());
         }
 
         // benchmark the value function only
