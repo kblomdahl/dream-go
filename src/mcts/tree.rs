@@ -92,20 +92,6 @@ impl PUCT {
         }
     }
 
-    /// Reference implementation of the PUCT value function.
-    ///
-    /// # Arguments
-    ///
-    /// * `node` -
-    /// * `value` - the winrates to use in the calculations
-    /// * `dst` - output array for the UCT value
-    ///
-    #[cfg(test)]
-    #[inline(always)]
-    fn get_ref(node: &Node, value: &[f32], dst: &mut [f32]) {
-        unsafe { PUCT::get_impl(node, value, dst) };
-    }
-
     /// Optimized implementation of the PUCT value function.
     ///
     /// # Arguments
@@ -124,8 +110,8 @@ impl PUCT {
     }
 }
 
-unsafe fn do_apply_fpu_safe(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
-    use std::intrinsics::{fsub_fast};
+unsafe fn do_apply_fpu_impl(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
+    use std::intrinsics::fsub_fast;
 
     for i in 0..368 {
         if *count.get_unchecked(i) == 0 {
@@ -136,7 +122,7 @@ unsafe fn do_apply_fpu_safe(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
 
 #[target_feature(enable = "avx,avx2")]
 unsafe fn do_apply_fpu_avx2(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
-    do_apply_fpu_safe(value, count, fpu_reduce)
+    do_apply_fpu_impl(value, count, fpu_reduce)
 }
 
 /// Apply the first play urgency reduction to all elements in `value` if `count`
@@ -153,7 +139,7 @@ fn do_apply_fpu(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
     if is_x86_feature_detected!("avx2") {
         unsafe { do_apply_fpu_avx2(value, count, fpu_reduce) }
     } else {
-        unsafe { do_apply_fpu_safe(value, count, fpu_reduce) }
+        unsafe { do_apply_fpu_impl(value, count, fpu_reduce) }
     }
 }
 
@@ -429,7 +415,7 @@ impl Node {
 
     /// Returns the best move according to the prior value of the root node.
     pub fn prior(&self) -> (f32, usize) {
-        let max_i = (0..362).max_by_key(|&i| OrderedFloat(self.prior[i])).unwrap();
+        let max_i = argmax(&self.prior).unwrap_or(361);
 
         (self.prior[max_i], max_i)
     }
@@ -780,13 +766,12 @@ pub fn to_pretty<'a>(root: &'a Node) -> ToPretty<'a> {
 
 #[cfg(test)]
 mod tests {
-    use test::{self, Bencher};
     use rand::rngs::SmallRng;
-    use rand::{Rng, FromEntropy};
+    use rand::{Rng, SeedableRng};
     use go::*;
     use mcts::tree::*;
 
-    fn get_prior_distribution(rng: &mut SmallRng, board: Board, color: Color) -> Vec<f32> {
+    fn get_prior_distribution(rng: &mut SmallRng, board: &Board, color: Color) -> Vec<f32> {
         let mut prior: Vec<f32> = (0..362).map(|_| rng.gen::<f32>()).collect();
         let sum_recip: f32 = prior.iter().map(|&f| f).sum();
 
@@ -801,98 +786,151 @@ mod tests {
         prior
     }
 
-    unsafe fn bench_test(b: &mut Bencher) {
-        let mut rng = SmallRng::from_entropy();
-        let mut root = Node::new(Color::Black, 0.5, get_prior_distribution(&mut rng, Board::new(DEFAULT_KOMI), Color::Black));
+    unsafe fn unsafe_visit_order() {
+        let mut choices = vec! [];
+        let mut rng = SmallRng::from_seed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        let mut root = Node::new(
+            Color::Black,
+            0.5,
+            get_prior_distribution(&mut rng, &Board::new(DEFAULT_KOMI), Color::Black)
+        );
 
-        for t in 0..800 {
-            let mut board = Board::new(DEFAULT_KOMI);
-            let mut dst_ref = [0.0f32; 368];
-            let mut dst_asm = [0.0f32; 368];
+        loop {
+            let trace = probe(&mut root, &mut Board::new(DEFAULT_KOMI));
 
-            // check so that the reference and asm implementation gives back the same
-            // value
-            PUCT::get(&root, &root.value, &mut dst_asm);
-            PUCT::get_ref(&root, &root.value, &mut dst_ref);
+            if let Some(trace) = trace {
+                assert_eq!(trace.len(), 1);
 
-            for i in 0..362 {
-                // because of numeric instabilities and approximations the answers may
-                // be slightly different
-                const EPS: f32 = 1e-4;
+                // check that we are not re-visiting a node that we have not yet finished
+                // expanding.
+                let i = trace[0].2;
 
-                assert!(
-                    (dst_asm[i] - dst_ref[i]).abs() < EPS,
-                    "epoch {}: dst[{}] <=> asm {} != ref {}",
-                    t, i, dst_asm[i], dst_ref[i]
-                );
+                assert!(!choices.contains(&i));
+                choices.push(i);
+
+                // check that the virtual loss has been correctly applied.
+                assert_eq!(root.vcount[i], *config::VLOSS_CNT);
+                assert_eq!(root.vtotal_count, choices.len() as i32 * *config::VLOSS_CNT);
+
+                // check that all nodes that were visited before this had larger prior
+                // value.
+                for &other_i in &choices {
+                    assert!(root.prior[other_i] >= root.prior[i]);
+                }
+            } else {
+                // check that we did not double-add any virtual loss
+                for &other_i in &choices {
+                    assert_eq!(root.vcount[other_i], *config::VLOSS_CNT);
+                }
+
+                assert_eq!(root.vtotal_count, choices.len() as i32 * *config::VLOSS_CNT);
+                break;
             }
 
-            // expand the tree by one probe so that the root values change
-            let trace = probe(&mut root, &mut board).unwrap();
-            let &(_, color, _) = trace.last().unwrap();
-            let next_color = color.opposite();
-            let (value, policy) = (rng.gen::<f32>(), get_prior_distribution(&mut rng, board, next_color));
-
-            insert(&trace, next_color, value, policy);
-        }
-
-        // benchmark the value function only
-        let root = test::black_box(root);
-
-        b.iter(|| {
-            let mut dst = test::black_box([0.0f32; 368]);
-
-            PUCT::get(&root, &root.value, &mut dst);
-            dst
-        });
-
-    }
-
-    #[bench]
-    fn puct(b: &mut Bencher) {
-        unsafe { bench_test(b); }
-    }
-
-    #[target_feature(enable = "avx,avx2")]
-    unsafe fn bench_apply_fpu_avx2(b: &mut Bencher) {
-        let mut count = [0; 368];
-
-        for i in 0..10 {
-            count[3*i] = 1;
-        }
-
-        b.iter(|| {
-            let mut value = [0.5; 368];
-
-            do_apply_fpu_avx2(&mut value, &count, 0.22)
-        });
-    }
-
-    #[bench]
-    fn apply_fpu_avx2(b: &mut Bencher) {
-        unsafe {
-            bench_apply_fpu_avx2(b);
+            assert!(choices.len() < 362);
         }
     }
 
-    unsafe fn bench_apply_fpu_safe(b: &mut Bencher) {
-        let mut count = [0; 368];
-
-        for i in 0..10 {
-            count[3*i] = 1;
-        }
-
-        b.iter(|| {
-            let mut value = [0.5; 368];
-
-            do_apply_fpu_safe(&mut value, &count, 0.22)
-        });
+    #[test]
+    fn visit_order() {
+        unsafe { unsafe_visit_order() }
     }
 
-    #[bench]
-    fn apply_fpu_safe(b: &mut Bencher) {
-        unsafe {
-            bench_apply_fpu_safe(b);
+    unsafe fn unsafe_virtual_loss() {
+        let mut board = Board::new(DEFAULT_KOMI);
+        let mut rng = SmallRng::from_seed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        let mut root = Node::new(
+            Color::Black,
+            0.5,
+            get_prior_distribution(&mut rng, &board, Color::Black)
+        );
+
+        if let Some(trace) = probe(&mut root, &mut board) {
+            let i = trace[0].2;
+
+            // check that the virtual loss was applied
+            assert_eq!(root.vcount[i], *config::VLOSS_CNT);
+            assert_eq!(root.vtotal_count, *config::VLOSS_CNT);
+
+            // check that the virtual loss is un-applied after we update this move, and
+            // that we we increase the `count` instead.
+            let other_prior = get_prior_distribution(&mut rng, &board, Color::Black);
+            let other_value = 0.9;
+
+            insert(&trace, Color::Black, other_value, other_prior);
+
+            assert_eq!(root.vcount[i], 0);
+            assert_eq!(root.vtotal_count, 0);
+            assert_eq!(root.count[i], 1);
+            assert_eq!(root.total_count, 1);
+        } else {
+            panic!();
         }
+    }
+
+    #[test]
+    fn virtual_loss() {
+        unsafe { unsafe_virtual_loss() }
+    }
+
+    unsafe fn unsafe_value_update() {
+        let mut board = Board::new(DEFAULT_KOMI);
+        let mut rng = SmallRng::from_seed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        let mut root = Node::new(
+            Color::Black,
+            0.5,
+            (0..362).map(|i| { if i == 60 { 1.0 } else { 0.0 } }).collect()
+        );
+
+        // to setup a scenario where we have two parallel probes that will both update
+        // the same node value we need to pre-expand a node.
+        let other_prior = get_prior_distribution(&mut rng, &board, Color::Black);
+        let trace = probe(&mut root, &mut board).unwrap();
+
+        insert(&trace, Color::Black, 0.9, other_prior.clone());
+        assert_eq!(root.value[60], 0.9);
+        assert_eq!(root.count[60], 1);
+        assert_eq!(root.total_count, 1);
+        assert_eq!(root.vcount[60], 0);
+        assert_eq!(root.vtotal_count, 0);
+
+        // two parallel probes in the same sub-tree.
+        let trace_1 = probe(&mut root, &mut Board::new(DEFAULT_KOMI)).unwrap();
+        let trace_2 = probe(&mut root, &mut Board::new(DEFAULT_KOMI)).unwrap();
+
+        assert_eq!(trace_1[0].2, 60);
+        assert_eq!(trace_2[0].2, 60);
+        assert!(trace_1[1].2 != trace_2[1].2);
+
+        // the value of the root sub-tree should remain unchanged, but the virtual loss
+        // should have increased.
+        assert_eq!(root.value[60], 0.9);
+        assert_eq!(root.count[60], 1);
+        assert_eq!(root.total_count, 1);
+        assert_eq!(root.vcount[60], 2 * *config::VLOSS_CNT);
+        assert_eq!(root.vtotal_count, 2 * *config::VLOSS_CNT);
+
+        // check update after the first probe is inserted
+        insert(&trace_1, Color::White, 0.2, other_prior.clone());
+
+        assert_eq!(root.value[60], 0.85);
+        assert_eq!(root.count[60], 2);
+        assert_eq!(root.total_count, 2);
+        assert_eq!(root.vcount[60], *config::VLOSS_CNT);
+        assert_eq!(root.vtotal_count, *config::VLOSS_CNT);
+
+        // check update after the second probe is inserted
+        insert(&trace_2, Color::White, 0.3, other_prior.clone());
+
+        assert_eq!(root.value[60], 0.8);
+        assert_eq!(root.count[60], 3);
+        assert_eq!(root.total_count, 3);
+        assert_eq!(root.vcount[60], 0);
+        assert_eq!(root.vtotal_count, 0);
+    }
+
+    #[test]
+    fn value_update() {
+        unsafe { unsafe_value_update() }
     }
 }
