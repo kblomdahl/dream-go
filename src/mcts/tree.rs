@@ -40,7 +40,7 @@ pub struct PUCT;
 
 impl PUCT {
     #[inline(always)]
-    unsafe fn get_impl(node: &Node, value: &[f32], dst: &mut [f32]) {
+    unsafe fn get_impl(node: &Node, value: &mut [f32]) {
         use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
 
         let n = node.total_count + node.vtotal_count;
@@ -50,17 +50,17 @@ impl PUCT {
         for i in 0..362 {
             let count = *node.count.get_unchecked(i) + *node.vcount.get_unchecked(i);
             let prior = *node.prior.get_unchecked(i);
-            let value = *value.get_unchecked(i);
+            let value_ = *value.get_unchecked(i);
             let exp_bonus = fdiv_fast(sqrt_n, (1 + count) as f32);
 
-            *dst.get_unchecked_mut(i) = fadd_fast(value, fmul_fast(fmul_fast(prior, uct_exp), exp_bonus));
+            *value.get_unchecked_mut(i) = fadd_fast(value_, fmul_fast(fmul_fast(prior, uct_exp), exp_bonus));
         }
     }
 
     #[allow(unused_attributes)]
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn get_avx2(node: &Node, value: &[f32], dst: &mut [f32]) {
-        PUCT::get_impl(node, value, dst);
+    unsafe fn get_avx2(node: &Node, value: &mut [f32]) {
+        PUCT::get_impl(node, value);
     }
 
     /// Update the trace backwards with the given value (and color).
@@ -98,14 +98,13 @@ impl PUCT {
     ///
     /// * `node` -
     /// * `value` - the winrates to use in the calculations
-    /// * `dst` - output array for the UCT value
     ///
     #[inline(always)]
-    fn get(node: &Node, value: &[f32], dst: &mut [f32]) {
+    fn get(node: &Node, value: &mut [f32]) {
         if is_x86_feature_detected!("avx2") {
-            unsafe { PUCT::get_avx2(node, value, dst) };
+            unsafe { PUCT::get_avx2(node, value) };
         } else {
-            unsafe { PUCT::get_impl(node, value, dst) };
+            unsafe { PUCT::get_impl(node, value) };
         }
     }
 }
@@ -171,6 +170,7 @@ fn percentile(array: &[i32], total: i32, n: f64) -> (i32, f64) {
 }
 
 /// A monte carlo search tree.
+#[repr(align(64))]
 pub struct Node {
     /// Spinlock used to protect the data in this node during modifications.
     lock: Mutex,
@@ -298,8 +298,8 @@ impl Node {
             */
         }
 
-        let mut uct = [::std::f32::NEG_INFINITY; 368];
-        PUCT::get(self, &self.value, &mut uct);
+        let mut uct = self.value.clone();
+        PUCT::get(self, &mut uct);
 
         for i in children {
             // do not output nodes that has not been visited to reduce the
@@ -476,14 +476,16 @@ impl Node {
 
         // compute all UCB1 values for each node before trying to figure out which
         // to pick to make it possible to do it with SIMD.
-        let mut uct = [::std::f32::NEG_INFINITY; 368];
+        for i in 362..368 {
+            value[i] = ::std::f32::NEG_INFINITY;
+        }
 
-        PUCT::get(self, &value, &mut uct);
+        PUCT::get(self, &mut value);
 
         // greedy selection based on the maximum ucb1 value, failing if someone else
         // is already expanding the node we want to expand.
         let _guard = self.lock.lock();
-        let max_i = argmax(&uct).and_then(|i| {
+        let max_i = argmax(&value).and_then(|i| {
             if self.expanding[i] && self.children[i].is_null() {
                 None  // someone else is already expanding this node
             } else {

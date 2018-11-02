@@ -22,6 +22,7 @@ use small_set::SmallSet;
 
 ///
 #[derive(Clone)]
+#[repr(align(64))]
 pub struct Board {
     /// The interior board representation.
     pub(super) inner: BoardFast,
