@@ -768,12 +768,13 @@ pub fn to_pretty<'a>(root: &'a Node) -> ToPretty<'a> {
 mod tests {
     use rand::rngs::SmallRng;
     use rand::{Rng, SeedableRng};
+    use test::Bencher;
     use go::*;
     use mcts::tree::*;
 
     fn get_prior_distribution(rng: &mut SmallRng, board: &Board, color: Color) -> Vec<f32> {
         let mut prior: Vec<f32> = (0..362).map(|_| rng.gen::<f32>()).collect();
-        let sum_recip: f32 = prior.iter().map(|&f| f).sum();
+        let sum_recip: f32 = prior.iter().sum::<f32>().recip();
 
         for i in 0..362 {
             if i == 361 || board.is_valid(color, X[i] as usize, Y[i] as usize) {
@@ -932,5 +933,36 @@ mod tests {
     #[test]
     fn value_update() {
         unsafe { unsafe_value_update() }
+    }
+
+    unsafe fn unsafe_bench_probe_insert(b: &mut Bencher) {
+        b.iter(|| {
+            let mut rng = SmallRng::from_seed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+            let mut root = Node::new(
+                Color::Black,
+                0.5,
+                get_prior_distribution(&mut rng, &Board::new(DEFAULT_KOMI), Color::Black)
+            );
+
+            for _i in 0..800 {
+                let mut board = Board::new(DEFAULT_KOMI);
+                let trace = probe(&mut root, &mut board).unwrap();
+                let next_color = board.last_played().map(|c| { c.opposite() }).unwrap_or(Color::Black);
+
+                insert(
+                    &trace,
+                    next_color,
+                    0.5,
+                    get_prior_distribution(&mut rng, &board, next_color)
+                );
+            }
+
+            root
+        })
+    }
+
+    #[bench]
+    fn bench_probe_insert(b: &mut Bencher) {
+        unsafe { unsafe_bench_probe_insert(b) }
     }
 }
