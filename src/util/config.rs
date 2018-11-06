@@ -137,10 +137,6 @@ lazy_static! {
     /// The UCT exploration rate.
     pub static ref UCT_EXP: Vec<(i32, f32)> = get_intp_list("UCT_EXP")
         .unwrap_or(vec! [(0, 0.88)]);
-
-    /// The rave bias.
-    pub static ref RAVE_BIAS: f32 = get_env("RAVE_BIAS")
-        .unwrap_or(0.705811);
 }
 
 /// Returns true if any command-line argument with the given name is present.
