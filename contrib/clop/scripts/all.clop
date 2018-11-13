@@ -9,7 +9,7 @@ Script ./run_dreamgo.py
 #
 LinearParameter UCT_EXP 0.4 1.6
 IntegerParameter VLOSS_CNT 1 5
-#LinearParameter FPU_REDUCE 0.01 0.80
+LinearParameter FPU_REDUCE 0.01 0.80
 LinearParameter SOFTMAX_TEMPERATURE 0.5 1.0
 
 # Parallelization parameters

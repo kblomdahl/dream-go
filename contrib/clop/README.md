@@ -5,12 +5,21 @@ Environment for optimizing the parameters that affects the playing strength of D
 - `UCT_EXP`
 - `VLOSS_CNT`
 - `FPU_REDUCE`
+- `SOFTMAX_TEMPERATURE`
 
 ## Running
 
 Copy the most recent `dream_go.json` file to the current directory:
 
 ```bash
-cargo build --release
-bin/clop-console c < scripts/dream_go.clop
+make
+bin/clop-console c < scripts/all.clop
 ```
+
+There are also some configuration files that allow you to tune one parameter at a time. The names should be self-explaining:
+
+- `scripts/only_fpu_reduce.clop`
+- `scripts/only_softmax_temperature.clop`
+- `scripts/only_uct_exp.clop`
+- `scripts/only_vloss_count.clop`
+

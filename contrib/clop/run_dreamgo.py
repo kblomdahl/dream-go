@@ -38,11 +38,60 @@ W
 ```
 """
 
+from datetime import datetime
 from subprocess import Popen, PIPE, DEVNULL
 from random import random
 
 import sys
 import os
+
+GTP_TABLE = {
+    'a': 'a',
+    'b': 'b',
+    'c': 'c',
+    'd': 'd',
+    'e': 'e',
+    'f': 'f',
+    'g': 'g',
+    'h': 'h',
+    'j': 'i',
+    'k': 'j',
+    'l': 'k',
+    'm': 'l',
+    'n': 'm',
+    'o': 'n',
+    'p': 'o',
+    'q': 'p',
+    'r': 'q',
+    's': 'r',
+    't': 's',
+
+    '1': 'a',
+    '2': 'b',
+    '3': 'c',
+    '4': 'd',
+    '5': 'e',
+    '6': 'f',
+    '7': 'g',
+    '8': 'h',
+    '9': 'i',
+    '10': 'j',
+    '11': 'k',
+    '12': 'l',
+    '13': 'm',
+    '14': 'n',
+    '15': 'o',
+    '16': 'p',
+    '17': 'q',
+    '18': 'r',
+    '19': 's',
+}
+
+def gtp_to_sgf(color, gtp_move):
+    x = gtp_move[0]
+    y = gtp_move[1:]
+
+    return ';{}[{}{}]'.format(color, GTP_TABLE[x], GTP_TABLE[y])
 
 def play_game(engine_1, engine_2, environ_1, environ_2):
     """
@@ -100,7 +149,7 @@ def play_game(engine_1, engine_2, environ_1, environ_2):
                 if move == 'pass':
                     pass_count += 1
                 elif move == 'resign':
-                    return other[2]  # if an engine resign then it loses
+                    return other[2], other[1], all_moves  # if an engine resign then it loses
                 else:
                     all_moves.append((current[1], move))
                     pass_count = 0
@@ -108,7 +157,7 @@ def play_game(engine_1, engine_2, environ_1, environ_2):
                     # play this move to the other engine
                     write_command(other[0], line_nr, 'play {} {}\n'.format(current[1], move))
             else:
-                return other[2]  # if an engine encounter an error then it loses
+                return other[2], other[1], all_moves  # if an engine encounter an error then it loses
 
             # flip the current player
             turns = [turns[1], turns[0]]
@@ -117,13 +166,19 @@ def play_game(engine_1, engine_2, environ_1, environ_2):
         proc_1.stdin.write(b'quit\n')
         proc_2.stdin.write(b'quit\n')
 
-        # we finished without a winner, we use GNU Go to determine the winner so that
-        # no complicated scoring algorihm, including figuring out if a group is alive
-        # or not, has to be implemented in the referee.
+        # we use GNU Go to determine the winner so that no complicated scoring algorithm,
+        # including figuring out if a group is alive or not, has to be implemented in
+        # the referee.
         #
         # We use the `final_score` variant here to avoid any incorrect scores due to
         # complicated situations that `estimate_score` fail to take into account.
-        gnugo = Popen('/usr/games/gnugo --chinese-rules --mode gtp', shell=True, stdin=PIPE, stdout=PIPE, stderr=DEVNULL)
+        gnugo = Popen([
+            '/usr/games/gnugo',
+            '--chinese-rules',
+            '--positional-superko',
+            '--mode', 'gtp'
+        ], stdin=PIPE, stdout=PIPE, stderr=DEVNULL)
+
         gnugo.stdin.write(b'komi 7.5\n')
         gnugo.stdin.write(b'boardsize 19\n')
         gnugo.stdin.write(b'clear_board\n')
@@ -133,7 +188,7 @@ def play_game(engine_1, engine_2, environ_1, environ_2):
 
         re = write_command(gnugo, 2000, 'final_score\n')
         if not re:
-            return None  # cannot determine winner
+            return None, None, None  # cannot determine winner
 
         re = re.split(' ')[1].upper()  # trim away the id prefix
 
@@ -141,9 +196,9 @@ def play_game(engine_1, engine_2, environ_1, environ_2):
         gnugo.communicate()
 
         if re.startswith('b') or re.startswith('B'):
-            return black[2]
+            return black[2], re, all_moves
         else:
-            return white[2]
+            return white[2], re, all_moves
     finally:
         # terminate the engines the hard way if they have not died already
         if not proc_1.poll():
@@ -158,19 +213,43 @@ def main():
     """ Main function """
 
     # complement the current environment variable with the given parameters
-    parameters = dict(os.environ)
+    environ = dict(os.environ)
+    extra = {}
 
     for i in range(3, len(sys.argv), 2):
-        parameters[sys.argv[i]] = sys.argv[i+1]
+        extra[sys.argv[i]] = sys.argv[i+1]
 
-    #
+    # play an odd number of games, and whomever wins the most is considered
+    # the overall winner
     cwd = os.getcwd()
+    results = {}
 
-    print(play_game(
-        cwd + "/../../target/release/dream_go --no-ponder --num-rollout 3200",  # engine to be optimized
-        cwd + "/../../target/release/dream_go --no-ponder --num-rollout 3200",  # opponent
-        parameters,
-        {}
-    ))
+    for _ in range(5):
+        result, winner, moves = play_game(
+            cwd + "/bin/dream_go --no-ponder --num-rollout 800",  # engine to be optimized
+            cwd + "/bin/dream_go --no-ponder --num-rollout 800",  # opponent
+            {**environ, **extra},
+            environ
+        )
+
+        if result is not None:
+            results[result] = results.get(result, 0) + 1
+
+        # save the final game as SGF
+        if moves:
+            filename = datetime.now().strftime('%Y%m%d.%H%M%S.%f')
+
+            with open('games/' + filename + '.' + result + '.sgf', 'w') as sgf:
+                sgf.write('(;GM[1]FF[4]SZ[19]RU[Chinese]KM[7.5]')
+                sgf.write('RE[{}]'.format(winner))
+                sgf.write('C[{}\n{}]'.format(result, str(extra)))
+
+                for color, move in moves:
+                    sgf.write(gtp_to_sgf(color, move))
+
+                sgf.write(')\n')
+
+
+    print(max(results.keys(), key=lambda key: results[key]))
 
 main()
