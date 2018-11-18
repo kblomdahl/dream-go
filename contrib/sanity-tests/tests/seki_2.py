@@ -30,4 +30,4 @@ with TestCase('Seki 2') as seki_2:
     #     ● Black    ○ White
     #
     seki_2.setup_from_sgf('examples/seki_2.sgf', 722)
-    seki_2.final_score().expect_to(be_winner('W', '7.5'))
+    seki_2.final_score().expect_to(be_winner('W', '9.5'))

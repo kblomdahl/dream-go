@@ -30,4 +30,4 @@ with TestCase('Dead Dragon 1') as dead_dragon_1:
     #     ● Black    ○ White
     #
     dead_dragon_1.setup_from_sgf('examples/dead_dragon_1.sgf', 722)
-    dead_dragon_1.final_score().expect_to(be_winner('B', '38.5'))
+    dead_dragon_1.final_score().expect_to(be_winner('B', '33.5'))
