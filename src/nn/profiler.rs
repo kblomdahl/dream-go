@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use] pub mod ffi;
-pub mod devices;
-mod graph;
-mod loader;
-mod network;
-mod output_map;
-mod profiler;
-mod slots;
-mod tensor;
+use nn::ffi::cuda;
 
-pub use self::graph::{Workspace, forward};
-pub use self::network::{Network, WorkspaceGuard};
-pub use self::output_map::*;
-pub use self::profiler::Profiler;
+pub struct Profiler;
+
+impl Profiler {
+    pub fn with<T, F>(f: F) -> T
+        where F: FnOnce() -> T
+    {
+        unsafe {
+            check!(cuda::cudaProfilerStart());
+        }
+
+        let out = f();
+
+        unsafe {
+            check!(cuda::cudaProfilerStop());
+        }
+
+        out
+    }
+}

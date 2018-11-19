@@ -34,7 +34,7 @@ pub use self::policy_play::*;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
 use std::fmt;
-use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -44,7 +44,7 @@ use go::sgf::*;
 use go::{symmetry, Board, Color, CHW_VECT_C, Features, Score};
 use mcts::time_control::{TimeStrategy, RolloutLimit};
 use mcts::predict::{PredictService, PredictGuard, PredictRequest};
-use nn::Network;
+use nn::{Network, Profiler};
 use util::b85;
 use util::config;
 use util::min;
@@ -285,9 +285,6 @@ struct ThreadContext<T: TimeStrategy + Clone + Send> {
 
     /// Time control element
     time_strategy: T,
-
-    /// The number of probes that still needs to be done into the tree.
-    remaining: Arc<AtomicIsize>,
 }
 
 unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
@@ -390,17 +387,11 @@ fn predict_aux<T>(
 
     // start-up all of the worker threads, and then start listening for requests on the
     // channel we gave each thread.
-    let remaining = if *config::NUM_ROLLOUT > starting_tree.size() {
-        (*config::NUM_ROLLOUT - starting_tree.size()) as isize
-    } else {
-        0
-    };
     let context: ThreadContext<T> = ThreadContext {
         root: Arc::new(UnsafeCell::new(starting_tree)),
         starting_point: starting_point.clone(),
 
-        time_strategy: time_strategy.clone(),
-        remaining: Arc::new(AtomicIsize::new(remaining)),
+        time_strategy: time_strategy.clone()
     };
 
     if num_workers <= 1 {
@@ -459,7 +450,9 @@ pub fn predict<T>(
 {
     let num_workers = num_workers.unwrap_or(*config::NUM_THREADS);
 
-    predict_aux::<T>(server, num_workers, time_control, starting_tree, starting_point, starting_color)
+    Profiler::with(move || {
+        predict_aux::<T>(server, num_workers, time_control, starting_tree, starting_point, starting_color)
+    })
 }
 
 /// Returns a weighted random komi between `-7.5` to `7.5`, with the most common

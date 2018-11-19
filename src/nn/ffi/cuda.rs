@@ -147,4 +147,7 @@ extern {
     pub fn cudaStreamDestroy(stream: Stream) -> Error;
     pub fn cudaStreamSynchronize(stream: Stream) -> Error;
     pub fn cudaStreamWaitEvent(stream: Stream, event: Event, flags: u32) -> Error;
+
+    pub fn cudaProfilerStart() -> Error;
+    pub fn cudaProfilerStop() -> Error;
 }

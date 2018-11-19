@@ -13,9 +13,7 @@
 // limitations under the License.
 //
 
-use go::symmetry::Transform;
-use go::{DEFAULT_KOMI, Board, Color, Features, Score, CHW};
-use dream_go::mcts;
+use go::{DEFAULT_KOMI, Board, Color};
 use dream_go::nn;
 
 use regex::Regex;
@@ -96,51 +94,3 @@ pub fn playout_file(filename: &str, max_moves: Option<usize>) -> Board {
     playout_game(&contents, max_moves)
 }
 
-/// Returns the next move as suggested by the neural network for the given
-/// color.
-/// 
-/// # Arguments
-/// 
-/// * `board` -
-/// * `next_color` -
-/// 
-#[allow(dead_code)]
-pub fn predict(board: &Board, next_color: Color) -> (f32, Vec<f32>) {
-    // predict the next move and the current value using the neural network
-    NETWORK.with(|network| {
-        let features = board.get_features::<CHW>(next_color, Transform::Identity);
-        let mut workspace = network.get_workspace(1);
-        let mut outputs = nn::forward(
-            &mut workspace,
-            &features,
-            nn::OutputSet::new().with(nn::Output::Value).with(nn::Output::Policy)
-        );
-
-        let value = outputs.take(nn::Output::Value)[0] as f32;
-        let policy = outputs.take(nn::Output::Policy);
-
-        (value, policy)
-    })
-}
-
-/// Returns the final score as suggested by the neural network for the given
-/// next color to play.
-/// 
-/// # Arguments
-/// 
-/// * `board` -
-/// * `next_color` -
-/// 
-#[allow(dead_code)]
-pub fn greedy_score(board: &Board, next_color: Color) -> (usize, usize) {
-    NETWORK.with(|network| {
-        let service = mcts::predict::service(network.clone());
-        let (finished, _rollout) = mcts::greedy_score(
-            &service.lock(),
-            board,
-            next_color
-        );
-
-        board.get_guess_score(&finished)
-    })
-}
