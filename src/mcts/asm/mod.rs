@@ -16,6 +16,6 @@ mod argmax;
 mod normalize_finite;
 mod sum_finite;
 
-pub use self::argmax::argmax;
+pub use self::argmax::{argmax_f32, argmax_i32};
 pub use self::normalize_finite::{normalize_finite_f32};
 pub use self::sum_finite::{sum_finite_f32, sum_i32};

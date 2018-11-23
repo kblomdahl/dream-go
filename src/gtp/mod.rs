@@ -20,6 +20,7 @@ use std::time::Instant;
 use go::util::sgf::*;
 use go::util::score::{Score, StoneStatus};
 use go::{DEFAULT_KOMI, Board, Color};
+use mcts::asm::{sum_finite_f32, normalize_finite_f32};
 use mcts::time_control;
 use mcts;
 use util::config;
@@ -460,20 +461,9 @@ impl Gtp {
 
             // output the heatmap in Sabaki format
             let json = if prior {
-                let mut s = vec! [0.0f32; 362];
-                let mut s_total = 0.0f32;
-
-                for i in 0..362 {
-                    if tree.prior[i].is_finite() {
-                        s_total += tree.prior[i];
-                    }
-                }
-
-                for i in 0..362 {
-                    if tree.prior[i].is_finite() {
-                        s[i] = tree.prior[i] / s_total;
-                    }
-                }
+                let mut s = tree.prior.clone();
+                let mut s_total = sum_finite_f32(&s);
+                normalize_finite_f32(&mut s, s_total);
 
                 Gtp::to_heatmap(&s)
             } else {

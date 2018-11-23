@@ -138,6 +138,17 @@ mod tests {
     }
 
     #[test]
+    fn check_int() {
+        let mut array = [0; 368];
+
+        for i in 0..8 {
+            array[i] = -(i as i32);
+        }
+
+        assert_eq!(sum_i32(&array), -28);
+    }
+
+    #[test]
     fn check_normal() {
         let mut array = [0.0f32; 368];
 

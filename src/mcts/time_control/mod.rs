@@ -55,17 +55,12 @@ pub trait TimeStrategy {
 /// * `root` - the tree to check for stability
 /// 
 fn is_stable(root: &tree::Node) -> bool {
-    let mut max_visits = 0;
-    let mut max_wins = 0;
-
-    for i in 1..362 {
-        if root.count[i] > root.count[max_visits] { max_visits = i; }
-        if root.value[i] > root.value[max_wins] { max_wins = i; }
-    }
+    let max_visits = root.children.argmax_count();
+    let max_wins = root.children.argmax_value();
 
     max_visits == max_wins || {
-        let max_value = root.value[max_wins];
-        let other_value = root.value[max_visits];
+        let max_value = root.with(max_wins, |child| child.value());
+        let other_value = root.with(max_visits, |child| child.value());
 
         max_value - other_value < 0.005  // within 0.025%
     }
@@ -79,20 +74,23 @@ fn is_stable(root: &tree::Node) -> bool {
 /// * `root` - the tree to get the lower bound for
 /// 
 fn min_promote_rollouts(root: &tree::Node) -> usize {
-    let mut top_1 = 0;
-
-    for i in 1..362 {
-        if root.count[i] > root.count[top_1] { top_1 = i; }
-    }
+    let top_1 = root.children.argmax_count();
 
     // find the most visited child that is **not** `top_1`.
     let mut top_2 = if top_1 == 0 { 1 } else { 0 };
 
-    for i in 0..362 {
-        if i != top_1 && root.count[i] > root.count[top_2] { top_2 = i; }
+    for i in root.children.nonzero() {
+        let count_i = root.with(i, |child| child.count());
+
+        if i != top_1 && count_i > root.with(top_2, |child| child.count()) {
+            top_2 = i;
+        }
     }
 
-    (root.count[top_1] - root.count[top_2]) as usize
+    let count_1 = root.with(top_1, |child| child.count());
+    let count_2 = root.with(top_2, |child| child.count());
+
+    (count_1 - count_2) as usize
 }
 
 /// Implements a time control scheme based on the `UNST-N` and `EARLY-C`

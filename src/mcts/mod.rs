@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod asm;
+pub mod asm;
 mod dirichlet;
 mod global_cache;
 mod greedy_score;
@@ -47,9 +47,7 @@ use go::{Board, Color};
 use mcts::time_control::{TimeStrategy, RolloutLimit};
 use mcts::predict::{PredictService, PredictGuard, PredictRequest};
 use nn::{Network, Profiler};
-use util::b85;
-use util::config;
-use util::min;
+use util::{b85, config, min};
 use mcts::asm::sum_finite_f32;
 use mcts::asm::normalize_finite_f32;
 

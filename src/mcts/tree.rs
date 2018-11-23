@@ -15,14 +15,14 @@
 use go::util::sgf::SgfCoordinate;
 use go::{Board, Color};
 use parallel::spin::Mutex;
-use mcts::asm::argmax;
+use mcts::asm::{argmax_f32, argmax_i32};
 use util::{config, max};
 
 use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
 use std::fmt;
+use std::mem::ManuallyDrop;
 use std::ptr;
-use mcts::asm::sum_i32;
 
 lazy_static! {
     /// Mapping from policy index to the `x` coordinate it represents.
@@ -41,27 +41,61 @@ pub struct PUCT;
 
 impl PUCT {
     #[inline(always)]
-    unsafe fn get_impl(node: &Node, value: &mut [f32]) {
+    unsafe fn get_big_impl(node: &Node, big: &BigChildrenImpl, value: &mut [f32]) {
         use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
 
         let n = node.total_count + node.vtotal_count;
         let sqrt_n = ((1 + n) as f32).sqrt();
         let uct_exp = config::get_uct_exp(n);
+        let uct_exp_sqrt_n = fmul_fast(uct_exp, sqrt_n);
 
         for i in 0..362 {
-            let count = *node.count.get_unchecked(i) + *node.vcount.get_unchecked(i);
+            let count = *big.count.get_unchecked(i) + *big.vcount.get_unchecked(i) as i32;
             let prior = *node.prior.get_unchecked(i);
             let value_ = *value.get_unchecked(i);
-            let exp_bonus = fdiv_fast(sqrt_n, (1 + count) as f32);
+            let exp_bonus = fdiv_fast(uct_exp_sqrt_n, (1 + count) as f32);
 
-            *value.get_unchecked_mut(i) = fadd_fast(value_, fmul_fast(fmul_fast(prior, uct_exp), exp_bonus));
+            *value.get_unchecked_mut(i) = fadd_fast(value_, fmul_fast(prior, exp_bonus));
         }
     }
 
     #[allow(unused_attributes)]
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn get_avx2(node: &Node, value: &mut [f32]) {
-        PUCT::get_impl(node, value);
+    unsafe fn get_big_avx2(node: &Node, big: &BigChildrenImpl, value: &mut [f32]) {
+        PUCT::get_big_impl(node, big, value);
+    }
+
+    #[inline(always)]
+    unsafe fn get_small_impl(node: &Node, small: &SmallChildrenImpl, value: &mut [f32]) {
+        debug_assert!(SMALL_SIZE == 8);
+
+        use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
+
+        let n = node.total_count + node.vtotal_count;
+        let sqrt_n = ((1 + n) as f32).sqrt();
+        let uct_exp = config::get_uct_exp(n);
+        let uct_exp_sqrt_n = fmul_fast(uct_exp, sqrt_n);
+
+        for i in 0..362 {
+            let other = small.find_index_fast(i);
+            let prior = *node.prior.get_unchecked(i);
+            let value_ = *value.get_unchecked(i);
+
+            if let Some(other) = other {
+                let count = small.count[other] + small.vcount[other] as i32;
+                let exp_bonus = fdiv_fast(uct_exp_sqrt_n, (1 + count) as f32);
+
+                *value.get_unchecked_mut(i) = fadd_fast(value_, fmul_fast(prior, exp_bonus));
+            } else {
+                *value.get_unchecked_mut(i) = fadd_fast(value_, fmul_fast(prior, uct_exp_sqrt_n));
+            }
+        }
+    }
+
+    #[allow(unused_attributes)]
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn get_small_avx2(node: &Node, small: &SmallChildrenImpl, value: &mut [f32]) {
+        PUCT::get_small_impl(node, small, value);
     }
 
     /// Update the trace backwards with the given value (and color).
@@ -74,7 +108,7 @@ impl PUCT {
     ///
     #[inline]
     unsafe fn update(trace: &NodeTrace, color: Color, value: f32) {
-        use std::intrinsics::fdiv_fast;
+        use std::intrinsics::{fadd_fast, fsub_fast, fdiv_fast};
 
         for &(node, _, index) in trace.iter() {
             let value_ = if color == (*node).color { value } else { 1.0 - value };
@@ -84,12 +118,16 @@ impl PUCT {
             let _guard = (*node).lock.lock();
 
             (*node).total_count += 1;
-            (*node).total_value[index] += value_;
-            (*node).count[index] += 1;
-            (*node).value[index] = fdiv_fast((*node).total_value[index], (*node).count[index] as f32);
-
             (*node).vtotal_count -= *config::VLOSS_CNT;
-            (*node).vcount[index] -= *config::VLOSS_CNT;
+            (*node).children.with_mut(index, |mut child| {
+                let prev_count = child.count();
+                let prev_vcount = child.vcount();
+                let prev_value = child.value();
+
+                child.set_count(prev_count + 1);
+                child.set_value(fadd_fast(prev_value, fdiv_fast(fsub_fast(value_, prev_value), (prev_count + 1) as f32)));
+                child.set_vcount(prev_vcount - *config::VLOSS_CNT);
+            }, (*node).initial_value);
         }
     }
 
@@ -103,43 +141,99 @@ impl PUCT {
     #[inline(always)]
     fn get(node: &Node, value: &mut [f32]) {
         if is_x86_feature_detected!("avx2") {
-            unsafe { PUCT::get_avx2(node, value) };
+            unsafe {
+                match node.children {
+                    ChildrenImpl::Small(ref small) => PUCT::get_small_avx2(node, small, value),
+                    ChildrenImpl::Big(ref big) => PUCT::get_big_avx2(node, big, value),
+                }
+            }
         } else {
-            unsafe { PUCT::get_impl(node, value) };
+            unsafe {
+                match node.children {
+                    ChildrenImpl::Small(ref small) => PUCT::get_small_impl(node, small, value),
+                    ChildrenImpl::Big(ref big) => PUCT::get_big_impl(node, big, value),
+                }
+            }
         }
     }
 }
 
-unsafe fn do_apply_fpu_impl(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
-    use std::intrinsics::fsub_fast;
+/// An implementation of the First-Play Urgency.
+struct FPU;
 
-    for i in 0..368 {
-        if *count.get_unchecked(i) == 0 {
-            *value.get_unchecked_mut(i) = max(0.0, fsub_fast(*value.get_unchecked(i), fpu_reduce));
+impl FPU {
+    unsafe fn apply_big_impl(value: &mut [f32], big: &BigChildrenImpl, fpu_reduce: f32) {
+        use std::intrinsics::fsub_fast;
+
+        for i in 0..368 {
+            let count = *big.count.get_unchecked(i) + *big.vcount.get_unchecked(i) as i32;
+
+            if count == 0 {
+                *value.get_unchecked_mut(i) = max(0.0, fsub_fast(*value.get_unchecked(i), fpu_reduce));
+            }
         }
     }
-}
 
-#[target_feature(enable = "avx,avx2")]
-unsafe fn do_apply_fpu_avx2(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
-    do_apply_fpu_impl(value, count, fpu_reduce)
-}
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn apply_big_avx2(value: &mut [f32], big: &BigChildrenImpl, fpu_reduce: f32) {
+        FPU::apply_big_impl(value, big, fpu_reduce)
+    }
 
-/// Apply the first play urgency reduction to all elements in `value` if `count`
-/// is zero.
-///
-/// # Arguments
-///
-/// * `value` - the value of each element
-/// * `count` - the number of visits so far to each element
-/// * `fpu_reduce` - the reduction to apply
-///
-#[inline(always)]
-fn do_apply_fpu(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
-    if is_x86_feature_detected!("avx2") {
-        unsafe { do_apply_fpu_avx2(value, count, fpu_reduce) }
-    } else {
-        unsafe { do_apply_fpu_impl(value, count, fpu_reduce) }
+    unsafe fn apply_small_impl(value: &mut [f32], small: &SmallChildrenImpl, fpu_reduce: f32) {
+        use std::arch::x86_64::*;
+        use std::intrinsics::fsub_fast;
+
+        let indices = _mm_loadu_si128(&small.indices as *const i16 as *const _);
+
+        for i in 0..362 {
+            let eq = _mm_cmpeq_epi16(indices, _mm_set1_epi16(i as i16));
+            let eq = _mm_movemask_epi8(eq) as u32;
+
+            if eq == 0 || small.count[_mm_tzcnt_32(eq) as usize / 2] == 0 {
+                *value.get_unchecked_mut(i) = max(0.0, fsub_fast(*value.get_unchecked(i), fpu_reduce));
+            }
+        }
+    }
+
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn apply_small_avx2(value: &mut [f32], small: &SmallChildrenImpl, fpu_reduce: f32) {
+        FPU::apply_small_impl(value, small, fpu_reduce)
+    }
+
+    /// Apply the first play urgency reduction to all elements in `value` if `count`
+    /// is zero.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - the value of each element
+    /// * `big` - The children storage as a big node.
+    /// * `fpu_reduce` - the reduction to apply
+    ///
+    #[inline(always)]
+    fn apply_big(value: &mut [f32], big: &BigChildrenImpl, fpu_reduce: f32) {
+        if is_x86_feature_detected!("avx2") {
+            unsafe { FPU::apply_big_avx2(value, big, fpu_reduce) }
+        } else {
+            unsafe { FPU::apply_big_impl(value, big, fpu_reduce) }
+        }
+    }
+
+    /// Apply the first play urgency reduction to all elements in `value` if `count`
+    /// is zero.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - the value of each element
+    /// * `small` - The children storage as a small node.
+    /// * `fpu_reduce` - the reduction to apply
+    ///
+    #[inline(always)]
+    fn apply_small(value: &mut [f32], small: &SmallChildrenImpl, fpu_reduce: f32) {
+        if is_x86_feature_detected!("avx2") {
+            unsafe { FPU::apply_small_avx2(value, small, fpu_reduce) }
+        } else {
+            unsafe { FPU::apply_small_impl(value, small, fpu_reduce) }
+        }
     }
 }
 
@@ -151,8 +245,8 @@ fn do_apply_fpu(value: &mut [f32], count: &[i32], fpu_reduce: f32) {
 /// * `array` -
 /// * `n` -
 ///
-fn percentile(array: &[i32], total: i32, n: f64) -> (i32, f64) {
-    let mut copy = array.to_vec();
+fn percentile<I: Iterator<Item=i32>>(array: I, total: i32, n: f64) -> (i32, f64) {
+    let mut copy = array.collect::<Vec<i32>>();
     copy.sort_unstable_by_key(|val| -val);
 
     // step forward in the array until we have accumulated the requested amount
@@ -170,35 +264,226 @@ fn percentile(array: &[i32], total: i32, n: f64) -> (i32, f64) {
     unreachable!();
 }
 
-/// A monte carlo search tree.
+/// Flyweight structure used to contain the values of a single child in a `Node`. These
+/// values should never be modified as they will **not** be synchronized back to the
+/// origin structure.
+pub struct Child {
+    expanding: bool,
+    count: i32,
+    vcount: i16,
+    ptr: *mut Node,
+    value: f32
+}
+
+impl Child {
+    /// Returns a default child, with the given `value`. This constructor is normally used
+    /// when a sparse `Node` does not contain a child it was asked for.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - the value of the parent `Node`
+    ///
+    fn with_value(value: f32) -> Child {
+        Child {
+            count: 0,
+            vcount: 0,
+            value: value,
+            expanding: false,
+            ptr: ptr::null_mut()
+        }
+    }
+
+    /// Returns a child that is initialized from a `SmallChildrenImpl` at the given `index`.
+    ///
+    /// # Arguments
+    ///
+    /// * `small` - the `SmallChildrenImpl` to initialize from
+    /// * `index` - the sparse index in `SmallChildrenImpl` to initialize from
+    ///
+    fn from_small(small: &SmallChildrenImpl, index: usize) -> Child {
+        Child {
+            count: small.count[index],
+            vcount: small.vcount[index],
+            value: small.value[index],
+            expanding: small.expanding[index],
+            ptr: small.ptr[index]
+        }
+    }
+
+    /// Returns a child that is initialized from a `BigChildrenImpl` at the given `index`.
+    ///
+    /// # Arguments
+    ///
+    /// * `big` - the `BigChildrenImpl` to initialize from
+    /// * `index` - the dense index in `BigChildrenImpl` to initialize from
+    ///
+    fn from_big(big: &BigChildrenImpl, index: usize) -> Child {
+        Child {
+            count: big.count[index],
+            vcount: big.vcount[index],
+            value: big.value[index],
+            expanding: big.expanding[index],
+            ptr: big.ptr[index]
+        }
+    }
+
+    /// Returns whether this child is currently being expanded.
+    pub fn expanding(&self) -> bool {
+        self.expanding
+    }
+
+    /// Returns the number of visits to this child.
+    pub fn count(&self) -> i32 {
+        self.count
+    }
+
+    /// Returns the number of virtual visits to this child.
+    pub fn vcount(&self) -> i32 {
+        self.vcount as i32
+    }
+
+    /// Return the child node itself.
+    pub fn ptr(&self) -> *mut Node {
+        self.ptr
+    }
+
+    /// Returns the average value of this child.
+    pub fn value(&self) -> f32 {
+        self.value
+    }
+}
+
+/// Flyweight mutable structure used to contain the values of a single child in a `Node`.
+pub struct ChildMut {
+    expanding: *mut bool,
+    count: *mut i32,
+    vcount: *mut i16,
+    ptr: *mut *mut Node,
+    value: *mut f32
+}
+
+impl ChildMut {
+    /// Returns a child that is initialized from a `SmallChildrenImpl` at the given `index`. The
+    /// given `small` node must outlive the returned `ChildMut`.
+    ///
+    /// # Arguments
+    ///
+    /// * `small` - the `SmallChildrenImpl` to initialize from
+    /// * `index` - the sparse index in `SmallChildrenImpl` to initialize from
+    ///
+    unsafe fn from_small(small: &mut SmallChildrenImpl, index: usize) -> ChildMut {
+        ChildMut {
+            count: small.count.get_unchecked_mut(index),
+            vcount: small.vcount.get_unchecked_mut(index),
+            value: small.value.get_unchecked_mut(index),
+            expanding: small.expanding.get_unchecked_mut(index),
+            ptr: small.ptr.get_unchecked_mut(index)
+        }
+    }
+
+    /// Returns a child that is initialized from a `BigChildrenImpl` at the given `index`. The
+    /// given `big` node must outlive the returned `ChildMut`.
+    ///
+    /// # Arguments
+    ///
+    /// * `big` - the `BigChildrenImpl` to initialize from
+    /// * `index` - the dense index in `BigChildrenImpl` to initialize from
+    ///
+    unsafe fn from_big(big: &mut BigChildrenImpl, index: usize) -> ChildMut {
+        ChildMut {
+            count: big.count.get_unchecked_mut(index),
+            vcount: big.vcount.get_unchecked_mut(index),
+            value: big.value.get_unchecked_mut(index),
+            expanding: big.expanding.get_unchecked_mut(index),
+            ptr: big.ptr.get_unchecked_mut(index)
+        }
+    }
+
+    /// Returns whether this child is currently being expanded.
+    pub fn expanding(&self) -> bool {
+        unsafe { *self.expanding }
+    }
+
+    /// Returns the number of visits to this child.
+    pub fn count(&self) -> i32 {
+        unsafe { *self.count }
+    }
+
+    /// Returns the number of virtual visits to this child.
+    pub fn vcount(&self) -> i32 {
+        unsafe { *self.vcount as i32 }
+    }
+
+    /// Return the child node itself.
+    pub fn ptr(&self) -> *mut Node {
+        unsafe { *self.ptr }
+    }
+
+    /// Returns the average value of this child.
+    pub fn value(&self) -> f32 {
+        unsafe { *self.value }
+    }
+
+    /// Sets whether this child is, or has been, expanded.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - whether this child is expanding
+    ///
+    fn set_expanding(&mut self, value: bool) {
+        unsafe { *self.expanding = value; }
+    }
+
+    /// Sets the number of visits to this child.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - the new number of visits to this child
+    ///
+    fn set_count(&mut self, value: i32) {
+        unsafe { *self.count = value; }
+    }
+
+    /// Sets the number of virtual visits to this child.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - the new number of virtual visits to this child
+    ///
+    fn set_vcount(&mut self, value: i32) {
+        unsafe { *self.vcount = value as i16; }
+    }
+
+    /// Sets the actual child node. If there is already a child node set, then you
+    /// are responsible for freeing the old node.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - the new child `Node`
+    ///
+    fn set_ptr(&mut self, value: *mut Node) {
+        unsafe { *self.ptr = value; }
+    }
+
+    /// Sets the average value of this child.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - the new average value of this child
+    ///
+    fn set_value(&mut self, value: f32) {
+        unsafe { *self.value = value; }
+    }
+}
+
+/// A dense representation of a `Node`.
 #[repr(align(64))]
-pub struct Node {
-    /// Spinlock used to protect the data in this node during modifications.
-    lock: Mutex,
-
-    /// The color of each edge.
-    pub color: Color,
-
-    /// The number of consecutive passes to reach this node.
-    pub pass_count: i32,
-
-    /// The total number of times any edge has been traversed.
-    pub total_count: i32,
-
+pub struct BigChildrenImpl {
     /// The number of times each edge has been traversed.
     pub count: [i32; 368],
 
     /// The number of virtual losses each edge has.
-    pub vcount: [i32; 368],
-
-    /// The total number of virtual losses for any edge.
-    pub vtotal_count: i32,
-
-    /// The prior value of each edge as indicated by the policy.
-    pub prior: [f32; 368],
-
-    /// The total sum of all values for the sub-tree of each edge.
-    pub total_value: [f32; 368],
+    pub vcount: [i16; 368],
 
     /// The average value for the sub-tree of each edge.
     pub value: [f32; 368],
@@ -209,15 +494,401 @@ pub struct Node {
     expanding: [bool; 362],
 
     /// The sub-tree that each edge points towards.
-    children: [*mut Node; 362]
+    ptr: [*mut Node; 362]
+}
+
+impl Drop for BigChildrenImpl {
+    fn drop(&mut self) {
+        for &child in self.ptr.iter() {
+            if !child.is_null() {
+                unsafe { Box::from_raw(child); }
+            }
+        }
+    }
+}
+
+impl BigChildrenImpl {
+    /// Returns a `BigChildrenImpl` that is equivalent to the given `small` node.
+    ///
+    /// # Arguments
+    ///
+    /// * `small` - the node to initialize from
+    /// * `value` - the initial _value_ to use for any children not in `small`
+    ///
+    unsafe fn from_small(small: &SmallChildrenImpl, value: f32) -> BigChildrenImpl {
+        let mut big = BigChildrenImpl {
+            count: [0; 368],
+            vcount: [0; 368],
+            value: [value; 368],
+            expanding: [false; 362],
+            ptr: [ptr::null_mut(); 362]
+        };
+
+        for (index, &other) in small.indices.iter().enumerate() {
+            if other >= 0 {
+                let other = other as usize;
+
+                big.count[other] = small.count[index];
+                big.vcount[other] = small.vcount[index];
+                big.value[other] = small.value[index];
+                big.expanding[other] = small.expanding[index];
+                big.ptr[other] = small.ptr[index];
+            }
+        }
+
+        big
+    }
+}
+
+/// The maximum number of elements a sparse (small) node contains.
+const SMALL_SIZE: usize = 8;
+
+/// Possible results for looking up an index in a small node.
+enum SmallChildrenResult {
+    Found(usize),
+    NotFound(usize),
+    Overflow
+}
+
+/// A sparse representation of a `Node` that only stores `SMALL_SIZE` children before
+/// overflowing. It store the sparse indices in `indices`, which is an unsorted mapping
+/// from sparse index to dense index.
+pub struct SmallChildrenImpl {
+    /// The number of times each edge has been traversed.
+    pub count: [i32; SMALL_SIZE],
+
+    /// The number of virtual losses each edge has.
+    pub vcount: [i16; SMALL_SIZE],
+
+    /// The average value for the sub-tree of each edge.
+    pub value: [f32; SMALL_SIZE],
+
+    /// Whether some thread is currently busy (or is done) expanding the given
+    /// child. This is used to avoid the same child being expanded multiple
+    /// times by different threads.
+    expanding: [bool; SMALL_SIZE],
+
+    /// The sub-tree that each edge points towards.
+    ptr: [*mut Node; SMALL_SIZE],
+
+    /// Indices of the children stored in this node.
+    indices: [i16; SMALL_SIZE]
+}
+
+impl Drop for SmallChildrenImpl {
+    fn drop(&mut self) {
+        for &child in self.ptr.iter() {
+            if !child.is_null() {
+                unsafe { Box::from_raw(child); }
+            }
+        }
+    }
+}
+
+impl SmallChildrenImpl {
+    /// Returns an empty sparse node.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - the initial _value_ for any child
+    ///
+    fn with_value(value: f32) -> SmallChildrenImpl {
+        SmallChildrenImpl {
+            count: [0; SMALL_SIZE],
+            vcount: [0; SMALL_SIZE],
+            value: [value; SMALL_SIZE],
+            expanding: [false; SMALL_SIZE],
+            ptr: [ptr::null_mut(); SMALL_SIZE],
+            indices: [::std::i16::MIN; SMALL_SIZE]
+        }
+    }
+
+    /// Returns the sparse index for the given dense `index`, or `None` if it does
+    /// not exist in this node.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - the index to search for
+    ///
+    #[inline(always)]
+    unsafe fn find_index_fast(&self, index: usize) -> Option<usize> {
+        use std::arch::x86_64::*;
+
+        let indices = _mm_loadu_si128(&self.indices as *const i16 as *const _);
+        let eq = _mm_cmpeq_epi16(indices, _mm_set1_epi16(index as i16));
+        let eq = _mm_movemask_epi8(eq) as u32;
+
+        if eq != 0 {
+            let trailing_zeros = _mm_tzcnt_32(eq) as usize;
+
+            Some(trailing_zeros / 2)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the first unused sparse index in this node, or `None` if this
+    /// node is full.
+    #[inline(always)]
+    unsafe fn find_empty_fast(&self) -> Option<usize> {
+        use std::arch::x86_64::*;
+
+        let indices = _mm_loadu_si128(&self.indices as *const i16 as *const _);
+        let eq = _mm_cmplt_epi16(indices, _mm_set1_epi16(0));
+        let eq = _mm_movemask_epi8(eq) as u32;
+
+        if eq != 0 {
+            let trailing_zeros = _mm_tzcnt_32(eq) as usize;
+
+            Some(trailing_zeros / 2)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the sparse index for the given dense `index`, or the index where it
+    /// can be inserted.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - the index to search for
+    ///
+    fn find_index(&self, index: usize) -> SmallChildrenResult {
+        match unsafe { self.find_index_fast(index) } {
+            Some(index) => SmallChildrenResult::Found(index),
+            None => {
+                match unsafe { self.find_empty_fast() } {
+                    Some(i) => SmallChildrenResult::NotFound(i),
+                    _ => SmallChildrenResult::Overflow
+                }
+            }
+        }
+    }
+}
+
+/// Iterator over any non-zero child in a sparse node.
+pub struct ChildrenNonZeroIter {
+    count: *const i32,
+    indices: *const i16,
+    index: usize
+}
+
+impl Iterator for ChildrenNonZeroIter {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        unsafe {
+            loop {
+                if self.index >= 361 || (!self.indices.is_null() && self.index >= SMALL_SIZE - 1) {
+                    return None;
+                }
+
+                self.index += 1;
+                if *self.count.add(self.index) != 0 {
+                    break
+                }
+            }
+
+            let result = self.index;
+            self.index += 1;
+
+            Some(if self.indices.is_null() {
+                result
+            } else {
+                *self.indices.add(result) as usize
+            })
+        }
+    }
+}
+
+/// Union of `SmallChildrenImpl` and `BigChildrenImpl`, where the later is stored on the heap.
+pub enum ChildrenImpl {
+    Small(ManuallyDrop<SmallChildrenImpl>),
+    Big(Box<BigChildrenImpl>)
+}
+
+impl ChildrenImpl {
+    /// Returns the scattered value array of all children.
+    ///
+    /// # Arguments
+    ///
+    /// * `default_value` - the value to use for any unvisited children
+    ///
+    pub fn value(&self, default_value: f32) -> Vec<f32> {
+        match *self {
+            ChildrenImpl::Big(ref big) => {
+                big.value.to_vec()
+            },
+            ChildrenImpl::Small(ref small) => {
+                let mut out = vec! [default_value; 368];
+
+                for index in 0..SMALL_SIZE {
+                    let other = small.indices[index];
+
+                    if other >= 0 {
+                        out[other as usize] = small.value[index];
+                    }
+                }
+
+                out
+            }
+        }
+    }
+
+    /// Returns the index of the child with the largest number of visits.
+    pub fn argmax_count(&self) -> usize {
+        match *self {
+            ChildrenImpl::Big(ref big) => argmax_i32(&big.count).unwrap(),
+            ChildrenImpl::Small(ref small) => {
+                let other = argmax_i32(&small.count).unwrap();
+
+                small.indices[other] as usize
+            }
+        }
+    }
+
+    /// Returns the index of the child with the largest average value.
+    pub fn argmax_value(&self) -> usize {
+        match *self {
+            ChildrenImpl::Big(ref big) => argmax_f32(&big.value).unwrap(),
+            ChildrenImpl::Small(ref small) => {
+                let other = argmax_f32(&small.value).unwrap();
+
+                small.indices[other] as usize
+            }
+        }
+    }
+
+    /// Returns an iterator over all visited children.
+    pub fn nonzero(&self) -> ChildrenNonZeroIter {
+        match self {
+            ChildrenImpl::Small(ref small) => {
+                ChildrenNonZeroIter {
+                    count: &small.count as *const i32,
+                    indices: &small.indices as *const i16,
+                    index: 0
+                }
+            },
+            ChildrenImpl::Big(ref big) => {
+                ChildrenNonZeroIter {
+                    count: &big.count as *const i32,
+                    indices: ptr::null(),
+                    index: 0
+                }
+            }
+        }
+    }
+
+    /// Returns the result of the given callback, and being called with an immutable
+    /// reference for the child for index.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` -
+    /// * `callback` -
+    /// * `initial_value` -
+    ///
+    pub fn with<T, F>(&self, index: usize, callback: F, initial_value: f32) -> T
+        where F: FnOnce(Child) -> T
+    {
+        callback(match self {
+            ChildrenImpl::Small(ref small) => {
+                match small.find_index(index) {
+                    SmallChildrenResult::Found(other) => {
+                        Child::from_small(small, other)
+                    },
+                    _ => {
+                        Child::with_value(initial_value)
+                    }
+                }
+            },
+            ChildrenImpl::Big(ref big) => {
+                Child::from_big(big, index)
+            }
+        })
+    }
+
+    /// Returns the result of the given callback, and being called with an mutable
+    /// reference for the child for index.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` -
+    /// * `callback` -
+    /// * `initial_value` -
+    ///
+    pub fn with_mut<T, F>(&mut self, index: usize, callback: F, initial_value: f32) -> T
+        where F: FnOnce(ChildMut) -> T
+    {
+        let child = match self {
+            ChildrenImpl::Small(ref mut small) => {
+                match small.find_index(index) {
+                    SmallChildrenResult::Found(other) => {
+                        Some(unsafe { ChildMut::from_small(small, other) })
+                    },
+                    SmallChildrenResult::NotFound(other) => {
+                        small.indices[other] = index as i16;
+
+                        Some(unsafe { ChildMut::from_small(small, other) })
+                    },
+                    SmallChildrenResult::Overflow => {
+                        None
+                    }
+                }
+            },
+            ChildrenImpl::Big(ref mut big) => {
+                Some(unsafe { ChildMut::from_big(big, index) })
+            }
+        };
+
+        if let Some(child) = child {
+            callback(child)
+        } else {
+            *self = ChildrenImpl::Big(Box::new(unsafe {
+                BigChildrenImpl::from_small(match self {
+                    ChildrenImpl::Small(ref small) => small,
+                    _ => unreachable!()
+                }, initial_value)
+            }));
+
+            self.with_mut(index, callback, initial_value)
+        }
+    }
+}
+
+/// A monte carlo search tree.
+#[repr(align(64))]
+pub struct Node {
+    /// Spinlock used to protect the data in this node during modifications.
+    lock: Mutex,
+
+    /// The color of each edge.
+    pub color: Color,
+
+    /// The initial vale of this node.
+    pub initial_value: f32,
+
+    /// The number of consecutive passes to reach this node.
+    pub pass_count: i16,
+
+    /// The total number of times any edge has been traversed.
+    pub total_count: i32,
+
+    /// The total number of virtual losses for any edge.
+    pub vtotal_count: i32,
+
+    /// The prior value of each edge as indicated by the policy.
+    pub prior: [f32; 368],
+
+    /// The sparse (or dense) representation of the remaining MCTS fields.
+    pub children: ChildrenImpl
 }
 
 impl Drop for Node {
     fn drop(&mut self) {
-        for &child in self.children.iter() {
-            if !child.is_null() {
-                unsafe { Box::from_raw(child); }
-            }
+        match self.children {
+            ChildrenImpl::Small(ref mut small) => unsafe { ManuallyDrop::drop(small) },
+            _ => ()
         }
     }
 }
@@ -244,17 +915,13 @@ impl Node {
 
         Node {
             lock: Mutex::new(),
-            color: color,
+            color,
+            initial_value: value,
             pass_count: 0,
             total_count: 0,
-            count: [0; 368],
             vtotal_count: 0,
-            vcount: [0; 368],
             prior: prior_padding,
-            total_value: [0.0; 368],
-            value: [value; 368],
-            expanding: [false; 362],
-            children: [ptr::null_mut(); 362]
+            children: ChildrenImpl::Small(ManuallyDrop::new(SmallChildrenImpl::with_value(value)))
         }
     }
 
@@ -263,17 +930,47 @@ impl Node {
         self.total_count as usize
     }
 
+    /// Returns the result of the given callback, and being called with an immutable
+    /// reference for the child for index.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` -
+    /// * `callback` -
+    ///
+    pub fn with<T, F>(&self, index: usize, callback: F) -> T
+        where F: FnOnce(Child) -> T
+    {
+        self.children.with(index, callback, self.initial_value)
+    }
+
+    /// Returns the result of the given callback, and being called with an mutable
+    /// reference for the child for index.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` -
+    /// * `callback` -
+    ///
+    pub fn with_mut<T, F>(&mut self, index: usize, callback: F) -> T
+        where F: FnOnce(ChildMut) -> T
+    {
+        let _guard = self.lock.lock();
+
+        self.children.with_mut(index, callback, self.initial_value)
+    }
+
     fn as_sgf<S: SgfCoordinate>(&self, fmt: &mut fmt::Formatter, meta: bool) -> fmt::Result {
         // annotate the top-10 moves to make it easier to navigate for the
         // user.
         let mut children = (0..362).collect::<Vec<usize>>();
-        children.sort_by_key(|&i| -self.count[i]);
+        children.sort_by_key(|&i| -self.with(i, |child| child.count()));
 
         if meta {
             for i in 0..10 {
                 let j = children[i];
 
-                if j != 361 && self.count[j] > 0 {
+                if j != 361 && self.with(j, |child| child.count()) > 0 {
                     lazy_static! {
                         static ref LABELS: Vec<&'static str> = vec! [
                             "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"
@@ -299,13 +996,13 @@ impl Node {
             */
         }
 
-        let mut uct = self.value.clone();
+        let mut uct = self.children.value(self.initial_value);
         PUCT::get(self, &mut uct);
 
         for i in children {
             // do not output nodes that has not been visited to reduce the
             // size of the final SGF file.
-            if self.count[i] == 0 {
+            if self.with(i, |child| child.count()) == 0 {
                 continue;
             }
 
@@ -316,14 +1013,14 @@ impl Node {
             )?;
             write!(fmt, "C[prior {:.4} value {:.4} (visits {} / total {}) uct {:.4}]",
                 self.prior[i],
-                self.value[i],
-                self.count[i],
+                self.with(i, |child| child.value()),
+                self.with(i, |child| child.count()),
                 self.total_count,
                 uct[i]
             )?;
 
             unsafe {
-                let child = self.children[i];
+                let child = self.with(i, |child| child.ptr());
 
                 if !child.is_null() {
                     (*child).as_sgf::<S>(fmt, meta)?;
@@ -338,33 +1035,35 @@ impl Node {
 
     /// Returns the sub-tree that contains the exploration of the given move index.
     ///
-    /// # Argumnets
+    /// # Arguments
     ///
     /// * `self` - the search tree to pluck the child from
     /// * `index` - the move to pluck the sub-tree for
     ///
     pub fn forward(mut self, index: usize) -> Option<Node> {
-        let child = self.children[index];
+        let color = self.color;
+        let pass_count = self.pass_count;
 
-        if child.is_null() {
-            if index == 361 {
-                // we need to record that were was a pass so that we have the correct
-                // pass count in the root node.
-                let prior = vec! [0.0f32; 362];
-                let mut next = Node::new(self.color.opposite(), 0.5, prior);
-                next.pass_count = self.pass_count + 1;
+        self.with_mut(index, |mut child| {
+            if child.ptr().is_null() {
+                if index == 361 {
+                    // we need to record that were was a pass so that we have the correct
+                    // pass count in the root node.
+                    let prior = vec! [0.0f32; 362];
+                    let mut next = Node::new(color.opposite(), 0.5, prior);
+                    next.pass_count = pass_count + 1;
 
-                Some(next)
+                    Some(next)
+                } else {
+                    None
+                }
             } else {
-                None
-            }
-        } else {
-            Some(unsafe {
-                self.children[index] = ptr::null_mut();
+                let next = child.ptr();
+                child.set_ptr(ptr::null_mut());
 
-                ptr::read(child)
-            })
-        }
+                Some(unsafe { ptr::read(next) })
+            }
+        })
     }
 
     /// Returns the best move according to the current search tree. This is
@@ -381,19 +1080,27 @@ impl Node {
     pub fn best(&self, temperature: f32) -> (f32, usize) {
         if temperature <= 9e-2 { // greedy
             let max_i = (0..362)
-                .max_by_key(|&i| (self.count[i], OrderedFloat(self.value[i]), OrderedFloat(self.prior[i])))
+                .max_by_key(|&i| {
+                    self.with(i, |child| {
+                        (child.count(), OrderedFloat(child.value()), OrderedFloat(self.prior[i]))
+                    })
+                })
                 .unwrap();
 
-            (self.value[max_i], max_i)
+            (self.with(max_i, |child| child.value()), max_i)
         } else {
             let t = (temperature as f64).recip();
-            let c_total = sum_i32(&self.count);
-            let (c_threshold, c_total) = percentile(&self.count, c_total, 0.1);
+            let c_total = self.children.nonzero().map(|i| self.with(i, |child| child.count())).sum::<i32>();
+            let (c_threshold, c_total) = percentile(
+                self.children.nonzero().map(|i| self.with(i, |child| child.count())),
+                c_total,
+                0.1
+            );
             let mut s = vec! [::std::f64::NAN; 362];
             let mut s_total = 0.0;
 
-            for i in 0..362 {
-                let count = self.count[i];
+            for i in self.children.nonzero() {
+                let count = self.with(i, |child| child.count());
 
                 if count >= c_threshold {
                     s_total += (count as f64 / c_total).powf(t);
@@ -409,14 +1116,14 @@ impl Node {
                 let threshold = s_total * thread_rng().gen::<f64>();
                 let max_i = (0..362).filter(|&i| s[i] >= threshold).next().unwrap();
 
-                (self.value[max_i], max_i)
+                (self.with(max_i, |child| child.value()), max_i)
             }
         }
     }
 
     /// Returns the best move according to the prior value of the root node.
     pub fn prior(&self) -> (f32, usize) {
-        let max_i = argmax(&self.prior).unwrap_or(361);
+        let max_i = argmax_f32(&self.prior).unwrap_or(361);
 
         (self.prior[max_i], max_i)
     }
@@ -427,12 +1134,12 @@ impl Node {
         let mut s = vec! [T::from(0.0f32); 362];
         let mut s_total = 0.0f32;
 
-        for i in 0..362 {
-            s_total += self.count[i] as f32;
+        for i in self.children.nonzero() {
+            s_total += self.with(i, |child| child.count()) as f32;
         }
 
-        for i in 0..362 {
-            s[i] = T::from(self.count[i] as f32 / s_total);
+        for i in self.children.nonzero() {
+            s[i] = T::from(self.with(i, |child| child.count()) as f32 / s_total);
         }
 
         s
@@ -446,8 +1153,10 @@ impl Node {
     /// * `index` - the index of the child to disqualify
     ///
     pub fn disqualify(&mut self, index: usize) {
-        self.value[index] = ::std::f32::NEG_INFINITY;
-        self.count[index] = 0;
+        self.with_mut(index, |mut child| {
+            child.set_value(::std::f32::NEG_INFINITY);
+            child.set_count(0);
+        });
     }
 
     /// Returns the child with the maximum UCT value, and increase its visit count
@@ -458,7 +1167,7 @@ impl Node {
     /// * `apply_fpu` - whether to use the first-play urgency heuristic
     ///
     fn select(&mut self, apply_fpu: bool) -> Option<usize> {
-        let mut value = self.value.clone();
+        let mut value = self.children.value(self.initial_value);
 
         if apply_fpu {
             // for unvisited children, attempt to transform the parent `value`
@@ -470,9 +1179,12 @@ impl Node {
             // - constant (this is currently used)
             // - zero
             //
-            let fpu_reduce = config::get_fpu_reduce(self.total_count);
+            let fpu_reduce = config::get_fpu_reduce(self.total_count + self.vtotal_count);
 
-            do_apply_fpu(&mut value, &self.count, fpu_reduce);
+            match self.children {
+                ChildrenImpl::Big(ref big) => FPU::apply_big(&mut value, big, fpu_reduce),
+                ChildrenImpl::Small(ref small) => FPU::apply_small(&mut value, small, fpu_reduce)
+            }
         }
 
         // compute all UCB1 values for each node before trying to figure out which
@@ -485,19 +1197,26 @@ impl Node {
 
         // greedy selection based on the maximum ucb1 value, failing if someone else
         // is already expanding the node we want to expand.
+        let initial_value = self.initial_value;
         let _guard = self.lock.lock();
-        let max_i = argmax(&value).and_then(|i| {
-            if self.expanding[i] && self.children[i].is_null() {
-                None  // someone else is already expanding this node
-            } else {
-                Some(i)
-            }
+        let max_i = argmax_f32(&value).and_then(|i| {
+            self.children.with(i, |child| {
+                if child.expanding() && child.ptr().is_null() {
+                    None  // someone else is already expanding this node
+                } else {
+                    Some(i)
+                }
+            }, initial_value)
         });
 
         if let Some(max_i) = max_i {
             self.vtotal_count += *config::VLOSS_CNT;
-            self.vcount[max_i] += *config::VLOSS_CNT;
-            self.expanding[max_i] = true;
+            self.children.with_mut(max_i, |mut child| {
+                let prev_vcount = child.vcount();
+
+                child.set_vcount(prev_vcount + *config::VLOSS_CNT);
+                child.set_expanding(true);
+            }, initial_value);
         }
 
         max_i
@@ -534,7 +1253,7 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
             }
 
             //
-            let child = current.children[next_child];
+            let child = current.with(next_child, |child| child.ptr());
 
             if child.is_null() {
                 break
@@ -547,8 +1266,12 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
             for (node, _, next_child) in trace.into_iter() {
                 let _guard = (*node).lock.lock();
 
-                (*node).vtotal_count -= *config::VLOSS_CNT;
-                (*node).vcount[next_child] -= *config::VLOSS_CNT;
+                (*node).vtotal_count -= *config::VLOSS_CNT as i32;
+                (*node).children.with_mut(next_child, |mut child| {
+                    let prev_vcount = child.vcount();
+
+                    child.set_vcount(prev_vcount - *config::VLOSS_CNT);
+                }, (*node).initial_value);
             }
 
             return None;
@@ -570,14 +1293,23 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
 ///
 pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32>) {
     if let Some(&(node, _, index)) = trace.last() {
-        let mut next = Box::new(Node::new(color, value, prior));
-        if index == 361 {
-            next.pass_count = (*node).pass_count + 1;
-        }
+        let updated = (*node).with_mut(index, |mut child| {
+            debug_assert!(child.ptr().is_null());
 
-        if (*node).children[index].is_null() {
-            (*node).children[index] = Box::into_raw(next);
-        } else {
+            let mut next = Box::new(Node::new(color, value, prior));
+            if index == 361 {
+                next.pass_count = (*node).pass_count + 1;
+            }
+
+            if child.ptr().is_null() {
+                child.set_ptr(Box::into_raw(next));
+                true
+          } else {
+                false
+            }
+        });
+
+        if !updated {
             debug_assert!(index == 361);
 
             // since we stop probing into a tree once two consecutive passes has
@@ -682,13 +1414,13 @@ impl<'a> Iterator for GreedyPath<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<usize> {
-        let max_i = (0..362).max_by_key(|&i| self.current.count[i]).unwrap();
+        let max_i = self.current.children.argmax_count();
 
-        if self.current.count[max_i] == 0 {
+        if self.current.with(max_i, |child| child.count()) == 0 {
             None
         } else {
             unsafe {
-                self.current = &*self.current.children[max_i];
+                self.current = &*self.current.with(max_i, |child| child.ptr());
             }
 
             Some(max_i)
@@ -704,8 +1436,8 @@ pub struct ToPretty<'a> {
 
 impl<'a> fmt::Display for ToPretty<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        let mut children = (0..362).collect::<Vec<usize>>();
-        children.sort_by_key(|&i| -self.root.count[i]);
+        let mut children = self.root.children.nonzero().collect::<Vec<usize>>();
+        children.sort_by_key(|&i| -self.root.with(i, |child| child.count()));
 
         if !*config::VERBOSE {
             children.truncate(10);
@@ -713,7 +1445,7 @@ impl<'a> fmt::Display for ToPretty<'a> {
 
         // print a summary containing the total tree size
         let total_value: f32 = (0..362)
-            .map(|i| (self.root.count[i] as f32) * self.root.value[i])
+            .map(|i| self.root.with(i, |child| child.count() as f32 * child.value()))
             .sum();
         let norm_value = total_value / (self.root.total_count as f32);
         let likely_path: String = GreedyPath { current: self.root }
@@ -729,12 +1461,8 @@ impl<'a> fmt::Display for ToPretty<'a> {
 
         // print a summary of each move that we considered
         for i in children {
-            if self.root.count[i] <= 1  {
-                continue;
-            }
-
             let pretty_vertex = PrettyVertex { inner: i };
-            let child = unsafe { &*self.root.children[i] };
+            let child = unsafe { &*self.root.with(i, |child| child.ptr()) };
             let likely_path: String = GreedyPath { current: child }
                     .map(|i| PrettyVertex { inner: i })
                     .map(|v| format!("{}", v))
@@ -743,7 +1471,7 @@ impl<'a> fmt::Display for ToPretty<'a> {
             write!(fmt, "{: >5} -> {:7} (W: {:5.2}%) (N: {:5.2}%) PV: {} {}\n",
                 pretty_vertex,
                 child.total_count,
-                100.0 * self.root.value[i],
+                100.0 * self.root.with(i, |child| child.value()),
                 100.0 * self.root.prior[i],
                 pretty_vertex,
                 likely_path
@@ -816,21 +1544,23 @@ mod tests {
                 choices.push(i);
 
                 // check that the virtual loss has been correctly applied.
-                assert_eq!(root.vcount[i], *config::VLOSS_CNT);
-                assert_eq!(root.vtotal_count, choices.len() as i32 * *config::VLOSS_CNT);
+                assert_eq!(root.with(i, |child| child.vcount()), *config::VLOSS_CNT);
+                assert_eq!(root.vtotal_count, choices.len() as i32 * *config::VLOSS_CNT as i32);
 
                 // check that all nodes that were visited before this had larger prior
                 // value.
+                let prior_i = root.prior[i];
+
                 for &other_i in &choices {
-                    assert!(root.prior[other_i] >= root.prior[i]);
+                    assert!(root.prior[other_i] >= prior_i);
                 }
             } else {
                 // check that we did not double-add any virtual loss
                 for &other_i in &choices {
-                    assert_eq!(root.vcount[other_i], *config::VLOSS_CNT);
+                    assert_eq!(root.with(other_i, |child| child.vcount()), *config::VLOSS_CNT);
                 }
 
-                assert_eq!(root.vtotal_count, choices.len() as i32 * *config::VLOSS_CNT);
+                assert_eq!(root.vtotal_count, choices.len() as i32 * *config::VLOSS_CNT as i32);
                 break;
             }
 
@@ -856,8 +1586,8 @@ mod tests {
             let i = trace[0].2;
 
             // check that the virtual loss was applied
-            assert_eq!(root.vcount[i], *config::VLOSS_CNT);
-            assert_eq!(root.vtotal_count, *config::VLOSS_CNT);
+            assert_eq!(root.with(i, |child| child.vcount()), *config::VLOSS_CNT);
+            assert_eq!(root.vtotal_count, *config::VLOSS_CNT as i32);
 
             // check that the virtual loss is un-applied after we update this move, and
             // that we we increase the `count` instead.
@@ -866,9 +1596,9 @@ mod tests {
 
             insert(&trace, Color::Black, other_value, other_prior);
 
-            assert_eq!(root.vcount[i], 0);
+            assert_eq!(root.with(i, |child| child.vcount()), 0);
             assert_eq!(root.vtotal_count, 0);
-            assert_eq!(root.count[i], 1);
+            assert_eq!(root.with(i, |child| child.count()), 1);
             assert_eq!(root.total_count, 1);
         } else {
             panic!();
@@ -882,23 +1612,26 @@ mod tests {
 
     unsafe fn unsafe_value_update() {
         let mut board = Board::new(DEFAULT_KOMI);
-        let mut rng = SmallRng::from_seed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
         let mut root = Node::new(
             Color::Black,
             0.5,
-            (0..362).map(|i| { if i == 60 { 1.0 } else { 0.0 } }).collect()
+            (0..362).map(|i| if i == 60 { 1.0 } else { 0.0 }).collect()
         );
 
         // to setup a scenario where we have two parallel probes that will both update
         // the same node value we need to pre-expand a node.
-        let other_prior = get_prior_distribution(&mut rng, &board, Color::Black);
+        let other_prior: Vec<f32> = (0..362).map(|i| if i == 61 || i == 62 { 0.5 } else { 0.0 }).collect();
         let trace = probe(&mut root, &mut board).unwrap();
 
         insert(&trace, Color::Black, 0.9, other_prior.clone());
-        assert_eq!(root.value[60], 0.9);
-        assert_eq!(root.count[60], 1);
+        assert!({
+            let value = root.with(60, |child| child.value());
+
+            value >= 0.8999 && value <= 0.9001
+        });
+        assert_eq!(root.with(60, |child| child.count()), 1);
         assert_eq!(root.total_count, 1);
-        assert_eq!(root.vcount[60], 0);
+        assert_eq!(root.with(60, |child| child.vcount()), 0);
         assert_eq!(root.vtotal_count, 0);
 
         // two parallel probes in the same sub-tree.
@@ -907,32 +1640,33 @@ mod tests {
 
         assert_eq!(trace_1[0].2, 60);
         assert_eq!(trace_2[0].2, 60);
-        assert_ne!(trace_1[1].2, trace_2[1].2);
+        assert!(trace_1[1].2 == 61 || trace_2[1].2 == 61);
+        assert!(trace_1[1].2 == 62 || trace_2[1].2 == 62);
 
         // the value of the root sub-tree should remain unchanged, but the virtual loss
         // should have increased.
-        assert_eq!(root.value[60], 0.9);
-        assert_eq!(root.count[60], 1);
+        assert_eq!(root.with(60, |child| child.value()), 0.9);
+        assert_eq!(root.with(60, |child| child.count()), 1);
         assert_eq!(root.total_count, 1);
-        assert_eq!(root.vcount[60], 2 * *config::VLOSS_CNT);
-        assert_eq!(root.vtotal_count, 2 * *config::VLOSS_CNT);
+        assert_eq!(root.with(60, |child| child.vcount()), 2 * *config::VLOSS_CNT);
+        assert_eq!(root.vtotal_count, 2 * *config::VLOSS_CNT as i32);
 
         // check update after the first probe is inserted
         insert(&trace_1, Color::White, 0.2, other_prior.clone());
 
-        assert_eq!(root.value[60], 0.85);
-        assert_eq!(root.count[60], 2);
+        assert_eq!(root.with(60, |child| child.value()), 0.85);
+        assert_eq!(root.with(60, |child| child.count()), 2);
         assert_eq!(root.total_count, 2);
-        assert_eq!(root.vcount[60], *config::VLOSS_CNT);
-        assert_eq!(root.vtotal_count, *config::VLOSS_CNT);
+        assert_eq!(root.with(60, |child| child.vcount()), *config::VLOSS_CNT);
+        assert_eq!(root.vtotal_count, *config::VLOSS_CNT as i32);
 
         // check update after the second probe is inserted
         insert(&trace_2, Color::White, 0.3, other_prior.clone());
 
-        assert_eq!(root.value[60], 0.8);
-        assert_eq!(root.count[60], 3);
+        assert_eq!(root.with(60, |child| child.value()), 0.8);
+        assert_eq!(root.with(60, |child| child.count()), 3);
         assert_eq!(root.total_count, 3);
-        assert_eq!(root.vcount[60], 0);
+        assert_eq!(root.with(60, |child| child.vcount()), 0);
         assert_eq!(root.vtotal_count, 0);
     }
 
