@@ -131,7 +131,7 @@ impl SlotsGuard {
     /// * `size_in_bytes` - the minimum required size of the allocated area
     /// * `stream` - the stream that will use the memory
     /// 
-    pub fn get_slot<'a>(&'a self, name: Slot, size_in_bytes: usize, stream: cuda::Stream) -> SlotGuard<'a> {
+    pub fn get_slot(&self, name: Slot, size_in_bytes: usize, stream: cuda::Stream) -> SlotGuard {
         let slot_pos = name as usize;
 
         // check if the slot exists in the local pool

@@ -75,7 +75,7 @@ fn ponder_worker(
     let (_, _, next_tree) = mcts::predict::<_>(
         &service.lock(),
         None,
-        PonderTimeControl { is_running: is_running },
+        PonderTimeControl { is_running },
         search_tree,
         &board,
         next_color

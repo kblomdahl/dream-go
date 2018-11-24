@@ -456,7 +456,7 @@ impl Node {
     ///
     /// * `apply_fpu` - whether to use the first-play urgency heuristic
     ///
-    fn select<'a>(&'a mut self, apply_fpu: bool) -> Option<usize> {
+    fn select(&mut self, apply_fpu: bool) -> Option<usize> {
         let mut value = self.value.clone();
 
         if apply_fpu {
@@ -762,7 +762,7 @@ impl<'a> fmt::Display for ToPretty<'a> {
 /// * `root` -
 /// * `starting_point` -
 ///
-pub fn to_pretty<'a>(root: &'a Node) -> ToPretty<'a> {
+pub fn to_pretty(root: &Node) -> ToPretty {
     ToPretty { root: root }
 }
 
@@ -903,7 +903,7 @@ mod tests {
 
         assert_eq!(trace_1[0].2, 60);
         assert_eq!(trace_2[0].2, 60);
-        assert!(trace_1[1].2 != trace_2[1].2);
+        assert_ne!(trace_1[1].2, trace_2[1].2);
 
         // the value of the root sub-tree should remain unchanged, but the virtual loss
         // should have increased.

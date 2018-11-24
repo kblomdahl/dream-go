@@ -67,7 +67,7 @@ impl PredictState {
     }
 
     /// Returns the network used to perform the predictions.
-    pub fn get_network<'a>(&'a self) -> &'a Network {
+    pub fn get_network(&self) -> &Network {
         &self.network
     }
 
@@ -202,6 +202,14 @@ impl parallel::ServiceImpl for PredictState {
         set_current_device(device_id);
     }
 
+    fn check_sleep(state: MutexGuard<Self::State>) {
+        let num_requests = state.sender_list.len();
+        let num_waiting = state.waiting_list.len();
+
+        assert_eq!(num_requests, 0, "we should never sleep with a pending request -- {}", num_requests);
+        assert_eq!(num_waiting, 0, "we should never sleep with a pending wait -- {}", num_waiting);
+    }
+
     fn process(
         state: &Mutex<Self::State>,
         mut state_lock: MutexGuard<Self::State>,
@@ -221,13 +229,5 @@ impl parallel::ServiceImpl for PredictState {
         };
 
         PredictState::check(state, state_lock, has_more);
-    }
-
-    fn check_sleep(state: MutexGuard<Self::State>) {
-        let num_requests = state.sender_list.len();
-        let num_waiting = state.waiting_list.len();
-
-        assert!(num_requests == 0, "we should never sleep with a pending request -- {}", num_requests);
-        assert!(num_waiting == 0, "we should never sleep with a pending wait -- {}", num_waiting);
     }
 }

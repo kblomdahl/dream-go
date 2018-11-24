@@ -206,7 +206,7 @@ impl<I: ServiceImpl + 'static> Service<I> {
 
     /// Acquire an endpoint that can be used to communicate with the
     /// service.
-    pub fn lock<'a>(&'a self) -> ServiceGuard<'a, I> {
+    pub fn lock(&self) -> ServiceGuard<I> {
         ServiceGuard {
             _owner: ::std::marker::PhantomData::default(),
 
@@ -226,7 +226,7 @@ pub struct ServiceGuard<'a, I: ServiceImpl> {
 
 impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
     /// Returns the current state of this service.
-    pub fn get_state<'b>(&'b self) -> MutexGuard<I::State> {
+    pub fn get_state(&self) -> MutexGuard<I::State> {
         self.state.lock().unwrap()
     }
 

@@ -422,7 +422,7 @@ fn predict_aux<T>(
     });
 
     #[cfg(feature = "trace-mcts")]
-    eprintln!("{}", tree::to_sgf::<CGoban, E>(&root, starting_point, true));
+    eprintln!("{}", tree::to_sgf::<CGoban>(&root, starting_point, true));
 
     (value, index, root)
 }

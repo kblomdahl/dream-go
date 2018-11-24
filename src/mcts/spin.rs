@@ -41,7 +41,7 @@ impl Mutex {
     }
 
     #[inline]
-    pub fn lock<'a>(&'a self) -> MutexGuard<'a> {
+    pub fn lock(&self) -> MutexGuard {
         while !self.is_available.compare_and_swap(true, false, Ordering::Acquire) {
             thread::yield_now();
         }

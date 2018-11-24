@@ -99,7 +99,7 @@ impl Network {
     /// 
     /// * `batch_size` -
     /// 
-    pub fn get_workspace<'a>(&'a self, batch_size: usize) -> WorkspaceGuard<'a> {
+    pub fn get_workspace(&self, batch_size: usize) -> WorkspaceGuard {
         let device_id = get_current_device();
         let key = (batch_size, device_id);
         let mut workspaces = self.workspaces.lock().unwrap();

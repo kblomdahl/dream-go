@@ -34,13 +34,13 @@ fn main() {
     match *config::PROCEDURE {
         Procedure::Help => {
             println!("Usage: ./dream-go [options]");
-            println!("");
+            println!();
             println!("  --self-play <n>       Extract a dataset from self-play containing n examples");
             println!("  --policy-play <n>     Extract a dataset from self-play using only the policy network");
             println!("  --ex-it               When combined with --policy-play perform search on some partial");
             println!("                        policies");
             println!("  --gtp                 Run GTP client (default)");
-            println!("");
+            println!();
             println!("Advanced options:");
             println!("  --num-rollout <n>     The number of rollouts to add to the search tree for every move");
             println!("  --num-games <n>       The number of games to play or extract in parallel");

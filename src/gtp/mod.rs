@@ -352,7 +352,7 @@ impl Gtp {
                 let mut other = board.clone();
 
                 other.place(color, x, y);
-                (Some(Vertex { x: x, y: y }), mcts::tree::Node::forward(tree, index), other)
+                (Some(Vertex { x, y }), mcts::tree::Node::forward(tree, index), other)
             };
 
             ((value, vertex, last_log), tree, (other, color.opposite()))

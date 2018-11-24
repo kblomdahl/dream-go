@@ -78,7 +78,7 @@ pub struct Absolute {
 impl Absolute {
     pub fn new(main_time: f32) -> Absolute {
         Absolute {
-            main_time: main_time
+            main_time
         }
     }
 }
@@ -113,9 +113,9 @@ pub struct ByoYomi {
 impl ByoYomi {
     pub fn new(main_time: f32, byo_yomi_time: f32, byo_yomi_periods: usize) -> ByoYomi {
         ByoYomi {
-            main_time: main_time,
-            byo_yomi_time: byo_yomi_time,
-            byo_yomi_periods: byo_yomi_periods
+            main_time,
+            byo_yomi_time,
+            byo_yomi_periods
         }
     }
 }

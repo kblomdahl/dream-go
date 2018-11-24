@@ -137,7 +137,7 @@ impl OutputSet {
         }
     }
 
-    pub fn iter<'a>(&'a self) -> OutputSetIter<'a> {
+    pub fn iter(&self) -> OutputSetIter {
         OutputSetIter {
             array: &self.array,
             position: 0

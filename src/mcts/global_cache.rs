@@ -106,7 +106,7 @@ impl<K: Clone + Hash + Eq, V: Clone> LruCache<K, V> {
         }
     }
 
-    fn get<'a>(&'a mut self, key: &K) -> Option<&'a V> {
+    fn get(&mut self, key: &K) -> Option<&V> {
         let key_ref = KeyRef { inner: key };
 
         if let Some(entry) = self.entries.get_mut(&key_ref) {
