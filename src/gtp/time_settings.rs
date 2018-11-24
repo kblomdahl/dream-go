@@ -179,7 +179,17 @@ impl TimeSettings for Canadian {
     }
 
     fn remaining(&self) -> (f32, f32, usize) {
-        (self.main_time, 0.0, 0)
+        if self.byo_yomi_time == 0.0 {
+            (self.main_time, 0.0, 0)
+        } else {
+            let extra_time = self.byo_yomi_time / self.byo_yomi_stones as f32;
+
+            if self.main_time < extra_time {
+                (0.0, self.main_time / self.byo_yomi_stones_remaining as f32, 1)
+            } else {
+                (self.main_time - extra_time, extra_time, 1)
+            }
+        }
     }
 
     fn update(&mut self, elapsed: f32) {
