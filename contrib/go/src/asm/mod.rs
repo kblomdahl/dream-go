@@ -12,26 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(core_intrinsics)]
-#![feature(test)]
+mod count_zeros;
+mod contains;
 
-#[macro_use] extern crate lazy_static;
-extern crate libc;
-extern crate rand;
-extern crate regex;
-#[cfg(test)] extern crate test;
-
-mod asm;
-mod board;
-#[macro_use] mod board_fast;
-mod circular_buf;
-mod codegen;
-mod color;
-pub mod util;
-mod small_set;
-mod zobrist;
-
-pub use self::color::*;
-pub use self::board::*;
-
-pub const DEFAULT_KOMI: f32 = 7.5;
+pub use self::count_zeros::count_zeros;
+pub use self::contains::{contains_u16x16, contains_u64x16};

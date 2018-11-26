@@ -17,8 +17,9 @@ use regex::Regex;
 use std::io::BufRead;
 use std::time::Instant;
 
-use go::sgf::*;
-use go::{DEFAULT_KOMI, Board, Color, Score, StoneStatus};
+use go::util::sgf::*;
+use go::util::score::{Score, StoneStatus};
+use go::{DEFAULT_KOMI, Board, Color};
 use mcts::time_control;
 use mcts;
 use util::config;

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use ordered_float::OrderedFloat;
+use std::arch::x86_64::*;
 
 /// Returns the index of the maximum value in the given array. If multiple
 /// indices share the same value, then which is returned is undefined.
@@ -23,8 +24,6 @@ use ordered_float::OrderedFloat;
 /// 
 #[target_feature(enable = "avx,avx2,bmi1")]
 unsafe fn _argmax(array: &[f32]) -> Option<usize> {
-    use std::arch::x86_64::*;
-
     let mut so_far = _mm256_broadcast_ss(&::std::f32::NEG_INFINITY);
     let mut index: usize = 0;
 
@@ -88,14 +87,14 @@ pub fn argmax(array: &[f32]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use mcts::argmax::*;
     use test::{self, Bencher};
+    use super::*;
 
     #[bench]
     fn argmax_each(b: &mut Bencher) {
         let mut array = [::std::f32::NEG_INFINITY; 368];
 
-        // test setting each element within an eigth lane as the maximum to
+        // test setting each element within an eight lane as the maximum to
         // ensure nothing is lost
         for i in 0..362 {
             array[i] = 2.0 + (i as f32);

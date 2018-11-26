@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::arch::x86_64::*;
+
 /// Returns the number of elements in the given array that are `0`. The
 /// input arrays length must be a divider of `16` (for SIMD reasons).
 ///
@@ -20,48 +22,47 @@
 /// * `array` -
 ///
 #[target_feature(enable = "avx,avx2,popcnt")]
-unsafe fn _count_zeros(array: &[u8]) -> usize {
-    debug_assert!(array.len() == 384);
+unsafe fn _count_zeros(haystack: &[u8]) -> usize {
+    debug_assert!(haystack.len() == 384);
 
-    use std::arch::x86_64::*;
-
-    let zero = _mm256_setzero_si256();
+    let mut haystack = haystack.as_ptr();
     let mut count = 0;
+    let zero = _mm256_setzero_si256();
 
-    for i in 0..12 {
-        let x = _mm256_loadu_si256(array.get_unchecked(32*i) as *const u8 as *const _);
-        let c = _mm256_cmpeq_epi8(x, zero);
-        let m = _mm256_movemask_epi8(c);  // set one bit for every match in `c`
+    for _i in 0..12 {
+        let a = _mm256_loadu_si256(haystack.add( 0) as *const _);
+        let eq_a = _mm256_cmpeq_epi8(a, zero);
 
-        count += _popcnt32(m);  // count the number of matches in `c`
+        count += _popcnt32(_mm256_movemask_epi8(eq_a));
+        haystack = haystack.add(32);
     }
 
     count as usize
 }
 
 /// Returns the number of elements in the given array that are `0`. The
-/// input arrays length must be a divider of `16` (for SIMD reasons).
+/// input arrays length must be a divider of `32` (for SIMD reasons).
 ///
 /// # Arguments
 ///
 /// * `array` -
 ///
 #[inline(always)]
-pub fn count_zeros(array: &[u8]) -> usize {
+pub fn count_zeros(haystack: &[u8]) -> usize {
     if is_x86_feature_detected!("avx2")  {
-        unsafe { _count_zeros(array) }
+        unsafe { _count_zeros(haystack) }
     } else {
-        (0..361).filter(|&i| array[i] == 0).count()
+        (0..361).filter(|&i| haystack[i] == 0).count()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use test::Bencher;
-    use asm;
+    use super::count_zeros;
 
     #[bench]
-    fn count_zeros(b: &mut Bencher) {
+    fn check_count_zeros(b: &mut Bencher) {
         let mut array = [1u8; 384];
 
         array[  0] = 0; array[  3] = 0; array[ 18] = 0; array[ 21] = 0;
@@ -69,11 +70,11 @@ mod tests {
         array[212] = 0; array[281] = 0; array[300] = 0; array[311] = 0;
 
         // check that the result is correct before the tight loop
-        assert_eq!(asm::count_zeros(&array), 12);
+        assert_eq!(count_zeros(&array), 12);
 
         // benchmark our implementation
         b.iter(move || {
-            asm::count_zeros(&array)
+            count_zeros(&array)
         });
     }
 }

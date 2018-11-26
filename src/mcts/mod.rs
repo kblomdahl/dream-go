@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod argmax;
+mod asm;
 mod dirichlet;
 mod global_cache;
 mod greedy_score;
 mod policy_play;
 pub mod predict;
 mod self_play;
-mod spin;
 pub mod tree;
 pub mod time_control;
 
@@ -40,14 +39,19 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use time;
 
-use go::sgf::*;
-use go::{symmetry, Board, Color, CHW_VECT_C, Features, Score};
+use go::util::features::{CHW_VECT_C, Features};
+use go::util::score::{Score};
+use go::util::sgf::*;
+use go::util::symmetry;
+use go::{Board, Color};
 use mcts::time_control::{TimeStrategy, RolloutLimit};
 use mcts::predict::{PredictService, PredictGuard, PredictRequest};
 use nn::{Network, Profiler};
 use util::b85;
 use util::config;
 use util::min;
+use mcts::asm::sum_finite_f32;
+use mcts::asm::normalize_finite_f32;
 
 pub enum GameResult {
     Resign(String, Board, Color, f32),
@@ -132,7 +136,7 @@ fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f
 
         normalize_policy(&mut policy);
 
-        Some((value / 8.0, policy))
+        Some((value * 0.125, policy))
     } else {
         None
     }
@@ -184,13 +188,12 @@ fn create_initial_policy(
 {
     // mark all illegal moves as -Inf, which effectively ensures they are never selected by
     // the tree search.
-    let mut policy = vec! [0.0; 362];
+    let mut workspace = [0; 368];
+    let mut policy = vec! [::std::f32::NEG_INFINITY; 368];
 
-    for i in 0..361 {
-        let (x, y) = (tree::X[i] as usize, tree::Y[i] as usize);
-
-        if !board.is_valid(color, x, y) {
-            policy[i] = ::std::f32::NEG_INFINITY;
+    for i in 0..362 {
+        if i == 361 || board.is_valid_mut(color, tree::X[i] as usize, tree::Y[i] as usize, &mut workspace) {
+            policy[i] = 0.0;
         }
     }
 
@@ -256,16 +259,12 @@ fn add_valid_candidates(
 ///
 fn normalize_policy(policy: &mut Vec<f32>) {
     // re-normalize the policy since we have modified its values
-    let policy_sum: f32 = policy.iter().filter(|p| p.is_finite()).sum();
+    let policy_sum: f32 = sum_finite_f32(&policy);
 
     if policy_sum < 1e-6 {  // do not divide by zero
-        dirichlet::add_ex(policy, 0.03, 1.0);
+        dirichlet::add_ex(&mut policy[0..362], 0.03, 1.0);
     } else {
-        let policy_recip = policy_sum.recip();
-
-        for i in 0..362 {
-            policy[i] *= policy_recip;
-        }
+        normalize_finite_f32(policy, policy_sum);
     }
 
     // check for NaN
@@ -363,7 +362,7 @@ fn predict_aux<T>(
 
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
-    dirichlet::add(&mut starting_policy, 0.03);
+    dirichlet::add(&mut starting_policy[0..362], 0.03);
 
     // if we have a starting tree given, then re-use that tree (after some sanity
     // checks), otherwise we need to query the neural network about what the

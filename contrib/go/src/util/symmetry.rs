@@ -196,7 +196,7 @@ pub fn is_symmetric(board: &Board, transform: Transform) -> bool {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use symmetry;
+    use super::*;
 
     fn test_uniq(values: &[f32]) {
         let u = values.into_iter()
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     pub fn identity() {
         let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        symmetry::apply(&mut seq, symmetry::Transform::Identity);
+        apply(&mut seq, Transform::Identity);
 
         test_uniq(&seq);
     }
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     pub fn flip_lr() {
         let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        symmetry::apply(&mut seq, symmetry::Transform::FlipLR);
+        apply(&mut seq, Transform::FlipLR);
 
         test_uniq(&seq);
     }
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     pub fn flip_ud() {
         let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        symmetry::apply(&mut seq, symmetry::Transform::FlipUD);
+        apply(&mut seq, Transform::FlipUD);
 
         test_uniq(&seq);
     }
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     pub fn transpose() {
         let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        symmetry::apply(&mut seq, symmetry::Transform::Transpose);
+        apply(&mut seq, Transform::Transpose);
 
         test_uniq(&seq);
     }
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     pub fn transpose_anti() {
         let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        symmetry::apply(&mut seq, symmetry::Transform::TransposeAnti);
+        apply(&mut seq, Transform::TransposeAnti);
 
         test_uniq(&seq);
     }
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     pub fn rot90() {
         let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        symmetry::apply(&mut seq, symmetry::Transform::Rot90);
+        apply(&mut seq, Transform::Rot90);
 
         test_uniq(&seq);
     }
@@ -260,7 +260,7 @@ mod tests {
     #[test]
     pub fn rot180() {
         let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        symmetry::apply(&mut seq, symmetry::Transform::Rot180);
+        apply(&mut seq, Transform::Rot180);
 
         test_uniq(&seq);
     }
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     pub fn rot270() {
         let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        symmetry::apply(&mut seq, symmetry::Transform::Rot270);
+        apply(&mut seq, Transform::Rot270);
 
         test_uniq(&seq);
     }

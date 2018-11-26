@@ -12,17 +12,64 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use asm::{contains_u16x16, contains_u64x16};
+
+const SET_SIZE: usize = 16;
+
 /// A LRA set that only keeps the eight most recently added values.
 #[derive(Clone)]
-pub struct SmallSet {
-    buf: [u64; 16],
+#[repr(align(16))]
+pub struct SmallSet16 {
+    buf: [u16; SET_SIZE],
     count: usize
 }
 
-impl SmallSet {
+impl SmallSet16 {
     /// Returns an empty set.
-    pub fn new() -> SmallSet {
-        SmallSet { buf: [0; 16], count: 0 }
+    pub fn new() -> SmallSet16 {
+        SmallSet16 { buf: [0xffff; SET_SIZE], count: 0 }
+    }
+
+    /// Adds the given value to this set, removing the oldest value if
+    /// the set overflows.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - the value to add to the set
+    ///
+    pub fn push(&mut self, value: u16) {
+        self.buf[self.count] = value;
+        self.count += 1;
+
+        if self.count == SET_SIZE {
+            self.count = 0;
+        }
+    }
+
+    /// Returns true if this set contains the given value.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - the value to look for
+    ///
+    #[inline(always)]
+    pub fn contains(&self, other: u16) -> bool {
+        contains_u16x16(&self.buf, other)
+    }
+}
+
+/// A LRA set that only keeps the eight most recently added values.
+#[derive(Clone)]
+#[repr(align(16))]
+pub struct SmallSet64 {
+    buf: [u64; SET_SIZE],
+    count: usize
+}
+
+impl SmallSet64 {
+    /// Returns an empty set.
+    pub fn new() -> SmallSet64 {
+        SmallSet64 { buf: [0; SET_SIZE], count: 0 }
     }
 
     /// Adds the given value to this set, removing the oldest value if
@@ -36,35 +83,9 @@ impl SmallSet {
         self.buf[self.count] = value;
         self.count += 1;
 
-        if self.count == 16 {
+        if self.count == SET_SIZE {
             self.count = 0;
         }
-    }
-
-    /// Returns true if this set contains the given value (using AVX2
-    /// instructions).
-    ///
-    /// # Arguments
-    ///
-    /// * `other` - the value to look for
-    ///
-    #[target_feature(enable = "avx,avx2")]
-    unsafe fn contains_avx2(&self, other: u64) -> bool {
-        use std::arch::x86_64::*;
-
-        let other = _mm256_set1_epi64x(other as i64);
-
-        for i in 0..4 {
-            let buf = self.buf.get_unchecked(4 * i) as *const u64 as *const __m256i;
-            let value = _mm256_loadu_si256(buf);
-            let mask = _mm256_cmpeq_epi64(other, value);
-
-            if _mm256_movemask_epi8(mask) != 0 {
-                return true;
-            }
-        }
-
-        false
     }
 
     /// Returns true if this set contains the given value.
@@ -75,34 +96,29 @@ impl SmallSet {
     ///
     #[inline(always)]
     pub fn contains(&self, other: u64) -> bool {
-        if is_x86_feature_detected!("avx2") {
-            unsafe { self.contains_avx2(other) }
-        } else {
-            (0..16).any(|x| self.buf[x] == other)
-        }
+        contains_u64x16(&self.buf, other)
     }
 
     /// Returns an iterator over all elements in this set.
-    pub fn iter<'a>(&'a self) -> SmallIter<'a> {
-        SmallIter {
+    pub fn iter(&self) -> SmallIter64 {
+        SmallIter64 {
             set: self,
             position: 0
         }
     }
 }
 
-
-/// Iterator over all elements contained within a `SmallSet`.
-pub struct SmallIter<'a> {
-    set: &'a SmallSet,
+/// Iterator over all elements contained within a `SmallSet64`.
+pub struct SmallIter64<'a> {
+    set: &'a SmallSet64,
     position: usize
 }
 
-impl<'a> Iterator for SmallIter<'a> {
+impl<'a> Iterator for SmallIter64<'a> {
     type Item = u64;
 
     fn next(&mut self) -> Option<u64> {
-        if self.position >= 16 {
+        if self.position >= SET_SIZE {
             None
         } else {
             let value = self.set.buf[self.position];
@@ -119,8 +135,8 @@ mod tests {
     use test::Bencher;
 
     #[test]
-    fn check() {
-        let mut s = SmallSet::new();
+    fn check_64() {
+        let mut s = SmallSet64::new();
 
         s.push(1);
         s.push(2);
@@ -133,15 +149,42 @@ mod tests {
     }
 
     #[bench]
-    fn contains(b: &mut Bencher) {
-        let mut s = SmallSet::new();
+    fn contains_64(b: &mut Bencher) {
+        let mut s = SmallSet64::new();
 
         s.push(1);
         s.push(2);
         s.push(3);
 
         b.iter(|| {
-            s.contains(8)
+            assert_eq!(s.contains(8), false);
+        });
+    }
+
+    #[test]
+    fn check_16() {
+        let mut s = SmallSet16::new();
+
+        s.push(1);
+        s.push(2);
+        s.push(3);
+
+        assert!(s.contains(1));
+        assert!(s.contains(2));
+        assert!(s.contains(3));
+        assert!(!s.contains(4));
+    }
+
+    #[bench]
+    fn contains_16(b: &mut Bencher) {
+        let mut s = SmallSet16::new();
+
+        s.push(1);
+        s.push(2);
+        s.push(3);
+
+        b.iter(|| {
+            assert_eq!(s.contains(8), false);
         });
     }
 }

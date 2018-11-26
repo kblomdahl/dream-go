@@ -14,6 +14,7 @@
 
 mod one_shot_channel;
 mod service;
+pub mod spin;
 
 pub use self::one_shot_channel::*;
 pub use self::service::*;

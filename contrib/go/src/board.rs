@@ -18,7 +18,7 @@ use std::hash::{Hash, Hasher};
 use board_fast::BoardFast;
 use color::Color;
 use circular_buf::CircularBuf;
-use small_set::SmallSet;
+use small_set::{SmallSet16, SmallSet64};
 
 ///
 #[derive(Clone)]
@@ -43,7 +43,12 @@ pub struct Board {
     pub(super) zobrist_hash: u64,
 
     /// The zobrist hash of the most recent board positions.
-    pub(super) zobrist_history: SmallSet
+    pub(super) zobrist_history: SmallSet64,
+
+    /// The most recently played moves, this is used to speed-up ko checks since
+    /// for a move to be ko, it is a necessary condition that said move has been
+    /// played before.
+    pub(super) zobrist_played: SmallSet16
 }
 
 impl Board {
@@ -55,7 +60,8 @@ impl Board {
             count: 0,
             last_played: None,
             zobrist_hash: 0,
-            zobrist_history: SmallSet::new()
+            zobrist_history: SmallSet64::new(),
+            zobrist_played: SmallSet16::new()
         }
     }
 
@@ -123,14 +129,36 @@ impl Board {
     ///
     /// * `color` - the color of the move
     /// * `index` - the index of the move
+    /// * `workspace` - the memoization of the board liberties
+    ///
+    pub(super) fn _is_ko_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
+        debug_assert!(self.inner.is_valid(color, index));
+
+        self.zobrist_played.contains(index as u16 + 1) && {
+            let adjust = self.inner.place_if_mut(color, index, workspace);
+            let next_zobrist_hash = self.zobrist_hash ^ adjust;
+
+            self.zobrist_history.contains(next_zobrist_hash)
+        }
+    }
+
+    /// Returns true if playing at the given index violated the
+    /// super-ko rule.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the move
+    /// * `index` - the index of the move
     ///
     pub(super) fn _is_ko(&self, color: Color, index: usize) -> bool {
         debug_assert!(self.inner.is_valid(color, index));
 
-        let adjust = self.inner.place_if(color, index);
-        let next_zobrist_hash = self.zobrist_hash ^ adjust;
+        self.zobrist_played.contains(index as u16 + 1) && {
+            let adjust = self.inner.place_if(color, index);
+            let next_zobrist_hash = self.zobrist_hash ^ adjust;
 
-        self.zobrist_history.contains(next_zobrist_hash)
+            self.zobrist_history.contains(next_zobrist_hash)
+        }
     }
 
     /// Returns whether the given move is valid according to the
@@ -140,9 +168,23 @@ impl Board {
     ///
     /// * `color` - the color of the move
     /// * `index` - the index of the move
+    /// * `workspace` - the memoization of the board liberties
     ///
     pub(super) fn _is_valid(&self, color: Color, index: usize) -> bool {
         self.inner.is_valid(color, index) && !self._is_ko(color, index)
+    }
+
+    /// Returns whether the given move is valid according to the
+    /// Tromp-Taylor rules.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the move
+    /// * `index` - the index of the move
+    /// * `workspace` - the memoization of the board liberties
+    ///
+    pub(super) fn _is_valid_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
+        self.inner.is_valid_mut(color, index, workspace) && !self._is_ko_mut(color, index, workspace)
     }
 
     /// Returns whether the given move is valid according to the
@@ -155,7 +197,22 @@ impl Board {
     /// * `y` - the row of the move
     ///
     pub fn is_valid(&self, color: Color, x: usize, y: usize) -> bool {
-        self._is_valid(color, 19 * y + x)
+        let mut workspace = [0; 368];
+
+        self._is_valid_mut(color, 19 * y + x, &mut workspace)
+    }
+
+    /// Returns whether the given move is valid according to the
+    /// Tromp-Taylor rules, using a memoization
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the move
+    /// * `x` - the column of the move
+    /// * `y` - the row of the move
+    ///
+    pub fn is_valid_mut(&self, color: Color, x: usize, y: usize, workspace: &mut [u8]) -> bool {
+        self._is_valid_mut(color, 19 * y + x, workspace)
     }
 
     /// Place the given stone on the board without checking if it is legal, the
@@ -178,6 +235,7 @@ impl Board {
         // vector.
         self.history.push(index);
         self.zobrist_history.push(self.zobrist_hash);
+        self.zobrist_played.push(index as u16 + 1);
     }
 
     /// Place the given stone on the board without checking if it is legal, the

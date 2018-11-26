@@ -17,7 +17,8 @@ use std::sync::Mutex;
 use std::hash::{Hash, Hasher};
 use std::ptr;
 
-use go::{Board, Color, symmetry};
+use go::util::symmetry;
+use go::{Board, Color};
 
 /// The maximum number of entries to be stored in the transposition table
 /// before we need to remove the least recently used one.

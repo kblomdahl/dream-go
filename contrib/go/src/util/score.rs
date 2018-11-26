@@ -235,7 +235,7 @@ fn get_territory_distance(board: &BoardFast, color: Color) -> [u8; 368] {
 mod tests {
     use board::*;
     use color::*;
-    use score::*;
+    use super::*;
 
     #[test]
     fn score_black() {

@@ -12,26 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(core_intrinsics)]
-#![feature(test)]
+mod argmax;
+mod normalize_finite;
+mod sum_finite;
 
-#[macro_use] extern crate lazy_static;
-extern crate libc;
-extern crate rand;
-extern crate regex;
-#[cfg(test)] extern crate test;
-
-mod asm;
-mod board;
-#[macro_use] mod board_fast;
-mod circular_buf;
-mod codegen;
-mod color;
-pub mod util;
-mod small_set;
-mod zobrist;
-
-pub use self::color::*;
-pub use self::board::*;
-
-pub const DEFAULT_KOMI: f32 = 7.5;
+pub use self::argmax::argmax;
+pub use self::normalize_finite::{normalize_finite_f32};
+pub use self::sum_finite::{sum_finite_f32, sum_i32};

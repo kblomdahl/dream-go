@@ -199,11 +199,18 @@ macro_rules! find_nd {
 
 macro_rules! find_4d {
     ($this:expr, $source:expr, |$index:ident, $value:ident| $stmt:block) => {{
+        unsafe {
+            ::std::intrinsics::prefetch_read_data(::codegen::N.get_unchecked($source), 0);
+            ::std::intrinsics::prefetch_read_data(::codegen::E.get_unchecked($source), 0);
+            ::std::intrinsics::prefetch_read_data(::codegen::S.get_unchecked($source), 0);
+            ::std::intrinsics::prefetch_read_data(::codegen::W.get_unchecked($source), 0);
+        }
+
         find_nd!($this, $source, |$index, $value| $stmt, N, E, S, W)
     }};
 }
 
-/// 
+/// Minimal representation of a go board that implements all rules (except super-ko).
 #[derive(Clone)]
 pub struct BoardFast {
     /// The color of the stone that is occupying each vertex. This array
@@ -219,6 +226,7 @@ pub struct BoardFast {
 }
 
 impl BoardFast {
+    /// Returns an empty board.
     pub fn new() -> BoardFast {
         let mut board = BoardFast {
             vertices: [0; 368],
@@ -306,6 +314,68 @@ impl BoardFast {
         false
     }
 
+    /// Returns whether the given group has at least `n` liberties, using the
+    /// given counter to do so.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - the index of a vertex in the group
+    /// * `n` - the maximum number of liberties to count
+    /// * `workspace` - the memoization of the board liberties
+    ///
+    #[inline]
+    pub fn has_n_liberty_mut<C: Counter + Default>(&self, index: usize, mut n: usize, workspace: &mut [u8]) -> bool {
+        if workspace[index] != 0 {
+            workspace[index] == 0xff
+        } else {
+            let mut counter = C::default();
+            let mut current = index;
+
+            loop {
+                workspace[current] = 1;
+
+                foreach_4d!(self, current, |other_index, value| {
+                    if value == 0 && counter.add(other_index) {
+                        n -= 1;
+
+                        if n == 0 {
+                            self.set_workspace_mut(index, 0xff, workspace);
+                            return true
+                        }
+                    }
+                });
+
+                current = unsafe { *self.next_vertex.get_unchecked(current) as usize };
+                if current == index {
+                    break;
+                }
+            }
+
+            false
+        }
+    }
+
+    /// Update the memoization value for all vertices connected to `index` to `value`.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` -
+    /// * `value` -
+    /// * `workspace` -
+    ///
+    fn set_workspace_mut(&self, index: usize, value: u8, workspace: &mut [u8]) {
+        let mut current = index;
+
+        loop {
+            workspace[current] = value;
+
+            current = unsafe { *self.next_vertex.get_unchecked(current) as usize };
+            if current == index {
+                break;
+            }
+        }
+    }
+
     /// Returns whether the given move is valid according to the
     /// Tromp-Taylor rules.
     ///
@@ -324,13 +394,48 @@ impl BoardFast {
                     return true;
                 }
 
-                // check for the following two conditions simplied into one case:
+                // check for the following two conditions simplified into one case:
                 //
                 // 1. If a neighbour is friendly then we are fine if it has at
                 //    least two liberties.
                 // 2. If a neighbour is unfriendly then we are fine if it has less
                 //    than two liberties (i.e. one).
                 if value != 0xff && (value == current) == self.has_n_liberty::<Two>(other_index, 2) {
+                    return true;
+                }
+            });
+
+            false  // move is suicide :'(
+        }
+    }
+
+    /// Returns whether the given move is valid according to the
+    /// Tromp-Taylor rules.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the move
+    /// * `index` - the HW index of the move
+    /// * `workspace` - the memoization of the board liberties
+    ///
+    #[inline(always)]
+    pub fn is_valid_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
+        self.vertices[index] == 0 && {
+            let current = color as u8;
+
+            foreach_4d!(self, index, |other_index, value| {
+                // check for direct liberties
+                if value == 0 {
+                    return true;
+                }
+
+                // check for the following two conditions simplified into one case:
+                //
+                // 1. If a neighbour is friendly then we are fine if it has at
+                //    least two liberties.
+                // 2. If a neighbour is unfriendly then we are fine if it has less
+                //    than two liberties (i.e. one).
+                if value != 0xff && (value == current) == self.has_n_liberty_mut::<Two>(other_index, 2, workspace) {
                     return true;
                 }
             });
@@ -455,7 +560,37 @@ impl BoardFast {
         adjust
     }
 
-    /// 
+    /// Returns the zobrist hash adjustments that are would be made if a stone
+    /// of the given color was played on the given vertex.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the move
+    /// * `index` - the HW index of the move
+    /// * `workspace` - the memoization of the board liberties
+    ///
+    #[inline]
+    pub fn place_if_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> u64 {
+        let opponent = color.opposite() as u8;
+        let mut adjust = zobrist::TABLE[color as usize][index];
+
+        foreach_4d!(self, index, |other_index, value| {
+            if value == opponent && !self.has_n_liberty_mut::<Two>(other_index, 2, workspace) {
+                adjust ^= self.capture_if(opponent as usize, other_index);
+            }
+        });
+
+        adjust
+    }
+
+    /// Place a some of the given `color` at the given `index` on this board. This function
+    /// assume that the given move is valid.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` -
+    /// * `index` -
+    ///
     #[inline]
     pub fn place(&mut self, color: Color, index: usize) -> u64 {
         let player = color as u8;

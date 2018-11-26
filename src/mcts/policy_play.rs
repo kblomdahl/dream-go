@@ -110,7 +110,7 @@ fn policy_forward(
 
     if num_policy_rollout <= 1 {
         if let Some((value, mut policy)) = full_forward(server, board, color) {
-            dirichlet::add(&mut policy, 0.03);
+            dirichlet::add(&mut policy[0..362], 0.03);
             Some((value, policy))
         } else {
             None

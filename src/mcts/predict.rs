@@ -15,7 +15,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use parallel::{self, OneSender};
-use go::FEATURE_SIZE;
+use go::util::features::{FEATURE_SIZE};
 use nn::devices::{DEVICES, set_current_device};
 use nn::{self, Network, Output, OutputSet, Workspace};
 use util::config;

@@ -18,6 +18,9 @@ tensor-core = []
 # dump all finished search tree's to stderr
 trace-mcts = []
 
+[profile.bench]
+debug = true
+
 [profile.dev]
 opt-level = 1
 debug = true

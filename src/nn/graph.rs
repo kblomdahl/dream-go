@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use libc::c_void;
 
-use go::{FEATURE_SIZE, NUM_FEATURES};
+use go::util::features::{FEATURE_SIZE, NUM_FEATURES};
 use nn::devices::get_current_device;
 use nn::ffi::{cublas, cuda, cudnn};
 use nn::slots::*;
@@ -60,7 +60,7 @@ impl InferenceType for i8 {
     type Tower = i8;
     type Output = f32;
 
-    fn as_f32(self) -> f32 { 6.0 * (self as f32) / 127.0 }
+    fn as_f32(self) -> f32 { THREE * (self as f32) / 127.0 }
 }
 
 impl InferenceType for f32 {

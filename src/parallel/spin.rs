@@ -52,7 +52,7 @@ impl Mutex {
 
 #[cfg(test)]
 mod tests {
-    use ::mcts::spin::*;
+    use super::*;
 
     #[test]
     fn lock() {

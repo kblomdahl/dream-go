@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use asm;
+use asm::count_zeros;
 use board_fast::*;
 use board::Board;
 use color::Color;
-use ladder::Ladder;
-use symmetry;
+
+use super::ladder::Ladder;
+use super::symmetry;
 
 /// The number of features that the board will provide.
 pub const NUM_FEATURES: usize = 32;
@@ -275,15 +276,11 @@ fn get_num_liberties(board: &BoardFast, index: usize, memoize: &mut [usize]) -> 
         memoize[index]
     } else {
         let mut liberties = [0xff; 384];
-
         fill_liberties(board, index, &mut liberties);
-
-        // count the number of liberties, maybe in the future using a SIMD
-        // implementation which would be a lot faster than this
-        let num_liberties = asm::count_zeros(&liberties);
 
         // update the cached value in the memoize array for all stones
         // that are strongly connected to the given index
+        let num_liberties = count_zeros(&liberties);
         let mut current = index;
 
         loop {
@@ -374,7 +371,7 @@ fn get_num_liberties_if(board: &BoardFast, color: Color, index: usize, memoize: 
         liberties[other_index] = value;
     });
 
-    asm::count_zeros(&liberties)
+    count_zeros(&liberties)
 }
 
 #[cfg(test)]
