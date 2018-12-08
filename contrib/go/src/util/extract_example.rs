@@ -17,7 +17,7 @@ use board::Board;
 use ::DEFAULT_KOMI;
 
 use super::features::{CHW, FEATURE_SIZE, Features};
-use super::sgf::{CGoban, SgfCoordinate};
+use super::sgf::{Sgf, SgfError};
 use super::symmetry;
 
 use libc::{c_char, c_int, c_uchar};
@@ -27,12 +27,25 @@ use std::ffi::CStr;
 
 #[repr(C)]
 pub struct Example {
-    features: [c_char; FEATURE_SIZE],
-    index: c_int,
-    color: c_int,
-    policy: [c_uchar; 905],
-    winner: c_int,
-    number: c_int
+    pub features: [c_char; FEATURE_SIZE],
+    pub index: c_int,
+    pub color: c_int,
+    pub policy: [c_uchar; 905],
+    pub winner: c_int,
+    pub number: c_int
+}
+
+impl Default for Example {
+    fn default() -> Example {
+        Example {
+            features: [0; FEATURE_SIZE],
+            index: 0,
+            color: 0,
+            policy: [0; 905],
+            winner: 0,
+            number: 0
+        }
+    }
 }
 
 struct Candidate {
@@ -61,7 +74,6 @@ pub extern fn extract_single_example(
         static ref WINNER: Regex = Regex::new(r"RE\[([^\]]+)\]").unwrap();
         static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
         static ref KOMI: Regex = Regex::new(r"KM\[([^\]]*)\]").unwrap();
-        static ref MOVE: Regex = Regex::new(r";([BW])\[([^\]]*)\](?:P\[([^\]]*)\])?").unwrap();
     }
 
     unsafe { CStr::from_ptr(raw_sgf_content) }.to_str().map(|content| {
@@ -97,37 +109,23 @@ pub extern fn extract_single_example(
 
         // find _all_ recorded moves, and their policies (if applicable).
         let mut examples = vec! [];
-        let mut board = Board::new(komi);
         let mut pass_count = 0;
 
-        for moves in MOVE.captures_iter(&content) {
-            let (x, y) = CGoban::parse(&moves[2]).unwrap_or_else(|_err| { (19, 19) });
-            let policy = moves.get(3).map(|input| input.as_str().to_string());
-            let current_color = match &moves[1] {
-                "B" => Color::Black,
-                "W" => Color::White,
-                _ => unreachable!()
-            };
+        for m in Sgf::new(&content, komi) {
+            match m {
+                Err(SgfError::IllegalMove) => { return -30 },
+                Err(SgfError::ParseError) => { return -23 },
+                Ok(m) => {
+                    let is_pass = m.x >= 19 || m.y >= 19;
 
-            if x >= 19 || y >= 19 {
-                examples.push(Candidate {
-                    board: board.clone(),
-                    index: 361,
-                    color: current_color,
-                    policy: policy
-                });
-                pass_count += 1;
-            } else if board.is_valid(current_color, x, y) {
-                examples.push(Candidate {
-                    board: board.clone(),
-                    index: 19 * y + x,
-                    color: current_color,
-                    policy: policy
-                });
-                board.place(current_color, x, y);
-                pass_count = 0;
-            } else {
-                return -20;
+                    pass_count = if is_pass { pass_count + 1 } else { 0 };
+                    examples.push(Candidate {
+                        board: m.board,
+                        index: if is_pass { 361 } else { 19 * m.y + m.x },
+                        color: m.color,
+                        policy: m.policy
+                    });
+                }
             }
         }
 
@@ -135,10 +133,11 @@ pub extern fn extract_single_example(
         // the game. This is necessary since a lot of games seems to be
         // missing them.
         while SCORED.is_match(&content) && pass_count < 2 {
+            let last_board = examples.last().map(|cand| cand.board.clone());
             let last_color = examples.last().map(|cand| cand.color).unwrap_or(Color::White);
 
             examples.push(Candidate {
-                board: board.clone(),
+                board: last_board.unwrap_or_else(|| Board::new(komi)),
                 index: 361,
                 color: last_color.opposite(),
                 policy: None
