@@ -16,6 +16,8 @@ use go::{Board, Color};
 use util::config;
 use mcts::*;
 
+use std::mem;
+
 /// Play a game against the engine and return the result of the game.
 ///
 /// # Arguments
@@ -35,7 +37,8 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
     // engine playing pointless capture sequences at the end of the game
     // that does not change the final result.
     let allow_resign = thread_rng().gen::<f32>() < 0.95;
-    let mut root = None;
+    let mut root_current = None;
+    let mut root_other = None;
 
     while count < 722 {
         let num_workers = *config::NUM_THREADS / num_parallel.load(Ordering::Acquire);
@@ -43,7 +46,7 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
             &server,
             num_workers,
             RolloutLimit::new(*config::NUM_ROLLOUT),
-            root,
+            root_current,
             &board,
             current
         );
@@ -64,8 +67,6 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
             if pass_count >= 2 {
                 return GameResult::Ended(sgf, board)
             }
-
-            root = tree::Node::forward(tree, 361);
         } else {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
@@ -86,9 +87,18 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
 
             pass_count = 0;
             board.place(current, x, y);
-            root = tree::Node::forward(tree, index);
         }
 
+        // update the search trees
+        root_current = tree::Node::forward(tree, index);
+        root_other = if let Some(other) = root_other {
+            tree::Node::forward(other, index)
+        } else {
+            None
+        };
+
+        // swap whose turn it is to place a stone
+        mem::swap(&mut root_current, &mut root_other);
         current = current.opposite();
         count += 1;
     }
