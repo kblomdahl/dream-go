@@ -318,6 +318,8 @@ impl Child {
     /// * `index` - the dense index in `BigChildrenImpl` to initialize from
     ///
     fn from_big(big: &BigChildrenImpl, index: usize) -> Child {
+        debug_assert!(index < 362);
+
         Child {
             count: big.count[index],
             vcount: big.vcount[index],
@@ -354,6 +356,7 @@ impl Child {
 }
 
 /// Flyweight mutable structure used to contain the values of a single child in a `Node`.
+#[derive(Debug)]
 pub struct ChildMut {
     expanding: *mut bool,
     count: *mut i32,
@@ -390,6 +393,8 @@ impl ChildMut {
     /// * `index` - the dense index in `BigChildrenImpl` to initialize from
     ///
     unsafe fn from_big(big: &mut BigChildrenImpl, index: usize) -> ChildMut {
+        debug_assert!(index < 362);
+
         ChildMut {
             count: big.count.get_unchecked_mut(index),
             vcount: big.vcount.get_unchecked_mut(index),
@@ -670,7 +675,8 @@ impl SmallChildrenImpl {
 pub struct ChildrenNonZeroIter {
     count: *const i32,
     indices: *const i16,
-    index: usize
+    index: usize,
+    len: usize
 }
 
 impl Iterator for ChildrenNonZeroIter {
@@ -678,25 +684,20 @@ impl Iterator for ChildrenNonZeroIter {
 
     fn next(&mut self) -> Option<usize> {
         unsafe {
-            loop {
-                if self.index >= 361 || (!self.indices.is_null() && self.index >= SMALL_SIZE - 1) {
-                    return None;
-                }
-
+            while self.index < self.len {
+                let prev_index = self.index;
                 self.index += 1;
-                if *self.count.add(self.index) != 0 {
-                    break
+
+                if *self.count.add(prev_index) > 0 {
+                    return Some(if self.indices.is_null() {
+                        prev_index
+                    } else {
+                        *self.indices.add(prev_index) as usize
+                    });
                 }
             }
 
-            let result = self.index;
-            self.index += 1;
-
-            Some(if self.indices.is_null() {
-                result
-            } else {
-                *self.indices.add(result) as usize
-            })
+            None
         }
     }
 }
@@ -741,8 +742,13 @@ impl ChildrenImpl {
             ChildrenImpl::Big(ref big) => argmax_i32(&big.count).unwrap(),
             ChildrenImpl::Small(ref small) => {
                 let other = argmax_i32(&small.count).unwrap();
+                let index = small.indices[other];
 
-                small.indices[other] as usize
+                if index < 0 {
+                    0
+                } else {
+                    index as usize
+                }
             }
         }
     }
@@ -766,14 +772,16 @@ impl ChildrenImpl {
                 ChildrenNonZeroIter {
                     count: &small.count as *const i32,
                     indices: &small.indices as *const i16,
-                    index: 0
+                    index: 0,
+                    len: SMALL_SIZE
                 }
             },
             ChildrenImpl::Big(ref big) => {
                 ChildrenNonZeroIter {
                     count: &big.count as *const i32,
                     indices: ptr::null(),
-                    index: 0
+                    index: 0,
+                    len: 362
                 }
             }
         }
@@ -1082,7 +1090,7 @@ impl Node {
             let max_i = (0..362)
                 .max_by_key(|&i| {
                     self.with(i, |child| {
-                        (child.count(), OrderedFloat(child.value()), OrderedFloat(self.prior[i]))
+                        (child.count(), OrderedFloat(self.prior[i]))
                     })
                 })
                 .unwrap();
@@ -1167,7 +1175,11 @@ impl Node {
     /// * `apply_fpu` - whether to use the first-play urgency heuristic
     ///
     fn select(&mut self, apply_fpu: bool) -> Option<usize> {
-        let mut value = self.children.value(self.initial_value);
+        let mut value = {
+            let _guard = self.lock.lock();
+
+            self.children.value(self.initial_value)
+        };
 
         if apply_fpu {
             // for unvisited children, attempt to transform the parent `value`
@@ -1294,8 +1306,6 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
 pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32>) {
     if let Some(&(node, _, index)) = trace.last() {
         let updated = (*node).with_mut(index, |mut child| {
-            debug_assert!(child.ptr().is_null());
-
             let mut next = Box::new(Node::new(color, value, prior));
             if index == 361 {
                 next.pass_count = (*node).pass_count + 1;

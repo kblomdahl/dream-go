@@ -105,7 +105,7 @@ unsafe fn _argmax_i32(array: &[i32]) -> Option<usize> {
     let steps = array.len() / 8;
     let mut array = array.as_ptr();
     let mut so_far = _mm256_set1_epi32(::std::i32::MIN);
-    let mut index: usize = 0;
+    let mut index: usize = ::std::usize::MAX;
 
     for i in 0..steps {
         let x = _mm256_loadu_si256(array as *const _);
@@ -147,7 +147,11 @@ unsafe fn _argmax_i32(array: &[i32]) -> Option<usize> {
         array = array.add(8);
     }
 
-    Some(index)
+    if index == ::std::usize::MAX {
+        None
+    } else {
+        Some(index)
+    }
 }
 
 /// Returns the index of the maximum value in the given array. If multiple
@@ -162,7 +166,7 @@ pub fn argmax_i32(array: &[i32]) -> Option<usize> {
     if is_x86_feature_detected!("avx2")  {
         unsafe { _argmax_i32(array) }
     } else {
-        (0..362).max_by_key(|&i| array[i])
+        (0..array.len()).max_by_key(|&i| array[i])
     }
 }
 
