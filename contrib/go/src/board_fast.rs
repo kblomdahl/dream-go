@@ -672,10 +672,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bitfield_cnv() {
+    fn exhaustive_vertex_bitfield() {
         let mut x: u16 = 0;
 
-        for color in 0..3 {
+        for color in 0..4 {
             x.set_color(color);
 
             for next_vertex in 0..362 {
@@ -683,111 +683,6 @@ mod tests {
 
                 for visited in vec! [true, false] {
                     x.set_visited(visited);
-
-                    assert_eq!(x.color(), color);
-                    assert_eq!(x.next_vertex(), next_vertex);
-                    assert_eq!(x.visited(), visited);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn bitfield_cvn() {
-        let mut x: u16 = 0;
-
-        for color in 0..3 {
-            x.set_color(color);
-
-            for visited in vec! [true, false] {
-                x.set_visited(visited);
-
-                for next_vertex in 0..362 {
-                    x.set_next_vertex(next_vertex);
-
-                    assert_eq!(x.color(), color);
-                    assert_eq!(x.next_vertex(), next_vertex);
-                    assert_eq!(x.visited(), visited);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn bitfield_vcn() {
-        let mut x: u16 = 0;
-
-        for visited in vec! [true, false] {
-            x.set_visited(visited);
-
-            for color in 0..3 {
-                x.set_color(color);
-
-                for next_vertex in 0..362 {
-                    x.set_next_vertex(next_vertex);
-
-                    assert_eq!(x.color(), color);
-                    assert_eq!(x.next_vertex(), next_vertex);
-                    assert_eq!(x.visited(), visited);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn bitfield_vnc() {
-        let mut x: u16 = 0;
-
-        for visited in vec! [true, false] {
-            x.set_visited(visited);
-
-            for next_vertex in 0..362 {
-                x.set_next_vertex(next_vertex);
-
-                for color in 0..3 {
-                    x.set_color(color);
-
-                    assert_eq!(x.color(), color);
-                    assert_eq!(x.next_vertex(), next_vertex);
-                    assert_eq!(x.visited(), visited);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn bitfield_ncv() {
-        let mut x: u16 = 0;
-
-        for next_vertex in 0..362 {
-            x.set_next_vertex(next_vertex);
-
-            for color in 0..3 {
-                x.set_color(color);
-
-                for visited in vec! [true, false] {
-                    x.set_visited(visited);
-
-                    assert_eq!(x.color(), color);
-                    assert_eq!(x.next_vertex(), next_vertex);
-                    assert_eq!(x.visited(), visited);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn bitfield_nvc() {
-        let mut x: u16 = 0;
-
-        for next_vertex in 0..362 {
-            x.set_next_vertex(next_vertex);
-
-            for visited in vec! [true, false] {
-                x.set_visited(visited);
-
-                for color in 0..3 {
-                    x.set_color(color);
 
                     assert_eq!(x.color(), color);
                     assert_eq!(x.next_vertex(), next_vertex);

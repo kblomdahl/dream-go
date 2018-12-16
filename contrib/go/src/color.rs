@@ -23,8 +23,8 @@ pub enum Color {
 
 impl Color {
     /// Returns the opposite of this color.
-    pub fn opposite(&self) -> Color {
-        match *self {
+    pub fn opposite(self) -> Color {
+        match self {
             Color::Black => Color::White,
             Color::White => Color::Black
         }

@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#![allow(clippy::all)]
 
 /// Automatically generated zobrist hash table of random 64-bit integers generated
 /// by a Python random function (MT).

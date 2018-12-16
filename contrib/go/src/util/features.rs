@@ -153,7 +153,7 @@ impl Features for Board {
             if index == 361 {
                 // pass
             } else {
-                let other = symmetry_table[index] as usize;
+                let other = symmetry_table[index as usize] as usize;
 
                 features[O::index(5+i, other)] = c_1;
             }

@@ -16,7 +16,7 @@
 pub struct CircularIterator<'a> {
     count: usize,
     position: usize,
-    buf: &'a [usize]
+    buf: &'a [u16]
 }
 
 /// Lookup table computing `(index + 1) % 6`.
@@ -27,9 +27,9 @@ const N_MOD_SIX: [usize; 6] = [1, 2, 3, 4, 5, 0];
 const P_MOD_SIX: [usize; 6] = [5, 0, 1, 2, 3, 4];
 
 impl<'a> Iterator for CircularIterator<'a> {
-    type Item = usize;
+    type Item = u16;
 
-    fn next(&mut self) -> Option<usize> {
+    fn next(&mut self) -> Option<u16> {
         if self.count == 6 {
             None
         } else {
@@ -45,7 +45,7 @@ impl<'a> Iterator for CircularIterator<'a> {
 /// A circular stack that keeps track of the six most recent pushed buffers.
 pub struct CircularBuf {
     position: usize,
-    buf: [usize; 6]
+    buf: [u16; 6]
 }
 
 impl Clone for CircularBuf {
@@ -71,7 +71,7 @@ impl CircularBuf {
     /// 
     /// * `value` - 
     /// 
-    pub fn push(&mut self, value: usize) {
+    pub fn push(&mut self, value: u16) {
         self.buf[self.position] = value;
         self.position = N_MOD_SIX[self.position];
     }

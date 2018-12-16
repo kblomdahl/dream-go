@@ -173,7 +173,7 @@ impl Ladder for BoardFast {
         board.place(color, index);
 
         // check if we have exactly two liberties
-        let num_liberties = board.get_n_liberty::<Three>(index, 3).into_iter()
+        let num_liberties = board.get_n_liberty::<Three>(index, 3).iter()
             .fold(0, |acc, &liberty| {
                 acc + if liberty == 0xffff { 0 } else { 1 }
             });
@@ -220,11 +220,9 @@ mod tests {
         board.place(Color::Black, 18,  0);
         board.place(Color::Black, 18, 18);
 
-        let mut workspace = [0; 368];
-
         for x in 0..19 {
             for y in 0..19 {
-                if board.is_valid_mut(Color::White, x, y, &mut workspace) {
+                if board.is_valid(Color::White, x, y) {
                     let is_ladder = (x == 1 && y == 0)
                         || (x ==  0 && y ==  1)
                         || (x == 18 && y == 17)
@@ -260,11 +258,9 @@ mod tests {
         board.place(Color::Black, 3, 2);
         board.place(Color::Black, 4, 2);
 
-        let mut workspace = [0; 368];
-
         for x in 0..19 {
             for y in 0..19 {
-                if board.is_valid_mut(Color::Black, x, y, &mut workspace) {
+                if board.is_valid(Color::Black, x, y) {
                     let is_ladder = x == 3 && y == 4;
                     let index = 19 * y + x;
 
@@ -288,11 +284,9 @@ mod tests {
         board.place(Color::Black,  4,  2);
         board.place(Color::Black,  3,  4);
 
-        let mut workspace = [0; 368];
-
         for x in 0..19 {
             for y in 0..19 {
-                if board.is_valid_mut(Color::White, x, y, &mut workspace) {
+                if board.is_valid(Color::White, x, y) {
                     let index = 19 * y + x;
 
                     // check that nothing is a ladder capture

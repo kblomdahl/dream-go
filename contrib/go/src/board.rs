@@ -30,6 +30,12 @@ pub struct Board {
     /// Stack containing the six most recent `vertices`.
     pub(super) history: CircularBuf,
 
+    /// The zobrist hash of the current board state.
+    pub(super) zobrist_hash: u64,
+
+    /// The zobrist hash of the most recent board positions.
+    pub(super) zobrist_history: SmallSet64,
+
     /// The komi used for this game.
     pub(super) komi: f32,
 
@@ -38,12 +44,6 @@ pub struct Board {
 
     /// The color of the player who played the most recent move.
     pub(super) last_played: Option<Color>,
-
-    /// The zobrist hash of the current board state.
-    pub(super) zobrist_hash: u64,
-
-    /// The zobrist hash of the most recent board positions.
-    pub(super) zobrist_history: SmallSet64,
 }
 
 impl Board {
@@ -164,8 +164,8 @@ impl Board {
     /// * `index` - the index of the move
     /// * `workspace` - the memoization of the board liberties
     ///
-    pub(super) fn _is_valid(&self, color: Color, index: usize) -> bool {
-        self.inner.is_valid(color, index) && !self._is_ko(color, index)
+    pub(super) fn _is_valid_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
+        self.inner.is_valid_mut(color, index, workspace) && !self._is_ko_mut(color, index, workspace)
     }
 
     /// Returns whether the given move is valid according to the
@@ -177,23 +177,8 @@ impl Board {
     /// * `index` - the index of the move
     /// * `workspace` - the memoization of the board liberties
     ///
-    pub(super) fn _is_valid_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
-        self.inner.is_valid_mut(color, index, workspace) && !self._is_ko_mut(color, index, workspace)
-    }
-
-    /// Returns whether the given move is valid according to the
-    /// Tromp-Taylor rules.
-    ///
-    /// # Arguments
-    ///
-    /// * `color` - the color of the move
-    /// * `x` - the column of the move
-    /// * `y` - the row of the move
-    ///
-    pub fn is_valid(&self, color: Color, x: usize, y: usize) -> bool {
-        let mut workspace = [0; 368];
-
-        self._is_valid_mut(color, 19 * y + x, &mut workspace)
+    pub(super) fn _is_valid(&self, color: Color, index: usize) -> bool {
+        self.inner.is_valid(color, index) && !self._is_ko(color, index)
     }
 
     /// Returns whether the given move is valid according to the
@@ -207,6 +192,19 @@ impl Board {
     ///
     pub fn is_valid_mut(&self, color: Color, x: usize, y: usize, workspace: &mut [u8]) -> bool {
         self._is_valid_mut(color, 19 * y + x, workspace)
+    }
+
+    /// Returns whether the given move is valid according to the
+    /// Tromp-Taylor rules.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - the color of the move
+    /// * `x` - the column of the move
+    /// * `y` - the row of the move
+    ///
+    pub fn is_valid(&self, color: Color, x: usize, y: usize) -> bool {
+        self._is_valid(color, 19 * y + x)
     }
 
     /// Place the given stone on the board without checking if it is legal, the
@@ -227,7 +225,7 @@ impl Board {
 
         // store the actually played move since it is necessary for the feature
         // vector.
-        self.history.push(index);
+        self.history.push(index as u16);
         self.zobrist_history.push(self.zobrist_hash);
     }
 
@@ -275,7 +273,7 @@ impl fmt::Display for Board {
             for x in 0..19 {
                 let index = 19 * y + x;
 
-                if self.inner.vertices[index] == 0 {
+                if self.inner.vertices[index].color() == 0 {
                     write!(f, "  ")?;
                 } else if self.inner.vertices[index].color() == Color::Black as u8 {
                     write!(f, " \u{25cf}")?;
@@ -412,5 +410,35 @@ mod tests {
         board.place(Color::White, 0, 1);
 
         assert!(!board.is_valid(Color::Black, 0, 0));
+    }
+
+    /// Test that when the same group is a neighbour multiple times we do
+    /// not reduce its liberty count twice.
+    #[test]
+    fn double_liberty_subtraction() {
+        let mut board = Board::new(7.5);
+
+        board.place(Color::Black, 1, 1);
+        board.place(Color::Black, 1, 2);
+        board.place(Color::Black, 2, 1);
+        board.place(Color::Black, 0, 2);
+        board.place(Color::Black, 2, 0);
+        board.place(Color::White, 0, 3);
+        board.place(Color::White, 3, 0);
+        board.place(Color::White, 1, 3);
+        board.place(Color::White, 3, 1);
+        board.place(Color::White, 2, 2);
+
+        assert!(board.is_valid(Color::White, 0, 1));
+        assert!(board.is_valid(Color::White, 1, 0));
+
+        board.place(Color::White, 0, 1);
+
+        assert_eq!(board.at(0, 1), Some(Color::White));
+        assert_eq!(board.at(1, 1), Some(Color::Black));
+        assert_eq!(board.at(1, 2), Some(Color::Black));
+        assert_eq!(board.at(2, 1), Some(Color::Black));
+        assert_eq!(board.at(0, 2), Some(Color::Black));
+        assert_eq!(board.at(2, 0), Some(Color::Black));
     }
 }

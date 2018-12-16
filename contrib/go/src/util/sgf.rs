@@ -37,7 +37,7 @@ impl SgfCoordinate for CGoban {
     }
 
     fn parse(s: &str) -> Result<(usize, usize), SgfCoordinateError> {
-        if s.len() == 0 {
+        if s.is_empty() {
             Ok((19, 19))
         } else if s.len() == 2 {
             let mut ch = s.chars();
@@ -145,7 +145,7 @@ fn skip_until_next<'a, 'b>(bytes: &'a [u8], start_at: &mut usize, goal: u8) -> &
 }
 
 fn peek_forward2(bytes: &[u8], at_index: usize, peek_1: u8, peek_2: u8) -> bool {
-    at_index < bytes.len() - 2 && bytes[at_index+0] == peek_1 && bytes[at_index+1] == peek_2
+    at_index < bytes.len() - 2 && bytes[at_index] == peek_1 && bytes[at_index+1] == peek_2
 }
 
 fn find_next_property<'a, 'b>(bytes: &'a [u8], start_at: &mut usize) -> Option<(&'b [u8], &'b [u8])>
@@ -186,7 +186,7 @@ fn find_next_vertex(bytes: &[u8], start_at: &mut usize) -> Option<(Color, usize,
 /// * `sgf` -
 /// * `start_at` -
 ///
-fn find_next_move(sgf: &String, start_at: &mut usize) -> Option<SgfMatch> {
+fn find_next_move(sgf: &str, start_at: &mut usize) -> Option<SgfMatch> {
     let bytes = sgf.as_bytes();
 
     while *start_at < bytes.len() - 4 {

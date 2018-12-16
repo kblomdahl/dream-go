@@ -77,8 +77,8 @@ pub enum Transform {
 }
 
 impl Transform {
-    pub fn inverse(&self) -> Transform {
-        match *self {
+    pub fn inverse(self) -> Transform {
+        match self {
             Transform::Identity => Transform::Identity,
             Transform::FlipLR => Transform::FlipLR,
             Transform::FlipUD => Transform::FlipUD,
@@ -90,8 +90,8 @@ impl Transform {
         }
     }
 
-    pub fn apply(&self, index: usize) -> usize {
-        let dest = match *self {
+    pub fn apply(self, index: usize) -> usize {
+        let dest = match self {
             Transform::Identity => _IDENTITY[index],
             Transform::FlipLR => _FLIP_LR[index],
             Transform::FlipUD => _FLIP_UD[index],
@@ -105,8 +105,8 @@ impl Transform {
         dest as usize
     }
 
-    pub fn get_table(&self) -> &'static [u16] {
-        match *self {
+    pub fn get_table(self) -> &'static [u16] {
+        match self {
             Transform::Identity => &_IDENTITY,
             Transform::FlipLR => &_FLIP_LR,
             Transform::FlipUD => &_FLIP_UD,

@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#![allow(clippy::all)]
 
 pub const N: [u16; 361] = [
      19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,
