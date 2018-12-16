@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use board_fast::{BoardFast, One, Two, Three};
+use board_fast::{BoardFast, Vertex, One, Two, Three};
 use color::Color;
 
 pub trait Ladder {
@@ -40,7 +40,7 @@ fn _can_escape_with_capture(board: &BoardFast, color: Color, index: usize) -> bo
             }
         });
 
-        current = unsafe { *board.next_vertex.get_unchecked(current) as usize };
+        current = unsafe { (*board.vertices.get_unchecked(current)).next_vertex() as usize };
         if current == index {
             break;
         }

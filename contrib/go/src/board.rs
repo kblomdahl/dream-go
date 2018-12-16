@@ -15,10 +15,10 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use board_fast::BoardFast;
+use board_fast::{BoardFast, Vertex};
 use color::Color;
 use circular_buf::CircularBuf;
-use small_set::{SmallSet16, SmallSet64};
+use small_set::SmallSet64;
 
 ///
 #[derive(Clone)]
@@ -44,11 +44,6 @@ pub struct Board {
 
     /// The zobrist hash of the most recent board positions.
     pub(super) zobrist_history: SmallSet64,
-
-    /// The most recently played moves, this is used to speed-up ko checks since
-    /// for a move to be ko, it is a necessary condition that said move has been
-    /// played before.
-    pub(super) zobrist_played: SmallSet16
 }
 
 impl Board {
@@ -61,7 +56,6 @@ impl Board {
             last_played: None,
             zobrist_hash: 0,
             zobrist_history: SmallSet64::new(),
-            zobrist_played: SmallSet16::new()
         }
     }
 
@@ -113,9 +107,9 @@ impl Board {
     pub fn at(&self, x: usize, y: usize) -> Option<Color> {
         let index = 19 * y + x;
 
-        if self.inner.vertices[index] == Color::Black as u8 {
+        if self.inner.vertices[index].color() == Color::Black as u8 {
             Some(Color::Black)
-        } else if self.inner.vertices[index] == Color::White as u8 {
+        } else if self.inner.vertices[index].color() == Color::White as u8 {
             Some(Color::White)
         } else {
             None
@@ -134,7 +128,7 @@ impl Board {
     pub(super) fn _is_ko_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
         debug_assert!(self.inner.is_valid(color, index));
 
-        self.zobrist_played.contains(index as u16 + 1) && {
+        self.inner.vertices[index].visited() && {
             let adjust = self.inner.place_if_mut(color, index, workspace);
             let next_zobrist_hash = self.zobrist_hash ^ adjust;
 
@@ -153,7 +147,7 @@ impl Board {
     pub(super) fn _is_ko(&self, color: Color, index: usize) -> bool {
         debug_assert!(self.inner.is_valid(color, index));
 
-        self.zobrist_played.contains(index as u16 + 1) && {
+        self.inner.vertices[index].visited() && {
             let adjust = self.inner.place_if(color, index);
             let next_zobrist_hash = self.zobrist_hash ^ adjust;
 
@@ -235,7 +229,6 @@ impl Board {
         // vector.
         self.history.push(index);
         self.zobrist_history.push(self.zobrist_hash);
-        self.zobrist_played.push(index as u16 + 1);
     }
 
     /// Place the given stone on the board without checking if it is legal, the
@@ -284,9 +277,9 @@ impl fmt::Display for Board {
 
                 if self.inner.vertices[index] == 0 {
                     write!(f, "  ")?;
-                } else if self.inner.vertices[index] == Color::Black as u8 {
+                } else if self.inner.vertices[index].color() == Color::Black as u8 {
                     write!(f, " \u{25cf}")?;
-                } else if self.inner.vertices[index] == Color::White as u8 {
+                } else if self.inner.vertices[index].color() == Color::White as u8 {
                     write!(f, " \u{25cb}")?;
                 }
             }
@@ -327,7 +320,7 @@ impl PartialEq for Board {
 
         history && self.inner.vertices.iter()
             .zip(other.inner.vertices.iter())
-            .all(|(a, b)| a == b)
+            .all(|(a, b)| a.color() == b.color())
     }
 }
 

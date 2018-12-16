@@ -141,9 +141,9 @@ impl Features for Board {
         for index in 0..361 {
             let other = symmetry_table[index] as usize;
 
-            if self.inner.vertices[index] == current {
+            if self.inner.vertices[index].color() == current {
                 features[O::index(3, other)] = c_1;
-            } else if self.inner.vertices[index] != 0 {
+            } else if self.inner.vertices[index].color() != 0 {
                 features[O::index(4, other)] = c_1;
             }
         }
@@ -165,8 +165,8 @@ impl Features for Board {
         for index in 0..361 {
             let other = symmetry_table[index] as usize;
 
-            if self.inner.vertices[index] != 0 {
-                let start = if self.inner.vertices[index] == current { 11 } else { 23 };
+            if self.inner.vertices[index].color() != 0 {
+                let start = if self.inner.vertices[index].color() == current { 11 } else { 23 };
                 let num_liberties = ::std::cmp::min(
                     get_num_liberties(&self.inner, index, &mut liberties),
                     6
@@ -193,7 +193,7 @@ impl Features for Board {
         for index in 0..361 {
             let other = symmetry_table[index] as usize;
 
-            if self.inner.vertices[index] != 0 {
+            if self.inner.vertices[index].color() != 0 {
                 // pass
             } else if _is_valid_memoize(&self.inner, color, index, &mut liberties) {
                 // is super-ko
@@ -252,7 +252,7 @@ fn fill_liberties(board: &BoardFast, index: usize, liberties: &mut [u8]) {
             }
         });
 
-        current = board.next_vertex[current] as usize;
+        current = board.vertices[current].next_vertex() as usize;
 
         if current == index {
             break;
@@ -286,7 +286,7 @@ fn get_num_liberties(board: &BoardFast, index: usize, memoize: &mut [usize]) -> 
         loop {
             memoize[current] = num_liberties;
 
-            current = board.next_vertex[current] as usize;
+            current = board.vertices[current].next_vertex() as usize;
             if current == index {
                 break;
             }
@@ -310,7 +310,7 @@ fn get_num_liberties(board: &BoardFast, index: usize, memoize: &mut [usize]) -> 
 /// * `memoize` - cache of already calculated liberty counts
 ///
 fn _is_valid_memoize(board: &BoardFast, color: Color, index: usize, memoize: &mut [usize]) -> bool {
-    debug_assert!(board.vertices[index] == 0);
+    debug_assert!(board.vertices[index].color() == 0);
 
     let current = color as u8;
 
@@ -326,7 +326,7 @@ fn _is_valid_memoize(board: &BoardFast, color: Color, index: usize, memoize: &mu
         //    least two liberties.
         // 2. If a neighbour is unfriendly then we are fine if it has less
         //    than two liberties (i.e. one).
-        if value != 0xff && (value == current) == (get_num_liberties(board, other_index, memoize) >= 2) {
+        if value != 0x3 && (value == current) == (get_num_liberties(board, other_index, memoize) >= 2) {
             return true;
         }
     });
@@ -343,10 +343,10 @@ fn _is_valid_memoize(board: &BoardFast, color: Color, index: usize, memoize: &mu
 /// * `index` - the index of the stone to pretend place
 ///
 fn get_num_liberties_if(board: &BoardFast, color: Color, index: usize, memoize: &mut [usize]) -> usize {
-    debug_assert!(board.vertices[index] == 0);
+    debug_assert!(board.vertices[index].color() == 0);
 
     let mut other = board.clone();
-    other.vertices[index] = color as u8;
+    other.vertices[index].set_color(color as u8);
 
     // capture of opponent stones
     let current = color as u8;

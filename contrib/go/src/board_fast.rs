@@ -148,7 +148,9 @@ macro_rules! foreach_nd {
                 *::codegen::$dir.get_unchecked($source) as usize
             };
             let $value = unsafe {
-                *$this.vertices.get_unchecked($index)
+                use ::board_fast::Vertex;
+
+                (*$this.vertices.get_unchecked($index)).color()
             };
 
             $stmt
@@ -183,7 +185,9 @@ macro_rules! find_nd {
                 *::codegen::$dir.get_unchecked($source) as usize
             };
             let $value = unsafe {
-                *$this.vertices.get_unchecked($index)
+                use ::board_fast::Vertex;
+
+                (*$this.vertices.get_unchecked($index)).color()
             };
 
             $stmt
@@ -210,19 +214,61 @@ macro_rules! find_4d {
     }};
 }
 
+pub trait Vertex {
+    fn color(self) -> u8;
+    fn set_color(&mut self, color: u8);
+    fn next_vertex(self) -> u16;
+    fn set_next_vertex(&mut self, next_vertex: u16);
+    fn visited(self) -> bool;
+    fn set_visited(&mut self, visited: bool);
+}
+
+impl Vertex for u16 {
+    #[inline(always)]
+    fn color(self) -> u8 {
+        (self & 0x3) as u8
+    }
+
+    #[inline(always)]
+    fn set_color(&mut self, color: u8) {
+        debug_assert!(color <= 3);
+
+        *self = *self & 0xfffc | color as u16;
+    }
+
+    #[inline(always)]
+    fn next_vertex(self) -> u16 {
+        (self & 0x7fff) >> 2
+    }
+
+    #[inline(always)]
+    fn set_next_vertex(&mut self, next_vertex: u16) {
+        *self = (*self & 0x8003) | (next_vertex << 2);
+    }
+
+    #[inline(always)]
+    fn visited(self) -> bool {
+        (self & 0x8000) != 0
+    }
+
+    #[inline(always)]
+    fn set_visited(&mut self, visited: bool) {
+        *self = (*self & 0x7fff) | if visited { 0x8000 } else { 0 }
+    }
+}
+
 /// Minimal representation of a go board that implements all rules (except super-ko).
 #[derive(Clone)]
 pub struct BoardFast {
-    /// The color of the stone that is occupying each vertex. This array
-    /// should in addition contain at least one extra padding element that
-    /// contains `0xff`, this extra element is used to the out-of-bounds
-    /// index to avoid extra branches.
-    pub vertices: [u8; 368],
-
-    /// The index of a stone that is strongly connected to each vertex in
-    /// such a way that every stone in a strongly connected group forms
-    /// a cycle.
-    pub next_vertex: [u16; 361]
+    /// Packed bit structure that contains the following fields. It has been padded
+    /// with additional elements at the end that are used instead of out-of-bounds
+    /// checks.
+    ///
+    /// - `color` - 2 bits
+    /// - `next_vertex` - 13 bits
+    /// - `visited` - 1 bit
+    ///
+    pub vertices: [u16; 368],
 }
 
 impl BoardFast {
@@ -230,13 +276,12 @@ impl BoardFast {
     pub fn new() -> BoardFast {
         let mut board = BoardFast {
             vertices: [0; 368],
-            next_vertex: [0; 361]
         };
 
         // fill the padding with _invalid_ elements that does not match either
         // of the three possible vertices (`Black`, `White`, and `Empty`).
         for i in 361..368 {
-            board.vertices[i] = 0xff;
+            board.vertices[i].set_color(0x3);
         }
 
         board
@@ -272,7 +317,7 @@ impl BoardFast {
                 }
             });
 
-            current = unsafe { *self.next_vertex.get_unchecked(current) as usize };
+            current = unsafe { (*self.vertices.get_unchecked(current)).next_vertex() as usize };
             if current == index {
                 break;
             }
@@ -305,7 +350,7 @@ impl BoardFast {
                 }
             });
 
-            current = unsafe { *self.next_vertex.get_unchecked(current) as usize };
+            current = unsafe { (*self.vertices.get_unchecked(current)).next_vertex() as usize };
             if current == index {
                 break;
             }
@@ -345,7 +390,7 @@ impl BoardFast {
                     }
                 });
 
-                current = unsafe { *self.next_vertex.get_unchecked(current) as usize };
+                current = unsafe { (*self.vertices.get_unchecked(current)).next_vertex() as usize };
                 if current == index {
                     break;
                 }
@@ -369,7 +414,7 @@ impl BoardFast {
         loop {
             workspace[current] = value;
 
-            current = unsafe { *self.next_vertex.get_unchecked(current) as usize };
+            current = unsafe { (*self.vertices.get_unchecked(current)).next_vertex() as usize };
             if current == index {
                 break;
             }
@@ -385,7 +430,7 @@ impl BoardFast {
     /// * `index` - the HW index of the move
     ///
     pub fn is_valid(&self, color: Color, index: usize) -> bool {
-        self.vertices[index] == 0 && {
+        self.vertices[index].color() == 0 && {
             let current = color as u8;
 
             foreach_4d!(self, index, |other_index, value| {
@@ -400,7 +445,7 @@ impl BoardFast {
                 //    least two liberties.
                 // 2. If a neighbour is unfriendly then we are fine if it has less
                 //    than two liberties (i.e. one).
-                if value != 0xff && (value == current) == self.has_n_liberty::<Two>(other_index, 2) {
+                if value != 0x3 && (value == current) == self.has_n_liberty::<Two>(other_index, 2) {
                     return true;
                 }
             });
@@ -420,7 +465,7 @@ impl BoardFast {
     ///
     #[inline(always)]
     pub fn is_valid_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
-        self.vertices[index] == 0 && {
+        self.vertices[index].color() == 0 && {
             let current = color as u8;
 
             foreach_4d!(self, index, |other_index, value| {
@@ -435,7 +480,7 @@ impl BoardFast {
                 //    least two liberties.
                 // 2. If a neighbour is unfriendly then we are fine if it has less
                 //    than two liberties (i.e. one).
-                if value != 0xff && (value == current) == self.has_n_liberty_mut::<Two>(other_index, 2, workspace) {
+                if value != 0x3 && (value == current) == self.has_n_liberty_mut::<Two>(other_index, 2, workspace) {
                     return true;
                 }
             });
@@ -465,7 +510,7 @@ impl BoardFast {
                 return;
             }
 
-            current = self.next_vertex[current] as usize;
+            current = unsafe { (*self.vertices.get_unchecked(current)).next_vertex() } as usize;
             if current == index {
                 break;
             }
@@ -480,11 +525,11 @@ impl BoardFast {
         //
         //   a -> 2 -> 3 -> 1 -> b -> c -> a
         //
-        let index_prev = self.next_vertex[index];
-        let other_prev = self.next_vertex[other];
+        let index_prev = self.vertices[index].next_vertex();
+        let other_prev = self.vertices[other].next_vertex();
 
-        self.next_vertex[other] = index_prev;
-        self.next_vertex[index] = other_prev;
+        self.vertices[other].set_next_vertex(index_prev);
+        self.vertices[index].set_next_vertex(other_prev);
     }
 
     /// Returns the zobrist hash adjustment that would need to be done if the
@@ -503,7 +548,7 @@ impl BoardFast {
         loop {
             adjust ^= zobrist::TABLE[color][current];
 
-            current = self.next_vertex[current] as usize;
+            current = self.vertices[current].next_vertex() as usize;
             if current == index {
                 break;
             }
@@ -527,9 +572,9 @@ impl BoardFast {
 
         loop {
             hash ^= zobrist::TABLE[color][current];
-            self.vertices[current] = 0;
+            self.vertices[current].set_color(0);
 
-            current = self.next_vertex[current] as usize;
+            current = self.vertices[current].next_vertex() as usize;
             if current == index {
                 break;
             }
@@ -597,8 +642,9 @@ impl BoardFast {
 
         // place the stone on the board regardless of whether it is legal
         // or not.
-        self.vertices[index] = color as u8;
-        self.next_vertex[index] = index as u16;
+        self.vertices[index].set_color(color as u8);
+        self.vertices[index].set_next_vertex(index as u16);
+        self.vertices[index].set_visited(true);
 
         // connect this stone to any neighbouring groups
         foreach_4d!(self, index, |other_index, value| {
@@ -623,5 +669,131 @@ impl BoardFast {
 
 #[cfg(test)]
 mod tests {
-    // pass
+    use super::*;
+
+    #[test]
+    fn bitfield_cnv() {
+        let mut x: u16 = 0;
+
+        for color in 0..3 {
+            x.set_color(color);
+
+            for next_vertex in 0..362 {
+                x.set_next_vertex(next_vertex);
+
+                for visited in vec! [true, false] {
+                    x.set_visited(visited);
+
+                    assert_eq!(x.color(), color);
+                    assert_eq!(x.next_vertex(), next_vertex);
+                    assert_eq!(x.visited(), visited);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bitfield_cvn() {
+        let mut x: u16 = 0;
+
+        for color in 0..3 {
+            x.set_color(color);
+
+            for visited in vec! [true, false] {
+                x.set_visited(visited);
+
+                for next_vertex in 0..362 {
+                    x.set_next_vertex(next_vertex);
+
+                    assert_eq!(x.color(), color);
+                    assert_eq!(x.next_vertex(), next_vertex);
+                    assert_eq!(x.visited(), visited);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bitfield_vcn() {
+        let mut x: u16 = 0;
+
+        for visited in vec! [true, false] {
+            x.set_visited(visited);
+
+            for color in 0..3 {
+                x.set_color(color);
+
+                for next_vertex in 0..362 {
+                    x.set_next_vertex(next_vertex);
+
+                    assert_eq!(x.color(), color);
+                    assert_eq!(x.next_vertex(), next_vertex);
+                    assert_eq!(x.visited(), visited);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bitfield_vnc() {
+        let mut x: u16 = 0;
+
+        for visited in vec! [true, false] {
+            x.set_visited(visited);
+
+            for next_vertex in 0..362 {
+                x.set_next_vertex(next_vertex);
+
+                for color in 0..3 {
+                    x.set_color(color);
+
+                    assert_eq!(x.color(), color);
+                    assert_eq!(x.next_vertex(), next_vertex);
+                    assert_eq!(x.visited(), visited);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bitfield_ncv() {
+        let mut x: u16 = 0;
+
+        for next_vertex in 0..362 {
+            x.set_next_vertex(next_vertex);
+
+            for color in 0..3 {
+                x.set_color(color);
+
+                for visited in vec! [true, false] {
+                    x.set_visited(visited);
+
+                    assert_eq!(x.color(), color);
+                    assert_eq!(x.next_vertex(), next_vertex);
+                    assert_eq!(x.visited(), visited);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bitfield_nvc() {
+        let mut x: u16 = 0;
+
+        for next_vertex in 0..362 {
+            x.set_next_vertex(next_vertex);
+
+            for visited in vec! [true, false] {
+                x.set_visited(visited);
+
+                for color in 0..3 {
+                    x.set_color(color);
+
+                    assert_eq!(x.color(), color);
+                    assert_eq!(x.next_vertex(), next_vertex);
+                    assert_eq!(x.visited(), visited);
+                }
+            }
+        }
+    }
 }

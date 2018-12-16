@@ -15,6 +15,7 @@
 use std::cell::RefCell;
 use std::mem;
 
+use board_fast::{Vertex};
 use board::Board;
 
 fn get_transformation<F, G>(ax: F, ay: G) -> Box<[u16]>
@@ -189,7 +190,7 @@ pub fn is_symmetric(board: &Board, transform: Transform) -> bool {
     (0..361).all(|i| {
         let j = lookup[i] as usize;
 
-        board.inner.vertices[i] == board.inner.vertices[j]
+        board.inner.vertices[i].color() == board.inner.vertices[j].color()
     })
 }
 

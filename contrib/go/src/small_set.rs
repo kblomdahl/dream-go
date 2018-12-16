@@ -12,51 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use asm::{contains_u16x16, contains_u64x16};
+use asm::contains_u64x16;
 
 const SET_SIZE: usize = 16;
-
-/// A LRA set that only keeps the eight most recently added values.
-#[derive(Clone)]
-#[repr(align(16))]
-pub struct SmallSet16 {
-    buf: [u16; SET_SIZE],
-    count: usize
-}
-
-impl SmallSet16 {
-    /// Returns an empty set.
-    pub fn new() -> SmallSet16 {
-        SmallSet16 { buf: [0xffff; SET_SIZE], count: 0 }
-    }
-
-    /// Adds the given value to this set, removing the oldest value if
-    /// the set overflows.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - the value to add to the set
-    ///
-    pub fn push(&mut self, value: u16) {
-        self.buf[self.count] = value;
-        self.count += 1;
-
-        if self.count == SET_SIZE {
-            self.count = 0;
-        }
-    }
-
-    /// Returns true if this set contains the given value.
-    ///
-    /// # Arguments
-    ///
-    /// * `other` - the value to look for
-    ///
-    #[inline(always)]
-    pub fn contains(&self, other: u16) -> bool {
-        contains_u16x16(&self.buf, other)
-    }
-}
 
 /// A LRA set that only keeps the eight most recently added values.
 #[derive(Clone)]
@@ -151,33 +109,6 @@ mod tests {
     #[bench]
     fn contains_64(b: &mut Bencher) {
         let mut s = SmallSet64::new();
-
-        s.push(1);
-        s.push(2);
-        s.push(3);
-
-        b.iter(|| {
-            assert_eq!(s.contains(8), false);
-        });
-    }
-
-    #[test]
-    fn check_16() {
-        let mut s = SmallSet16::new();
-
-        s.push(1);
-        s.push(2);
-        s.push(3);
-
-        assert!(s.contains(1));
-        assert!(s.contains(2));
-        assert!(s.contains(3));
-        assert!(!s.contains(4));
-    }
-
-    #[bench]
-    fn contains_16(b: &mut Bencher) {
-        let mut s = SmallSet16::new();
 
         s.push(1);
         s.push(2);

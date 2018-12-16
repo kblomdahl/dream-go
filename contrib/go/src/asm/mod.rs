@@ -16,4 +16,4 @@ mod count_zeros;
 mod contains;
 
 pub use self::count_zeros::count_zeros;
-pub use self::contains::{contains_u16x16, contains_u64x16};
+pub use self::contains::contains_u64x16;

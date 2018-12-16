@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use board_fast::BoardFast;
+use board_fast::{BoardFast, Vertex};
 use board::Board;
 use color::Color;
 
@@ -89,8 +89,8 @@ pub trait Score {
 
 impl Score for Board {
     fn is_scoreable(&self) -> bool {
-        let some_black = (0..361).any(|i| self.inner.vertices[i] == Color::Black as u8);
-        let some_white = (0..361).any(|i| self.inner.vertices[i] == Color::White as u8);
+        let some_black = (0..361).any(|i| self.inner.vertices[i].color() == Color::Black as u8);
+        let some_white = (0..361).any(|i| self.inner.vertices[i].color() == Color::White as u8);
 
         some_black && some_white && {
             let black_distance = get_territory_distance(&self.inner, Color::Black);
@@ -116,17 +116,17 @@ impl Score for Board {
         let mut other = self.inner.clone();
 
         for i in 0..361 {
-            if other.vertices[i] == finished.inner.vertices[i] {
+            if other.vertices[i].color() == finished.inner.vertices[i].color() {
                 // pass
-            } else if other.vertices[i] != 0 {
-                if finished.inner.vertices[i] == 0 {
-                    if other.vertices[i] == Color::Black as u8 && white_distance[i] != 0xff {
-                        other.vertices[i] = 0; // black stone is not black territory, nor stone
-                    } else if other.vertices[i] == Color::White as u8 && black_distance[i] != 0xff {
-                        other.vertices[i] = 0; // white stone is not white territory, nor stone
+            } else if other.vertices[i].color() != 0 {
+                if finished.inner.vertices[i].color() == 0 {
+                    if other.vertices[i].color() == Color::Black as u8 && white_distance[i] != 0xff {
+                        other.vertices[i].set_color(0); // black stone is not black territory, nor stone
+                    } else if other.vertices[i].color() == Color::White as u8 && black_distance[i] != 0xff {
+                        other.vertices[i].set_color(0); // white stone is not white territory, nor stone
                     }
                 } else {
-                    other.vertices[i] = 0; // remove dead stone
+                    other.vertices[i].set_color(0); // remove dead stone
                 }
             }
         }
@@ -140,15 +140,15 @@ impl Score for Board {
         let mut status_list = vec! [];
 
         for i in 0..361 {
-            if self.inner.vertices[i] == finished.inner.vertices[i] {
-                if self.inner.vertices[i] != 0 {
+            if self.inner.vertices[i].color() == finished.inner.vertices[i].color() {
+                if self.inner.vertices[i].color() != 0 {
                     status_list.push((i, StoneStatus::Alive));
                 }
-            } else if self.inner.vertices[i] != 0 {
-                if finished.inner.vertices[i] == 0 {
-                    if self.inner.vertices[i] == Color::Black as u8 && white_distance[i] != 0xff {
+            } else if self.inner.vertices[i].color() != 0 {
+                if finished.inner.vertices[i].color() == 0 {
+                    if self.inner.vertices[i].color() == Color::Black as u8 && white_distance[i] != 0xff {
                         status_list.push((i, StoneStatus::Dead));
-                    } else if self.inner.vertices[i] == Color::White as u8 && black_distance[i] != 0xff {
+                    } else if self.inner.vertices[i].color() == Color::White as u8 && black_distance[i] != 0xff {
                         status_list.push((i, StoneStatus::Dead));
                     }
                 } else {
@@ -204,7 +204,7 @@ fn get_territory_distance(board: &BoardFast, color: Color) -> [u8; 368] {
     let mut probes = VecDeque::with_capacity(512);
 
     for index in 0..361 {
-        if board.vertices[index] == current {
+        if board.vertices[index].color() == current {
             territory[index] = 0;
             probes.push_back(index);
         }

@@ -22,48 +22,6 @@ use std::arch::x86_64::*;
 /// * `other` - the value to look for
 ///
 #[target_feature(enable = "sse2,avx,avx2")]
-unsafe fn _contains_u16x16_avx2(haystack: &[u16], needle: u16) -> bool {
-    let haystack = haystack.as_ptr();
-
-    // unroll the entire loop for a better pipeline
-    let needle = _mm_set1_epi16(needle as i16);
-    let a = _mm_loadu_si128(haystack.add(0) as *const _);
-    let b = _mm_loadu_si128(haystack.add(8) as *const _);
-    let eq_a = _mm_cmpeq_epi16(a, needle);
-    let eq_b = _mm_cmpeq_epi16(b, needle);
-
-    // we do not care where the needle was found, just if it is present so just
-    // squash all of the elements together.
-    let or = _mm_or_si128(eq_a, eq_b);
-
-    _mm_movemask_epi8(or) != 0
-}
-
-/// Returns true if this set contains the given value.
-///
-/// # Arguments
-///
-/// * `other` - the value to look for
-///
-#[inline(always)]
-pub fn contains_u16x16(haystack: &[u16], needle: u16) -> bool {
-    debug_assert_eq!(haystack.len(), 16);
-
-    if is_x86_feature_detected!("avx2") {
-        unsafe { _contains_u16x16_avx2(haystack, needle) }
-    } else {
-        (0..16).any(|x| haystack[x] == needle)
-    }
-}
-
-/// Returns true if this set contains the given value (using SSE2, and AVX2
-/// instructions).
-///
-/// # Arguments
-///
-/// * `other` - the value to look for
-///
-#[target_feature(enable = "sse2,avx,avx2")]
 unsafe fn _contains_u64x16_avx2(haystack: &[u64], needle: u64) -> bool {
     let mut haystack = haystack.as_ptr();
 
