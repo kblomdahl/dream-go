@@ -16,7 +16,35 @@ use ordered_float::OrderedFloat;
 
 use go::{Board, Color};
 use util::config;
+use mcts::asm::sum_finite_f32;
 use mcts::*;
+
+/// Returns the skewness of the given policy. A large return value says that
+/// the given input `policy` is less certain, and therefore more interesting
+/// to search on.
+///
+/// # Arguments
+///
+/// * `policy` -
+///
+fn skewness(policy: &[f32]) -> f32 {
+    let mean = sum_finite_f32(&policy) / (policy.len() as f32);
+
+    // calculate the second and third moments
+    let k_3 = policy.iter()
+        .filter(|&p| p.is_finite())
+        .map(|&p| (p - mean).powi(3))
+        .sum::<f32>() / (policy.len() as f32);
+    let k_2 = policy.iter()
+        .filter(|&p| p.is_finite())
+        .map(|&p| (p - mean).powi(2))
+        .sum::<f32>() / (policy.len() as f32 - 1.0);
+
+    // calculate the skew, and then inverse it so that a low skew becomes _good_
+    let b = k_3 / k_2.powf(3.0 / 2.0);
+
+    1.0 / b.powi(2)
+}
 
 /// pick the move from the policy by taking the top 80% of the policy, and then
 /// choosing a move from the remains (weighted by the moves policy value)
@@ -148,29 +176,31 @@ fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
     let mut board = Board::new(get_random_komi());
     let mut color = Color::Black;
     let mut pass_count = 0;
+    let mut total_skew = 0.0;
 
     while pass_count < 2 && board.count() < 722 {
         let result = policy_forward(&server, &board, color);
-        let index = if let Some((_value, policy)) = result {
+        let (index, skew) = if let Some((_value, policy)) = result {
             match policy_choose(&policy, temperature) {
-                Some(index) => index,
-                None => 361
+                Some(index) => (index, skewness(&policy)),
+                None => (361, 0.0)
             }
         } else {
             break;  // failure?
         };
 
         if index == 361 {
-            sgf.push((board.clone(), color, format!(";{}[]", color)));
+            sgf.push((board.clone(), color, skew, format!(";{}[]", color)));
             pass_count += 1;
         } else {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
-            sgf.push((board.clone(), color, format!(";{}[{}]", color, CGoban::to_sgf(x, y))));
+            sgf.push((board.clone(), color, skew, format!(";{}[{}]", color, CGoban::to_sgf(x, y))));
             board.place(color, x, y);
             pass_count = 0;
         }
 
+        total_skew += skew;
         temperature = min(5.0, 1.03 * temperature);
         color = color.opposite();
     }
@@ -178,24 +208,43 @@ fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
     // if we are running with --ex-it then we need compute policies for some
     // moves.
     if ex_it {
-        // shuffle the indices randomly, and pluck the `n` first indices
+        // reject the top 50% most skewed prior values, since they will not produce useful
+        // search trees anyway.
         let mut indices = (0..sgf.len()).collect::<Vec<_>>();
-        thread_rng().shuffle(&mut indices);
-
         let num_samples = match *config::NUM_SAMPLES {
             config::SamplingStrategy::Percent(pct) => (pct * indices.len() as f32) as usize,
-            config::SamplingStrategy::Fixed(num) => num
+            config::SamplingStrategy::Fixed(num) => ::std::cmp::min(num, indices.len())
         };
 
-        // compute the policy
-        for i in indices.into_iter().take(num_samples) {
+        for _j in 0..num_samples {
+            let cutoff = thread_rng().gen::<f32>() * total_skew;
+            let mut so_far = 0.0;
+            let mut i;
+            let mut j = 0;
+
+            loop {
+                i = indices[j];
+                so_far += sgf[i].2;
+
+                if so_far >= cutoff {
+                    break
+                }
+
+                j += 1;
+            }
+
+            // for each `i`, compute the _true_ policy using MCTS
             let (policy_sgf, value_sgf) = policy_ex_it(server, &sgf[i].0, sgf[i].1);
 
-            sgf[i].2 = format!("{}P[{}]V[{:.4}]", sgf[i].2, policy_sgf, value_sgf);
+            sgf[i].3 = format!("{}P[{}]V[{:.4}]", sgf[i].3, policy_sgf, value_sgf);
+
+            // remove the sample from the available samples so that we do not compute it twice
+            total_skew -= sgf[i].2;
+            indices.swap_remove(j);
         }
     }
 
-    GameResult::Ended(sgf.into_iter().fold(String::new(), |acc, (_board, _color, sgf)| acc + &sgf), board)
+    GameResult::Ended(sgf.into_iter().fold(String::new(), |acc, (_board, _color, _skew, sgf)| acc + &sgf), board)
 }
 
 /// Play games against the engine and return the results of the game over

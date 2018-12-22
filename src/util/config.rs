@@ -37,7 +37,7 @@ impl FromStr for SamplingStrategy {
         let s = s.trim();
 
         if s.ends_with("%") {
-            let s = s.trim_right_matches("%");
+            let s = s.trim_end_matches("%");
 
             s.parse::<f32>()
                 .map_err(|_| ())
