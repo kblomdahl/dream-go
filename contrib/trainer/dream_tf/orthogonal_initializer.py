@@ -60,7 +60,10 @@ def orthogonal_initializer():
         if num_rows < num_cols:
             q = np.transpose(q, [1, 0])
 
-        return np.reshape(q, shape) / np.linalg.norm(q, ord=2)
+        # normalize each output dimension so that its norm is one
+        q_n = np.linalg.norm(q, ord=2, axis=0)
+
+        return np.reshape(q / (np.sqrt(shape[-1]) * q_n[np.newaxis, :]), shape)
 
     return _init
 
@@ -78,13 +81,21 @@ def orthogonal_loss(x):
     num_cols = x.shape[-1]
 
     if num_rows < num_cols:
-        flat_shape = (num_cols, num_rows)
-    else:
         flat_shape = (num_rows, num_cols)
+    else:
+        flat_shape = (num_cols, num_rows)
 
     # calculate how orthogonal this matrix is
-    x = np.reshape(x, flat_shape)
-    x_t = np.transpose(x, [1, 0])
-    i = np.matmul(x, x_t)
+    if type(x) == np.ndarray:
+        x = np.reshape(x, flat_shape)
+        x_t = np.transpose(x, [1, 0])
+        i = np.matmul(x, x_t)
 
-    return np.linalg.norm(i - np.identity(i.shape[0]), ord=1)
+        return np.sum(np.abs(i - np.identity(i.shape[0])))
+    else:
+        x = tf.reshape(x, flat_shape)
+        x_t = tf.transpose(x, [1, 0])
+        i = tf.matmul(x, x_t)
+
+        return tf.reduce_sum(tf.abs(i - tf.eye(int(i.shape[0]))))
+

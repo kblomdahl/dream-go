@@ -21,98 +21,157 @@
 import argparse
 import base64
 import json
-import math
 from datetime import datetime
 
 import numpy as np
 import tensorflow as tf
 
 from tensorflow.python import debug as tf_debug
+from .boost_table import BOOST_PER_MOVE_NUMBER
 from .learning_rate import LEARNING_RATE, LOSS, LearningRateScheduler
 from .orthogonal_initializer import orthogonal_initializer, orthogonal_loss
 from .pretty_print import to_sgf_heatmap
 
 NUM_FEATURES = 32  # the total number of input features
 MAX_STEPS = 524288000  # the default total number of examples to train over
-BATCH_SIZE = 512  # the default number of examples per batch
+BATCH_SIZE = 2048  # the default number of examples per batch
 
 DUMP_OPS = 'DumpOps'  # the graph collection that contains all dump operations
 
 # -------- Graph Components --------
 
+def recompute_grad(func):
+    @tf.custom_gradient
+    def _forward(x):
+        # calculate the forward pass, while keeping track of which variables
+        # were accessed
+        with tf.GradientTape() as tape:
+            y = func(x, is_recomputing=False)
+
+        original_vars = set(tape.watched_variables())
+        var_scope = tf.get_variable_scope()
+
+        def grad_fn(output_grad, variables=None):
+            assert set(variables) == original_vars, "Wrong variables passed to @tf.custom_gradient function"
+
+            # re-calculate the gradient
+            in_var = tf.identity(x)
+
+            with tf.control_dependencies([output_grad]):
+                with tf.variable_scope(var_scope, reuse=True):
+                    y = func(in_var, is_recomputing=True)
+
+            grads = tf.gradients(
+                [y],
+                [in_var] + variables,
+                [output_grad],
+                gate_gradients=True,
+                aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
+                colocate_gradients_with_ops=True
+            )
+
+            return grads[:1], grads[1:]
+
+        return y, grad_fn
+
+    return _forward
+
 def normalize_constraint(x):
-    """ Returns a constraint that set `tf.norm(x) = 1` """
-    return x / tf.norm(x)
+    """ Returns a constraint that set each output vector to `tf.norm(x) = 1` """
+    out_dims = x.shape[-1]
+    y = tf.norm(tf.reshape(x, (-1, out_dims)), axis=0)
+
+    return x / (tf.sqrt(tf.cast(out_dims, tf.float32)) * tf.reshape(y, (1, 1, 1, out_dims)))
 
 def unit_constraint(x):
     """ Return a constraint that clip `x` to the range [0, 1] """
-    return tf.minimum(tf.maximum(x, 0.0), 1.0)
+    return tf.clip_by_value(x, 0.0, 1.0)
 
 def relu3(x):
     """ Returns `min(max(x, 0), 3)`, this is useful to simulate quantized inference. """
-    return tf.minimum(tf.nn.relu(x), 3.09023)
+    return tf.clip_by_value(x, 0.0, 3.09023)
 
-def batch_norm(x, weights, mode, params):
+def conv2d(x, weights):
+    """ Shortcut for `tf.nn.conv2d` """
+    return tf.nn.conv2d(x, tf.cast(weights, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
+
+def compute_gradients(loss, **kwargs):
+    """ Shortcut to _tf.gradients_ (or similar alternatives) """
+
+    var_list = tf.trainable_variables()
+    grads = tf.gradients(
+        loss,
+        var_list,
+        gate_gradients=True,
+        aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
+        #colocate_gradients_with_ops=True  # would force _custom gradients_ to the CPU
+        **kwargs
+    )
+
+    return grads, var_list
+
+def batch_norm(x, weights, mode, params, is_recomputing=False):
     """ Batch normalization layer. """
     num_channels = weights.shape[3]
     ones_op = tf.ones_initializer()
     zeros_op = tf.zeros_initializer()
 
     with tf.variable_scope(weights.op.name.split('/')[-1]):
-        scale = tf.get_variable('scale', (num_channels,), tf.float32, ones_op, trainable=False)
-        mean = tf.get_variable('mean', (num_channels,), tf.float32, zeros_op, trainable=False)
-        variance = tf.get_variable('variance', (num_channels,), tf.float32, ones_op, trainable=False)
-        offset = tf.get_variable('offset', (num_channels,), tf.float32, zeros_op, trainable=True)
+        scale = tf.get_variable('scale', (num_channels,), tf.float32, ones_op, trainable=False, use_resource=True)
+        mean = tf.get_variable('mean', (num_channels,), tf.float32, zeros_op, trainable=False, use_resource=True)
+        variance = tf.get_variable('variance', (num_channels,), tf.float32, ones_op, trainable=False, use_resource=True)
+        offset = tf.get_variable('offset', (num_channels,), tf.float32, zeros_op, trainable=True, use_resource=True)
 
-    # fold the batch normalization into the convolutional weights and one
-    # additional bias term. By scaling the weights and the mean by the
-    # term `scale / sqrt(variance + 0.001)`.
-    #
-    # Also multiply the mean by -1 since the bias term uses addition, while
-    # batch normalization assumes subtraction.
-    #
-    # The weights are scaled using broadcasting, where all input weights for
-    # a given output feature are scaled by that features term.
-    #
-    std_ = tf.sqrt(variance + 0.001)
-    offset_ = offset - mean / std_
-    weights_ = tf.multiply(
-        weights,
-        tf.reshape(scale / std_, (1, 1, 1, num_channels))
-    )
+    if not is_recomputing:
+        # fold the batch normalization into the convolutional weights and one
+        # additional bias term. By scaling the weights and the mean by the
+        # term `scale / sqrt(variance + 0.001)`.
+        #
+        # Also multiply the mean by -1 since the bias term uses addition, while
+        # batch normalization assumes subtraction.
+        #
+        # The weights are scaled using broadcasting, where all input weights for
+        # a given output feature are scaled by that features term.
+        #
+        std_ = tf.sqrt(variance + 0.001)
+        offset_ = offset - mean / std_
+        weights_ = tf.multiply(
+            weights,
+            tf.reshape(scale / std_, (1, 1, 1, num_channels))
+        )
 
-    # fix the weights so that they appear in the _correct_ order according
-    # to cuDNN.
-    #
-    # tensorflow: [h, w, in, out]
-    # cudnn:      [out, in, h, w]
-    weights_ = tf.reshape(weights_, [
-        weights_.shape[0],
-        weights_.shape[1],
-        -1,  # weights_.shape[2] / 4
-        4,
-        weights_.shape[3]
-    ])
-    weights_ = tf.transpose(weights_, [4, 2, 0, 1, 3])
+        # fix the weights so that they appear in the _correct_ order according
+        # to cuDNN.
+        #
+        # tensorflow: [h, w, in, out]
+        # cudnn:      [out, in, h, w]
+        weights_ = tf.reshape(weights_, [
+            weights_.shape[0],
+            weights_.shape[1],
+            -1,  # weights_.shape[2] / 4
+            4,
+            weights_.shape[3]
+        ])
+        weights_ = tf.transpose(weights_, [4, 2, 0, 1, 3])
 
-    # quantize the weights to [-127, +127] and the offset to the same range
-    # but as a floating point number as required by cuDNN. Note that this range
-    # contains 255 values for the range [-3.0, +3.0] for the offset, so the
-    # step size becomes `(6.0 / 255.0)`
-    weights_max = tf.reduce_max(tf.abs(weights_))
-    weights_q, weights_qmin, weights_qmax = tf.quantize(
-        weights_,
-        -weights_max,
-        weights_max,
-        tf.qint8,
-        'SCALED',
-        'HALF_AWAY_FROM_ZERO'
-    )
+        # quantize the weights to [-127, +127] and the offset to the same range
+        # but as a floating point number as required by cuDNN. Note that this range
+        # contains 255 values for the range [-3.0, +3.0] for the offset, so the
+        # step size becomes `(6.0 / 255.0)`
+        weights_max = tf.reduce_max(tf.abs(weights_))
+        weights_q, weights_qmin, weights_qmax = tf.quantize(
+            weights_,
+            -weights_max,
+            weights_max,
+            tf.qint8,
+            'SCALED',
+            'HALF_AWAY_FROM_ZERO'
+        )
 
-    step_size = (2 * 3.09023) / 255.0
+        step_size = (2 * 3.09023) / 255.0
 
-    tf.add_to_collection(DUMP_OPS, [offset, offset_ / step_size, 'f4', tf.constant(127.0 * step_size)])
-    tf.add_to_collection(DUMP_OPS, [weights, weights_q, 'i1', tf.reduce_max([tf.abs(weights_qmin), tf.abs(weights_qmax)])])
+        tf.add_to_collection(DUMP_OPS, [offset, offset_ / step_size, 'f4', tf.constant(127.0 * step_size)])
+        tf.add_to_collection(DUMP_OPS, [weights, weights_q, 'i1', tf.reduce_max([tf.abs(weights_qmin), tf.abs(weights_qmax)])])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
@@ -127,12 +186,13 @@ def batch_norm(x, weights, mode, params):
                 is_training=True
             )
 
-            with tf.device(None):
-                update_mean_op = tf.assign_sub(mean, 0.01 * (mean - b_mean), use_locking=True)
-                update_variance_op = tf.assign_sub(variance, 0.01 * (variance - b_variance), use_locking=True)
+            if not is_recomputing:
+                with tf.device(None):
+                    update_mean_op = tf.assign_sub(mean, 0.01 * (mean - b_mean), use_locking=True)
+                    update_variance_op = tf.assign_sub(variance, 0.01 * (variance - b_variance), use_locking=True)
 
-                tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, update_mean_op)
-                tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, update_variance_op)
+                    tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, update_mean_op)
+                    tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, update_variance_op)
         else:
             y, _, _ = tf.nn.fused_batch_norm(
                 x,
@@ -168,28 +228,26 @@ def residual_block(x, mode, params):
     half_op = tf.constant_initializer(0.5, tf.float32)
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint)
-    conv_2 = tf.get_variable('conv_2', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint)
-    alpha = tf.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=True)
+    conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
+    conv_2 = tf.get_variable('conv_2', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
+    alpha = tf.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=True, use_resource=True)
 
     tf.add_to_collection(DUMP_OPS, [alpha, alpha, 'f4'])
 
-    def _forward(x):
+    def _forward(x, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """
 
         # the 1st convolution
-        y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = batch_norm(y, conv_1, mode, params)
+        y = batch_norm(conv2d(x, conv_1), conv_1, mode, params, is_recomputing=is_recomputing)
         y = relu3(y)
 
         # the 2nd convolution
-        y = tf.nn.conv2d(y, tf.cast(conv_2, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = batch_norm(y, conv_2, mode, params)
+        y = batch_norm(conv2d(y, conv_2), conv_2, mode, params, is_recomputing=is_recomputing)
         y = relu3(tf.cast(alpha, tf.float16) * y + tf.cast(1.0 - alpha, tf.float16) * x)
 
         return y
 
-    return _forward(x)
+    return recompute_grad(_forward)(x)
 
 def value_head(x, mode, params):
     """
@@ -207,11 +265,11 @@ def value_head(x, mode, params):
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op, constraint=normalize_constraint)
-    linear_1 = tf.get_variable('linear_1', (361, 256), tf.float32, init_op)
-    linear_2 = tf.get_variable('linear_2', (256, 1), tf.float32, init_op)
-    offset_1 = tf.get_variable('linear_1/offset', (256,), tf.float32, zeros_op)
-    offset_2 = tf.get_variable('linear_2/offset', (1,), tf.float32, zeros_op)
+    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
+    linear_1 = tf.get_variable('linear_1', (361, 256), tf.float32, init_op, use_resource=True)
+    linear_2 = tf.get_variable('linear_2', (256, 1), tf.float32, init_op, use_resource=True)
+    offset_1 = tf.get_variable('linear_1/offset', (256,), tf.float32, zeros_op, use_resource=True)
+    offset_2 = tf.get_variable('linear_2/offset', (1,), tf.float32, zeros_op, use_resource=True)
 
     tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f4'])
     tf.add_to_collection(DUMP_OPS, [linear_2, linear_2, 'f4'])
@@ -220,8 +278,7 @@ def value_head(x, mode, params):
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
-        y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = batch_norm(y, conv_1, mode, params)
+        y = batch_norm(conv2d(x, conv_1), conv_1, mode, params)
         y = tf.nn.relu(y)
 
         y = tf.reshape(y, (-1, 361))
@@ -248,17 +305,16 @@ def policy_head(x, mode, params):
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 2), tf.float32, init_op, constraint=normalize_constraint)
-    linear_1 = tf.get_variable('linear_1', (722, 362), tf.float32, init_op)
-    offset_1 = tf.get_variable('linear_1/offset', (362,), tf.float32, zeros_op)
+    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 2), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
+    linear_1 = tf.get_variable('linear_1', (722, 362), tf.float32, init_op, use_resource=True)
+    offset_1 = tf.get_variable('linear_1/offset', (362,), tf.float32, zeros_op, use_resource=True)
 
     tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f4'])
     tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f4'])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
-        y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = batch_norm(y, conv_1, mode, params)
+        y = batch_norm(conv2d(x, conv_1), conv_1, mode, params)
         y = tf.nn.relu(y)
 
         y = tf.reshape(y, (-1, 722))
@@ -283,10 +339,9 @@ def tower(x, mode, params):
     tf.add_to_collection(DUMP_OPS, [num_channels_, num_channels_, 'i4'])
 
     with tf.variable_scope('01_upsample', reuse=tf.AUTO_REUSE):
-        conv_1 = tf.get_variable('conv_1', (3, 3, num_inputs, num_channels), tf.float32, init_op, constraint=normalize_constraint)
+        conv_1 = tf.get_variable('conv_1', (3, 3, num_inputs, num_channels), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
 
-        y = tf.nn.conv2d(x, tf.cast(conv_1, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
-        y = batch_norm(y, conv_1, mode, params)
+        y = batch_norm(conv2d(x, conv_1), conv_1, mode, params)
         y = relu3(y)
 
     for i in range(num_blocks):
@@ -370,7 +425,8 @@ def get_dataset(files, batch_size=1, is_training=True):
         result = dream_go.extract_single_example(line, example)
 
         if result != 0:
-            features = np.zeros((32, 19, 19), 'f2')
+            features = np.zeros((NUM_FEATURES, 19, 19), 'f2')
+            boost = np.zeros((), 'f4')
             value = np.zeros((), 'f4')
             policy = np.zeros((362,), 'f2')
         else:
@@ -381,29 +437,35 @@ def get_dataset(files, batch_size=1, is_training=True):
             value = np.asarray(1.0 if example[0].color == example[0].winner else -1.0, 'f4')
             policy = np.fromstring(base64.b85decode(policy_hat), 'f2')
 
-            # fix any partial policy
-            policy[example[0].index] = 1.0 - np.sum(policy)
+            if example[0].number <= len(BOOST_PER_MOVE_NUMBER):
+                boost = np.asarray(BOOST_PER_MOVE_NUMBER[example[0].number - 1], 'f4')
+            else:
+                boost = np.asarray(1.0, 'f4')
 
-        return features, value, policy
+            # fix any partial policy
+            policy[example[0].index] += 1.0 - np.sum(policy)
+
+        return features, boost, value, policy
 
     def _parse(line):
         return tuple(tf.py_func(
             __parse,
             [line],
-            [tf.float16, tf.float32, tf.float16]
+            [tf.float16, tf.float32, tf.float32, tf.float16]
         ))
 
-    def _illegal_policy(features, value, policy):
-        return tf.not_equal(tf.reduce_sum(policy), 0.0)
+    def _illegal_policy(features, boost, value, policy):
+        return tf.not_equal(tf.reduce_sum(boost), 0.0)
 
-    def _fix_shape(features, value, policy):
+    def _fix_shape(features, boost, value, policy):
         features = tf.reshape(features, [NUM_FEATURES, 19, 19])
+        boost = tf.reshape(boost, [1])
         value = tf.reshape(value, [1])
         policy = tf.reshape(policy, [362])
 
-        return features, value, policy
+        return features, boost, value, policy
 
-    def _augment(features, value, policy):
+    def _augment(features, boost, value, policy):
         def _identity(image):
             return tf.identity(image)
 
@@ -445,7 +507,6 @@ def get_dataset(files, batch_size=1, is_training=True):
 
         # apply a random transformation to the input features
         random = tf.random_uniform((), 0, 8, tf.int32)
-        features = tf.reshape(features, [NUM_FEATURES, 19, 19])
         features = _apply_random(random, features)
 
         # transforming the policy is _harder_ since it has that extra pass
@@ -457,36 +518,26 @@ def get_dataset(files, batch_size=1, is_training=True):
 
         value = tf.reshape(value, [1])
 
-        return features, value, policy
+        return features, boost, value, policy
 
-    def _shuffle_history(features):
-        features = tf.split(features, (5, 6, NUM_FEATURES - 11), 0)
-
-        return tf.concat([
-            features[0],
-            tf.random_shuffle(features[1]),
-            features[2]
-        ], axis=0)
-
-    def _fix_history(features, value, policy):
+    def _fix_history(features, boost, value, policy):
         """ Zeros out the history planes for 25% of the features. """
-        HISTORY_MASK = np.asarray([1.0] * NUM_FEATURES, 'f2')
-        HISTORY_MASK[5:11] = 0.0
-        HISTORY_MASK = tf.constant(HISTORY_MASK, tf.float16, (NUM_FEATURES, 1, 1))
+        zero_history_mask = np.asarray([1.0] * NUM_FEATURES, 'f2')
+        zero_history_mask[3:4] = 0.0
+        zero_history_mask = tf.constant(zero_history_mask, tf.float16, (NUM_FEATURES, 1, 1))
 
         random = tf.random_uniform((), 0, 100, tf.int32)
         features = tf.case(
             [
-                (tf.less(random, 10), lambda: features * HISTORY_MASK),
-                (tf.less(random, 15), lambda: _shuffle_history(features)),
+                (tf.less(random, 10), lambda: features * zero_history_mask)
             ],
             default=lambda: features
         )
 
-        return features, value, policy
+        return features, boost, value, policy
 
     with tf.device('cpu:0'):
-        num_parallel_calls = max(os.cpu_count() - 8, 4);
+        num_parallel_calls = max(os.cpu_count() - 8, 4)
 
         dataset = tf.data.TextLineDataset(files)
         if is_training:
@@ -505,7 +556,7 @@ def get_dataset(files, batch_size=1, is_training=True):
 
 def input_fn(files, batch_size, is_training):
     return get_dataset(files, batch_size, is_training).map(
-        lambda features, value, policy: (features, {'value': value, 'policy': policy})
+        lambda features, boost, value, policy: (features, {'boost': boost, 'value': value, 'policy': policy})
     )
 
 # -------- Model function --------
@@ -519,22 +570,24 @@ def model_fn(features, labels, mode, params):
         # - Value head
         # - Policy head
         #
-        loss_value = tf.reduce_mean(tf.squared_difference(
+        loss_value = tf.reshape(tf.squared_difference(
             tf.stop_gradient(labels['value']),
             value_hat
-        ))
-        loss_policy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+        ), (-1, 1))
+        loss_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
             labels=tf.stop_gradient(labels['policy']),
             logits=policy_hat
-        ))
+        ), (-1, 1))
 
-        loss = loss_policy + 2.0 * loss_value
-        tf.add_to_collection(LOSS, loss)
+        loss_unboosted = loss_policy + 2.0 * loss_value
+        loss = tf.reduce_mean(tf.stop_gradient(labels['boost']) * loss_unboosted)
+        tf.add_to_collection(LOSS, loss_unboosted)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             # set an initial learning rate and then rely on the `LearningRateScheduler`
             # hook to decrease it when the loss plateaus
             learning_rate = tf.Variable(params['learning_rate'], False, name='lr')
+            loss_scale = 128
 
             tf.add_to_collection(LEARNING_RATE, learning_rate)
 
@@ -543,13 +596,9 @@ def model_fn(features, labels, mode, params):
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
 
             with tf.control_dependencies(update_ops):
-                gradients, variables = zip(*optimizer.compute_gradients(
-                    loss,
-                    var_list=tf.trainable_variables(),
-                    aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
-                    colocate_gradients_with_ops=True
-                ))
+                gradients, variables = compute_gradients(loss_scale * loss)
 
+                gradients = [grad / loss_scale for grad in gradients]
                 train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
 
             # during training it is very useful to plot the norm of the gradients at
@@ -561,15 +610,16 @@ def model_fn(features, labels, mode, params):
                 if grad is not None:
                     tf.summary.scalar('gradients/' + var_name, tf.norm(grad))
                 tf.summary.scalar('norms/' + var_name, tf.norm(var))
+                tf.summary.scalar('orthogonality/' + var_name, orthogonal_loss(var))
 
             tf.summary.scalar('learning_rate', learning_rate)
         else:
             train_op = None
 
-        tf.summary.scalar('loss/policy', loss_policy)
-        tf.summary.scalar('loss/value', loss_value)
+        tf.summary.scalar('loss/policy', tf.reduce_mean(loss_policy))
+        tf.summary.scalar('loss/value', tf.reduce_mean(loss_value))
 
-        # evalutation metrics such as the accuracy is more human readable than
+        # evaluation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look
         # at the accuracy instead of the loss.
         policy_hot = tf.argmax(labels['policy'], axis=1)
@@ -771,12 +821,12 @@ elif args.print:
         out = {}
 
         for var in nn.get_variable_names():
-            value = np.asarray(nn.get_variable_value(var))
+            var_value = np.asarray(nn.get_variable_value(var))
 
             out[var] = {
-                'mean': float(np.average(value)),
-                'std': float(np.std(value)),
-                'orthogonal': float(orthogonal_loss(value))
+                'mean': float(np.average(var_value)),
+                'std': float(np.std(var_value)),
+                'orthogonal': float(orthogonal_loss(var_value))
             }
 
         print(json.dumps(
@@ -788,6 +838,5 @@ elif args.print:
         ))
     else:
         for var in args.files:
-            value = nn.get_variable_value(var)
+            print(var, nn.get_variable_value(var).tolist())
 
-            print(var, value.tolist())

@@ -45,7 +45,7 @@ class LearningRateScheduler(tf.train.SessionRunHook):
     def begin(self):
         self.global_step = tf.train.get_global_step()
         self.learning_rate = tf.get_collection(LEARNING_RATE)[-1]
-        self.loss = tf.get_collection(LOSS)[-1]
+        self.loss = tf.reduce_mean(tf.get_collection(LOSS))
 
         with tf.device('cpu:0'):
             buf_size = LearningRateScheduler.BUF_SIZE
@@ -119,7 +119,7 @@ class LearningRateScheduler(tf.train.SessionRunHook):
         # least squares.
         steps = global_step - last_decrease
 
-        if global_step > 10:
+        if global_step > 0 and global_step % 10 == 0:
             x = losses[:global_step, 0:2]
             y = losses[:global_step, 2].T
             p, m = self.is_decreasing(x, y)
