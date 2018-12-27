@@ -27,9 +27,11 @@ fn all_succeed() {
     for (line_nr, line) in BufReader::new(&f).lines().enumerate() {
         if let Ok(line) = line {
             let c_string = CString::new(line).unwrap();
-            let code = extract_single_example(c_string.as_ptr(), &mut example);
+            let code = unsafe {
+                extract_single_example(c_string.as_ptr(), &mut example)
+            };
 
-            assert!(code == 0, "Line {}, Code {}: {:?}", line_nr, code, c_string);
+            assert_eq!(code, 0, "Line {}, Code {}: {:?}", line_nr, code, c_string);
         } else {
             panic!();
         }

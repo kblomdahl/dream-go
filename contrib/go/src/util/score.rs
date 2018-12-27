@@ -120,10 +120,11 @@ impl Score for Board {
                 // pass
             } else if other.vertices[i].color() != 0 {
                 if finished.inner.vertices[i].color() == 0 {
-                    if other.vertices[i].color() == Color::Black as u8 && white_distance[i] != 0xff {
-                        other.vertices[i].set_color(0); // black stone is not black territory, nor stone
-                    } else if other.vertices[i].color() == Color::White as u8 && black_distance[i] != 0xff {
-                        other.vertices[i].set_color(0); // white stone is not white territory, nor stone
+                    let is_dead_black = other.vertices[i].color() == Color::Black as u8 && white_distance[i] != 0xff;
+                    let is_dead_white = other.vertices[i].color() == Color::White as u8 && black_distance[i] != 0xff;
+
+                    if is_dead_black || is_dead_white {
+                        other.vertices[i].set_color(0);
                     }
                 } else {
                     other.vertices[i].set_color(0); // remove dead stone
@@ -146,9 +147,10 @@ impl Score for Board {
                 }
             } else if self.inner.vertices[i].color() != 0 {
                 if finished.inner.vertices[i].color() == 0 {
-                    if self.inner.vertices[i].color() == Color::Black as u8 && white_distance[i] != 0xff {
-                        status_list.push((i, StoneStatus::Dead));
-                    } else if self.inner.vertices[i].color() == Color::White as u8 && black_distance[i] != 0xff {
+                    let is_dead_black = self.inner.vertices[i].color() == Color::Black as u8 && white_distance[i] != 0xff;
+                    let is_dead_white = self.inner.vertices[i].color() == Color::White as u8 && black_distance[i] != 0xff;
+
+                    if is_dead_black || is_dead_white {
                         status_list.push((i, StoneStatus::Dead));
                     }
                 } else {

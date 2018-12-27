@@ -73,8 +73,8 @@ pub struct OutputMap<T> {
     array: [Option<T>; OUTPUT_SIZE]
 }
 
-impl<T> OutputMap<T> {
-    pub fn new() -> OutputMap<T> {
+impl<T> Default for OutputMap<T> {
+    fn default() -> OutputMap<T> {
         OutputMap {
             array: [
                 None, None, None, None, None,
@@ -90,7 +90,9 @@ impl<T> OutputMap<T> {
             ]
         }
     }
+}
 
+impl<T> OutputMap<T> {
     pub fn put(&mut self, key: Output, value: T) {
         self.array[key as usize] = Some(value);
     }
@@ -113,13 +115,15 @@ pub struct OutputSet {
     array: [bool; OUTPUT_SIZE]
 }
 
-impl OutputSet {
-    pub fn new() -> OutputSet {
+impl Default for OutputSet {
+    fn default() -> OutputSet {
         OutputSet {
             array: [false; OUTPUT_SIZE]
         }
     }
+}
 
+impl OutputSet {
     pub fn add(&mut self, key: Output) {
         self.array[key as usize] = true;
     }

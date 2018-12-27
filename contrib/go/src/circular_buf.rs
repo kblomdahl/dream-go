@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -78,7 +78,7 @@ impl CircularBuf {
 
     /// Returns an iterator over all the buffers in the stack starting with the
     /// most recent one, and going backward in time.
-    pub fn iter<'a>(&'a self) -> CircularIterator<'a> {
+    pub fn iter(&self) -> CircularIterator {
         CircularIterator {
             count: 0,
             position: P_MOD_SIX[self.position],

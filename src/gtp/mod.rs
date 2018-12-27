@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ use gtp::ponder_service::PonderService;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&'static str; 23] = [
+const KNOWN_COMMANDS: [&str; 23] = [
     "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove",
     "kgs-genmove_cleanup", "undo",
@@ -250,7 +250,7 @@ impl Gtp {
     fn parse_line(line: &str) -> Option<(Option<usize>, Command)> {
         let line = line.trim();
         let line = {
-            if let Some(pos) = line.find("#") {
+            if let Some(pos) = line.find('#') {
                 line[0..pos].to_string()
             } else {
                 line.to_string()
@@ -487,12 +487,12 @@ impl Gtp {
             Command::ProtocolVersion => { success!(id, "2"); },
             Command::Name => {
                 success!(id, config::get_env::<String>("DG_NAME")
-                    .unwrap_or(env!("CARGO_PKG_NAME").to_string())
+                    .unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string())
                 );
             },
             Command::Version => {
                 success!(id, config::get_env::<String>("DG_VERSION")
-                    .unwrap_or(env!("CARGO_PKG_VERSION").to_string())
+                    .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
                 );
             },
             Command::BoardSize(size) => {

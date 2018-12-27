@@ -32,9 +32,11 @@ fn all_succeed(b: &mut Bencher) {
 
     b.iter(move || {
         for line in &lines {
-            let code = extract_single_example(line.as_ptr(), &mut example);
+            let code = unsafe {
+                extract_single_example(line.as_ptr(), &mut example)
+            };
 
-            assert!(code == 0, "Code {}: {:?}", code, line);
+            assert_eq!(code, 0, "Code {}: {:?}", code, line);
         }
     });
 }

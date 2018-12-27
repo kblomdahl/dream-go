@@ -84,7 +84,7 @@ impl PredictState {
         let mut outputs = nn::forward(
             workspace,
             features_list,
-            OutputSet::new().with(Output::Policy).with(Output::Value)
+            OutputSet::default().with(Output::Policy).with(Output::Value)
         );
 
         let value_list = outputs.take(Output::Value);
@@ -119,7 +119,7 @@ impl PredictState {
         // the receivers
         let (value_list, policy_list) = PredictState::forward(
             &mut network.get_workspace(batch_size),
-            &Vec::from(features_list)
+            &features_list
         );
 
         // send out our predictions to all of the receivers
@@ -158,28 +158,26 @@ impl PredictState {
                 // more requests are incoming, wait for them before trying to
                 // evaluate a batch
             }
-        } else {
-            if num_requests > 0 {
-                assert!(num_requests <= batch_size);
+        } else if num_requests > 0 {
+            assert!(num_requests <= batch_size);
 
-                // immediately evaluate when we hit a barrier in order to:
-                //   1. minimize the latency between request and response
-                //   2. avoid a race condition where a request that arrives
-                //      during an evaluation does not trigger one.
-                PredictState::predict(state, state_lock, num_requests);
-            } else if state_lock.running_count.load(Ordering::SeqCst) == 0 {
-                // everything is asleep? probably a race condition between the
-                // pending message being sent and it being received. Just wake
-                // everything up and it should normalize.
-                let num_waiting = state_lock.waiting_list.len();
+            // immediately evaluate when we hit a barrier in order to:
+            //   1. minimize the latency between request and response
+            //   2. avoid a race condition where a request that arrives
+            //      during an evaluation does not trigger one.
+            PredictState::predict(state, state_lock, num_requests);
+        } else if state_lock.running_count.load(Ordering::SeqCst) == 0 {
+            // everything is asleep? probably a race condition between the
+            // pending message being sent and it being received. Just wake
+            // everything up and it should normalize.
+            let num_waiting = state_lock.waiting_list.len();
 
-                for waiting in state_lock.waiting_list.drain(0..num_waiting) {
-                    waiting.send(None);
-                }
-            } else {
-                // wait until the currently running request finish instead of
-                // waking up any threads
+            for waiting in state_lock.waiting_list.drain(0..num_waiting) {
+                waiting.send(None);
             }
+        } else {
+            // wait until the currently running request finish instead of
+            // waking up any threads
         }
     }
 }

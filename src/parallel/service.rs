@@ -183,7 +183,7 @@ impl<I: ServiceImpl + 'static> Service<I> {
             queue: vec! [],
             is_running: true
         }), Condvar::new()));
-        let num_threads = num_threads.unwrap_or_else(|| I::get_thread_count());
+        let num_threads = num_threads.unwrap_or_else(I::get_thread_count);
 
         Service {
             workers: (0..num_threads)

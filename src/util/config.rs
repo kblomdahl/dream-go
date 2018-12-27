@@ -36,7 +36,7 @@ impl FromStr for SamplingStrategy {
     fn from_str(s: &str) -> Result<Self, ()> {
         let s = s.trim();
 
-        if s.ends_with("%") {
+        if s.ends_with('%') {
             let s = s.trim_end_matches("%");
 
             s.parse::<f32>()
@@ -45,7 +45,7 @@ impl FromStr for SamplingStrategy {
         } else {
             s.parse::<usize>()
                 .map_err(|_| ())
-                .map(|f| SamplingStrategy::Fixed(f))
+                .map(SamplingStrategy::Fixed)
         }
     }
 }
@@ -127,7 +127,7 @@ lazy_static! {
     /// The _First Play Urgency_ reduction. Setting this is `1.0`, or `0.0`
     /// effectively disables FPU.
     pub static ref FPU_REDUCE: Vec<(i32, f32)> = get_intp_list("FPU_REDUCE")
-        .unwrap_or(vec! [(0, 0.60), (200, 0.50), (800, 0.22)]);
+        .unwrap_or_else(|| vec! [(0, 0.60), (200, 0.50), (800, 0.22)]);
 
     /// The number of virtual losses to add during async probes into the monte
     /// carlo search tree. A higher value avoids multiple probes exploring the
@@ -136,7 +136,7 @@ lazy_static! {
 
     /// The UCT exploration rate.
     pub static ref UCT_EXP: Vec<(i32, f32)> = get_intp_list("UCT_EXP")
-        .unwrap_or(vec! [(0, 0.88)]);
+        .unwrap_or_else(|| vec! [(0, 0.88)]);
 }
 
 /// Returns true if any command-line argument with the given name is present.
@@ -196,7 +196,7 @@ pub fn get_args() -> Vec<String> {
     let mut rest = vec! [];
 
     for (i, arg) in env::args().enumerate().skip(1) {
-        if !arg.starts_with("--") && !usize::from_str(&arg).is_ok() {
+        if !arg.starts_with("--") && usize::from_str(&arg).is_err() {
             rest.push(arg);
         } else if arg == "--" {
             for arg in env::args().skip(i + 1) {
@@ -210,7 +210,7 @@ pub fn get_args() -> Vec<String> {
     rest
 }
 
-fn get_intp_value(points: &Vec<(i32, f32)>, x: i32) -> f32 {
+fn get_intp_value(points: &[(i32, f32)], x: i32) -> f32 {
     if let Some(i) = points.iter().position(|e| e.0 >= x) {
         let x0 = points.get(if i == 0 { 0 } else { i-1 }).unwrap_or(&points[0]);
         let x1 = &points[i];

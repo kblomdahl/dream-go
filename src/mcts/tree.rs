@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -894,9 +894,8 @@ pub struct Node {
 
 impl Drop for Node {
     fn drop(&mut self) {
-        match self.children {
-            ChildrenImpl::Small(ref mut small) => unsafe { ManuallyDrop::drop(small) },
-            _ => ()
+        if let ChildrenImpl::Small(ref mut small) = self.children {
+            unsafe { ManuallyDrop::drop(small) }
         }
     }
 }
@@ -916,10 +915,7 @@ impl Node {
         // copy the prior values into an array size that is dividable
         // by 16 to ensure we can use 256-bit wide SIMD registers.
         let mut prior_padding = [::std::f32::NEG_INFINITY; 368];
-
-        for i in 0..362 {
-            prior_padding[i] = prior[i];
-        }
+        prior_padding[..362].copy_from_slice(&prior[..362]);
 
         Node {
             lock: Mutex::new(),
@@ -1122,7 +1118,7 @@ impl Node {
                 (0.5, thread_rng().gen_range(0, 362))
             } else {
                 let threshold = s_total * thread_rng().gen::<f64>();
-                let max_i = (0..362).filter(|&i| s[i] >= threshold).next().unwrap();
+                let max_i = (0..362).find(|&i| s[i] >= threshold).unwrap();
 
                 (self.with(max_i, |child| child.value()), max_i)
             }
@@ -1463,7 +1459,7 @@ impl<'a> fmt::Display for ToPretty<'a> {
                 .map(|v| format!("{}", v))
                 .collect::<Vec<String>>().join(" ");
 
-        write!(fmt, "Nodes: {}, Win: {:.1}%, PV: {}\n",
+        writeln!(fmt, "Nodes: {}, Win: {:.1}%, PV: {}",
             self.root.total_count,
             100.0 * norm_value,
             likely_path
@@ -1478,7 +1474,7 @@ impl<'a> fmt::Display for ToPretty<'a> {
                     .map(|v| format!("{}", v))
                     .collect::<Vec<String>>().join(" ");
 
-            write!(fmt, "{: >5} -> {:7} (W: {:5.2}%) (N: {:5.2}%) PV: {} {}\n",
+            writeln!(fmt, "{: >5} -> {:7} (W: {:5.2}%) (N: {:5.2}%) PV: {} {}",
                 pretty_vertex,
                 child.total_count,
                 100.0 * self.root.with(i, |child| child.value()),

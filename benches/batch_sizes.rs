@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 #![feature(test)]
 
 extern crate go;
@@ -54,7 +53,7 @@ fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
             forward(
                 &mut workspace,
                 &features,
-                OutputSet::new()
+                OutputSet::default()
                     .with(Output::Policy)
                     .with(Output::Value)
             )

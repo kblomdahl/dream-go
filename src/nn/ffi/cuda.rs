@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ pub enum DeviceAttr {
 }
 
 #[repr(i32)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum Error {
     Success = 0,
@@ -101,8 +101,8 @@ pub enum Error {
 
 impl Error {
     /// Returns whether this _error_ indicates a successful call.
-    pub fn is_ok(&self) -> bool {
-        *self == Error::Success
+    pub fn is_ok(self) -> bool {
+        self == Error::Success
     }
 }
 

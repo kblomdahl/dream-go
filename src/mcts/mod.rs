@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ impl fmt::Display for GameResult {
                     } else if white > black {
                         format!("W+{:.1}", white - black)
                     } else {
-                        format!("0")
+                        "0".to_string()
                     }
                 };
 
@@ -234,7 +234,7 @@ fn create_initial_policy(
 fn add_valid_candidates(
     dst: &mut Vec<f32>,
     src: Vec<f32>,
-    indices: &Vec<usize>,
+    indices: &[usize],
     t: symmetry::Transform
 ) {
     // always copy the _passing_ move since it is never an illegal move.
@@ -346,21 +346,18 @@ fn predict_aux<T>(
 ) -> (f32, usize, tree::Node)
     where T: TimeStrategy + Clone + Send + 'static
 {
-    let (starting_value, mut starting_policy) = {
-        let server = server.clone();
-
+    let (starting_value, mut starting_policy) =
         full_forward(&server, starting_point, starting_color)
             .unwrap_or_else(|| {
                 let mut policy = vec! [0.0; 362];
                 policy[361] = 1.0;
 
                 (0.5, policy)
-            })
-    };
+            });
 
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
-    dirichlet::add(&mut starting_policy[0..362], 0.03);
+    dirichlet::add(&mut starting_policy[..362], 0.03);
 
     // if we have a starting tree given, then re-use that tree (after some sanity
     // checks), otherwise we need to query the neural network about what the
@@ -373,10 +370,7 @@ fn predict_aux<T>(
         // - calculated using only one symmetry.
         // - a pre-expanded pass move, which does not get a prior computed.
         //
-        for i in 0..362 {
-            starting_tree.prior[i] = starting_policy[i];
-        }
-
+        starting_tree.prior[0..362].clone_from_slice(&starting_policy[..362]);
         starting_tree
     } else {
         tree::Node::new(starting_color, starting_value, starting_policy)

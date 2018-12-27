@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -74,8 +74,8 @@ pub enum Determinism {
 }
 
 impl DataType {
-    pub fn size(&self) -> usize {
-        match *self {
+    pub fn size(self) -> usize {
+        match self {
             DataType::Float => 4,
             DataType::Half => 2,
             DataType::Int8 => 1,
@@ -84,8 +84,8 @@ impl DataType {
         }
     }
 
-    pub fn is_floating_point(&self) -> bool {
-        match *self {
+    pub fn is_floating_point(self) -> bool {
+        match self {
             DataType::Float => true,
             DataType::Half => true,
             DataType::Int8 => false,
@@ -94,8 +94,8 @@ impl DataType {
         }
     }
 
-    pub fn to_cuda(&self) -> cuda::DataType {
-        match *self {
+    pub fn to_cuda(self) -> cuda::DataType {
+        match self {
             DataType::Float => cuda::DataType::R32F,
             DataType::Half => cuda::DataType::R16F,
             DataType::Int8 => cuda::DataType::R8I,
@@ -115,7 +115,7 @@ pub enum OpTensorOp {
 }
 
 #[repr(i32)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum Status {
     Success = 0,
@@ -134,8 +134,8 @@ pub enum Status {
 
 impl Status {
     /// Returns whether this status indicates a successful call.
-    pub fn is_ok(&self) -> bool {
-        *self == Status::Success
+    pub fn is_ok(self) -> bool {
+        self == Status::Success
     }
 }
 

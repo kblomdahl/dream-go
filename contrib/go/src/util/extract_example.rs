@@ -63,7 +63,7 @@ struct Candidate {
 /// - `raw_sgf_content` - The UTF-8 encoded content of an SGF file.
 ///
 #[no_mangle]
-pub extern fn extract_single_example(
+pub unsafe extern fn extract_single_example(
     raw_sgf_content: *const c_char,
     out: *mut Example
 ) -> c_int
@@ -76,7 +76,7 @@ pub extern fn extract_single_example(
         static ref KOMI: Regex = Regex::new(r"KM\[([^\]]*)\]").unwrap();
     }
 
-    unsafe { CStr::from_ptr(raw_sgf_content) }.to_str().map(|content| {
+    CStr::from_ptr(raw_sgf_content).to_str().map(|content| {
         // find the komi by looking for the pattern `KM[...]` at any point
         // in the file.
         let komi = {
@@ -165,21 +165,19 @@ pub extern fn extract_single_example(
                 symmetry::Transform::Identity
             );
 
-            unsafe {
-                (*out).features.clone_from_slice(&features);
-                (*out).index = examples[i].index as c_int;
-                (*out).color = examples[i].color as c_int;
-                (*out).policy.clone_from_slice(match examples[i].policy {
-                    Some(ref policy) => {
-                        assert!(policy.len() == 905, "illegal policy -- {}", policy);
+            (*out).features.clone_from_slice(&features);
+            (*out).index = examples[i].index as c_int;
+            (*out).color = examples[i].color as c_int;
+            (*out).policy.clone_from_slice(match examples[i].policy {
+                Some(ref policy) => {
+                    assert_eq!(policy.len(), 905, "illegal policy -- {}", policy);
 
-                        policy.as_bytes()
-                    },
-                    None => EMPTY_POLICY.as_bytes()
-                });
-                (*out).winner = winner as c_int;
-                (*out).number = i as c_int;
-            }
+                    policy.as_bytes()
+                },
+                None => EMPTY_POLICY.as_bytes()
+            });
+            (*out).winner = winner as c_int;
+            (*out).number = i as c_int;
 
             0
         }).unwrap_or(-30)

@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -74,7 +74,7 @@ impl Network {
                     let mut json = file.clone();
                     json.set_extension("json");
                     json.as_path().to_str().map(|s| s.to_string())
-                }).unwrap_or("dream_go.json".to_string()),
+                }).unwrap_or_else(|| "dream_go.json".to_string()),
 
                 // hard-coded paths to make development and deployment easier
                 "dream_go.json".to_string(),

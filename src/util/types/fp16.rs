@@ -30,8 +30,8 @@ impl f16 {
     }
 
     /// Returns the wrapped bits.
-    pub fn to_bits(&self) -> u16 {
-        let f16(bits) = *self;
+    pub fn to_bits(self) -> u16 {
+        let f16(bits) = self;
 
         bits
     }

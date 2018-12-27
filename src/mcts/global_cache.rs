@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -194,23 +194,21 @@ pub fn get_or_insert<F>(
     let existing = {
         let mut table = TABLE.lock().unwrap();
 
-        table.get(&key).map(|&(ref value, ref policy)| {
-            (value.clone(), policy.clone())
+        table.get(&key).map(|&(value, ref policy)| {
+            (value, policy.clone())
         })
     };
 
     if let Some((value, policy)) = existing {
         Some((value, policy))
+    } else if let Some((value, policy)) = supplier() {
+        let mut table = TABLE.lock().unwrap();
+
+        table.insert(&key, (value, policy.clone()));
+
+        Some((value, policy))
     } else {
-        if let Some((value, policy)) = supplier() {
-            let mut table = TABLE.lock().unwrap();
-
-            table.insert(&key, (value, policy.clone()));
-
-            Some((value, policy))
-        } else {
-            None
-        }
+        None
     }
 }
 

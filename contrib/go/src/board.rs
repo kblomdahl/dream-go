@@ -260,10 +260,10 @@ impl fmt::Display for Board {
 
         write!(f, "    ")?;
         for i in 0..19 { write!(f, " {}", LETTERS[i])?; }
-        write!(f, "\n")?;
+        writeln!(f)?;
         write!(f, "   \u{256d}")?;
         for _ in 0..19 { write!(f, "\u{2500}\u{2500}")?; }
-        write!(f, "\u{2500}\u{256e}\n")?;
+        writeln!(f, "\u{2500}\u{256e}")?;
 
         for y in 0..19 {
             let y = 18 - y;
@@ -282,16 +282,16 @@ impl fmt::Display for Board {
                 }
             }
 
-            write!(f, " \u{2502} {}\n", 1 + y)?;
+            writeln!(f, " \u{2502} {}", 1 + y)?;
         }
 
         write!(f, "   \u{2570}")?;
         for _ in 0..19 { write!(f, "\u{2500}\u{2500}")?; }
-        write!(f, "\u{2500}\u{256f}\n")?;
+        writeln!(f, "\u{2500}\u{256f}")?;
         write!(f, "    ")?;
         for i in 0..19 { write!(f, " {}", LETTERS[i])?; }
-        write!(f, "\n")?;
-        write!(f, "    \u{25cf} Black    \u{25cb} White\n")?;
+        writeln!(f)?;
+        writeln!(f, "    \u{25cf} Black    \u{25cb} White")?;
 
         Ok(())
     }

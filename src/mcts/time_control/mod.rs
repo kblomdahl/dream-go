@@ -114,11 +114,7 @@ pub fn is_done<T>(root: &tree::Node, ticket: &T) -> bool
             TimeStrategyResult::NotExpired(remaining) => {
                 let min_promote = min_promote_rollouts(root);
 
-                if min_promote > remaining {
-                    true
-                } else {
-                    false
-                }
+                min_promote > remaining
             },
             TimeStrategyResult::Extended => false,
             _ => true

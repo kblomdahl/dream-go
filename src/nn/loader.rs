@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,18 +35,14 @@ fn skip_until<I>(iter: &mut I, stop: char) -> String
 {
     let mut out: String = String::with_capacity(32);
 
-    loop {
-        if let Some(ch) = iter.next() {
-            let ch = char::from_u32(ch as u32).unwrap();
+    for ch in iter {
+        let ch = char::from_u32(ch as u32).unwrap();
 
-            if unsafe { unlikely(ch == stop) } {
-                break
-            }
-
-            out.push(ch);
-        } else {
+        if unsafe { unlikely(ch == stop) } {
             break
         }
+
+        out.push(ch);
     }
 
     out

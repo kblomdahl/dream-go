@@ -127,7 +127,7 @@ impl Tensor {
                 stream
             ));
 
-            if self.ptr[device_id].compare_and_swap(ptr::null_mut(), ptr, Ordering::SeqCst) != ptr::null_mut() {
+            if !self.ptr[device_id].compare_and_swap(ptr::null_mut(), ptr, Ordering::SeqCst).is_null() {
                 check!(cuda::cudaStreamSynchronize(stream));  // wait for copy
                 check!(cuda::cudaFree(ptr));
 

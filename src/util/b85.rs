@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -134,25 +134,21 @@ pub fn encode(input: &[f32]) -> String {
     let mut output = String::new();
     let mut iter = input.iter();
 
-    loop {
-        if let Some(a) = iter.next() {
-            let b = iter.next().unwrap();
+    while let Some(a) = iter.next() {
+        let b = iter.next().unwrap();
 
-            // cast the values to half precision before we do anything else
-            let a = f16::from(*a).to_bits().to_be();
-            let b = f16::from(*b).to_bits().to_be();
+        // cast the values to half precision before we do anything else
+        let a = f16::from(*a).to_bits().to_be();
+        let b = f16::from(*b).to_bits().to_be();
 
-            // 
-            let acc = ((a as usize) << 16) | (b as usize);
+        //
+        let acc = ((a as usize) << 16) | (b as usize);
 
-            output.push(ENCODE_85[acc / 52200625]);
-            output.push(ENCODE_85[(acc / 614125) % 85]);
-            output.push(ENCODE_85[(acc / 7225) % 85]);
-            output.push(ENCODE_85[(acc / 85) % 85]);
-            output.push(ENCODE_85[acc % 85]);
-        } else {
-            break
-        }
+        output.push(ENCODE_85[acc / 52_200_625]);
+        output.push(ENCODE_85[(acc / 614_125) % 85]);
+        output.push(ENCODE_85[(acc / 7225) % 85]);
+        output.push(ENCODE_85[(acc / 85) % 85]);
+        output.push(ENCODE_85[acc % 85]);
     }
 
     output

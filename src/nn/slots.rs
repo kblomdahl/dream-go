@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -138,7 +138,7 @@ impl SlotsGuard {
         let mut inner = self.inner.borrow_mut();
 
         if inner.len() > slot_pos && !inner[slot_pos].ptr.is_empty() {
-            let ref mut slot = inner[slot_pos];
+            let slot = &mut inner[slot_pos];
             let ptr = slot.ptr.pop().unwrap();
 
             return SlotGuard {

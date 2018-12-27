@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -98,6 +98,37 @@ unsafe fn load_to_host<T: InferenceType>(
     host.into_iter().map(|x| x.as_f32()).collect()
 }
 
+/// If the given output `output` is in the set of requested outputs, then
+/// loads the given pointers from the device to the host, and then adds it
+/// to the output map.
+///
+/// # Arguments
+///
+/// * `output_set` - The set of requested outputs.
+/// * `output_map` - The outputs.
+/// * `output` - The output to check for.
+/// * `device_ptr` -
+/// * `num_elements`-
+/// * `stream` -
+///
+unsafe fn load_output<T: InferenceType>(
+    output_set: &OutputSet,
+    output_map: &mut OutputMap<Vec<f32>>,
+    output: Output,
+    device_ptr: *const c_void,
+    num_elements: usize,
+    stream: cuda::Stream
+)
+{
+    if let Some(key) = output_set.contains(output) {
+        output_map.put(key, load_to_host::<T>(
+            device_ptr,
+            num_elements,
+            stream
+        ));
+    }
+}
+
 // -------- Graph --------
 
 pub struct Builder {
@@ -126,12 +157,12 @@ impl Builder {
             check!(cudnn::cudnnCreate(&mut handle_dnn));
         }
 
-        let c_up = unsafe { Rc::new(UpLayer::new(&handle_dnn, batch_size as i32, &self.tensors)) };
+        let c_up = unsafe { Rc::new(UpLayer::new(handle_dnn, batch_size as i32, &self.tensors)) };
         let c_residual = unsafe { (2..100).filter_map(|i| {
-            ResidualLayer::new(&handle_dnn, batch_size as i32, i, &self.tensors).map(|x| Rc::new(x))
+            ResidualLayer::new(handle_dnn, batch_size as i32, i, &self.tensors).map(Rc::new)
         }).collect::<Vec<Rc<ResidualLayer>>>() };
-        let c_value = unsafe { Rc::new(ValueLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)) };
-        let c_policy = unsafe { Rc::new(PolicyLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)) };
+        let c_value = unsafe { Rc::new(ValueLayer::new(handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)) };
+        let c_policy = unsafe { Rc::new(PolicyLayer::new(handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)) };
 
         let mut w = Workspace {
             batch_size: batch_size,
@@ -240,7 +271,7 @@ impl UpLayer {
     /// * `n` - The number of images.
     /// * `tensors` -
     ///
-    unsafe fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> UpLayer {
+    unsafe fn new(handle: cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> UpLayer {
         let weights = &tensors["01_upsample/conv_1:0"];
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
@@ -313,7 +344,7 @@ impl UpLayer {
         let mut num_fwd_algo = 0;
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
-            *handle,
+            handle,
             out.input,
             out.filter,
             out.descr,
@@ -404,7 +435,7 @@ impl ResidualLayer {
     /// * `i` - The index of the layer.
     /// * `tensors` -
     ///
-    unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Option<ResidualLayer> {
+    unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Option<ResidualLayer> {
         let weights_1 = tensors.get(&format!("{:02}_residual/conv_1:0", i));
         let weights_2 = tensors.get(&format!("{:02}_residual/conv_2:0", i));
         let alpha = tensors.get(&format!("{:02}_residual/alpha:0", i));
@@ -485,7 +516,7 @@ impl ResidualLayer {
         let mut num_fwd_algo = 0;
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
-            *handle,
+            handle,
             out.tensor,
             out.filter,
             out.descr,
@@ -615,7 +646,7 @@ impl ValueLayer {
     /// * `i` - The index of the layer.
     /// * `tensors` -
     ///
-    unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> ValueLayer {
+    unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> ValueLayer {
         let weights_1 = &tensors[&format!("{:02}v_value/conv_1:0", i)];
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
@@ -736,7 +767,7 @@ impl ValueLayer {
         let mut num_fwd_algo = 0;
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
-            *handle,
+            handle,
             out.input,
             out.filter,
             out.descr,
@@ -794,7 +825,7 @@ impl ValueLayer {
             self.value_1, *value_1
         ));
 
-        output_set.contains(Output::ValueDown).map(|key| { output_map.put(key, load_to_host::<T::Output>(*value_1, workspace.batch_size * 361, workspace.value_stream)) });
+        load_output::<T::Output>(output_set, output_map, Output::ValueDown, *value_1, workspace.batch_size * 361, workspace.value_stream);
 
         // perform the feed-forward linear layer (relu)
         let value_2 = slots.get_slot(Slot::Value_2, size_of::<T::Output>() * workspace.batch_size * 256, workspace.value_stream);
@@ -826,7 +857,7 @@ impl ValueLayer {
             &ZERO, self.value_2, *value_2,  // output
         ));
 
-        output_set.contains(Output::ValueGemm).map(|key| { output_map.put(key, load_to_host::<T::Output>(*value_2, workspace.batch_size * 256, workspace.value_stream)) });
+        load_output::<T::Output>(output_set, output_map, Output::ValueGemm, *value_2, workspace.batch_size * 256, workspace.value_stream);
 
         // perform the feed-forward linear layer (tanh)
         check!(cublas::cublasGemmEx(
@@ -905,7 +936,7 @@ impl PolicyLayer {
     /// * `i` - The index of the layer.
     /// * `tensors` -
     ///
-    unsafe fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> PolicyLayer {
+    unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> PolicyLayer {
         let weights_1 = &tensors[&format!("{:02}p_policy/conv_1:0", i)];
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
@@ -1000,7 +1031,7 @@ impl PolicyLayer {
         let mut num_fwd_algo = 0;
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
-            *handle,
+            handle,
             out.input,
             out.filter,
             out.descr,
@@ -1054,7 +1085,7 @@ impl PolicyLayer {
             self.policy_1, *policy_1
         ));
 
-        output_set.contains(Output::PolicyDown).map(|key| { output_map.put(key, load_to_host::<T::Output>(*policy_1, workspace.batch_size * 2 * 361, workspace.policy_stream)) });
+        load_output::<T::Output>(output_set, output_map, Output::PolicyDown, *policy_1, workspace.batch_size * 722, workspace.policy_stream);
 
         // perform the feed-forward linear layers
         let policy_2 = slots.get_slot(Slot::Policy_2, size_of::<T::Output>() * workspace.batch_size * 362, workspace.policy_stream);
@@ -1117,7 +1148,7 @@ pub fn forward<T: InferenceType>(
     debug_assert!(features.len() / FEATURE_SIZE == workspace.batch_size);
 
     let slots = workspace.slots.lock();
-    let mut map = OutputMap::new();
+    let mut map = OutputMap::default();
 
     unsafe {
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream));
@@ -1137,7 +1168,7 @@ pub fn forward<T: InferenceType>(
         // Upsample 32 -> 128 channels
         let mut residual_1 = workspace.c_up.clone().forward::<T>(workspace, &slots, &input);
 
-        outputs.contains(Output::Upsample).map(|key| { map.put(key, load_to_host::<T::Tower>(*residual_1, workspace.batch_size * image_size, workspace.tower_stream)) });
+        load_output::<T::Tower>(&outputs, &mut map, Output::Upsample, *residual_1, workspace.batch_size * image_size, workspace.tower_stream);
 
         // residual blocks
         let num_residual = workspace.c_residual.len();
@@ -1147,8 +1178,7 @@ pub fn forward<T: InferenceType>(
             let output = ::std::mem::transmute(Output::Residual_00 as u8 + i as u8);
 
             residual_1 = residual.forward::<T>(workspace, &slots, residual_1);
-
-            outputs.contains(output).map(|key| { map.put(key, load_to_host::<T::Output>(*residual_1, workspace.batch_size * image_size, workspace.tower_stream)) });
+            load_output::<T::Tower>(&outputs, &mut map, output, *residual_1, workspace.batch_size * image_size, workspace.tower_stream);
         }
 
         check!(cuda::cudaEventRecord(workspace.tower_finished, workspace.tower_stream));
@@ -1160,8 +1190,8 @@ pub fn forward<T: InferenceType>(
         let value = workspace.c_value.clone().forward::<T>(workspace, &slots, &outputs, &mut map, &residual_1);
         let policy = workspace.c_policy.clone().forward::<T>(workspace, &slots, &outputs, &mut map, &residual_1);
 
-        outputs.contains(Output::Value).map(|key| { map.put(key, load_to_host::<T::Output>(*value, workspace.batch_size, workspace.value_stream)) });
-        outputs.contains(Output::Policy).map(|key| { map.put(key, load_to_host::<T::Output>(*policy, workspace.batch_size * 362, workspace.policy_stream)) });
+        load_output::<T::Output>(&outputs, &mut map, Output::Value, *value, workspace.batch_size, workspace.value_stream);
+        load_output::<T::Output>(&outputs, &mut map, Output::Policy, *policy, workspace.batch_size * 362, workspace.policy_stream);
     }
 
     // pretty-print the tensor to stderr if logging is turned on
