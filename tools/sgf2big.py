@@ -66,7 +66,7 @@ def parse_sgf_content(contents, i):
                     ident += contents[i]
                     i += 1
 
-                if ident == 'HA' or ident == 'AB':  # handicap
+                if ident == 'AB':  # handicap
                     return
 
                 i = skip_ws(contents, i)
@@ -84,6 +84,10 @@ def parse_sgf_content(contents, i):
                     i += 1
 
                 i = skip_ws(contents, i + 1)
+
+                # skip handicap games
+                if ident == 'HA' and value != '0':
+                    return
 
                 # skip comments
                 if ident != 'C':
