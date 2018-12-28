@@ -30,7 +30,7 @@ To bootstrap the network from pre-generated data you will need an SGF file where
 cat kgs_big.sgf | sort | uniq | shuf | ./tools/sgf2balance.py > kgs_bal.sgf
 ```
 
-This binary file can then be feed into the bootstrap script which will tune the network weights to more accurately predict the moves played in the original SGF files. This script will run forever, so feel free to cancel it when you feel happy with the accuracy. You can monitor the accuracy (and a bunch of other stuff) using Tensorboard, whose logs are stored in the `logs/` directory. The final output will also be stored in the `models/` directory.
+This binary file can then be feed into the bootstrap script which will tune the network weights to more accurately predict the moves played in the original SGF files. This script will automatically terminate on convergence. You can monitor the accuracy (and a bunch of other stuff) using Tensorboard, whose logs are stored in the `logs/` directory. The final output will also be stored in the `models/` directory.
 
 ```bash
 cd contrib/trainer
@@ -61,10 +61,10 @@ If you want to use the [AlphaZero](https://arxiv.org/abs/1712.01815) algorithm t
 This can be accomplished using the `--self-play` command-line option. I also recommend that you increase the `--num-threads` and `--batch-size` arguments for this since the defaults are tuned for the GTP interface which has different (real time) requirements. This program will generate 25,000 games (should take around 14 days on modern hardware):
 
 ```bash
-./dream_go --num-threads 512 --batch-size 256 --self-play 25000 > self_play.sgf
+./dream_go --num-threads 32 --batch-size 32 --self-play 25000 > self_play.sgf
 ```
 
-The network should now be re-trained using this self-play, this is done in the same way as during the supervised training by first performing some basic data cleaning to avoid bias, converting the games to a binary representation and then training the network using tensorflow. You may wish to tune the `--num-samples` variable depending on how many self-play games you have generated as your goal should be to have around 2,000,000 examples for the neural network during training in total:
+The network should now be re-trained using this self-play, this is done in the same way as during the supervised training by first performing some basic data cleaning to avoid bias, converting the games to a binary representation and then training the network using TensorFlow. You should have at least 150,000 games in total to acquire a good result:
 
 ```bash
 sort < self_play.sgf | uniq | shuf | ./tools/sgf2balance.py > self_play_bal.sgf
@@ -72,8 +72,6 @@ sort < self_play.sgf | uniq | shuf | ./tools/sgf2balance.py > self_play_bal.sgf
 ```bash
 cd contrib/trainer/ && python3 -m dream_tf --start self_play_bal.sgf
 ```
-
-One observation worth pointing out is that if we generate 25,000 games and each game contains on average 250 moves, we just generated 4,250,000 search _unnecessary_ trees. This is not quite true as they are still useful for the _value head_, but one could argue that we are **way** past the point of diminishing returns.
 
 ### Expert Iteration
 
@@ -83,7 +81,7 @@ The training procedure for [Expert Iteration](https://arxiv.org/abs/1705.08439) 
 1. We generate the monte-carlo search tree during data extraction using the `--ex-it` switch only for examples that actually end-up as examples for the neural network.
 
 ```bash
-./dream_go --num-games 256 --num-threads 512 --batch-size 256 --ex-it --policy-play 1000000 > policy_play.sgf
+./dream_go --num-games 32 --num-threads 32 --batch-size 32 --ex-it --policy-play 200000 > policy_play.sgf
 ```
 ```bash
 sort < policy_play.sgf | uniq | shuf | ./tools/sgf2balance.py > policy_play_bal.sgf
@@ -92,14 +90,18 @@ sort < policy_play.sgf | uniq | shuf | ./tools/sgf2balance.py > policy_play_bal.
 cd contrib/trainer/ && python3 -m dream_tf --start policy_play_bal.sgf
 ```
 
-For the values provided in this example, which generate 2,000,000 examples for the neural network it should take about 7 days to generate the required data (from 1,000,000 distinct games).
+For the values provided in this example, which generate 200,000 examples for the neural network it should take about 1 days to generate the required data (from 200,000 distinct games).
 
 ## Roadmap
 
 * 1.0.0 - _Public Release_
 * 0.7.0 - _Acceptance_
   * First version with a network trained from self-play games
-  * Improved [neural network architecture](https://github.com/Chicoryn/dream-go/issues/25#issuecomment-377706857)
+* 0.6.2 - _Unfolded_
+  * Improved training procedure.
+  * Change the input features to [include more liberties](https://github.com/Chicoryn/dream-go/wiki#input-features).
+  * Decrease [memory use by 80%, and runtime performance by 25%](https://github.com/Chicoryn/dream-go/issues/36).
+  * Improved performance with [Tensor Cores](https://devblogs.nvidia.com/nvidia-turing-architecture-in-depth/).
 * 0.6.1 - _Emerged_
   * Improved [neural network architecture](https://github.com/Chicoryn/dream-go/issues/34#issuecomment-427583828)
   * Improved reinforcement training environment
