@@ -41,6 +41,13 @@ impl Order for CHW {
     }
 }
 
+/// Implementation of `Order` for the data format `NHWC`.
+pub struct HWC;
+
+impl Order for HWC {
+    fn index(c: usize, i: usize) -> usize { NUM_FEATURES * i + c }
+}
+
 /// Implementation of `Order` for the data format `NCHW_VECT_C`.
 #[allow(non_camel_case_types)]
 pub struct CHW_VECT_C;
@@ -82,37 +89,37 @@ impl Features for Board {
     ///  2. A constant plane filled with ones if we are white
     ///  3. A constant plane filled with ones if any move is super-ko
     /// 
-    /// ## Board state (current and historical)
+    /// ## One-hot historic board state
     /// 
-    ///  4. Our vertices (now)
-    ///  5. Opponent vertices (now)
-    ///  6. Most recent move ( 0)
-    ///  7. Most recent move (-1)
-    ///  8. Most recent move (-2)
-    ///  9. Most recent move (-3)
-    /// 10. Most recent move (-4)
-    /// 11. Most recent move (-5)
+    ///  4. Most recent move ( 0)
+    ///  5. Most recent move (-1)
     /// 
     /// ## Liberties
     /// 
-    /// 12. Our liberties (>= 1)
-    /// 13. Our liberties (>= 2)
-    /// 14. Our liberties (>= 3)
-    /// 15. Our liberties (>= 4)
-    /// 16. Our liberties (>= 5)
-    /// 17. Our liberties (>= 6)
-    /// 18. Our liberties after move (>= 1)
-    /// 19. Our liberties after move (>= 2)
-    /// 20. Our liberties after move (>= 3)
-    /// 21. Our liberties after move (>= 4)
-    /// 22. Our liberties after move (>= 5)
-    /// 23. Our liberties after move (>= 6)
-    /// 24. Opponent liberties (>= 1)
-    /// 25. Opponent liberties (>= 2)
-    /// 26. Opponent liberties (>= 3)
-    /// 27. Opponent liberties (>= 4)
-    /// 28. Opponent liberties (>= 5)
-    /// 29. Opponent liberties (>= 6)
+    ///  6. Our liberties (>= 1)
+    ///  7. Our liberties (>= 2)
+    ///  8. Our liberties (>= 3)
+    ///  9. Our liberties (>= 4)
+    /// 10. Our liberties (>= 5)
+    /// 11. Our liberties (>= 6)
+    /// 12. Our liberties (>= 7)
+    /// 13. Our liberties (>= 8)
+    /// 14. Our liberties after move (>= 1)
+    /// 15. Our liberties after move (>= 2)
+    /// 16. Our liberties after move (>= 3)
+    /// 17. Our liberties after move (>= 4)
+    /// 18. Our liberties after move (>= 5)
+    /// 19. Our liberties after move (>= 6)
+    /// 20. Our liberties after move (>= 7)
+    /// 21. Our liberties after move (>= 8)
+    /// 22. Opponent liberties (>= 1)
+    /// 23. Opponent liberties (>= 2)
+    /// 24. Opponent liberties (>= 3)
+    /// 25. Opponent liberties (>= 4)
+    /// 26. Opponent liberties (>= 5)
+    /// 27. Opponent liberties (>= 6)
+    /// 28. Opponent liberties (>= 7)
+    /// 29. Opponent liberties (>= 8)
     /// 
     /// ## Vertex properties
     /// 
@@ -137,25 +144,14 @@ impl Features for Board {
         let symmetry_table = symmetry.get_table();
         let current = color as u8;
 
-        // board state (current)
-        for index in 0..361 {
-            let other = symmetry_table[index] as usize;
-
-            if self.inner.vertices[index].color() == current {
-                features[O::index(3, other)] = c_1;
-            } else if self.inner.vertices[index].color() != 0 {
-                features[O::index(4, other)] = c_1;
-            }
-        }
-
         // board state (one-hot historic)
-        for (i, index) in self.history.iter().enumerate() {
+        for (i, index) in self.history.iter().take(2).enumerate() {
             if index == 361 {
                 // pass
             } else {
                 let other = symmetry_table[index as usize] as usize;
 
-                features[O::index(5+i, other)] = c_1;
+                features[O::index(3+i, other)] = c_1;
             }
         }
 
@@ -166,10 +162,10 @@ impl Features for Board {
             let other = symmetry_table[index] as usize;
 
             if self.inner.vertices[index].color() != 0 {
-                let start = if self.inner.vertices[index].color() == current { 11 } else { 23 };
+                let start = if self.inner.vertices[index].color() == current { 5 } else { 21 };
                 let num_liberties = ::std::cmp::min(
                     get_num_liberties(&self.inner, index, &mut liberties),
-                    6
+                    8
                 );
 
                 for i in 0..num_liberties {
@@ -178,11 +174,11 @@ impl Features for Board {
             } else if _is_valid_memoize(&self.inner, color, index, &mut liberties) {
                 let num_liberties = ::std::cmp::min(
                     get_num_liberties_if(&self.inner, color, index, &mut liberties),
-                    6
+                    8
                 );
 
                 for i in 0..num_liberties {
-                    features[O::index(17+i, other)] = c_1;
+                    features[O::index(13+i, other)] = c_1;
                 }
             }
         }
