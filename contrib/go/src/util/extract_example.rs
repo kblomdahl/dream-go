@@ -21,7 +21,7 @@ use super::sgf::{Sgf, SgfError};
 use super::symmetry;
 
 use libc::{c_char, c_int, c_uchar};
-use rand::Rng;
+use rand::prelude::SliceRandom;
 use regex::Regex;
 use std::ffi::CStr;
 
@@ -159,7 +159,7 @@ pub unsafe extern fn extract_single_example(
             (0..examples.len()).collect()
         };
 
-        rand::thread_rng().choose(&candidate_examples).map(|&i| {
+        candidate_examples.choose(&mut rand::thread_rng()).map(|&i| {
             let features = examples[i].board.get_features::<CHW>(
                 examples[i].color,
                 symmetry::Transform::Identity

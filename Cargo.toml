@@ -36,6 +36,6 @@ go = { path = "contrib/go" }
 lazy_static = {version = "1.2", features = ["nightly"]}
 libc = "0.2"
 ordered-float = "1.0"
-rand = "0.5"
+rand = "0.6"
 regex = {version = "1.1", features = ["unstable"]}
 time = "0.1"

@@ -30,6 +30,7 @@ pub use self::policy_play::*;
 
 /* -------- Code -------- */
 
+use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
 use std::fmt;
@@ -150,7 +151,7 @@ fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f
 /// * `color` - the current player
 ///
 fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
-    let t = *thread_rng().choose(&symmetry::ALL).unwrap();
+    let t = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
 
     global_cache::get_or_insert(board, color, t, || {
         // run a forward pass through the network using this transformation
@@ -464,7 +465,7 @@ fn get_random_komi() -> f32 {
     } else if value < 0.9 {
         0.5
     } else {
-        let value = thread_rng().gen_range::<i32>(-8, 8);
+        let value: i32 = thread_rng().gen_range(-8, 8);
 
         value as f32 + 0.5
     }
