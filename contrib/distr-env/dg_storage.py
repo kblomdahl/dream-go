@@ -123,7 +123,7 @@ def copy_most_recent_games():
 
     print('Loading training data...', end='', flush=True)
 
-    for blob in blobs[-100:]:
+    for blob in blobs[-200:]:
         dest_file = 'data/{}'.format(basename(blob.name))
         files += (dest_file,)
 

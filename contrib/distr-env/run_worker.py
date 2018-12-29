@@ -83,7 +83,7 @@ if __name__ == '__main__':
                 game_records += x
                 game_records += '\r\n'
 
-            # score the game as they get finished by the engine
+            # score the games as they get finished by the engine
             for line in proc.stdout:
                 line = line.decode('utf-8').strip()
                 pool.apply_async(clean_game, [line], callback=add_game_record)

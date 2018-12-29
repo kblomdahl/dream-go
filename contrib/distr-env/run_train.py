@@ -15,6 +15,7 @@ if best_model:
         '/usr/bin/python',
         '-m', 'dream_tf',
         '--start', '--warm-start', best_model,
+        '--steps', '40960000',
         '--name', next_model
     ] + copy_most_recent_games()
 else:
