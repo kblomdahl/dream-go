@@ -26,6 +26,7 @@ use nn::ffi::{cublas, cuda, cudnn};
 use nn::slots::*;
 use nn::output_map::*;
 use nn::tensor::Tensor;
+use util::types::f16;
 use util::config;
 
 /// A __global__ constant that contains `0.0`.
@@ -33,16 +34,6 @@ const ZERO: f32 = 0.0;
 
 /// A __global__ constant that contains `1.0`.
 const ONE: f32 = 1.0;
-
-/// A __global__ constant that contains approximately `3.09023`. This is necessary
-/// because we quantize to the range `[-127, +127]` which contains `0` and then
-/// `127` in each direction so a total of `1 + 2*127 = 255` elements. This means
-/// the maximum value that can be represented is:
-///
-/// `2.0 * THREE / 255.0 * 127.0`
-///
-/// Which we can solve for the value of `THREE` when the maximum value is 3.09023.
-const THREE: f32 = (3.09023 / 127.0) * 255.0 / 2.0;
 
 /// The number of channels to assume if not given in the network weights file.
 const DEFAULT_NUM_CHANNELS: i32 = 128;
@@ -56,11 +47,11 @@ pub trait InferenceType: Copy + Default + Sized {
     fn as_f32(self) -> f32;
 }
 
-impl InferenceType for i8 {
-    type Tower = i8;
-    type Output = f32;
+impl InferenceType for f16 {
+    type Tower = f16;
+    type Output = f16;
 
-    fn as_f32(self) -> f32 { THREE * (self as f32) / 127.0 }
+    fn as_f32(self) -> f32 { f32::from(self) }
 }
 
 impl InferenceType for f32 {
@@ -127,6 +118,22 @@ unsafe fn load_output<T: InferenceType>(
             stream
         ));
     }
+}
+
+/// Returns true if the current device supports `f16` (in a
+/// sensible way).
+fn has_true_half() -> bool {
+    let mut version_major: i32 = 0;
+    let mut version_minor: i32 = 0;
+
+    unsafe {
+        assert!(cuda::cudaDeviceGetAttribute(&mut version_major, cuda::DeviceAttr::ComputeCapabilityMajor, 0).is_ok());
+        assert!(cuda::cudaDeviceGetAttribute(&mut version_minor, cuda::DeviceAttr::ComputeCapabilityMinor, 0).is_ok());
+    }
+
+    (version_major == 6 && version_minor == 0) ||
+        (version_major == 6 && version_minor == 2) ||
+        (version_major >= 7)
 }
 
 // -------- Graph --------
@@ -245,8 +252,6 @@ struct UpLayer {
     relu: cudnn::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
-
-    alpha: f32
 }
 
 impl Drop for UpLayer {
@@ -272,7 +277,6 @@ impl UpLayer {
     /// * `tensors` -
     ///
     unsafe fn new(handle: cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> UpLayer {
-        let weights = &tensors["01_upsample/conv_1:0"];
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
@@ -284,39 +288,38 @@ impl UpLayer {
             relu: ptr::null(),
             descr: ptr::null(),
 
-            fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
-            alpha: weights.scale / (127.0 * THREE)
+            fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new()
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.input,
-            cudnn::TensorFormat::NCHWVECTC,
-            cudnn::DataType::Int8x4,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             n, NUM_FEATURES as i32, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.output));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.output,
-            cudnn::TensorFormat::NCHWVECTC,
-            cudnn::DataType::Int8x4,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             n, num_channels as i32, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.offset,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             1, num_channels as i32, 1, 1
         ));
 
         check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter));
         check!(cudnn::cudnnSetFilter4dDescriptor(
             out.filter,
-            cudnn::DataType::Int8x4,
-            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::DataType::Half,
+            cudnn::TensorFormat::NHWC,
             num_channels as i32, NUM_FEATURES as i32, 3, 3
         ));
 
@@ -333,7 +336,7 @@ impl UpLayer {
             out.descr,
             1, 1, 1, 1, 1, 1,
             cudnn::ConvolutionMode::CrossCorrelation,
-            cudnn::DataType::Int32
+            if has_true_half() { cudnn::DataType::Half } else { cudnn::DataType::Float }
         ));
 
         #[cfg(feature = "tensor-core")] {
@@ -380,7 +383,7 @@ impl UpLayer {
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
-            &self.alpha,
+            &ONE,
             self.input, **input,
             self.filter, weights.get(device_id),
             self.descr, self.fwd_algo.algo,
@@ -406,8 +409,6 @@ struct ResidualLayer {
     num_channels: usize,
 
     count: usize,
-    alpha1: f32,
-    alpha2: f32,
     gate_c: f32,  // carry gate
     gate_t: f32   // transform gate
 }
@@ -444,8 +445,6 @@ impl ResidualLayer {
             return None;
         }
 
-        let weights_1 = weights_1.unwrap();
-        let weights_2 = weights_2.unwrap();
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
@@ -461,8 +460,6 @@ impl ResidualLayer {
             num_channels: num_channels as usize,
 
             count: i,
-            alpha1: weights_1.scale / 127.0,
-            alpha2: gate_t * weights_2.scale / 127.0,
 
             gate_c: gate_c,
             gate_t: gate_t
@@ -471,24 +468,24 @@ impl ResidualLayer {
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.tensor));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.tensor,
-            cudnn::TensorFormat::NCHWVECTC,
-            cudnn::DataType::Int8x4,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             n, num_channels as i32, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.offset,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             1, num_channels as i32, 1, 1
         ));
 
         check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter));
         check!(cudnn::cudnnSetFilter4dDescriptor(
             out.filter,
-            cudnn::DataType::Int8x4,
-            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::DataType::Half,
+            cudnn::TensorFormat::NHWC,
             num_channels as i32, num_channels as i32, 3, 3
         ));
 
@@ -505,7 +502,7 @@ impl ResidualLayer {
             out.descr,
             1, 1, 1, 1, 1, 1,
             cudnn::ConvolutionMode::CrossCorrelation,
-            cudnn::DataType::Int32
+            if has_true_half() { cudnn::DataType::Half } else { cudnn::DataType::Float }
         ));
 
         #[cfg(feature = "tensor-core")] {
@@ -565,7 +562,7 @@ impl ResidualLayer {
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
-            &self.alpha1,
+            &ONE,
             self.tensor, *input,
             self.filter, weights_1.get(device_id),
             self.descr, self.fwd_algo.algo,
@@ -580,7 +577,7 @@ impl ResidualLayer {
         // perform the forward convolution (2)
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
-            &self.alpha2,
+            &self.gate_t,
             self.tensor, *residual_2,
             self.filter, weights_2.get(device_id),
             self.descr, self.fwd_algo.algo,
@@ -611,9 +608,7 @@ struct ValueLayer {
     bias_2: cudnn::TensorDescriptor,
     tanh: cudnn::ActivationDescriptor,
 
-    count: usize,
-    alpha1: f32,
-    alpha2: f32
+    count: usize
 }
 
 impl Drop for ValueLayer {
@@ -647,7 +642,6 @@ impl ValueLayer {
     /// * `tensors` -
     ///
     unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> ValueLayer {
-        let weights_1 = &tensors[&format!("{:02}v_value/conv_1:0", i)];
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
@@ -666,72 +660,70 @@ impl ValueLayer {
             bias_2: ptr::null(),
             tanh: ptr::null(),
 
-            count: i,
-            alpha1: weights_1.scale / 127.0,
-            alpha2: THREE / 127.0
+            count: i
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.input,
-            cudnn::TensorFormat::NCHWVECTC,
-            cudnn::DataType::Int8x4,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             n, num_channels, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_1));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.value_1,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             n, 1, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_2));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.value_2,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             n, 256, 1, 1
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_3));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.value_3,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             n, 1, 1, 1
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.offset,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             1, 1, 1, 1
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias_1));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.bias_1,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             1, 256, 1, 1
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias_2));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.bias_2,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             1, 1, 1, 1
         ));
 
         check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter));
         check!(cudnn::cudnnSetFilter4dDescriptor(
             out.filter,
-            cudnn::DataType::Int8x4,
-            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::DataType::Half,
+            cudnn::TensorFormat::NHWC,
             1, num_channels, 1, 1
         ));
 
@@ -756,7 +748,7 @@ impl ValueLayer {
             out.descr,
             0, 0, 1, 1, 1, 1,
             cudnn::ConvolutionMode::CrossCorrelation,
-            cudnn::DataType::Int32
+            if has_true_half() { cudnn::DataType::Half } else { cudnn::DataType::Float }
         ));
 
         #[cfg(feature = "tensor-core")] {
@@ -813,7 +805,7 @@ impl ValueLayer {
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
-            &self.alpha1,
+            &ONE,
             self.input, **input,
             self.filter, weights_1.get(device_id),
             self.descr, self.fwd_algo.algo,
@@ -836,12 +828,12 @@ impl ValueLayer {
             cublas::Operation::N,
             cublas::Operation::N,
             256, workspace.batch_size as i32, 361,  // output, batch_size, input
-            &self.alpha2 as *const f32 as *const c_void,
-            weights_2.get(device_id), cuda::DataType::R32F, 256,  // input_2
-            *value_1, cuda::DataType::R32F, 361,  // input_1
+            &ONE as *const f32 as *const c_void,
+            weights_2.get(device_id), cuda::DataType::R16F, 256,  // input_2
+            *value_1, cuda::DataType::R16F, 361,  // input_1
             &ZERO as *const f32 as *const c_void,
-            *value_2, cuda::DataType::R32F, 256,  // output
-            cuda::DataType::R32F, cublas::GemmAlgo::Dfalt
+            *value_2, cuda::DataType::R16F, 256,  // output
+            cuda::DataType::R32F, cublas::GemmAlgo::DfaltTensorOp
         ));
 
         check!(cudnn::cudnnAddTensor(
@@ -866,11 +858,11 @@ impl ValueLayer {
             cublas::Operation::N,
             1, workspace.batch_size as i32, 256,  // output, batch_size, input
             &ONE as *const f32 as *const c_void,
-            weights_3.get(device_id), cuda::DataType::R32F, 1,  // input_2
-            *value_2, cuda::DataType::R32F, 256,  // input_1
+            weights_3.get(device_id), cuda::DataType::R16F, 1,  // input_2
+            *value_2, cuda::DataType::R16F, 256,  // input_1
             &ZERO as *const f32 as *const c_void,
-            *value_3, cuda::DataType::R32F, 1,  // output
-            cuda::DataType::R32F, cublas::GemmAlgo::Dfalt
+            *value_3, cuda::DataType::R16F, 1,  // output
+            cuda::DataType::R32F, cublas::GemmAlgo::DfaltTensorOp
         ));
 
         check!(cudnn::cudnnAddTensor(
@@ -903,9 +895,7 @@ struct PolicyLayer {
     policy_1: cudnn::TensorDescriptor,
     policy_2: cudnn::TensorDescriptor,
 
-    count: usize,
-    alpha1: f32,
-    alpha2: f32
+    count: usize
 }
 
 impl Drop for PolicyLayer {
@@ -937,7 +927,6 @@ impl PolicyLayer {
     /// * `tensors` -
     ///
     unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> PolicyLayer {
-        let weights_1 = &tensors[&format!("{:02}p_policy/conv_1:0", i)];
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
@@ -954,56 +943,54 @@ impl PolicyLayer {
             policy_1: ptr::null(),
             policy_2: ptr::null(),
 
-            count: i,
-            alpha1: weights_1.scale / 127.0,
-            alpha2: THREE / 127.0
+            count: i
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.input,
-            cudnn::TensorFormat::NCHWVECTC,
-            cudnn::DataType::Int8x4,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             n, num_channels as i32, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.policy_1));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.policy_1,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             n, 2, 19, 19
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.policy_2));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.policy_2,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             n, 362, 1, 1
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.offset,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             1, 2, 1, 1
         ));
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias));
         check!(cudnn::cudnnSetTensor4dDescriptor(
             out.bias,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Float,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
             1, 362, 1, 1
         ));
 
         check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter));
         check!(cudnn::cudnnSetFilter4dDescriptor(
             out.filter,
-            cudnn::DataType::Int8x4,
-            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::DataType::Half,
+            cudnn::TensorFormat::NHWC,
             2, num_channels as i32, 1, 1
         ));
 
@@ -1020,7 +1007,7 @@ impl PolicyLayer {
             out.descr,
             0, 0, 1, 1, 1, 1,
             cudnn::ConvolutionMode::CrossCorrelation,
-            cudnn::DataType::Int32
+            if has_true_half() { cudnn::DataType::Half } else { cudnn::DataType::Float }
         ));
 
         #[cfg(feature = "tensor-core")] {
@@ -1073,7 +1060,7 @@ impl PolicyLayer {
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
-            &self.alpha1,
+            &ONE,
             self.input, **input,
             self.filter, weights_1.get(device_id),
             self.descr, self.fwd_algo.algo,
@@ -1096,12 +1083,12 @@ impl PolicyLayer {
             cublas::Operation::N,
             cublas::Operation::N,
             362, workspace.batch_size as i32, 722,  // output, batch_size, input
-            &self.alpha2 as *const f32 as *const c_void,
-            weights_2.get(device_id), cuda::DataType::R32F, 362,  // input_2
-            *policy_1, cuda::DataType::R32F, 722,  // input_1
+            &ONE as *const f32 as *const c_void,
+            weights_2.get(device_id), cuda::DataType::R16F, 362,  // input_2
+            *policy_1, cuda::DataType::R16F, 722,  // input_1
             &ZERO as *const f32 as *const c_void,
-            *policy_2, cuda::DataType::R32F, 362,  // output
-            cuda::DataType::R32F, cublas::GemmAlgo::Dfalt
+            *policy_2, cuda::DataType::R16F, 362,  // output
+            cuda::DataType::R32F, cublas::GemmAlgo::DfaltTensorOp
         ));
 
         // apply the softmax temperature at the _add tensor_ layer since the cuDNN

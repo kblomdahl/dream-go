@@ -40,7 +40,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use time;
 
-use go::util::features::{CHW_VECT_C, Features};
+use go::util::features::{HWC, Features};
 use go::util::score::{Score};
 use go::util::sgf::*;
 use go::util::symmetry;
@@ -48,6 +48,7 @@ use go::{Board, Color};
 use mcts::time_control::{TimeStrategy, RolloutLimit};
 use mcts::predict::{PredictService, PredictGuard, PredictRequest};
 use nn::{Network, Profiler};
+use util::types::f16;
 use util::{b85, config, min};
 use mcts::asm::sum_finite_f32;
 use mcts::asm::normalize_finite_f32;
@@ -109,7 +110,7 @@ fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f
             for i in 0..362 { policy[i] += other_policy[i]; }
             value += other_value;
         } else {
-            new_requests.push(PredictRequest::Ask(board.get_features::<CHW_VECT_C>(color, t)));
+            new_requests.push(PredictRequest::Ask(board.get_features::<HWC, f16>(color, t)));
             new_symmetries.push(t);
         }
     }
@@ -156,7 +157,7 @@ fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, V
     global_cache::get_or_insert(board, color, t, || {
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
-        let response = server.send(PredictRequest::Ask(board.get_features::<CHW_VECT_C>(color, t)));
+        let response = server.send(PredictRequest::Ask(board.get_features::<HWC, f16>(color, t)));
         let (value, original_policy) = if let Some(x) = response {
             x.unwrap()
         } else {

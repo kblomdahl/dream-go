@@ -22,6 +22,7 @@ use test::Bencher;
 use rand::{Rng, thread_rng};
 
 use go::util::features::FEATURE_SIZE;
+use dream_go::util::types::f16;
 use dream_go::nn::*;
 
 thread_local! {
@@ -40,10 +41,10 @@ fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
     NETWORK.with(|network| {
         let mut workspace = network.get_workspace(batch_size);
         let features = (0..batch_size).flat_map(|_| {
-            let mut input = vec! [0i8; FEATURE_SIZE];
+            let mut input = vec! [f16::from(0.0); FEATURE_SIZE];
 
             for b in input.iter_mut() {
-                *b = if thread_rng().gen::<f32>() < 0.2 { 127 } else { 0 };
+                *b = f16::from(if thread_rng().gen::<f32>() < 0.2 { 1.0 } else { 0.0 });
             }
 
             input.into_iter()

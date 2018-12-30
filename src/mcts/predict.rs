@@ -18,6 +18,7 @@ use parallel::{self, OneSender};
 use go::util::features::{FEATURE_SIZE};
 use nn::devices::{DEVICES, set_current_device};
 use nn::{self, Network, Output, OutputSet, Workspace};
+use util::types::f16;
 use util::config;
 
 pub type PredictGuard<'a> = parallel::ServiceGuard<'a, PredictState>;
@@ -29,7 +30,7 @@ pub fn service(network: Network) -> PredictService {
 
 pub enum PredictRequest {
     /// Request to compute the value and policy for some feature.
-    Ask(Vec<i8>),
+    Ask(Vec<f16>),
 
     /// Indicate that a worker is waiting for some other thread to finish
     /// and should be awaken after the next batch of computations finish.
@@ -45,7 +46,7 @@ pub struct PredictState {
     running_count: AtomicUsize,
 
     /// The features to get the value and policy for.
-    features_list: Vec<i8>,
+    features_list: Vec<f16>,
 
     /// The sender to response to each of the features in `features_list`
     /// over.
@@ -80,7 +81,7 @@ impl PredictState {
     /// * `workspace` - 
     /// * `features_list` - 
     /// 
-    fn forward(workspace: &mut Workspace, features_list: &[i8]) -> (Vec<f32>, Vec<Vec<f32>>) {
+    fn forward(workspace: &mut Workspace, features_list: &[f16]) -> (Vec<f32>, Vec<Vec<f32>>) {
         let mut outputs = nn::forward(
             workspace,
             features_list,

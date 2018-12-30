@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 #![feature(test)]
 
 extern crate go;
@@ -21,7 +20,7 @@ extern crate test;
 use test::Bencher;
 
 use go::{DEFAULT_KOMI, Board, Color};
-use go::util::features::{CHW, Features};
+use go::util::features::{HWC, Features};
 use go::util::symmetry::Transform;
 
 /// Benchmark the full playout of a game as a serie of `is_valid` and `place` calls.
@@ -140,7 +139,7 @@ fn get_features_16(b: &mut Bencher) {
     b.iter(move || {
         let black = test::black_box(Color::Black);
 
-        board.get_features::<CHW>(black, Transform::Transpose)
+        board.get_features::<HWC, f32>(black, Transform::Transpose)
     });
 }
 
@@ -195,6 +194,6 @@ fn get_features_32(b: &mut Bencher) {
     b.iter(move || {
         let white = test::black_box(Color::White);
 
-        board.get_features::<CHW>(white, Transform::FlipLR)
+        board.get_features::<HWC, f32>(white, Transform::FlipLR)
     });
 }

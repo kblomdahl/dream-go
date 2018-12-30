@@ -48,19 +48,6 @@ impl Order for HWC {
     fn index(c: usize, i: usize) -> usize { NUM_FEATURES * i + c }
 }
 
-/// Implementation of `Order` for the data format `NCHW_VECT_C`.
-#[allow(non_camel_case_types)]
-pub struct CHW_VECT_C;
-
-impl Order for CHW_VECT_C {
-    fn index(c: usize, i: usize) -> usize {
-        let c_ = c / 4;
-        let c__ = c % 4;
-
-        4 * (c_ * 361 + i) + c__
-    }
-}
-
 pub trait Features {
     /// Returns the features of the current object in the given order and data
     /// type.
@@ -70,11 +57,11 @@ pub trait Features {
     /// * `color` - the color of the current player
     /// * `symmetry` - the symmetry to use
     ///
-    fn get_features<O: Order>(
+    fn get_features<O: Order, T: From<f32> + Copy>(
         &self,
         color: Color,
         symmetry: symmetry::Transform
-    ) -> Vec<i8>;
+    ) -> Vec<T>;
 }
 
 impl Features for Board {
@@ -131,14 +118,14 @@ impl Features for Board {
     ///
     /// * `color` - the color of the current player
     ///
-    fn get_features<O: Order>(
+    fn get_features<O: Order, T: From<f32> + Copy>(
         &self,
         color: Color,
         symmetry: symmetry::Transform
-    ) -> Vec<i8>
+    ) -> Vec<T>
     {
-        let c_0: i8 = 0;
-        let c_1: i8 = 127;
+        let c_0 = T::from(0.0);
+        let c_1 = T::from(1.0);
 
         let mut features = vec! [c_0; FEATURE_SIZE];
         let symmetry_table = symmetry.get_table();
@@ -212,7 +199,7 @@ impl Features for Board {
         }
 
         // global properties
-        let c_komi: i8 = (63.5 + (63.5 * self.komi) / 7.5).round() as i8;
+        let c_komi = T::from(0.5 + (0.5 * self.komi) / 7.5);
 
         let is_black = if color == Color::Black { c_komi } else { c_0 };
         let is_white = if color == Color::White { c_komi } else { c_0 };

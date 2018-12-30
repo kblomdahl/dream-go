@@ -87,10 +87,6 @@ def unit_constraint(x):
     """ Return a constraint that clip `x` to the range [0, 1] """
     return tf.clip_by_value(x, 0.0, 1.0)
 
-def relu3(x):
-    """ Returns `min(max(x, 0), 3)`, this is useful to simulate quantized inference. """
-    return tf.clip_by_value(x, 0.0, 3.09023)
-
 def conv2d(x, weights):
     """ Shortcut for `tf.nn.conv2d` """
     return tf.nn.conv2d(x, tf.cast(weights, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
@@ -141,37 +137,14 @@ def batch_norm(x, weights, mode, params, is_recomputing=False):
         )
 
         # fix the weights so that they appear in the _correct_ order according
-        # to cuDNN.
+        # to cuDNN (for NHWC):
         #
         # tensorflow: [h, w, in, out]
-        # cudnn:      [out, in, h, w]
-        weights_ = tf.reshape(weights_, [
-            weights_.shape[0],
-            weights_.shape[1],
-            -1,  # weights_.shape[2] / 4
-            4,
-            weights_.shape[3]
-        ])
-        weights_ = tf.transpose(weights_, [4, 2, 0, 1, 3])
+        # cudnn:      [out, h, w, in]
+        weights_ = tf.transpose(weights_, [3, 0, 1, 2])
 
-        # quantize the weights to [-127, +127] and the offset to the same range
-        # but as a floating point number as required by cuDNN. Note that this range
-        # contains 255 values for the range [-3.0, +3.0] for the offset, so the
-        # step size becomes `(6.0 / 255.0)`
-        weights_max = tf.reduce_max(tf.abs(weights_))
-        weights_q, weights_qmin, weights_qmax = tf.quantize(
-            weights_,
-            -weights_max,
-            weights_max,
-            tf.qint8,
-            'SCALED',
-            'HALF_AWAY_FROM_ZERO'
-        )
-
-        step_size = (2 * 3.09023) / 255.0
-
-        tf.add_to_collection(DUMP_OPS, [offset, offset_ / step_size, 'f4', tf.constant(127.0 * step_size)])
-        tf.add_to_collection(DUMP_OPS, [weights, weights_q, 'i1', tf.reduce_max([tf.abs(weights_qmin), tf.abs(weights_qmax)])])
+        tf.add_to_collection(DUMP_OPS, [offset, offset_, 'f2'])
+        tf.add_to_collection(DUMP_OPS, [weights, weights_, 'f2'])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
@@ -239,11 +212,11 @@ def residual_block(x, mode, params):
 
         # the 1st convolution
         y = batch_norm(conv2d(x, conv_1), conv_1, mode, params, is_recomputing=is_recomputing)
-        y = relu3(y)
+        y = tf.nn.relu(y)
 
         # the 2nd convolution
         y = batch_norm(conv2d(y, conv_2), conv_2, mode, params, is_recomputing=is_recomputing)
-        y = relu3(tf.cast(alpha, tf.float16) * y + tf.cast(1.0 - alpha, tf.float16) * x)
+        y = tf.nn.relu(tf.cast(alpha, tf.float16) * y + tf.cast(1.0 - alpha, tf.float16) * x)
 
         return y
 
@@ -271,10 +244,10 @@ def value_head(x, mode, params):
     offset_1 = tf.get_variable('linear_1/offset', (256,), tf.float32, zeros_op, use_resource=True)
     offset_2 = tf.get_variable('linear_2/offset', (1,), tf.float32, zeros_op, use_resource=True)
 
-    tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f4'])
-    tf.add_to_collection(DUMP_OPS, [linear_2, linear_2, 'f4'])
-    tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f4'])
-    tf.add_to_collection(DUMP_OPS, [offset_2, offset_2, 'f4'])
+    tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f2'])
+    tf.add_to_collection(DUMP_OPS, [linear_2, linear_2, 'f2'])
+    tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f2'])
+    tf.add_to_collection(DUMP_OPS, [offset_2, offset_2, 'f2'])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
@@ -309,8 +282,19 @@ def policy_head(x, mode, params):
     linear_1 = tf.get_variable('linear_1', (722, 362), tf.float32, init_op, use_resource=True)
     offset_1 = tf.get_variable('linear_1/offset', (362,), tf.float32, zeros_op, use_resource=True)
 
-    tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f4'])
-    tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f4'])
+    # we train in NCHW, but the inference is done in NHWC so we need to change
+    # the order of the **first** linear layer such that it can handle NHWC
+    # input.
+    linear_1_ = tf.reshape(
+        tf.transpose(
+            tf.reshape(linear_1, [2, 361, 362]),
+            [1, 0, 2]
+        ),
+        [722, 362]
+    )
+
+    tf.add_to_collection(DUMP_OPS, [linear_1, linear_1_, 'f2'])
+    tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f2'])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
@@ -342,7 +326,7 @@ def tower(x, mode, params):
         conv_1 = tf.get_variable('conv_1', (3, 3, num_inputs, num_channels), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
 
         y = batch_norm(conv2d(x, conv_1), conv_1, mode, params)
-        y = relu3(y)
+        y = tf.nn.relu(y)
 
     for i in range(num_blocks):
         with tf.variable_scope('{:02d}_residual'.format(2 + i), reuse=tf.AUTO_REUSE):
@@ -403,7 +387,7 @@ def get_dataset(files, batch_size=1, is_training=True):
     ffi = FFI()
     ffi.cdef("""
     typedef struct {
-        char features[11552];
+        float features[11552];
         int index;
         int color;
         char policy[905];
@@ -433,7 +417,7 @@ def get_dataset(files, batch_size=1, is_training=True):
             features_hat = ffi.unpack(example[0].features, 11552)
             policy_hat = ffi.string(example[0].policy)
 
-            features = np.fromstring(bytes(features_hat), 'i1').astype('f2') / 127.0
+            features = np.asarray(features_hat, 'f4').astype('f2')
             value = np.asarray(1.0 if example[0].color == example[0].winner else -1.0, 'f4')
             policy = np.fromstring(base64.b85decode(policy_hat), 'f2')
 

@@ -20,14 +20,14 @@ use super::features::{CHW, FEATURE_SIZE, Features};
 use super::sgf::{Sgf, SgfError};
 use super::symmetry;
 
-use libc::{c_char, c_int, c_uchar};
+use libc::{c_float, c_char, c_int, c_uchar};
 use rand::prelude::SliceRandom;
 use regex::Regex;
 use std::ffi::CStr;
 
 #[repr(C)]
 pub struct Example {
-    pub features: [c_char; FEATURE_SIZE],
+    pub features: [c_float; FEATURE_SIZE],
     pub index: c_int,
     pub color: c_int,
     pub policy: [c_uchar; 905],
@@ -38,7 +38,7 @@ pub struct Example {
 impl Default for Example {
     fn default() -> Example {
         Example {
-            features: [0; FEATURE_SIZE],
+            features: [0.0; FEATURE_SIZE],
             index: 0,
             color: 0,
             policy: [0; 905],
@@ -160,7 +160,7 @@ pub unsafe extern fn extract_single_example(
         };
 
         candidate_examples.choose(&mut rand::thread_rng()).map(|&i| {
-            let features = examples[i].board.get_features::<CHW>(
+            let features = examples[i].board.get_features::<CHW, f32>(
                 examples[i].color,
                 symmetry::Transform::Identity
             );
