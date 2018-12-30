@@ -29,7 +29,7 @@ unsafe fn _contains_u64x16_avx2(haystack: &[u64], needle: u64) -> bool {
     let needle = _mm_set1_epi64x(needle as i64);
 
     for _i in 0..2 {
-        let a = _mm_loadu_si128(haystack.add( 0) as *const _);
+        let a = _mm_loadu_si128(haystack.add(0) as *const _);
         let b = _mm_loadu_si128(haystack.add(2) as *const _);
         let c = _mm_loadu_si128(haystack.add(4) as *const _);
         let d = _mm_loadu_si128(haystack.add(6) as *const _);

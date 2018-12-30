@@ -35,7 +35,7 @@ use gtp::ponder_service::PonderService;
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
 const KNOWN_COMMANDS: [&str; 23] = [
-    "protocol_verion", "name", "version", "boardsize", "clear_board", "komi", "play",
+    "protocol_version", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove",
     "kgs-genmove_cleanup", "undo",
     "time_settings", "kgs-time_settings", "time_left", "quit",
