@@ -79,9 +79,11 @@ def recompute_grad(func):
 def normalize_constraint(x):
     """ Returns a constraint that set each output vector to `tf.norm(x) = 1` """
     out_dims = x.shape[-1]
-    y = tf.norm(tf.reshape(x, (-1, out_dims)), axis=0)
+    x_f = tf.reshape(x, (-1, out_dims))
+    n = tf.norm(x_f, axis=0)
+    x_n = x_f / (tf.sqrt(tf.cast(out_dims, tf.float32)) * tf.reshape(n, (1, out_dims)))
 
-    return x / (tf.sqrt(tf.cast(out_dims, tf.float32)) * tf.reshape(y, (1, 1, 1, out_dims)))
+    return tf.reshape(x_n, x.shape)
 
 def unit_constraint(x):
     """ Return a constraint that clip `x` to the range [0, 1] """
@@ -89,7 +91,7 @@ def unit_constraint(x):
 
 def conv2d(x, weights):
     """ Shortcut for `tf.nn.conv2d` """
-    return tf.nn.conv2d(x, tf.cast(weights, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NCHW')
+    return tf.nn.conv2d(x, tf.cast(weights, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NHWC')
 
 def compute_gradients(loss, **kwargs):
     """ Shortcut to _tf.gradients_ (or similar alternatives) """
@@ -155,7 +157,7 @@ def batch_norm(x, weights, mode, params, is_recomputing=False):
                 offset,
                 None,
                 None,
-                data_format='NCHW',
+                data_format='NHWC',
                 is_training=True
             )
 
@@ -173,7 +175,7 @@ def batch_norm(x, weights, mode, params, is_recomputing=False):
                 offset,
                 mean,
                 variance,
-                data_format='NCHW',
+                data_format='NHWC',
                 is_training=False
             )
 
@@ -239,7 +241,7 @@ def value_head(x, mode, params):
     num_channels = params['num_channels']
 
     conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
-    linear_1 = tf.get_variable('linear_1', (361, 256), tf.float32, init_op, use_resource=True)
+    linear_1 = tf.get_variable('linear_1', (361, 256), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
     linear_2 = tf.get_variable('linear_2', (256, 1), tf.float32, init_op, use_resource=True)
     offset_1 = tf.get_variable('linear_1/offset', (256,), tf.float32, zeros_op, use_resource=True)
     offset_2 = tf.get_variable('linear_2/offset', (1,), tf.float32, zeros_op, use_resource=True)
@@ -282,18 +284,7 @@ def policy_head(x, mode, params):
     linear_1 = tf.get_variable('linear_1', (722, 362), tf.float32, init_op, use_resource=True)
     offset_1 = tf.get_variable('linear_1/offset', (362,), tf.float32, zeros_op, use_resource=True)
 
-    # we train in NCHW, but the inference is done in NHWC so we need to change
-    # the order of the **first** linear layer such that it can handle NHWC
-    # input.
-    linear_1_ = tf.reshape(
-        tf.transpose(
-            tf.reshape(linear_1, [2, 361, 362]),
-            [1, 0, 2]
-        ),
-        [722, 362]
-    )
-
-    tf.add_to_collection(DUMP_OPS, [linear_1, linear_1_, 'f2'])
+    tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f2'])
     tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f2'])
 
     def _forward(x):
@@ -409,15 +400,15 @@ def get_dataset(files, batch_size=1, is_training=True):
         result = dream_go.extract_single_example(line, example)
 
         if result != 0:
-            features = np.zeros((NUM_FEATURES, 19, 19), 'f2')
+            features = np.zeros((19, 19, NUM_FEATURES), 'f2')
             boost = np.zeros((), 'f4')
             value = np.zeros((), 'f4')
             policy = np.zeros((362,), 'f2')
         else:
-            features_hat = ffi.unpack(example[0].features, 11552)
+            features_hat = ffi.buffer(example[0].features, 11552 * ffi.sizeof('float'))
             policy_hat = ffi.string(example[0].policy)
 
-            features = np.asarray(features_hat, 'f4').astype('f2')
+            features = np.frombuffer(features_hat, 'f4').astype('f2')
             value = np.asarray(1.0 if example[0].color == example[0].winner else -1.0, 'f4')
             policy = np.fromstring(base64.b85decode(policy_hat), 'f2')
 
@@ -442,7 +433,7 @@ def get_dataset(files, batch_size=1, is_training=True):
         return tf.not_equal(tf.reduce_sum(boost), 0.0)
 
     def _fix_shape(features, boost, value, policy):
-        features = tf.reshape(features, [NUM_FEATURES, 19, 19])
+        features = tf.reshape(features, [19, 19, NUM_FEATURES])
         boost = tf.reshape(boost, [1])
         value = tf.reshape(value, [1])
         policy = tf.reshape(policy, [362])
@@ -454,25 +445,25 @@ def get_dataset(files, batch_size=1, is_training=True):
             return tf.identity(image)
 
         def _flip_lr(image):
-            return tf.reverse_v2(image, [2])
-
-        def _flip_ud(image):
             return tf.reverse_v2(image, [1])
 
+        def _flip_ud(image):
+            return tf.reverse_v2(image, [0])
+
         def _transpose_main(image):
-            return tf.transpose(image, [0, 2, 1])
+            return tf.transpose(image, [1, 0, 2])
 
         def _transpose_anti(image):
-            return tf.reverse_v2(tf.transpose(image, [0, 2, 1]), [1, 2])
+            return tf.reverse_v2(tf.transpose(image, [1, 0, 2]), [0, 1])
 
         def _rot90(image):
-            return tf.transpose(tf.reverse_v2(image, [2]), [0, 2, 1])
+            return tf.transpose(tf.reverse_v2(image, [1]), [1, 0, 2])
 
         def _rot180(image):
-            return tf.reverse_v2(image, [1, 2])
+            return tf.reverse_v2(image, [0, 1])
 
         def _rot270(image):
-            return tf.reverse_v2(tf.transpose(image, [0, 2, 1]), [2])
+            return tf.reverse_v2(tf.transpose(image, [1, 0, 2]), [1])
 
         def _apply_random(random, x):
             return tf.case([
@@ -497,7 +488,7 @@ def get_dataset(files, batch_size=1, is_training=True):
         # element at the end, so we temporarily remove it while the tensor gets
         # a random transformation applied
         policy, policy_pass = tf.split(policy, (361, 1))
-        policy = tf.reshape(_apply_random(random, tf.reshape(policy, [1, 19, 19])), [361])
+        policy = tf.reshape(_apply_random(random, tf.reshape(policy, [19, 19, 1])), [361])
         policy = tf.concat([policy, policy_pass], 0)
 
         value = tf.reshape(value, [1])
@@ -508,7 +499,7 @@ def get_dataset(files, batch_size=1, is_training=True):
         """ Zeros out the history planes for 25% of the features. """
         zero_history_mask = np.asarray([1.0] * NUM_FEATURES, 'f2')
         zero_history_mask[3:4] = 0.0
-        zero_history_mask = tf.constant(zero_history_mask, tf.float16, (NUM_FEATURES, 1, 1))
+        zero_history_mask = tf.constant(zero_history_mask, tf.float16, (1, 1, NUM_FEATURES))
 
         random = tf.random_uniform((), 0, 100, tf.int32)
         features = tf.case(

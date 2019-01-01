@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use color::Color;
 use board::Board;
 use ::DEFAULT_KOMI;
 
-use super::features::{CHW, FEATURE_SIZE, Features};
+use super::features::{HWC, FEATURE_SIZE, Features};
 use super::sgf::{Sgf, SgfError};
 use super::symmetry;
 
@@ -160,7 +160,7 @@ pub unsafe extern fn extract_single_example(
         };
 
         candidate_examples.choose(&mut rand::thread_rng()).map(|&i| {
-            let features = examples[i].board.get_features::<CHW, f32>(
+            let features = examples[i].board.get_features::<HWC, f32>(
                 examples[i].color,
                 symmetry::Transform::Identity
             );
