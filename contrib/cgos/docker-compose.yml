@@ -1,0 +1,9 @@
+version: '3'
+services:
+  cgos:
+    build:
+      context: .
+      args:
+        - GIT_REV
+        - CGOS_PASSWORD
+    restart: always

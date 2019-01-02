@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1452,6 +1452,7 @@ impl<'a> fmt::Display for ToPretty<'a> {
         // print a summary containing the total tree size
         let total_value: f32 = (0..362)
             .map(|i| self.root.with(i, |child| child.count() as f32 * child.value()))
+            .filter(|v| v.is_finite())
             .sum();
         let norm_value = total_value / (self.root.total_count as f32);
         let likely_path: String = GreedyPath { current: self.root }

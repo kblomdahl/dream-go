@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,6 +67,16 @@ lazy_static! {
 
     /// Whether to think in the background during idle time.
     pub static ref NO_PONDER: bool = has_opt("--no-ponder");
+
+    /// Whether to play using Tromp-Taylor rules.
+    pub static ref TROMP_TAYLOR: bool = has_opt("--tt");
+
+    /// The number of milliseconds to never let the total game game fall below.
+    ///
+    /// Safe time is intended to compensate for lag or other uncontrollable factors
+    /// that might arise during real games, especially when playing over network.
+    pub static ref SAFE_TIME_MS: usize = get_opt("--safe-time")
+        .unwrap_or(100);
 
     /// The target number of rollouts for each search tree.
     pub static ref NUM_ROLLOUT: usize = get_opt("--num-rollout").unwrap_or(1600);

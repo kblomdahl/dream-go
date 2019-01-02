@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,9 @@ type PonderResult = Result<(PredictService, SearchTree, Board, Color), &'static 
 
 unsafe impl Send for SearchTree {}
 
+/// The maximum size the tree is allowed to grow (in nodes) during pondering.
+const MAX_TREE_SIZE: usize = 100_000;
+
 /// A very simple _time control_ that thinks until a boolean flag is set to
 /// `false`.
 #[derive(Clone)]
@@ -39,13 +42,19 @@ pub struct PonderTimeControl {
 impl TimeStrategy for PonderTimeControl {
     fn try_extend<F: Fn() -> bool>(
         &self,
-        _root: &SearchTree,
+        root: &SearchTree,
         _predicate: F,
         _factor: f32
     ) -> TimeStrategyResult
     {
         if self.is_running.load(Ordering::SeqCst) {
-            TimeStrategyResult::NotExpired(::std::usize::MAX)
+            let total_visits = root.size();
+
+            if total_visits < MAX_TREE_SIZE {
+                TimeStrategyResult::NotExpired(MAX_TREE_SIZE - total_visits)
+            } else {
+                TimeStrategyResult::Expired
+            }
         } else {
             TimeStrategyResult::Expired
         }

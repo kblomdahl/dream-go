@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,11 +42,13 @@ fn main() {
             println!("  --gtp                 Run GTP client (default)");
             println!();
             println!("Advanced options:");
+            println!("  --safe-time <n>       The minimum number of milliseconds to leave on the game clock");
             println!("  --num-rollout <n>     The number of rollouts to add to the search tree for every move");
             println!("  --num-games <n>       The number of games to play or extract in parallel");
             println!("  --num-threads <n>     The number of search threads to use in total");
             println!("  --num-samples <n>     The number of games to extract from each game record");
             println!("  --batch-size <n>      The number parallel rollouts to perform on the GPU");
+            println!("  --tt                  Play using Tromp-Taylor rules");
             println!("  --no-ponder           Do not think in the background during idle time");
             println!("  --with-sabaki         Include Sabaki extensions amongst the GTP commands");
         },

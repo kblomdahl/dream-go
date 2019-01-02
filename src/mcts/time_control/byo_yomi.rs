@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,16 +14,15 @@
 
 use mcts::time_control::{TimeStrategy, TimeStrategyResult};
 use mcts::tree;
+use util::config::SAFE_TIME_MS;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// The number of milliseconds of each time period to allocate as _safe time_.
-/// 
-/// Safe time is intended to compensate for lag or other uncontrollable factors
-/// that might arise during real games.
-const SAFE_TIME_MS: usize = 50;
+/// The buffer time to remove from every period no matter what. This is to compensate for
+/// any latency in the rest of the program.
+const PERIOD_BUF_TIME_MS: usize = 50;
 
 #[derive(Clone)]
 pub struct ByoYomi {
@@ -49,12 +48,19 @@ impl ByoYomi {
         let byo_yomi_time_ms = (990.0 * byo_yomi_time) as usize;
 
         ByoYomi {
-            total_time_ms: main_time_ms + byo_yomi_time_ms * byo_yomi_periods,
+            total_time_ms: (main_time_ms + byo_yomi_time_ms * byo_yomi_periods).saturating_sub(*SAFE_TIME_MS),
             starting_visits: starting_visits,
             count: Arc::new(AtomicUsize::new(0)),
 
             start_time: Instant::now(),
             expire_time: Arc::new(AtomicUsize::new({
+                let safe_main_time_ms = main_time_ms.saturating_sub(*SAFE_TIME_MS);
+                let safe_byo_yomi_time_ms = if safe_main_time_ms == 0 {
+                    byo_yomi_time_ms.saturating_sub(*SAFE_TIME_MS)
+                } else {
+                    byo_yomi_time_ms
+                };
+
                 let period_ms = if move_number < 247 {
                     // The average game length is 257 moves as suggested
                     // by _Andries E. Brouwer_:
@@ -63,17 +69,17 @@ impl ByoYomi {
                     let remaining_regret = regret_cost_cum(257, 257) - regret_cost_cum(move_number, 257);
                     let fraction = regret_cost(move_number, 257) / remaining_regret;
 
-                    0.9 * fraction * main_time_ms as f32
+                    0.9 * fraction * safe_main_time_ms as f32
                 } else {
                     // assume the game will last for 10 more moves (forever)
                     //
                     // this will decay very quickly but should be fine since
                     // past the expected end-game most moves should just be the
                     // opponent refusing to surrender and playing stupid moves.
-                    0.1 * main_time_ms as f32
+                    0.1 * safe_main_time_ms as f32
                 };
 
-                byo_yomi_time_ms + period_ms as usize
+                safe_byo_yomi_time_ms + period_ms as usize
             })),
         }
     }
@@ -91,7 +97,7 @@ impl TimeStrategy for ByoYomi {
 
         // optimistic locking using atomic values, it will have a new value for
         // `expire_time` in the beginning of each loop iteration and check if it
-        // needs updating, if it does not then it exits immedietly otherwise it
+        // needs updating, if it does not then it exits immediately otherwise it
         // tries to update it.
         //
         // If the update fails due to concurrent modifications then it will try
@@ -99,10 +105,10 @@ impl TimeStrategy for ByoYomi {
         // be a lot cheaper than actual locking with a mutex.
         loop {
             let elapsed = self.start_time.elapsed();
-            let expires = Duration::from_millis(if expire_time_init < SAFE_TIME_MS {
+            let expires = Duration::from_millis(if expire_time_init < PERIOD_BUF_TIME_MS {
                 0
             } else {
-                (expire_time_init - SAFE_TIME_MS) as u64
+                (expire_time_init - PERIOD_BUF_TIME_MS) as u64
             });
 
             if elapsed >= expires {

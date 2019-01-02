@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -170,7 +170,7 @@ impl Gtp {
         } else if let Some(caps) = GENMOVE.captures(line) {
             let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
-            Ok((id, Command::GenMove(color, false)))
+            Ok((id, Command::GenMove(color, *config::TROMP_TAYLOR)))
         } else if line == "sabaki-genmovelog" {
             Ok((id, Command::GenMoveLog))
         } else if line == "final_score" {
@@ -737,6 +737,7 @@ impl Gtp {
                 let c = color as usize;
 
                 self.time_settings[c].time_left(main_time, byo_yomi_stones);
+                success!(id, "");
             }
         }
     }

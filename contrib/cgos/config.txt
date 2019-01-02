@@ -1,0 +1,9 @@
+%section server
+    server yss-aya.com
+    port 6819
+
+%section player
+    name dg-REV
+    password PASSWORD
+    invoke /app/dream_go --gtp --tt --safe-time 60000 --num-threads 64 --batch-size 16
+    priority 1
