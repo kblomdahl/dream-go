@@ -86,7 +86,7 @@ lazy_static! {
 
     /// The maximum batch size to forward to the neural network. A larger batch
     /// size typically result in a faster program but requires more GPU memory.
-    pub static ref BATCH_SIZE: usize = get_opt("--batch-size").unwrap_or(32);
+    pub static ref BATCH_SIZE: usize = get_opt("--batch-size").unwrap_or(16);
 
     /// The maximum number of games to play in parallel during `SelfPlay`,
     /// `PolicyPlay`, and `Extract` (with expert iteration).
