@@ -347,6 +347,8 @@ impl Gtp {
                 None
             };
 
+            let should_resign = value < 0.1;  // 10% chance of winning
+            let index = if should_resign { 361 } else { index };
             let (vertex, tree, other) = if index >= 361 {  // passing move
                 (None, mcts::tree::Node::forward(tree, 361), board.clone())
             } else {
@@ -357,15 +359,15 @@ impl Gtp {
                 (Some(Vertex { x, y }), mcts::tree::Node::forward(tree, index), other)
             };
 
-            ((value, vertex, last_log), tree, (other, color.opposite()))
+            ((vertex, should_resign, last_log), tree, (other, color.opposite()))
         });
 
-        if let Ok((value, vertex, last_log)) = result {
+        if let Ok((vertex, should_resign, last_log)) = result {
             if let Some(last_log) = last_log {
                 self.last_log = last_log;
             }
 
-            if value < 0.1 {  // 10% chance of winning
+            if should_resign {
                 success!(id, "resign");
                 None
             } else if let Some(vertex) = vertex {  // passing move
