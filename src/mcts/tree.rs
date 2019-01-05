@@ -318,7 +318,7 @@ impl Child {
     /// * `index` - the dense index in `BigChildrenImpl` to initialize from
     ///
     fn from_big(big: &BigChildrenImpl, index: usize) -> Child {
-        debug_assert!(index < 362);
+        debug_assert!(index < 362, "{}", index);
 
         Child {
             count: big.count[index],
@@ -1319,7 +1319,7 @@ pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32
             debug_assert!(index == 361);
 
             // since we stop probing into a tree once two consecutive passes has
-            // occured we can double-expand those nodes. This is too prevent that
+            // occurred we can double-expand those nodes. This is too prevent that
             // from causing memory leaks.
         }
     }

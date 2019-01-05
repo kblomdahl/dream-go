@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -199,7 +199,7 @@ fn create_initial_policy(
 
     // remove any symmetric moves that does not contribute to the search.
     //
-    // we do this by finding all symmeties which provides symmetric board positions,
+    // we do this by finding all symmetries which provides symmetric board positions,
     // then for each candidate move we find the minimum index provided by some
     // symmetry.
     let symmetries = symmetry::ALL.iter()
@@ -269,7 +269,7 @@ fn normalize_policy(policy: &mut Vec<f32>) {
 
     // check for NaN
     for i in 0..362 {
-        assert!(!policy[i].is_nan(), "found NaN at index {}, total sum = {}", i, policy_sum);
+        debug_assert!(!policy[i].is_nan(), "found NaN at index {}, total sum = {}", i, policy_sum);
     }
 }
 

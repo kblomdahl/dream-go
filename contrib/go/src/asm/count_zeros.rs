@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ unsafe fn _count_zeros(haystack: &[u8]) -> usize {
     let zero = _mm256_setzero_si256();
 
     for _i in 0..12 {
-        let a = _mm256_loadu_si256(haystack.add( 0) as *const _);
+        let a = _mm256_loadu_si256(haystack as *const _);
         let eq_a = _mm256_cmpeq_epi8(a, zero);
 
         count += _popcnt32(_mm256_movemask_epi8(eq_a));

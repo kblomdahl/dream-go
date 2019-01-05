@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ pub struct MutexGuard<'a> {
 
 impl<'a> Drop for MutexGuard<'a> {
     fn drop(&mut self) {
-        let previous = self.mutex.is_available.compare_and_swap(false, true, Ordering::Release);
+        let previous = self.mutex.is_available.compare_and_swap(false, true, Ordering::SeqCst);
 
         assert_eq!(previous, false);
     }
@@ -42,7 +42,7 @@ impl Mutex {
 
     #[inline]
     pub fn lock(&self) -> MutexGuard {
-        while !self.is_available.compare_and_swap(true, false, Ordering::Acquire) {
+        while !self.is_available.compare_and_swap(true, false, Ordering::SeqCst) {
             thread::yield_now();
         }
 
