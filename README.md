@@ -97,6 +97,9 @@ For the values provided in this example, which generate 200,000 examples for the
 * 1.0.0 - _Public Release_
 * 0.7.0 - _Acceptance_
   * First version with a network trained from self-play games
+* 0.6.3 - _Unravel_
+  * The engines plays more enjoyable with `kgs-genmove_cleanup`
+  * Bug fixes
 * 0.6.2 - _Unfolded_
   * Improved training procedure.
   * Change the input features to [include more liberties](https://github.com/Chicoryn/dream-go/wiki#input-features).
