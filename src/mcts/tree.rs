@@ -868,7 +868,7 @@ impl ChildrenImpl {
 #[repr(align(64))]
 pub struct Node {
     /// Spinlock used to protect the data in this node during modifications.
-    lock: Mutex,
+    pub lock: Mutex,
 
     /// The color of each edge.
     pub color: Color,
@@ -945,6 +945,8 @@ impl Node {
     pub fn with<T, F>(&self, index: usize, callback: F) -> T
         where F: FnOnce(Child) -> T
     {
+        let _guard = self.lock.lock();
+
         self.children.with(index, callback, self.initial_value)
     }
 

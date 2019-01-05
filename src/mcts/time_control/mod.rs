@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,12 +55,13 @@ pub trait TimeStrategy {
 /// * `root` - the tree to check for stability
 /// 
 fn is_stable(root: &tree::Node) -> bool {
+    let _guard = root.lock.lock();
     let max_visits = root.children.argmax_count();
     let max_wins = root.children.argmax_value();
 
     max_visits == max_wins || {
-        let max_value = root.with(max_wins, |child| child.value());
-        let other_value = root.with(max_visits, |child| child.value());
+        let max_value = root.children.with(max_wins, |child| child.value(), root.initial_value);
+        let other_value = root.children.with(max_visits, |child| child.value(), root.initial_value);
 
         max_value - other_value < 0.005  // within 0.025%
     }
@@ -74,21 +75,22 @@ fn is_stable(root: &tree::Node) -> bool {
 /// * `root` - the tree to get the lower bound for
 /// 
 fn min_promote_rollouts(root: &tree::Node) -> usize {
+    let _guard = root.lock.lock();
     let top_1 = root.children.argmax_count();
 
     // find the most visited child that is **not** `top_1`.
     let mut top_2 = if top_1 == 0 { 1 } else { 0 };
 
     for i in root.children.nonzero() {
-        let count_i = root.with(i, |child| child.count());
+        let count_i = root.children.with(i, |child| child.count(), root.initial_value);
 
-        if i != top_1 && count_i > root.with(top_2, |child| child.count()) {
+        if i != top_1 && count_i > root.children.with(top_2, |child| child.count(), root.initial_value) {
             top_2 = i;
         }
     }
 
-    let count_1 = root.with(top_1, |child| child.count());
-    let count_2 = root.with(top_2, |child| child.count());
+    let count_1 = root.children.with(top_1, |child| child.count(), root.initial_value);
+    let count_2 = root.children.with(top_2, |child| child.count(), root.initial_value);
 
     (count_1 - count_2) as usize
 }
