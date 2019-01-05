@@ -13,7 +13,7 @@ clean:
 	rm -rf $(DIR)
 
 build:
-	cargo build --release
+	cargo build --release --locked
 
 install: build control
 	rm -rf $(DIR)
