@@ -1203,12 +1203,12 @@ impl Node {
             value[i] = ::std::f32::NEG_INFINITY;
         }
 
+        let _guard = self.lock.lock();
         PUCT::get(self, &mut value);
 
         // greedy selection based on the maximum ucb1 value, failing if someone else
         // is already expanding the node we want to expand.
         let initial_value = self.initial_value;
-        let _guard = self.lock.lock();
         let max_i = argmax_f32(&value).and_then(|i| {
             self.children.with(i, |child| {
                 if child.expanding() && child.ptr().is_null() {
@@ -1303,16 +1303,16 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
 ///
 pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32>) {
     if let Some(&(node, _, index)) = trace.last() {
-        let updated = (*node).with_mut(index, |mut child| {
-            let mut next = Box::new(Node::new(color, value, prior));
-            if index == 361 {
-                next.pass_count = (*node).pass_count + 1;
-            }
+        let mut next = Box::new(Node::new(color, value, prior));
+        if index == 361 {
+            next.pass_count = (*node).pass_count + 1;
+        }
 
+        let updated = (*node).with_mut(index, |mut child| {
             if child.ptr().is_null() {
                 child.set_ptr(Box::into_raw(next));
                 true
-          } else {
+            } else {
                 false
             }
         });
