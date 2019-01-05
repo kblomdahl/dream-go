@@ -71,6 +71,9 @@ lazy_static! {
     /// Whether to play using Tromp-Taylor rules.
     pub static ref TROMP_TAYLOR: bool = has_opt("--tt");
 
+    /// Whether to allow the GTP interface to resign.
+    pub static ref NO_RESIGN: bool = has_opt("--no-resign");
+
     /// The number of milliseconds to never let the total game game fall below.
     ///
     /// Safe time is intended to compensate for lag or other uncontrollable factors
