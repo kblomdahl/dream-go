@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -192,7 +192,7 @@ impl parallel::ServiceImpl for PredictState {
         let num_devices = DEVICES.len();
         let num_busy = *config::NUM_THREADS / *config::BATCH_SIZE;
 
-        ::std::cmp::max(::std::cmp::max(2, num_devices), num_busy)
+        ::std::cmp::max(2 * num_devices, num_busy)
     }
 
     fn setup_thread(index: usize) {
