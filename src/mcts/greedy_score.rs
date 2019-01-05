@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ fn is_eye(board: &Board, color: Color, index: usize) -> bool {
 }
 
 /// Play the given board until the end using the policy of the neural network
-/// in a greedy manner (ignoring the pass move every time) until it is scoreable
+/// in a greedy manner (ignoring the pass move every time) until it is scorable
 /// according to the TT-rules.
 /// 
 /// # Arguments
@@ -72,7 +72,7 @@ pub fn greedy_score(server: &PredictGuard, board: &Board, next_color: Color) -> 
     let mut pass_count = 0;
     let mut count = 0;
 
-    while count < 722 && pass_count < 2 && !board.is_scoreable() {
+    while count < 722 && pass_count < 2 && !board.is_scorable() {
         let result = full_forward(&server, &board, current);
         if result.is_none() {
             break

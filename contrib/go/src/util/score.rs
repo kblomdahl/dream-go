@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,7 +50,11 @@ pub trait Score {
     /// * Both black and white has played at least one stone
     /// * All empty vertices are only reachable from one color
     ///
-    fn is_scoreable(&self) -> bool;
+    fn is_scorable(&self) -> bool;
+
+    /// Returns all territory that count as a score for either black
+    /// or white.
+    fn get_scorable_territory(&self) -> Vec<usize>;
 
     /// Returns the score for each player `(black, white)` of the
     /// current board state according to the Tromp-Taylor rules.
@@ -78,7 +82,7 @@ pub trait Score {
     ///
     /// - **alive** if the stone is present on both
     /// - **dead** if the stone is not present in the _finished_ board
-    /// - **seki** if the stone is present on both, but not scoreable
+    /// - **seki** if the stone is present on both, but not scorable
     ///
     /// # Arguments
     ///
@@ -88,7 +92,7 @@ pub trait Score {
 }
 
 impl Score for Board {
-    fn is_scoreable(&self) -> bool {
+    fn is_scorable(&self) -> bool {
         let some_black = (0..361).any(|i| self.inner.vertices[i].color() == Color::Black as u8);
         let some_white = (0..361).any(|i| self.inner.vertices[i].color() == Color::White as u8);
 
@@ -98,6 +102,15 @@ impl Score for Board {
 
             (0..361).all(|i| black_distance[i] == 0xff || white_distance[i] == 0xff)
         }
+    }
+
+    fn get_scorable_territory(&self) -> Vec<usize> {
+        let black_distance = get_territory_distance(&self.inner, Color::Black);
+        let white_distance = get_territory_distance(&self.inner, Color::White);
+
+        (0..361).filter(|&i| {
+            black_distance[i] == 0xff || white_distance[i] == 0xff
+        }).collect()
     }
 
     fn get_score(&self) -> (usize, usize) {
@@ -244,7 +257,7 @@ mod tests {
         let mut board = Board::new(7.5);
         board.place(Color::Black, 0, 0);
 
-        assert!(!board.is_scoreable());
+        assert!(!board.is_scorable());
         assert_eq!(board.get_score(), (361, 0));
     }
 
@@ -253,7 +266,7 @@ mod tests {
         let mut board = Board::new(7.5);
         board.place(Color::White, 0, 0);
 
-        assert!(!board.is_scoreable());
+        assert!(!board.is_scorable());
         assert_eq!(board.get_score(), (0, 361));
     }
 
@@ -268,7 +281,7 @@ mod tests {
         board.place(Color::Black, 0, 2);
         board.place(Color::Black, 1, 2);
 
-        assert!(board.is_scoreable());
+        assert!(board.is_scorable());
         assert_eq!(board.get_score(), (357, 4));
     }
 }

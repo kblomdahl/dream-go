@@ -298,7 +298,7 @@ impl Gtp {
         let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[color as usize].remaining();
         let board = self.history.last().unwrap();
         let result = self.ponder.service(|service, search_tree, _p_state| {
-            let mut search_tree = if search_tree.color != color {
+            let search_tree = if search_tree.color != color {
                 // passing moves are not recorded in the GTP protocol, so we
                 // will just assume the other player passed once if we are in
                 // this situation
@@ -307,15 +307,7 @@ impl Gtp {
                 Some(search_tree)
             };
 
-            // disqualify the `pass` move if we are doing clean-up and the board
-            // is not scoreable.
-            if is_cleanup && !board.is_scoreable() {
-                if let Some(ref mut search_tree) = search_tree {
-                    search_tree.disqualify(361);
-                }
-            }
-
-            let (value, index, tree) = if main_time.is_finite() && byo_yomi_time.is_finite() {
+            let (value, index, mut tree) = if main_time.is_finite() && byo_yomi_time.is_finite() {
                 let total_visits = search_tree.as_ref()
                     .map(|tree| tree.total_count)
                     .unwrap_or(0);
@@ -337,6 +329,20 @@ impl Gtp {
                     &board,
                     color
                 )
+            };
+
+            // disqualify the `pass` move, and any move that is not in contested territory, if
+            // we are doing clean-up and the board is not scorable.
+            let (value, index) = if is_cleanup && index == 361 && !board.is_scorable() {
+                tree.disqualify(361);
+
+                for &index in &board.get_scorable_territory() {
+                    tree.disqualify(index);
+                }
+
+                tree.best(0.0)
+            } else {
+                (value, index)
             };
 
             eprintln!("{}", mcts::tree::to_pretty(&tree));

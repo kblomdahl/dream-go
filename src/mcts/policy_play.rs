@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -171,7 +171,7 @@ fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
     let mut temperature = (*config::TEMPERATURE + 1e-3).recip();
     let mut sgf = vec! [];
 
-    // loop until we run or of legal moves, the board is fully scoreable, or
+    // loop until we run or of legal moves, the board is fully scorable, or
     // we have played 722 moves in total.
     let mut board = Board::new(get_random_komi());
     let mut color = Color::Black;
