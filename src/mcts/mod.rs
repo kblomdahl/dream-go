@@ -52,6 +52,7 @@ use util::types::f16;
 use util::{b85, config, min};
 use mcts::asm::sum_finite_f32;
 use mcts::asm::normalize_finite_f32;
+use parallel::rcu;
 
 pub enum GameResult {
     Resign(String, Board, Color, f32),
@@ -302,10 +303,12 @@ fn predict_worker<T>(context: ThreadContext<T>, server: PredictGuard)
 {
     let root = unsafe { &mut *context.root.get() };
 
+    rcu::register_thread();
     while !time_control::is_done(root, &context.time_strategy) {
         loop {
             let mut board = context.starting_point.clone();
             let trace = unsafe { tree::probe(root, &mut board) };
+            rcu::unregister_thread();
 
             if let Some(trace) = trace {
                 let &(_, color, _) = trace.last().unwrap();
@@ -313,6 +316,8 @@ fn predict_worker<T>(context: ThreadContext<T>, server: PredictGuard)
                 let result = forward(&server, &board, next_color);
 
                 if let Some((value, policy)) = result {
+                    rcu::register_thread();
+
                     unsafe {
                         tree::insert(&trace, next_color, value, policy);
                         break
@@ -322,9 +327,11 @@ fn predict_worker<T>(context: ThreadContext<T>, server: PredictGuard)
                 }
             } else {
                 server.send(PredictRequest::Wait);
+                rcu::register_thread();
             }
         }
     }
+    rcu::unregister_thread();
 }
 
 /// Predicts the _best_ next move according to the given neural network when applied

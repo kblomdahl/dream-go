@@ -55,7 +55,6 @@ pub trait TimeStrategy {
 /// * `root` - the tree to check for stability
 /// 
 fn is_stable(root: &tree::Node) -> bool {
-    let _guard = root.lock.lock();
     let max_visits = root.children.argmax_count();
     let max_wins = root.children.argmax_value();
 
@@ -75,7 +74,6 @@ fn is_stable(root: &tree::Node) -> bool {
 /// * `root` - the tree to get the lower bound for
 /// 
 fn min_promote_rollouts(root: &tree::Node) -> usize {
-    let _guard = root.lock.lock();
     let top_1 = root.children.argmax_count();
 
     // find the most visited child that is **not** `top_1`.
@@ -92,7 +90,11 @@ fn min_promote_rollouts(root: &tree::Node) -> usize {
     let count_1 = root.children.with(top_1, |child| child.count(), root.initial_value);
     let count_2 = root.children.with(top_2, |child| child.count(), root.initial_value);
 
-    (count_1 - count_2) as usize
+    if count_1 > count_2 {
+        (count_1 - count_2) as usize
+    } else {
+        0  // ignore the race condition
+    }
 }
 
 /// Implements a time control scheme based on the `UNST-N` and `EARLY-C`

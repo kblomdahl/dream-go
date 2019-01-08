@@ -16,14 +16,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 pub struct MutexGuard<'a> {
-    mutex: &'a Mutex
+    is_available: &'a AtomicBool
 }
 
 impl<'a> Drop for MutexGuard<'a> {
     fn drop(&mut self) {
-        let previous = self.mutex.is_available.compare_and_swap(false, true, Ordering::SeqCst);
-
-        assert_eq!(previous, false);
+        self.is_available.store(true, Ordering::Release);
     }
 }
 
@@ -42,11 +40,11 @@ impl Mutex {
 
     #[inline]
     pub fn lock(&self) -> MutexGuard {
-        while !self.is_available.compare_and_swap(true, false, Ordering::SeqCst) {
+        while !self.is_available.compare_and_swap(true, false, Ordering::Acquire) {
             thread::yield_now();
         }
 
-        MutexGuard { mutex: self }
+        MutexGuard { is_available: &self.is_available }
     }
 }
 

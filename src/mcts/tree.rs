@@ -15,6 +15,7 @@
 use go::util::sgf::SgfCoordinate;
 use go::{Board, Color};
 use parallel::spin::Mutex;
+use parallel::rcu;
 use mcts::asm::{argmax_f32, argmax_i32};
 use util::{config, max};
 
@@ -22,6 +23,7 @@ use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
 use std::fmt;
 use std::mem::ManuallyDrop;
+use std::intrinsics::{atomic_xadd, atomic_xsub};
 use std::ptr;
 
 lazy_static! {
@@ -115,18 +117,16 @@ impl PUCT {
 
             // incremental update of the average value and remove any additional
             // virtual losses we added to the node
-            let _guard = (*node).lock.lock();
+            atomic_xadd(&mut (*node).total_count, 1);
+            atomic_xsub(&mut (*node).vtotal_count, *config::VLOSS_CNT);
 
-            (*node).total_count += 1;
-            (*node).vtotal_count -= *config::VLOSS_CNT;
             (*node).children.with_mut(index, |mut child| {
-                let prev_count = child.count();
-                let prev_vcount = child.vcount();
-                let prev_value = child.value();
+                let _guard = (*node).lock.lock();
 
-                child.set_count(prev_count + 1);
+                let prev_value = child.value();
+                let prev_count = child.add_count(1);
                 child.set_value(fadd_fast(prev_value, fdiv_fast(fsub_fast(value_, prev_value), (prev_count + 1) as f32)));
-                child.set_vcount(prev_vcount - *config::VLOSS_CNT);
+                child.sub_vcount(*config::VLOSS_CNT);
             }, (*node).initial_value);
         }
     }
@@ -143,14 +143,14 @@ impl PUCT {
         if is_x86_feature_detected!("avx2") {
             unsafe {
                 match node.children {
-                    ChildrenImpl::Small(ref small) => PUCT::get_small_avx2(node, small, value),
+                    ChildrenImpl::Small(ref small, ref _lock) => PUCT::get_small_avx2(node, small, value),
                     ChildrenImpl::Big(ref big) => PUCT::get_big_avx2(node, big, value),
                 }
             }
         } else {
             unsafe {
                 match node.children {
-                    ChildrenImpl::Small(ref small) => PUCT::get_small_impl(node, small, value),
+                    ChildrenImpl::Small(ref small, ref _lock) => PUCT::get_small_impl(node, small, value),
                     ChildrenImpl::Big(ref big) => PUCT::get_big_impl(node, big, value),
                 }
             }
@@ -429,14 +429,12 @@ impl ChildMut {
         unsafe { *self.value }
     }
 
-    /// Sets whether this child is, or has been, expanded.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - whether this child is expanding
-    ///
-    fn set_expanding(&mut self, value: bool) {
-        unsafe { *self.expanding = value; }
+    /// Sets this child as having been expanded, returning whether this
+    /// has occurred before.
+    fn set_expanding(&mut self) -> bool {
+        use std::intrinsics::atomic_or;
+
+        unsafe { atomic_or(self.expanding as *mut u8, true as u8) != 0 }
     }
 
     /// Sets the number of visits to this child.
@@ -449,14 +447,37 @@ impl ChildMut {
         unsafe { *self.count = value; }
     }
 
-    /// Sets the number of virtual visits to this child.
+    /// Increments the number of visits to this child. Returning the previous
+    /// value.
     ///
     /// # Arguments
     ///
-    /// * `value` - the new number of virtual visits to this child
+    /// * `count` - the number of visits to add
     ///
-    fn set_vcount(&mut self, value: i32) {
-        unsafe { *self.vcount = value as i16; }
+    fn add_count(&mut self, count: i32) -> i32 {
+        unsafe { atomic_xadd(self.count, count) }
+    }
+
+    /// Increments the number of virtual visits to this child. Returning
+    /// the previous value.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - the number of virtual visits to add
+    ///
+    fn add_vcount(&mut self, count: i32) -> i16 {
+        unsafe { atomic_xadd(self.vcount, count as i16) }
+    }
+
+    /// Decrements the number of virtual visits to this child. Returning
+    /// the previous value.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - the number of virtual visits to remove
+    ///
+    fn sub_vcount(&mut self, count: i32) -> i16 {
+        unsafe { atomic_xsub(self.vcount, count as i16) }
     }
 
     /// Sets the actual child node. If there is already a child node set, then you
@@ -704,9 +725,11 @@ impl Iterator for ChildrenNonZeroIter {
 
 /// Union of `SmallChildrenImpl` and `BigChildrenImpl`, where the later is stored on the heap.
 pub enum ChildrenImpl {
-    Small(ManuallyDrop<SmallChildrenImpl>),
+    Small(ManuallyDrop<SmallChildrenImpl>, Mutex),
     Big(Box<BigChildrenImpl>)
 }
+
+unsafe impl Send for ChildrenImpl {}
 
 impl ChildrenImpl {
     /// Returns the scattered value array of all children.
@@ -720,7 +743,7 @@ impl ChildrenImpl {
             ChildrenImpl::Big(ref big) => {
                 big.value.to_vec()
             },
-            ChildrenImpl::Small(ref small) => {
+            ChildrenImpl::Small(ref small, ref _lock) => {
                 let mut out = vec! [default_value; 368];
 
                 for index in 0..SMALL_SIZE {
@@ -740,7 +763,7 @@ impl ChildrenImpl {
     pub fn argmax_count(&self) -> usize {
         match *self {
             ChildrenImpl::Big(ref big) => argmax_i32(&big.count).unwrap(),
-            ChildrenImpl::Small(ref small) => {
+            ChildrenImpl::Small(ref small, ref _lock) => {
                 let other = argmax_i32(&small.count).unwrap();
                 let index = small.indices[other];
 
@@ -757,7 +780,7 @@ impl ChildrenImpl {
     pub fn argmax_value(&self) -> usize {
         match *self {
             ChildrenImpl::Big(ref big) => argmax_f32(&big.value).unwrap(),
-            ChildrenImpl::Small(ref small) => {
+            ChildrenImpl::Small(ref small, ref _lock) => {
                 let other = argmax_f32(&small.value).unwrap();
 
                 small.indices[other] as usize
@@ -768,7 +791,7 @@ impl ChildrenImpl {
     /// Returns an iterator over all visited children.
     pub fn nonzero(&self) -> ChildrenNonZeroIter {
         match self {
-            ChildrenImpl::Small(ref small) => {
+            ChildrenImpl::Small(ref small, ref _lock) => {
                 ChildrenNonZeroIter {
                     count: &small.count as *const i32,
                     indices: &small.indices as *const i16,
@@ -800,7 +823,7 @@ impl ChildrenImpl {
         where F: FnOnce(Child) -> T
     {
         callback(match self {
-            ChildrenImpl::Small(ref small) => {
+            ChildrenImpl::Small(ref small, ref _lock) => {
                 match small.find_index(index) {
                     SmallChildrenResult::Found(other) => {
                         Child::from_small(small, other)
@@ -829,14 +852,19 @@ impl ChildrenImpl {
         where F: FnOnce(ChildMut) -> T
     {
         let child = match self {
-            ChildrenImpl::Small(ref mut small) => {
+            ChildrenImpl::Small(ref mut small, ref lock) => {
+                let guard = lock.lock();
+
                 match small.find_index(index) {
                     SmallChildrenResult::Found(other) => {
+                        drop(guard);
+
                         Some(unsafe { ChildMut::from_small(small, other) })
                     },
                     SmallChildrenResult::NotFound(other) => {
                         small.indices[other] = index as i16;
 
+                        drop(guard);
                         Some(unsafe { ChildMut::from_small(small, other) })
                     },
                     SmallChildrenResult::Overflow => {
@@ -852,17 +880,29 @@ impl ChildrenImpl {
         if let Some(child) = child {
             callback(child)
         } else {
-            *self = ChildrenImpl::Big(Box::new(unsafe {
-                BigChildrenImpl::from_small(match self {
-                    ChildrenImpl::Small(ref small) => small,
-                    _ => unreachable!()
-                }, initial_value)
-            }));
+            let other = SendablePtr { ptr: self as *mut _ };
+
+            rcu::update(move || {
+                unsafe {
+                    if let ChildrenImpl::Small(ref small, ref _lock) = *(other.ptr) {
+                        *(other.ptr) = ChildrenImpl::Big(Box::new(
+                            BigChildrenImpl::from_small(small, initial_value)
+                        ));
+                    }
+                }
+            });
 
             self.with_mut(index, callback, initial_value)
         }
     }
 }
+
+struct SendablePtr<T> {
+    ptr: *mut T
+}
+
+unsafe impl<T> Sync for SendablePtr<T> {}
+unsafe impl<T> Send for SendablePtr<T> {}
 
 /// A monte carlo search tree.
 #[repr(align(64))]
@@ -894,7 +934,7 @@ pub struct Node {
 
 impl Drop for Node {
     fn drop(&mut self) {
-        if let ChildrenImpl::Small(ref mut small) = self.children {
+        if let ChildrenImpl::Small(ref mut small, ref _lock) = self.children {
             unsafe { ManuallyDrop::drop(small) }
         }
     }
@@ -925,7 +965,7 @@ impl Node {
             total_count: 0,
             vtotal_count: 0,
             prior: prior_padding,
-            children: ChildrenImpl::Small(ManuallyDrop::new(SmallChildrenImpl::with_value(value)))
+            children: ChildrenImpl::Small(ManuallyDrop::new(SmallChildrenImpl::with_value(value)), Mutex::new())
         }
     }
 
@@ -945,8 +985,6 @@ impl Node {
     pub fn with<T, F>(&self, index: usize, callback: F) -> T
         where F: FnOnce(Child) -> T
     {
-        let _guard = self.lock.lock();
-
         self.children.with(index, callback, self.initial_value)
     }
 
@@ -961,8 +999,6 @@ impl Node {
     pub fn with_mut<T, F>(&mut self, index: usize, callback: F) -> T
         where F: FnOnce(ChildMut) -> T
     {
-        let _guard = self.lock.lock();
-
         self.children.with_mut(index, callback, self.initial_value)
     }
 
@@ -1173,11 +1209,7 @@ impl Node {
     /// * `apply_fpu` - whether to use the first-play urgency heuristic
     ///
     fn select(&mut self, apply_fpu: bool) -> Option<usize> {
-        let mut value = {
-            let _guard = self.lock.lock();
-
-            self.children.value(self.initial_value)
-        };
+        let mut value = self.children.value(self.initial_value);
 
         if apply_fpu {
             // for unvisited children, attempt to transform the parent `value`
@@ -1193,7 +1225,7 @@ impl Node {
 
             match self.children {
                 ChildrenImpl::Big(ref big) => FPU::apply_big(&mut value, big, fpu_reduce),
-                ChildrenImpl::Small(ref small) => FPU::apply_small(&mut value, small, fpu_reduce)
+                ChildrenImpl::Small(ref small, ref _lock) => FPU::apply_small(&mut value, small, fpu_reduce)
             }
         }
 
@@ -1203,30 +1235,28 @@ impl Node {
             value[i] = ::std::f32::NEG_INFINITY;
         }
 
-        let _guard = self.lock.lock();
         PUCT::get(self, &mut value);
 
         // greedy selection based on the maximum ucb1 value, failing if someone else
         // is already expanding the node we want to expand.
         let initial_value = self.initial_value;
-        let max_i = argmax_f32(&value).and_then(|i| {
-            self.children.with(i, |child| {
-                if child.expanding() && child.ptr().is_null() {
+        let max_i = argmax_f32(&value);
+        let max_i = max_i.and_then(|i| {
+            self.children.with_mut(i, |mut child| {
+                if child.set_expanding() && child.ptr().is_null() {
                     None  // someone else is already expanding this node
                 } else {
+                    child.add_vcount(*config::VLOSS_CNT);
+
                     Some(i)
                 }
             }, initial_value)
         });
 
-        if let Some(max_i) = max_i {
-            self.vtotal_count += *config::VLOSS_CNT;
-            self.children.with_mut(max_i, |mut child| {
-                let prev_vcount = child.vcount();
-
-                child.set_vcount(prev_vcount + *config::VLOSS_CNT);
-                child.set_expanding(true);
-            }, initial_value);
+        if max_i.is_some() {
+            unsafe {
+                atomic_xadd(&mut self.vtotal_count, *config::VLOSS_CNT);
+            }
         }
 
         max_i
@@ -1256,7 +1286,7 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
             if next_child != 361 {  // not a passing move
                 let (x, y) = (X[next_child] as usize, Y[next_child] as usize);
 
-                debug_assert!(board.is_valid(current.color, x, y));
+                debug_assert!(board.is_valid(current.color, x, y), "{}\nx {}, y {}", board.to_string(), x, y);
                 board.place(current.color, x, y);
             } else if current.pass_count >= 1 {
                 break;  // at least two consecutive passes
@@ -1274,13 +1304,10 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
             // undo the entire trace, since we added virtual losses (optimistically)
             // on the way down.
             for (node, _, next_child) in trace.into_iter() {
-                let _guard = (*node).lock.lock();
+                atomic_xsub(&mut (*node).vtotal_count, *config::VLOSS_CNT as i32);
 
-                (*node).vtotal_count -= *config::VLOSS_CNT as i32;
                 (*node).children.with_mut(next_child, |mut child| {
-                    let prev_vcount = child.vcount();
-
-                    child.set_vcount(prev_vcount - *config::VLOSS_CNT);
+                    child.sub_vcount(*config::VLOSS_CNT);
                 }, (*node).initial_value);
             }
 
@@ -1501,7 +1528,7 @@ impl<'a> fmt::Display for ToPretty<'a> {
 /// * `starting_point` -
 ///
 pub fn to_pretty(root: &Node) -> ToPretty {
-    ToPretty { root: root }
+    ToPretty { root }
 }
 
 #[cfg(test)]
@@ -1682,6 +1709,27 @@ mod tests {
     #[test]
     fn value_update() {
         unsafe { unsafe_value_update() }
+    }
+
+    unsafe fn unsafe_undo_trace() {
+        let mut board = Board::new(DEFAULT_KOMI);
+        let mut root = Node::new(
+            Color::Black,
+            0.5,
+            (0..362).map(|i| if i == 60 { 1.0 } else { 0.0 }).collect()
+        );
+
+        // probe twice, of which the first will be undone, then check that the tree is
+        // consistent with this.
+        assert!(probe(&mut root, &mut board).is_some());
+        assert!(probe(&mut root, &mut board).is_none());
+
+        assert_eq!(root.vtotal_count, *config::VLOSS_CNT as i32);
+    }
+
+    #[test]
+    fn undo_trace() {
+        unsafe { unsafe_undo_trace() }
     }
 
     unsafe fn unsafe_bench_probe_insert(b: &mut Bencher) {
