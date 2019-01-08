@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -131,12 +131,10 @@ pub static ALL: [Transform; 8] = [
 ];
 
 fn reorder<T: Copy>(src: &[T], dst: &mut [T], mapping: &[u16]) {
-    unsafe {
-        for i in 0..361 {
-            let j = *mapping.get_unchecked(i) as usize;
+    for i in 0..361 {
+        let j = mapping[i] as usize;
 
-            *dst.get_unchecked_mut(j) = *src.get_unchecked(i);
-        }
+        dst[j] = src[i];
     }
 }
 

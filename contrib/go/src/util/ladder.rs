@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ fn _can_escape_with_capture(board: &BoardFast, color: Color, index: usize) -> bo
             }
         });
 
-        current = unsafe { (*board.vertices.get_unchecked(current)).next_vertex() as usize };
+        current = board.vertices[current].next_vertex() as usize;
         if current == index {
             break;
         }

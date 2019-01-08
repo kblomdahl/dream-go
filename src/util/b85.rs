@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -101,7 +101,7 @@ pub fn decode<T, O>(input: &str) -> Option<Vec<O>>
 
         for _ in 0..5 {
             if let Some(ch) = iter.next() {
-                let de = unsafe { *decode_table.get_unchecked(ch as usize) };
+                let de = decode_table[ch as usize];
                 if de < 0 {
                     return None;  // invalid character
                 }

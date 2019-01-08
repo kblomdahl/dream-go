@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -144,14 +144,8 @@ impl Counter for N {
 macro_rules! foreach_nd {
     ($this:expr, $source:expr, |$index:ident, $value:ident| $stmt:block, $($dir:ident),*) => ({
         $(
-            let $index = unsafe {
-                *::codegen::$dir.get_unchecked($source) as usize
-            };
-            let $value = unsafe {
-                use ::board_fast::Vertex;
-
-                (*$this.vertices.get_unchecked($index)).color()
-            };
+            let $index = ::codegen::$dir[$source] as usize;
+            let $value = $this.vertices[$index].color();
 
             $stmt
         );*
@@ -181,14 +175,10 @@ macro_rules! find_nd {
 
     ($this:expr, $source:expr, |$index:ident, $value:ident| $stmt:block, $dir:ident $(,$rest:ident)*) => ({
         let __result = {
-            let $index = unsafe {
-                *::codegen::$dir.get_unchecked($source) as usize
-            };
-            let $value = unsafe {
-                use ::board_fast::Vertex;
+            use ::board_fast::Vertex;
 
-                (*$this.vertices.get_unchecked($index)).color()
-            };
+            let $index = ::codegen::$dir[$source] as usize;
+            let $value = $this.vertices[$index].color();
 
             $stmt
         };
@@ -317,7 +307,7 @@ impl BoardFast {
                 }
             });
 
-            current = unsafe { (*self.vertices.get_unchecked(current)).next_vertex() as usize };
+            current = self.vertices[current].next_vertex() as usize;
             if current == index {
                 break;
             }
@@ -350,7 +340,7 @@ impl BoardFast {
                 }
             });
 
-            current = unsafe { (*self.vertices.get_unchecked(current)).next_vertex() as usize };
+            current = self.vertices[current].next_vertex() as usize;
             if current == index {
                 break;
             }
@@ -390,7 +380,7 @@ impl BoardFast {
                     }
                 });
 
-                current = unsafe { (*self.vertices.get_unchecked(current)).next_vertex() as usize };
+                current = self.vertices[current].next_vertex() as usize;
                 if current == index {
                     break;
                 }
@@ -414,7 +404,7 @@ impl BoardFast {
         loop {
             workspace[current] = value;
 
-            current = unsafe { (*self.vertices.get_unchecked(current)).next_vertex() as usize };
+            current = self.vertices[current].next_vertex() as usize;
             if current == index {
                 break;
             }
@@ -510,7 +500,7 @@ impl BoardFast {
                 return;
             }
 
-            current = unsafe { (*self.vertices.get_unchecked(current)).next_vertex() } as usize;
+            current = self.vertices[current].next_vertex() as usize;
             if current == index {
                 break;
             }

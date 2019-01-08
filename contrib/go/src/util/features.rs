@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -230,9 +230,7 @@ fn fill_liberties(board: &BoardFast, index: usize, liberties: &mut [u8]) {
 
     loop {
         foreach_4d!(board, current, |other_index, value| {
-            unsafe {
-                *liberties.get_unchecked_mut(other_index) = value;
-            }
+            liberties[other_index] = value;
         });
 
         current = board.vertices[current].next_vertex() as usize;

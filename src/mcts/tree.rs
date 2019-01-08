@@ -52,12 +52,12 @@ impl PUCT {
         let uct_exp_sqrt_n = fmul_fast(uct_exp, sqrt_n);
 
         for i in 0..362 {
-            let count = *big.count.get_unchecked(i) + *big.vcount.get_unchecked(i) as i32;
-            let prior = *node.prior.get_unchecked(i);
-            let value_ = *value.get_unchecked(i);
+            let count = big.count[i] + big.vcount[i] as i32;
+            let prior = node.prior[i];
+            let value_ = value[i];
             let exp_bonus = fdiv_fast(uct_exp_sqrt_n, (1 + count) as f32);
 
-            *value.get_unchecked_mut(i) = fadd_fast(value_, fmul_fast(prior, exp_bonus));
+            value[i] = fadd_fast(value_, fmul_fast(prior, exp_bonus));
         }
     }
 
@@ -80,16 +80,16 @@ impl PUCT {
 
         for i in 0..362 {
             let other = small.find_index_fast(i);
-            let prior = *node.prior.get_unchecked(i);
-            let value_ = *value.get_unchecked(i);
+            let prior = node.prior[i];
+            let value_ = value[i];
 
             if let Some(other) = other {
                 let count = small.count[other] + small.vcount[other] as i32;
                 let exp_bonus = fdiv_fast(uct_exp_sqrt_n, (1 + count) as f32);
 
-                *value.get_unchecked_mut(i) = fadd_fast(value_, fmul_fast(prior, exp_bonus));
+                value[i] = fadd_fast(value_, fmul_fast(prior, exp_bonus));
             } else {
-                *value.get_unchecked_mut(i) = fadd_fast(value_, fmul_fast(prior, uct_exp_sqrt_n));
+                value[i] = fadd_fast(value_, fmul_fast(prior, uct_exp_sqrt_n));
             }
         }
     }
@@ -166,10 +166,10 @@ impl FPU {
         use std::intrinsics::fsub_fast;
 
         for i in 0..368 {
-            let count = *big.count.get_unchecked(i) + *big.vcount.get_unchecked(i) as i32;
+            let count = big.count[i] + big.vcount[i] as i32;
 
             if count == 0 {
-                *value.get_unchecked_mut(i) = max(0.0, fsub_fast(*value.get_unchecked(i), fpu_reduce));
+                value[i] = max(0.0, fsub_fast(value[i], fpu_reduce));
             }
         }
     }
@@ -190,7 +190,7 @@ impl FPU {
             let eq = _mm_movemask_epi8(eq) as u32;
 
             if eq == 0 || small.count[_mm_tzcnt_32(eq) as usize / 2] == 0 {
-                *value.get_unchecked_mut(i) = max(0.0, fsub_fast(*value.get_unchecked(i), fpu_reduce));
+                value[i] = max(0.0, fsub_fast(value[i], fpu_reduce));
             }
         }
     }
@@ -863,8 +863,8 @@ impl ChildrenImpl {
                     },
                     SmallChildrenResult::NotFound(other) => {
                         small.indices[other] = index as i16;
-
                         drop(guard);
+
                         Some(unsafe { ChildMut::from_small(small, other) })
                     },
                     SmallChildrenResult::Overflow => {
