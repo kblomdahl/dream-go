@@ -30,7 +30,7 @@ type PonderResult = Result<(PredictService, SearchTree, Board, Color), &'static 
 unsafe impl Send for SearchTree {}
 
 /// The maximum size the tree is allowed to grow (in nodes) during pondering.
-const MAX_TREE_SIZE: usize = 100_000;
+const MAX_TREE_SIZE: usize = 500_000;
 
 /// A very simple _time control_ that thinks until a boolean flag is set to
 /// `false`.
