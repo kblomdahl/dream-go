@@ -20,6 +20,11 @@ use std::collections::VecDeque;
 use std::thread;
 use std::sync::Arc;
 
+pub struct SendablePtr<T>(pub *mut T);
+
+unsafe impl<T> Sync for SendablePtr<T> {}
+unsafe impl<T> Send for SendablePtr<T> {}
+
 trait FnBox {
     fn call_box(self: Box<Self>);
 }

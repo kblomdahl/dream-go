@@ -15,7 +15,7 @@
 use go::util::sgf::SgfCoordinate;
 use go::{Board, Color};
 use parallel::spin::Mutex;
-use parallel::rcu;
+use parallel::rcu::{self, SendablePtr};
 use mcts::asm::{argmax_f32, argmax_i32};
 use util::{config, max};
 
@@ -880,12 +880,12 @@ impl ChildrenImpl {
         if let Some(child) = child {
             callback(child)
         } else {
-            let other = SendablePtr { ptr: self as *mut _ };
+            let other = SendablePtr(self as *mut _);
 
             rcu::update(move || {
                 unsafe {
-                    if let ChildrenImpl::Small(ref small) = *(other.ptr) {
-                        *(other.ptr) = ChildrenImpl::Big(Box::new(
+                    if let ChildrenImpl::Small(ref small) = *(other.0) {
+                        *(other.0) = ChildrenImpl::Big(Box::new(
                             BigChildrenImpl::from_small(small, initial_value)
                         ));
                     }
@@ -896,13 +896,6 @@ impl ChildrenImpl {
         }
     }
 }
-
-struct SendablePtr<T> {
-    ptr: *mut T
-}
-
-unsafe impl<T> Sync for SendablePtr<T> {}
-unsafe impl<T> Send for SendablePtr<T> {}
 
 /// A monte carlo search tree.
 #[repr(align(64))]
