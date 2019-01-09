@@ -23,7 +23,7 @@ use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
 use std::fmt;
 use std::mem::ManuallyDrop;
-use std::intrinsics::{atomic_xadd, atomic_xsub};
+use std::intrinsics::{atomic_xadd, atomic_xsub, atomic_cxchg};
 use std::ptr;
 
 lazy_static! {
@@ -83,7 +83,7 @@ impl PUCT {
             let prior = node.prior[i];
             let value_ = value[i];
 
-            if let Some(other) = other {
+            if let Ok(other) = other {
                 let count = small.count[other] + small.vcount[other] as i32;
                 let exp_bonus = fdiv_fast(uct_exp_sqrt_n, (1 + count) as f32);
 
@@ -143,14 +143,14 @@ impl PUCT {
         if is_x86_feature_detected!("avx2") {
             unsafe {
                 match node.children {
-                    ChildrenImpl::Small(ref small, ref _lock) => PUCT::get_small_avx2(node, small, value),
+                    ChildrenImpl::Small(ref small) => PUCT::get_small_avx2(node, small, value),
                     ChildrenImpl::Big(ref big) => PUCT::get_big_avx2(node, big, value),
                 }
             }
         } else {
             unsafe {
                 match node.children {
-                    ChildrenImpl::Small(ref small, ref _lock) => PUCT::get_small_impl(node, small, value),
+                    ChildrenImpl::Small(ref small) => PUCT::get_small_impl(node, small, value),
                     ChildrenImpl::Big(ref big) => PUCT::get_big_impl(node, big, value),
                 }
             }
@@ -629,7 +629,7 @@ impl SmallChildrenImpl {
         }
     }
 
-    /// Returns the sparse index for the given dense `index`, or `None` if it does
+    /// Returns the sparse index for the given dense `index`, or the insertion index if it
     /// not exist in this node.
     ///
     /// # Arguments
@@ -637,7 +637,7 @@ impl SmallChildrenImpl {
     /// * `index` - the index to search for
     ///
     #[inline(always)]
-    unsafe fn find_index_fast(&self, index: usize) -> Option<usize> {
+    unsafe fn find_index_fast(&self, index: usize) -> Result<usize, usize> {
         use std::arch::x86_64::*;
 
         let indices = _mm_loadu_si128(&self.indices as *const i16 as *const _);
@@ -647,28 +647,17 @@ impl SmallChildrenImpl {
         if eq != 0 {
             let trailing_zeros = _mm_tzcnt_32(eq) as usize;
 
-            Some(trailing_zeros / 2)
+            Ok(trailing_zeros / 2)
         } else {
-            None
-        }
-    }
+            // find the first element _< 0_
+            let lt = _mm_cmplt_epi16(indices, _mm_set1_epi16(0));
+            let lt = _mm_movemask_epi8(lt) as u32;
 
-    /// Returns the first unused sparse index in this node, or `None` if this
-    /// node is full.
-    #[inline(always)]
-    unsafe fn find_empty_fast(&self) -> Option<usize> {
-        use std::arch::x86_64::*;
-
-        let indices = _mm_loadu_si128(&self.indices as *const i16 as *const _);
-        let eq = _mm_cmplt_epi16(indices, _mm_set1_epi16(0));
-        let eq = _mm_movemask_epi8(eq) as u32;
-
-        if eq != 0 {
-            let trailing_zeros = _mm_tzcnt_32(eq) as usize;
-
-            Some(trailing_zeros / 2)
-        } else {
-            None
+            if lt != 0 {
+                Err(_mm_tzcnt_32(lt) as usize / 2)
+            } else {
+                Err(::std::usize::MAX)
+            }
         }
     }
 
@@ -681,13 +670,9 @@ impl SmallChildrenImpl {
     ///
     fn find_index(&self, index: usize) -> SmallChildrenResult {
         match unsafe { self.find_index_fast(index) } {
-            Some(index) => SmallChildrenResult::Found(index),
-            None => {
-                match unsafe { self.find_empty_fast() } {
-                    Some(i) => SmallChildrenResult::NotFound(i),
-                    _ => SmallChildrenResult::Overflow
-                }
-            }
+            Ok(index) => SmallChildrenResult::Found(index),
+            Err(other) if other == ::std::usize::MAX => { SmallChildrenResult::Overflow },
+            Err(other) => { SmallChildrenResult::NotFound(other) }
         }
     }
 }
@@ -725,7 +710,7 @@ impl Iterator for ChildrenNonZeroIter {
 
 /// Union of `SmallChildrenImpl` and `BigChildrenImpl`, where the later is stored on the heap.
 pub enum ChildrenImpl {
-    Small(ManuallyDrop<SmallChildrenImpl>, Mutex),
+    Small(ManuallyDrop<SmallChildrenImpl>),
     Big(Box<BigChildrenImpl>)
 }
 
@@ -743,7 +728,7 @@ impl ChildrenImpl {
             ChildrenImpl::Big(ref big) => {
                 big.value.to_vec()
             },
-            ChildrenImpl::Small(ref small, ref _lock) => {
+            ChildrenImpl::Small(ref small) => {
                 let mut out = vec! [default_value; 368];
 
                 for index in 0..SMALL_SIZE {
@@ -763,7 +748,7 @@ impl ChildrenImpl {
     pub fn argmax_count(&self) -> usize {
         match *self {
             ChildrenImpl::Big(ref big) => argmax_i32(&big.count).unwrap(),
-            ChildrenImpl::Small(ref small, ref _lock) => {
+            ChildrenImpl::Small(ref small) => {
                 let other = argmax_i32(&small.count).unwrap();
                 let index = small.indices[other];
 
@@ -780,7 +765,7 @@ impl ChildrenImpl {
     pub fn argmax_value(&self) -> usize {
         match *self {
             ChildrenImpl::Big(ref big) => argmax_f32(&big.value).unwrap(),
-            ChildrenImpl::Small(ref small, ref _lock) => {
+            ChildrenImpl::Small(ref small) => {
                 let other = argmax_f32(&small.value).unwrap();
 
                 small.indices[other] as usize
@@ -791,7 +776,7 @@ impl ChildrenImpl {
     /// Returns an iterator over all visited children.
     pub fn nonzero(&self) -> ChildrenNonZeroIter {
         match self {
-            ChildrenImpl::Small(ref small, ref _lock) => {
+            ChildrenImpl::Small(ref small) => {
                 ChildrenNonZeroIter {
                     count: &small.count as *const i32,
                     indices: &small.indices as *const i16,
@@ -823,7 +808,7 @@ impl ChildrenImpl {
         where F: FnOnce(Child) -> T
     {
         callback(match self {
-            ChildrenImpl::Small(ref small, ref _lock) => {
+            ChildrenImpl::Small(ref small) => {
                 match small.find_index(index) {
                     SmallChildrenResult::Found(other) => {
                         Child::from_small(small, other)
@@ -839,6 +824,38 @@ impl ChildrenImpl {
         })
     }
 
+    /// Returns a `ChildMut` for the given child in the _small_ node implementation, or _None_ if
+    /// the implementation is full and needs to be extended.
+    ///
+    /// # Arguments
+    ///
+    /// * `small` - the children implementation
+    /// * `index` - the index to fetch
+    ///
+    fn with_mut_small(small: &mut SmallChildrenImpl, index: usize) -> Option<ChildMut> {
+        'retry: loop {
+            return match small.find_index(index) {
+                SmallChildrenResult::Found(other) => {
+                    Some(unsafe { ChildMut::from_small(small, other) })
+                },
+                SmallChildrenResult::NotFound(other) => {
+                    unsafe {
+                        let indices_other = small.indices.as_mut_ptr().add(other);
+
+                        if atomic_cxchg(indices_other, ::std::i16::MIN, index as i16) != (::std::i16::MIN, true) {
+                            continue 'retry;
+                        }
+                    }
+
+                    Some(unsafe { ChildMut::from_small(small, other) })
+                },
+                SmallChildrenResult::Overflow => {
+                    None
+                }
+            }
+        }
+    }
+
     /// Returns the result of the given callback, and being called with an mutable
     /// reference for the child for index.
     ///
@@ -852,25 +869,8 @@ impl ChildrenImpl {
         where F: FnOnce(ChildMut) -> T
     {
         let child = match self {
-            ChildrenImpl::Small(ref mut small, ref lock) => {
-                let guard = lock.lock();
-
-                match small.find_index(index) {
-                    SmallChildrenResult::Found(other) => {
-                        drop(guard);
-
-                        Some(unsafe { ChildMut::from_small(small, other) })
-                    },
-                    SmallChildrenResult::NotFound(other) => {
-                        small.indices[other] = index as i16;
-                        drop(guard);
-
-                        Some(unsafe { ChildMut::from_small(small, other) })
-                    },
-                    SmallChildrenResult::Overflow => {
-                        None
-                    }
-                }
+            ChildrenImpl::Small(ref mut small) => {
+                ChildrenImpl::with_mut_small(small, index)
             },
             ChildrenImpl::Big(ref mut big) => {
                 Some(unsafe { ChildMut::from_big(big, index) })
@@ -884,7 +884,7 @@ impl ChildrenImpl {
 
             rcu::update(move || {
                 unsafe {
-                    if let ChildrenImpl::Small(ref small, ref _lock) = *(other.ptr) {
+                    if let ChildrenImpl::Small(ref small) = *(other.ptr) {
                         *(other.ptr) = ChildrenImpl::Big(Box::new(
                             BigChildrenImpl::from_small(small, initial_value)
                         ));
@@ -934,7 +934,7 @@ pub struct Node {
 
 impl Drop for Node {
     fn drop(&mut self) {
-        if let ChildrenImpl::Small(ref mut small, ref _lock) = self.children {
+        if let ChildrenImpl::Small(ref mut small) = self.children {
             unsafe { ManuallyDrop::drop(small) }
         }
     }
@@ -965,7 +965,7 @@ impl Node {
             total_count: 0,
             vtotal_count: 0,
             prior: prior_padding,
-            children: ChildrenImpl::Small(ManuallyDrop::new(SmallChildrenImpl::with_value(value)), Mutex::new())
+            children: ChildrenImpl::Small(ManuallyDrop::new(SmallChildrenImpl::with_value(value)))
         }
     }
 
@@ -1225,7 +1225,7 @@ impl Node {
 
             match self.children {
                 ChildrenImpl::Big(ref big) => FPU::apply_big(&mut value, big, fpu_reduce),
-                ChildrenImpl::Small(ref small, ref _lock) => FPU::apply_small(&mut value, small, fpu_reduce)
+                ChildrenImpl::Small(ref small) => FPU::apply_small(&mut value, small, fpu_reduce)
             }
         }
 
