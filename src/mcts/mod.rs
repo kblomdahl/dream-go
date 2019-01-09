@@ -404,7 +404,10 @@ fn predict_aux<T>(
             let context = context.clone();
             let server = server.clone_static();
 
-            thread::spawn(move || predict_worker::<T>(context, server))
+            thread::Builder::new()
+                .name("predict_worker".into())
+                .spawn(move || predict_worker::<T>(context, server))
+                .unwrap()
         }).collect::<Vec<JoinHandle<()>>>();
 
         // wait for all threads to terminate to avoid any zombie processes

@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -191,11 +191,14 @@ impl<I: ServiceImpl + 'static> Service<I> {
                     let inner = inner.clone();
                     let state = state.clone();
 
-                    thread::spawn(move || {
-                        I::setup_thread(i);
+                    thread::Builder::new()
+                        .name("service_worker".into())
+                        .spawn(move || {
+                            I::setup_thread(i);
 
-                        worker_thread::<I>(state, inner)
-                    })
+                            worker_thread::<I>(state, inner)
+                        })
+                        .unwrap()
                 })
                 .collect(),
 
