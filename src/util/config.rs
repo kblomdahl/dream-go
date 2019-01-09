@@ -130,7 +130,7 @@ lazy_static! {
     /// larger values make the engine more likely to pick a sub-optimal
     /// move (according to the search).
     pub static ref TEMPERATURE: f32 = get_env("TEMPERATURE")
-        .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 0.3 } else { 0.92 });
+        .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 0.3 } else { 0.8 });
 
     /// The softmax temperature to use at the end of the _policy head_. This
     /// temperature is applied for the entire game.

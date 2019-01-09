@@ -65,15 +65,13 @@ if __name__ == '__main__':
         copyfile(best_network, '/app/dream_go.json')
 
         game_records = ''
-        env = { 'POLICY_ROLLOUT': '40' }
+        env = {}
         proc = subprocess.Popen([
             '/app/dream_go',
-            '--policy-play', '1000',
-            '--num-rollout', '3200',
-            '--num-samples', '1',
-            '--num-games', '32',
-            '--num-threads', '32',
-            '--ex-it'
+            '--self-play', '1000',
+            '--num-rollout', '800',
+            '--num-threads', '64',
+            '--batch-size', '16'
         ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
 
         with multiprocessing.Pool() as pool:
