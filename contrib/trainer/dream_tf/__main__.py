@@ -704,7 +704,7 @@ if not model_dir:
 params = {
     'steps': args.steps[0] if args.steps else MAX_STEPS,
     'batch_size': args.batch_size[0] if args.batch_size else BATCH_SIZE,
-    'learning_rate': 3e-5 if args.warm_start else 3e-4,
+    'learning_rate': 1e-4 if args.warm_start else 3e-4,
 
     'num_channels': 128,
     'num_blocks': 9,
