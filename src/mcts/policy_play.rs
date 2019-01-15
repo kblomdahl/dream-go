@@ -103,7 +103,7 @@ fn policy_ex_it(server: &PredictGuard, board: &Board, color: Color) -> (String, 
     let (value, _index, tree) = predict_aux::<_>(
         &server,
         1,
-        RolloutLimit::new(*config::NUM_ROLLOUT),
+        RolloutLimit::new((*config::NUM_ROLLOUT).into()),
         None,
         board,
         color

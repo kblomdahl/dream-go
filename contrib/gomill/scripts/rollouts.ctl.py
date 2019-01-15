@@ -12,7 +12,7 @@ DIST = '/app/dist/'
 def dream_go(name='dg-v061', num_rollout=None, is_reliable_scorer=True):
     # make it output the _correct_ name from the GTP `name` command
     environ = {'DG_NAME': '%s-%04d' % (name, num_rollout), 'CUDA_VISIBLE_DEVICES': '1'}
-    command = [DIST + name, '--no-ponder', '--num-rollout', str(num_rollout)]
+    command = [DIST + name, '--num-rollout', str(num_rollout)]
 
     return Player(
         command,

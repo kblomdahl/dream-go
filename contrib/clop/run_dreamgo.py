@@ -226,8 +226,8 @@ def main():
 
     for _ in range(5):
         result, winner, moves = play_game(
-            cwd + "/bin/dream_go --no-ponder --num-rollout 800",  # engine to be optimized
-            cwd + "/bin/dream_go --no-ponder --num-rollout 800",  # opponent
+            cwd + "/bin/dream_go --num-rollout 800",  # engine to be optimized
+            cwd + "/bin/dream_go --num-rollout 800",  # opponent
             {**environ, **extra},
             environ
         )

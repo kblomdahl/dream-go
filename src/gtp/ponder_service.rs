@@ -29,14 +29,12 @@ type PonderResult = Result<(PredictService, SearchTree, Board, Color), &'static 
 
 unsafe impl Send for SearchTree {}
 
-/// The maximum size the tree is allowed to grow (in nodes) during pondering.
-const MAX_TREE_SIZE: usize = 500_000;
-
 /// A very simple _time control_ that thinks until a boolean flag is set to
 /// `false`.
 #[derive(Clone)]
 pub struct PonderTimeControl {
-    is_running: Arc<AtomicBool>
+    is_running: Arc<AtomicBool>,
+    max_tree_size: usize
 }
 
 impl TimeStrategy for PonderTimeControl {
@@ -50,8 +48,8 @@ impl TimeStrategy for PonderTimeControl {
         if self.is_running.load(Ordering::SeqCst) {
             let total_visits = root.size();
 
-            if total_visits < MAX_TREE_SIZE {
-                TimeStrategyResult::NotExpired(MAX_TREE_SIZE - total_visits)
+            if total_visits < self.max_tree_size {
+                TimeStrategyResult::NotExpired(self.max_tree_size - total_visits)
             } else {
                 TimeStrategyResult::Expired
             }
@@ -81,10 +79,11 @@ fn ponder_worker(
     is_running: Arc<AtomicBool>
 ) -> PonderResult
 {
+    let max_tree_size = (*config::NUM_ROLLOUT).user_defined_or(500_000);
     let (_, _, next_tree) = mcts::predict::<_>(
         &service.lock(),
         None,
-        PonderTimeControl { is_running },
+        PonderTimeControl { is_running, max_tree_size },
         search_tree,
         &board,
         next_color

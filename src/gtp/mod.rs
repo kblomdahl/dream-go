@@ -324,7 +324,7 @@ impl Gtp {
                 mcts::predict::<_>(
                     &service.lock(),
                     None,
-                    time_control::RolloutLimit::new(*config::NUM_ROLLOUT),
+                    time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
                     search_tree,
                     &board,
                     color
@@ -459,7 +459,7 @@ impl Gtp {
             let (_value, _index, tree) = mcts::predict::<_>(
                 &service.lock(),
                 None,
-                time_control::RolloutLimit::new(*config::NUM_ROLLOUT),
+                time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
                 None,
                 &board,
                 color

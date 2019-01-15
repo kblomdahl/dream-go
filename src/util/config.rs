@@ -25,6 +25,45 @@ pub enum Procedure {
     Help
 }
 
+#[derive(Copy, Clone)]
+pub enum RolloutLimit {
+    Default(usize),
+    UserDefined(usize),
+}
+
+impl RolloutLimit {
+    /// Returns the user defined limit, or the given `limit` if the user has
+    /// not explicitly given one.
+    ///
+    /// # Arguments
+    ///
+    /// * `default_value` - the value to return if the limit is not user defined
+    ///
+    pub fn user_defined_or(self, default_value: usize) -> usize {
+        match self {
+            RolloutLimit::Default(_limit) => default_value,
+            RolloutLimit::UserDefined(limit) => limit
+        }
+    }
+}
+
+impl From<RolloutLimit> for usize {
+    fn from(l: RolloutLimit) -> usize {
+        match l {
+            RolloutLimit::Default(limit) => limit,
+            RolloutLimit::UserDefined(limit) => limit
+        }
+    }
+}
+
+impl FromStr for RolloutLimit {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, ()> {
+        Ok(RolloutLimit::UserDefined(usize::from_str(s).map_err(|_| {})?))
+    }
+}
+
 pub enum SamplingStrategy {
     Percent(f32),
     Fixed(usize)
@@ -82,7 +121,7 @@ lazy_static! {
         .unwrap_or(100);
 
     /// The target number of rollouts for each search tree.
-    pub static ref NUM_ROLLOUT: usize = get_opt("--num-rollout").unwrap_or(1600);
+    pub static ref NUM_ROLLOUT: RolloutLimit = get_opt("--num-rollout").unwrap_or(RolloutLimit::Default(1600));
 
     /// The maximum batch size to forward to the neural network. A larger batch
     /// size typically result in a faster program but requires more GPU memory.

@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
         let (value, index, tree) = predict_aux::<_>(
             &server,
             num_workers,
-            RolloutLimit::new(*config::NUM_ROLLOUT),
+            RolloutLimit::new((*config::NUM_ROLLOUT).into()),
             root_current,
             &board,
             current
