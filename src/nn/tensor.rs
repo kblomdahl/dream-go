@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use libc::c_void;
 
 use nn::devices::MAX_DEVICES;
 use nn::ffi::cuda;
+use nn::Error;
 
 /// A data structure with interior mutability that store the host,
 /// device, and meta information about a tensor.
@@ -80,22 +81,24 @@ impl Tensor {
         self.ptr[device_id as usize].load(Ordering::Relaxed)
     }
 
-    pub fn set_host<T: Sized>(&mut self, data: Vec<T>) {
+    pub fn set_host<T: Sized>(&mut self, data: Vec<T>) -> Result<(), Error> {
         unsafe {
             if !self.host.is_null() {
-                check!(cuda::cudaFreeHost(self.host));
+                check!(cuda::cudaFreeHost(self.host))?;
             }
 
             self.size_in_bytes = size_of::<T>() * data.len();
             self.size_in_elements = data.len();
 
-            check!(cuda::cudaMallocHost(&mut self.host, self.size_in_bytes));
+            check!(cuda::cudaMallocHost(&mut self.host, self.size_in_bytes))?;
 
             ptr::copy_nonoverlapping(
                 data.as_ptr() as *const c_void,
                 self.host,
                 self.size_in_bytes
             );
+
+            Ok(())
         }
     }
 
@@ -107,7 +110,7 @@ impl Tensor {
         *(self.host as *const i32)
     }
 
-    pub unsafe fn copy_to_device(&self, device_id: i32, stream: cuda::Stream) -> bool {
+    pub unsafe fn copy_to_device(&self, device_id: i32, stream: cuda::Stream) -> Result<bool, Error> {
         let device_id = device_id as usize;
 
         if self.ptr[device_id].load(Ordering::Relaxed).is_null() {
@@ -118,25 +121,25 @@ impl Tensor {
                 self.size_in_bytes + (32 - self.size_in_bytes % 32)
             };
 
-            check!(cuda::cudaMalloc(&mut ptr, padded_size_in_bytes));
+            check!(cuda::cudaMalloc(&mut ptr, padded_size_in_bytes))?;
             check!(cuda::cudaMemcpyAsync(
                 ptr,
                 self.host,
                 self.size_in_bytes,
                 cuda::MemcpyKind::HostToDevice,
                 stream
-            ));
+            ))?;
 
             if !self.ptr[device_id].compare_and_swap(ptr::null_mut(), ptr, Ordering::SeqCst).is_null() {
-                check!(cuda::cudaStreamSynchronize(stream));  // wait for copy
-                check!(cuda::cudaFree(ptr));
+                check!(cuda::cudaStreamSynchronize(stream))?;  // wait for copy
+                check!(cuda::cudaFree(ptr))?;
 
-                false
+                Ok(false)
             } else {
-                true
+                Ok(true)
             }
         } else {
-            false
+            Ok(false)
         }
     }
 }

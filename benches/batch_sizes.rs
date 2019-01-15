@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ thread_local! {
 /// 
 fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
     NETWORK.with(|network| {
-        let mut workspace = network.get_workspace(batch_size);
+        let mut workspace = network.get_workspace(batch_size).expect("Failed to get workspace");
         let features = (0..batch_size).flat_map(|_| {
             let mut input = vec! [f16::from(0.0); FEATURE_SIZE];
 

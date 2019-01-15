@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use std::path::Path;
 use std::char;
 
 use nn::tensor::Tensor;
+use nn::Error;
 use util::b85;
 
 /// Step the iterator forward until the character given `stop` character is
@@ -57,7 +58,7 @@ struct JsonEntryIter<I: Iterator<Item=u8>> {
 }
 
 impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
-    type Item = (String, Tensor);
+    type Item = (String, Result<Tensor, Error>);
 
     fn next(&mut self) -> Option<Self::Item> {
         // skip until the quote before the name
@@ -86,7 +87,10 @@ impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
 
                 tensor.scale = array[0];
             } else if key == "v" {
-                tensor.set_host(b85::decode::<u8, _>(&value).unwrap());
+                match tensor.set_host(b85::decode::<u8, _>(&value).unwrap()) {
+                    Ok(()) => (),
+                    Err(reason) => { return Some((name, Err(reason))) }
+                }
             } else {
                 break
             }
@@ -98,7 +102,7 @@ impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
             }
         };
 
-        Some((name, tensor))
+        Some((name, Ok(tensor)))
     }
 }
 
@@ -110,21 +114,19 @@ impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
 /// 
 /// * `path` -
 /// 
-fn load_aux<I: Iterator<Item=u8>>(reader: I) -> Option<HashMap<String, Tensor>> {
+fn load_aux<I: Iterator<Item=u8>>(reader: I) -> Result<HashMap<String, Tensor>, Error> {
     let mut out: HashMap<String, Tensor> = HashMap::new();
     let iter = JsonEntryIter { iter: reader };
 
     for (name, t) in iter {
-        debug_assert!(t.scale > 0.0, "scale is non-positive for layer {} -- {}", name, t.scale);
-
-        out.insert(name, t);
+        out.insert(name, t?);
     }
 
     // an empty result-set is an error
     if out.is_empty() {
-        None
+        Err(Error::MissingWeights)
     } else {
-        Some(out)
+        Ok(out)
     }
 }
 
@@ -136,11 +138,11 @@ fn load_aux<I: Iterator<Item=u8>>(reader: I) -> Option<HashMap<String, Tensor>> 
 /// 
 /// * `path` -
 /// 
-pub fn load(path: &Path) -> Option<HashMap<String, Tensor>> {
+pub fn load(path: &Path) -> Result<HashMap<String, Tensor>, Error> {
     if let Ok(file) = File::open(path) {
         load_aux(BufReader::new(file).bytes().map(|ch| ch.unwrap()))
     } else {
-        None
+        Err(Error::MissingWeights)
     }
 }
 
@@ -152,13 +154,13 @@ mod tests {
     fn empty_json() {
         let out = load_aux("".as_bytes().into_iter().map(|ch| *ch));
 
-        assert!(out.is_none());
+        assert!(out.is_err());
     }
 
     #[test]
     fn load_json() {
         let out = load_aux("{\"11v_value/linear_2/offset:0\": {\"s\": \"(^d>V\", \"v\": \"(^d>V\"}}".as_bytes().into_iter().map(|ch| *ch));
-        assert!(out.is_some());
+        assert!(out.is_ok());
 
         // verify internal values
         let out = out.unwrap();

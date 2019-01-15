@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -134,7 +134,6 @@ extern {
     pub fn cudaGetDevice(device: *mut c_int) -> Error;
     pub fn cudaSetDevice(device: c_int) -> Error;
 
-    #[cfg(feature = "trace-cuda")]
     pub fn cudaDeviceSynchronize() -> Error;
     pub fn cudaRuntimeGetVersion(version: *mut c_int) -> Error;
     pub fn cudaDeviceGetAttribute(value: *mut c_int, attr: DeviceAttr, device: c_int) -> Error;

@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 #[macro_use] pub mod ffi;
 pub mod devices;
+mod error;
 mod graph;
 mod loader;
 mod network;
@@ -22,6 +23,7 @@ mod profiler;
 mod slots;
 mod tensor;
 
+pub use self::error::Error;
 pub use self::graph::{Workspace, forward};
 pub use self::network::{Network, WorkspaceGuard};
 pub use self::output_map::*;

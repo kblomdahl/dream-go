@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,12 @@ macro_rules! check {
     ($status:expr) => ({
         let err = $status;
 
-        assert!(err.is_ok(), "cuda call failed -- {:?}", err);
+        debug_assert!(err.is_ok(), "cuda call failed -- {:?}", err);
+        if err.is_ok() {
+            Ok(())
+        } else {
+            Err(err)
+        }
     })
 }
 

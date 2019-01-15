@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 
 use nn::devices::{MAX_DEVICES, get_current_device};
 use nn::ffi::cuda;
+use nn::Error;
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug)]
@@ -63,15 +64,15 @@ impl Slots {
         }
     }
 
-    pub fn lock(&self) -> SlotsGuard {
-        let device_id = get_current_device() as usize;
+    pub fn lock(&self) -> Result<SlotsGuard, Error> {
+        let device_id = get_current_device()? as usize;
 
-        SlotsGuard {
+        Ok(SlotsGuard {
             device_id: device_id,
 
             pool: self.inner.clone(),
             inner: RefCell::new(vec! [])
-        }
+        })
     }
 }
 
@@ -102,7 +103,7 @@ impl Drop for SlotsGuard {
                 // if all of the refs in the global pool are too small, then
                 // throw them all away and replace them with out refs
                 for ptr in global_slot.ptr.splice(.., slot.ptr.drain(..)) {
-                    unsafe { check!(cuda::cudaFree(ptr)) };
+                    unsafe { cuda::cudaFree(ptr) };
                 }
 
                 global_slot.size_in_bytes = slot.size_in_bytes;
@@ -110,7 +111,7 @@ impl Drop for SlotsGuard {
                 // the global pool grew in our absence, so throw away our
                 // refs
                 for ptr in slot.ptr.drain(..) {
-                    unsafe { check!(cuda::cudaFree(ptr)) };
+                    unsafe { cuda::cudaFree(ptr) };
                 }
             } else {
                 debug_assert!(slot.size_in_bytes == global_slot.size_in_bytes);
@@ -131,7 +132,7 @@ impl SlotsGuard {
     /// * `size_in_bytes` - the minimum required size of the allocated area
     /// * `stream` - the stream that will use the memory
     /// 
-    pub fn get_slot(&self, name: Slot, size_in_bytes: usize, stream: cuda::Stream) -> SlotGuard {
+    pub fn get_slot(&self, name: Slot, size_in_bytes: usize, stream: cuda::Stream) -> Result<SlotGuard, Error> {
         let slot_pos = name as usize;
 
         // check if the slot exists in the local pool
@@ -141,12 +142,12 @@ impl SlotsGuard {
             let slot = &mut inner[slot_pos];
             let ptr = slot.ptr.pop().unwrap();
 
-            return SlotGuard {
+            return Ok(SlotGuard {
                 name: name,
                 ptr: ptr,
                 size_in_bytes: slot.size_in_bytes,
                 inner: &self.inner
-            };
+            });
         }
 
         // if there is no local slot, then move (or allocate) one slot from the
@@ -174,28 +175,28 @@ impl SlotsGuard {
 
             debug_assert!(slot.size_in_bytes == 0 || !ptr.is_null());
 
-            SlotGuard {
+            Ok(SlotGuard {
                 name: name,
                 ptr: ptr,
                 size_in_bytes: slot.size_in_bytes,
                 inner: &self.inner
-            }
+            })
         } else {
             let mut ptr: *mut c_void = ptr::null_mut();
 
             unsafe {
-                check!(cuda::cudaMalloc(&mut ptr, size_in_bytes));
-                check!(cuda::cudaMemsetAsync(ptr, 0, size_in_bytes, stream));
+                check!(cuda::cudaMalloc(&mut ptr, size_in_bytes))?;
+                check!(cuda::cudaMemsetAsync(ptr, 0, size_in_bytes, stream))?;
 
                 debug_assert!(size_in_bytes == 0 || !ptr.is_null(), "Failed to allocate CUDA buffer of size {}", size_in_bytes);
             }
 
-            SlotGuard {
+            Ok(SlotGuard {
                 name: name,
                 ptr: ptr,
                 size_in_bytes: size_in_bytes,
                 inner: &self.inner
-            }
+            })
         }
     }
 }

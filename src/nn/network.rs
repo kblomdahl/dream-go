@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,9 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use nn::devices::get_current_device;
-use nn::graph;
-use nn::loader;
+use nn::devices::{get_current_device, set_current_device};
+use nn::ffi::cuda;
+use nn::{Error, graph, loader};
 
 type WorkspaceQueue = Mutex<Vec<graph::Workspace>>;
 
@@ -85,7 +85,15 @@ impl Network {
         }
 
         PATHS.iter()
-            .filter_map(|path| loader::load(Path::new(path)))
+            .filter_map(|path| {
+                match loader::load(Path::new(path)) {
+                    Ok(weights) => Some(weights),
+                    Err(Error::MissingWeights) => None,
+                    Err(reason) => {
+                        panic!("Failed to load network weights -- {:?}", reason)
+                    }
+                }
+            })
             .next()
             .map(|weights| Network {
                 builder: Arc::new(graph::Builder::new(weights)),
@@ -99,8 +107,8 @@ impl Network {
     /// 
     /// * `batch_size` -
     /// 
-    pub fn get_workspace(&self, batch_size: usize) -> WorkspaceGuard {
-        let device_id = get_current_device();
+    pub fn get_workspace(&self, batch_size: usize) -> Result<WorkspaceGuard, Error> {
+        let device_id = get_current_device()?;
         let key = (batch_size, device_id);
         let mut workspaces = self.workspaces.lock().unwrap();
         let candidates = workspaces.entry(key).or_insert_with(|| Box::new(Mutex::new(vec! [])));
@@ -112,12 +120,32 @@ impl Network {
                 lifetime: ::std::marker::PhantomData::default()
             },
             None => WorkspaceGuard {
-                workspace: Some(self.builder.get_workspace(batch_size)),
+                workspace: Some(self.builder.get_workspace(batch_size)?),
                 pool: candidates_ptr,
                 lifetime: ::std::marker::PhantomData::default()
             }
         };
 
-        guard
+        Ok(guard)
+    }
+
+    /// Wait for all jobs on the current device to finish, and then drain all of the workspaces.
+    pub fn synchronize(&self) {
+        let mut workspaces = self.workspaces.lock().unwrap();
+
+        unsafe {
+            cuda::cudaDeviceSynchronize();  // this should be allowed to fail
+
+            let original_device_id = get_current_device().expect("Failed to get the current device");
+
+            for ((_batch_size, device_id), value) in workspaces.drain() {
+                set_current_device(device_id).expect("Failed to set the device for the current thread");
+                check!(cuda::cudaDeviceSynchronize()).expect("Failed to synchronize the current device");
+
+                drop(value);
+            }
+
+            set_current_device(original_device_id).expect("Failed to set the device for the current thread");
+        }
     }
 }

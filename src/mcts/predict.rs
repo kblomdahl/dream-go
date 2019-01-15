@@ -81,19 +81,53 @@ impl PredictState {
     /// * `workspace` - 
     /// * `features_list` - 
     /// 
-    fn forward(workspace: &mut Workspace, features_list: &[f16]) -> (Vec<f32>, Vec<Vec<f32>>) {
+    fn forward_once(workspace: &mut Workspace, features_list: &[f16]) -> Result<(Vec<f32>, Vec<Vec<f32>>), nn::Error> {
         let mut outputs = nn::forward(
             workspace,
             features_list,
             OutputSet::default().with(Output::Policy).with(Output::Value)
-        );
+        )?;
 
         let value_list = outputs.take(Output::Value);
         let policy_list = outputs.take(Output::Policy).chunks(362)
             .map(|p| p.to_vec())
             .collect();
 
-        (value_list, policy_list)
+        Ok((value_list, policy_list))
+    }
+
+    /// Run the `nn::forward` function for the given features and wrap the
+    /// results into `Array` elements. This version assumes the neural network
+    /// use `f32` weights.
+    ///
+    /// # Arguments
+    ///
+    /// * `network` -
+    /// * `batch_size` -
+    /// * `features_list` -
+    ///
+    fn forward(network: &Network, batch_size: usize, features_list: &[f16]) -> (Vec<f32>, Vec<Vec<f32>>) {
+        let mut count = 0;
+
+        loop {
+            let result = network.get_workspace(batch_size).and_then(|mut workspace| {
+                PredictState::forward_once(&mut workspace, features_list)
+            });
+
+            match result {
+                Ok(content) => { return content },
+                Err(reason) => {
+                    eprintln!("Encountered CUDA error, retrying {} more times -- {:?}", 2 - count, reason);
+
+                    count += 1;
+                    if count >= 3 {
+                        panic!();  // unrecoverable
+                    }
+
+                    network.synchronize();
+                }
+            }
+        }
     }
 
     fn predict(
@@ -119,7 +153,8 @@ impl PredictState {
         // perform the neural network predictions and then inform all of
         // the receivers
         let (value_list, policy_list) = PredictState::forward(
-            &mut network.get_workspace(batch_size),
+            &network,
+            batch_size,
             &features_list
         );
 
@@ -198,7 +233,7 @@ impl parallel::ServiceImpl for PredictState {
     fn setup_thread(index: usize) {
         let device_id = DEVICES[index % DEVICES.len()];
 
-        set_current_device(device_id);
+        set_current_device(device_id).expect("Failed to set the device for the current thread");
     }
 
     fn check_sleep(state: MutexGuard<Self::State>) {
