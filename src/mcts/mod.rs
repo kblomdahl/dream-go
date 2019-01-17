@@ -325,6 +325,8 @@ fn predict_worker<T>(context: ThreadContext<T>, server: PredictGuard)
                 } else {
                     return  // unrecognized error
                 }
+            } else if !root.has_valid_candidates(&context.starting_point) {
+                return;  // skip `rcu::unregister` since we are not registered
             } else {
                 server.send(PredictRequest::Wait);
                 rcu::register_thread();
@@ -484,7 +486,11 @@ fn get_random_komi() -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use go::{Board, Color};
     use mcts;
+    use nn;
+    use std::sync::Arc;
+    use std::cell::UnsafeCell;
 
     #[test]
     fn get_random_komi() {
@@ -495,5 +501,22 @@ mod tests {
 
             assert!(komi >= -7.5 && komi <= 7.5, "komi is {}", komi);
         }
+    }
+
+    #[test]
+    fn no_allowed_moves() {
+        let network = nn::Network::new().unwrap();
+        let server = mcts::predict::service(network);
+        let context = mcts::ThreadContext {
+            root: Arc::new(UnsafeCell::new(mcts::tree::Node::new(Color::Black, 0.0, vec! [1.0; 362]))),
+            starting_point: Board::new(7.5),
+            time_strategy: mcts::time_control::RolloutLimit::new(100)
+        };
+
+        for i in 0..362 {
+            unsafe { &mut *context.root.get() }.disqualify(i);
+        }
+
+        mcts::predict_worker(context, server.lock());
     }
 }

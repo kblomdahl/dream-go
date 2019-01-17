@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,11 @@ use std::arch::x86_64::*;
 /// * `array` -
 /// 
 #[target_feature(enable = "avx,avx2,bmi1")]
-unsafe fn _argmax_f32(array: &[f32]) -> Option<usize> {
-    debug_assert_eq!(array.len() % 8, 0);
+unsafe fn _argmax_f32(original_array: &[f32]) -> Option<usize> {
+    debug_assert_eq!(original_array.len() % 8, 0);
 
-    let steps = array.len() / 8;
-    let mut array = array.as_ptr();
+    let steps = original_array.len() / 8;
+    let mut array = original_array.as_ptr();
     let mut so_far = _mm256_broadcast_ss(&::std::f32::NEG_INFINITY);
     let mut index: usize = 0;
 
@@ -59,7 +59,7 @@ unsafe fn _argmax_f32(array: &[f32]) -> Option<usize> {
         // determine the index of the element from our horizontal
         // maximum that is now in `so_far`.
         so_far = _mm256_max_ps(so_far, z);
-        let eq = _mm256_cmp_ps(so_far, x, _CMP_EQ_UQ);
+        let eq = _mm256_cmp_ps(so_far, x, _CMP_EQ_OQ);
         let eq = _mm256_movemask_ps(eq) as u32;
 
         if eq != 0 {
@@ -71,7 +71,11 @@ unsafe fn _argmax_f32(array: &[f32]) -> Option<usize> {
         array = array.add(8);
     }
 
-    Some(index)
+    if (*original_array.get_unchecked(index)).is_finite() {
+        Some(index)
+    } else {
+        None
+    }
 }
 
 /// Returns the index of the maximum value in the given array. If multiple
@@ -209,5 +213,22 @@ mod tests {
         array[257] = 0;
 
         assert_eq!(argmax_i32(&array), Some(257));
+    }
+
+    #[test]
+    fn check_all_inf() {
+        let array = [::std::f32::NEG_INFINITY; 368];
+
+        assert_eq!(argmax_f32(&array), None);
+    }
+
+    #[test]
+    fn check_all_nan() {
+        let mut array = [::std::f32::NEG_INFINITY; 368];
+        for i in 0..362 {
+            array[i] = ::std::f32::NAN;
+        }
+
+        assert_eq!(argmax_f32(&array), None);
     }
 }

@@ -962,6 +962,25 @@ impl Node {
         }
     }
 
+    /// Returns true if any of the valid candidate moves in this tree are
+    /// valid moves on the given board.
+    ///
+    /// # Arguments
+    ///
+    /// * `board` -
+    ///
+    pub fn has_valid_candidates(&self, board: &Board) -> bool {
+        let color = self.color;
+
+        for i in 0..361 {
+            if self.with(i, |cand| cand.value.is_finite()) && board.is_valid(color, X[i] as usize, Y[i] as usize) {
+                return true;
+            }
+        }
+
+        self.with(361, |cand| cand.value.is_finite())
+    }
+
     /// Returns the total size of this search tree.
     pub fn size(&self) -> usize {
         self.total_count as usize
