@@ -6,4 +6,6 @@ services:
       args:
         - GIT_REV
         - CGOS_PASSWORD
-    restart: always
+    environment:
+      - RUST_BACKTRACE=full
+    restart: on-failure

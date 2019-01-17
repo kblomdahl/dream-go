@@ -5,5 +5,5 @@
 %section player
     name dg-REV
     password PASSWORD
-    invoke /app/dream_go --gtp --tt --safe-time 60000 --num-threads 64 --batch-size 16
+    invoke /app/dream_go --gtp --tt --safe-time 60000 --num-threads 64 --batch-size 16 2>> stderr.log | tee -a stdout.log
     priority 1
