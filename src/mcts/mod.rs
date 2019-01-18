@@ -507,8 +507,9 @@ mod tests {
     fn no_allowed_moves() {
         let network = nn::Network::new().unwrap();
         let server = mcts::predict::service(network);
+        let root = Arc::new(UnsafeCell::new(mcts::tree::Node::new(Color::Black, 0.0, vec! [1.0; 362])));
         let context = mcts::ThreadContext {
-            root: Arc::new(UnsafeCell::new(mcts::tree::Node::new(Color::Black, 0.0, vec! [1.0; 362]))),
+            root: root.clone(),
             starting_point: Board::new(7.5),
             time_strategy: mcts::time_control::RolloutLimit::new(100)
         };
@@ -518,5 +519,6 @@ mod tests {
         }
 
         mcts::predict_worker(context, server.lock());
+        assert_eq!(unsafe { &*root.get() }.best(0.0), (::std::f32::NEG_INFINITY, 361));
     }
 }

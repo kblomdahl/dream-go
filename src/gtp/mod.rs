@@ -353,7 +353,7 @@ impl Gtp {
                 None
             };
 
-            let should_resign = !*config::NO_RESIGN && value < 0.1;  // 10% chance of winning
+            let should_resign = !*config::NO_RESIGN && value.is_finite() && value < 0.1;  // 10% chance of winning
             let index = if should_resign { 361 } else { index };
             let (vertex, tree, other) = if index >= 361 {  // passing move
                 (None, mcts::tree::Node::forward(tree, 361), board.clone())
