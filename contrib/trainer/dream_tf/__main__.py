@@ -28,11 +28,12 @@ import tensorflow as tf
 
 from tensorflow.python import debug as tf_debug
 from .boost_table import BOOST_PER_MOVE_NUMBER
+from .libgo import get_num_features, get_single_example
 from .learning_rate import LEARNING_RATE, LOSS, LearningRateScheduler
 from .orthogonal_initializer import orthogonal_initializer, orthogonal_loss
 from .pretty_print import to_sgf_heatmap
 
-NUM_FEATURES = 32  # the total number of input features
+NUM_FEATURES = get_num_features()  # the total number of input features
 MAX_STEPS = 524288000  # the default total number of examples to train over
 BATCH_SIZE = 2048  # the default number of examples per batch
 
@@ -194,10 +195,6 @@ def residual_block(x, mode, params):
     5. Batch normalisation
     6. A skip connection that adds the input to the block
     7. A rectifier non-linearity
-
-    We replace step 1 with two parallel convolutions, the first has a dilation
-    of one and the second has a dilation of two. We then concatenate the result
-    of these convolution before step 2.
     """
     init_op = orthogonal_initializer()
     half_op = tf.constant_initializer(0.5, tf.float32)
@@ -372,32 +369,10 @@ class DumpHook(tf.train.SessionRunHook):
 def get_dataset(files, batch_size=1, is_training=True):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
-    from cffi import FFI
     import os
 
-    ffi = FFI()
-    ffi.cdef("""
-    typedef struct {
-        float features[11552];
-        int index;
-        int color;
-        char policy[905];
-        int winner;
-        int number;
-    } Example;
-
-    int extract_single_example(const char*, Example*);
-    """)
-
-    try:
-        dream_go = ffi.dlopen("./libgo.so")
-    except:
-        print("Cannot load shared library 'go'.")
-        quit(1)
-
     def __parse(line):
-        example = ffi.new("Example[]", 1)
-        result = dream_go.extract_single_example(line, example)
+        result, example = get_single_example(line)
 
         if result != 0:
             features = np.zeros((19, 19, NUM_FEATURES), 'f2')
@@ -405,20 +380,17 @@ def get_dataset(files, batch_size=1, is_training=True):
             value = np.zeros((), 'f4')
             policy = np.zeros((362,), 'f2')
         else:
-            features_hat = ffi.buffer(example[0].features, 11552 * ffi.sizeof('float'))
-            policy_hat = ffi.string(example[0].policy)
+            features = np.frombuffer(example['features'], 'f4').astype('f2')
+            value = np.asarray(1.0 if example['color'] == example['winner'] else -1.0, 'f4')
+            policy = np.fromstring(base64.b85decode(example['policy']), 'f2')
 
-            features = np.frombuffer(features_hat, 'f4').astype('f2')
-            value = np.asarray(1.0 if example[0].color == example[0].winner else -1.0, 'f4')
-            policy = np.fromstring(base64.b85decode(policy_hat), 'f2')
-
-            if example[0].number <= len(BOOST_PER_MOVE_NUMBER):
-                boost = np.asarray(BOOST_PER_MOVE_NUMBER[example[0].number - 1], 'f4')
+            if example['number'] <= len(BOOST_PER_MOVE_NUMBER):
+                boost = np.asarray(BOOST_PER_MOVE_NUMBER[example['number'] - 1], 'f4')
             else:
                 boost = np.asarray(1.0, 'f4')
 
             # fix any partial policy
-            policy[example[0].index] += 1.0 - np.sum(policy)
+            policy[example['index']] += 1.0 - np.sum(policy)
 
         return features, boost, value, policy
 
