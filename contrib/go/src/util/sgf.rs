@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use ::{Board, Color};
+use memchr::memchr;
 
 static SGF_LETTERS: [char; 26] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
@@ -85,9 +86,9 @@ pub enum SgfError {
     ParseError
 }
 
-pub struct SgfEntry {
+pub struct SgfEntry<'a> {
     pub board: Board,
-    pub policy: Option<String>,
+    pub policy: Option<&'a [u8]>,
     pub value: Option<f32>,
 
     pub color: Color,
@@ -95,20 +96,18 @@ pub struct SgfEntry {
     pub y: usize
 }
 
-pub struct Sgf {
-    content: String,
-    depth: Vec<usize>,
-
+pub struct Sgf<'a> {
+    content: &'a [u8],
     board: Vec<Board>,
     index: usize,
 }
 
-struct SgfMatch {
+struct SgfMatch<'a> {
     color: Color,
     x: usize,
     y: usize,
 
-    policy: Option<String>,
+    policy: Option<&'a [u8]>,
     value: Option<f32>,
 
     begin: usize
@@ -126,22 +125,16 @@ fn skip_ws(bytes: &[u8], start_at: &mut usize) {
     }
 }
 
-fn skip_until_next<'a, 'b>(bytes: &'a [u8], start_at: &mut usize, goal: u8) -> &'b [u8]
-        where 'a: 'b
-{
+fn skip_until_next<'a>(bytes: &'a [u8], start_at: &mut usize, goal: u8) -> &'a [u8] {
     let starting_point = *start_at;
 
-    while *start_at < bytes.len() {
-        if bytes[*start_at] == goal {
-            *start_at += 1;
+    memchr(goal, &bytes[starting_point..])
+        .map(|i| {
+            *start_at += i + 1;
 
-            return &bytes[starting_point..(*start_at - 1)];
-        }
-
-        *start_at += 1;
-    }
-
-    &bytes[0..0]
+            &bytes[starting_point..(starting_point + i)]
+        })
+        .unwrap_or_else(|| &bytes[0..0])
 }
 
 fn peek_forward2(bytes: &[u8], at_index: usize, peek_1: u8, peek_2: u8) -> bool {
@@ -183,12 +176,10 @@ fn find_next_vertex(bytes: &[u8], start_at: &mut usize) -> Option<(Color, usize,
 ///
 /// # Arguments
 ///
-/// * `sgf` -
+/// * `bytes` -
 /// * `start_at` -
 ///
-fn find_next_move(sgf: &str, start_at: &mut usize) -> Option<SgfMatch> {
-    let bytes = sgf.as_bytes();
-
+fn find_next_move<'a>(bytes: &'a [u8], start_at: &mut usize) -> Option<SgfMatch<'a>> {
     while *start_at < bytes.len() - 4 {
         if bytes[*start_at] == b';' {
             let starting_index = *start_at;
@@ -198,7 +189,7 @@ fn find_next_move(sgf: &str, start_at: &mut usize) -> Option<SgfMatch> {
                 skip_ws(bytes, start_at);
                 let policy = if peek_forward2(bytes, *start_at, b'P', b'[') {
                     find_next_property(bytes, start_at).and_then(|x| {
-                        ::std::str::from_utf8(x.1).map(|x| x.to_string()).ok()
+                        Some(x.1)
                     })
                 } else {
                     None
@@ -232,68 +223,47 @@ fn find_next_move(sgf: &str, start_at: &mut usize) -> Option<SgfMatch> {
     None
 }
 
-impl Sgf {
-    pub fn new(content: &str, komi: f32) -> Sgf {
-        let mut s = Sgf {
-            content: content.to_string(),
-            depth: Vec::with_capacity(content.len()),
-
+impl<'a> Sgf<'a> {
+    pub fn new(content: &'a [u8], komi: f32) -> Sgf {
+        Sgf {
+            content: content,
             board: vec! [Board::new(komi)],
             index: 0
-        };
-
-        let mut rparen = vec! [];
-        let mut lparen = vec! [];
-        let mut in_property = false;
-        let content = content.as_bytes();
-
-        for (i, &ch) in content.iter().enumerate() {
-            if i == 0 || content[i-1] != b'\\' {
-                if ch == b'[' {
-                    in_property = true;
-                } else if ch == b']' {
-                    in_property = false
-                } else if !in_property && ch == b'(' {
-                    lparen.push(i);
-                } else if !in_property && ch == b')' {
-                    rparen.push(i);
-                }
-            }
-
-            s.depth.push(if lparen.len() > rparen.len() {
-                lparen.len() - rparen.len()
-            } else {
-                0
-            });
         }
-
-        s
     }
 }
 
-impl Iterator for Sgf {
-    type Item = Result<SgfEntry, SgfError>;
+impl<'a> Iterator for Sgf<'a> {
+    type Item = Result<SgfEntry<'a>, SgfError>;
 
-    fn next(&mut self) -> Option<Result<SgfEntry, SgfError>> {
+    fn next(&mut self) -> Option<Result<SgfEntry<'a>, SgfError>> {
         let starting_index = if self.index == 0 { 0 } else { self.index - 1 };
 
-        if let Some(m) = find_next_move(&self.content, &mut self.index) {
+        if let Some(m) = find_next_move(self.content, &mut self.index) {
             // unwind the stack for the nested game tree
+            let mut in_property = false;
+
             for i in starting_index..m.begin {
-                if self.depth[i] < self.depth[i+1] {
-                    if self.board.is_empty() {
-                        return Some(Err(SgfError::ParseError));
+                if i == 0 || self.content[i-1] != b'\'' {
+                    if self.content[i] == b'[' {
+                        in_property = true;
+                    } else if self.content[i] == b']' {
+                        in_property = false;
+                    } else if !in_property && self.content[i] == b'(' {
+                        if self.board.is_empty() {
+                            return Some(Err(SgfError::ParseError));
+                        }
+
+                        let prev_board = self.board.last().unwrap().clone();
+
+                        self.board.push(prev_board);
+                    } else if !in_property && self.content[i] == b')' {
+                        if self.board.is_empty() {
+                            return Some(Err(SgfError::ParseError));
+                        }
+
+                        self.board.pop();
                     }
-
-                    let prev_board = self.board.last().unwrap().clone();
-
-                    self.board.push(prev_board);
-                } else if self.depth[i] > self.depth[i+1] {
-                    if self.board.is_empty() {
-                        return Some(Err(SgfError::ParseError));
-                    }
-
-                    self.board.pop();
                 }
             }
 
@@ -331,7 +301,7 @@ mod tests {
 
     #[test]
     fn simple_sgf() {
-        let moves = Sgf::new("(;B[dp];W[dd])", 0.5)
+        let moves = Sgf::new(b"(;B[dp];W[dd])", 0.5)
             .map(|x| x.ok().unwrap())
             .collect::<Vec<_>>();
 
@@ -349,7 +319,7 @@ mod tests {
 
     #[test]
     fn rparen_sgf() {
-        let moves = Sgf::new("(;B[dp]C[)))];W[dd])", 0.5)
+        let moves = Sgf::new(b"(;B[dp]C[)))];W[dd])", 0.5)
             .map(|x| x.ok().unwrap())
             .collect::<Vec<_>>();
 
@@ -358,7 +328,7 @@ mod tests {
 
     #[test]
     fn branching_sgf() {
-        let moves = Sgf::new(" ( ;B[dp] ( ; W [pd] ) ( ; W [dd] ) ( ; W[pp] ) ) ", 7.5)
+        let moves = Sgf::new(b" ( ;B[dp] ( ; W [pd] ) ( ; W [dd] ) ( ; W[pp] ) ) ", 7.5)
             .map(|x| x.ok().unwrap())
             .collect::<Vec<_>>();
 
@@ -384,7 +354,7 @@ mod tests {
 
     #[test]
     fn nested_sgf() {
-        let moves = Sgf::new("(;B[dp](;W[dd];B[pd])(;W[qp];B[dd](;W[pd](;B[oq])(;B[op];W[oq]))(;W[np])))", 7.5)
+        let moves = Sgf::new(b"(;B[dp](;W[dd];B[pd])(;W[qp];B[dd](;W[pd](;B[oq])(;B[op];W[oq]))(;W[np])))", 7.5)
             .map(|x| x.unwrap())
             .collect::<Vec<_>>();
 
@@ -441,14 +411,14 @@ DT[2018-12-03]RE[W+R]TM[60]LT[]LC[1]GK[1]
 ;B[jp];W[ko];B[qm];W[rm];B[rn];W[lm];B[rj];W[qi];B[op];W[mo]
 ;B[pr];W[la];B[cc];W[bc];B[bb];W[cd];B[ca];W[cc];B[sk];W[ri]
 ;B[rl];W[mk];B[ol];W[nk];B[ih];W[pa];B[ad];W[ab];B[ba];W[ac]
-;B[ae];W[fa])"#);
+;B[ae];W[fa])"#.as_bytes());
 
         b.iter(move || {
             let mut last_num_played = -1;
             let mut last_color = Color::White;
             let mut count = 0;
 
-            for entry in Sgf::new(&sgf, 0.5) {
+            for entry in Sgf::new(sgf, 0.5) {
                 let entry = entry.ok().unwrap();
 
                 debug_assert!(entry.board.count() as i32 > last_num_played);

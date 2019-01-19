@@ -16,7 +16,7 @@ use color::Color;
 use board::Board;
 use ::DEFAULT_KOMI;
 
-use super::features::{HWC, FEATURE_SIZE, Features};
+use super::features::{HWC, FEATURE_SIZE, NUM_FEATURES, Features};
 use super::sgf::{Sgf, SgfError};
 use super::symmetry;
 
@@ -48,11 +48,17 @@ impl Default for Example {
     }
 }
 
-struct Candidate {
+struct Candidate<'a> {
     board: Board,
     index: usize,
     color: Color,
-    policy: Option<String>
+    policy: Option<&'a [u8]>
+}
+
+/// Returns the number of features used internally.
+#[no_mangle]
+pub unsafe extern fn get_num_features() -> c_int {
+    NUM_FEATURES as i32
 }
 
 /// Extract a single example from the given SGF file. If the file contains
@@ -111,7 +117,7 @@ pub unsafe extern fn extract_single_example(
         let mut examples = vec! [];
         let mut pass_count = 0;
 
-        for m in Sgf::new(&content, komi) {
+        for m in Sgf::new(content.as_bytes(), komi) {
             match m {
                 Err(SgfError::IllegalMove) => { return -30 },
                 Err(SgfError::ParseError) => { return -23 },
@@ -170,9 +176,9 @@ pub unsafe extern fn extract_single_example(
             (*out).color = examples[i].color as c_int;
             (*out).policy.clone_from_slice(match examples[i].policy {
                 Some(ref policy) => {
-                    assert_eq!(policy.len(), 905, "illegal policy -- {}", policy);
+                    assert_eq!(policy.len(), 905, "illegal policy -- {:?}", policy);
 
-                    policy.as_bytes()
+                    policy
                 },
                 None => EMPTY_POLICY.as_bytes()
             });
