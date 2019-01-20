@@ -52,7 +52,23 @@ struct Candidate<'a> {
     board: Board,
     index: usize,
     color: Color,
-    policy: Option<&'a [u8]>
+    policy: Option<&'a [u8]>,
+    value: Option<f32>
+}
+
+impl Candidate<'_> {
+    /// Returns true if this candidate has an MCTS policy.
+    fn has_policy(&self) -> bool {
+        self.policy.is_some()
+    }
+
+    /// Returns true if this candidate has a _reasonable_ win rate, i.e. between `[-0.95, 0.95]`.
+    fn has_reasonable_value(&self) -> bool {
+        match self.value {
+            None => true,
+            Some(v) => v.abs() < 0.95
+        }
+    }
 }
 
 /// Returns the number of features used internally.
@@ -82,7 +98,7 @@ pub unsafe extern fn extract_single_example(
         static ref KOMI: Regex = Regex::new(r"KM\[([^\]]*)\]").unwrap();
     }
 
-    CStr::from_ptr(raw_sgf_content).to_str().map(|content| {
+    CStr::from_ptr(raw_sgf_content as *const _).to_str().map(|content| {
         // find the komi by looking for the pattern `KM[...]` at any point
         // in the file.
         let komi = {
@@ -115,6 +131,7 @@ pub unsafe extern fn extract_single_example(
 
         // find _all_ recorded moves, and their policies (if applicable).
         let mut examples = vec! [];
+        let mut has_policy = false;
         let mut pass_count = 0;
 
         for m in Sgf::new(content.as_bytes(), komi) {
@@ -125,11 +142,13 @@ pub unsafe extern fn extract_single_example(
                     let is_pass = m.x >= 19 || m.y >= 19;
 
                     pass_count = if is_pass { pass_count + 1 } else { 0 };
+                    has_policy = has_policy || m.policy.is_some();
                     examples.push(Candidate {
                         board: m.board,
                         index: if is_pass { 361 } else { 19 * m.y + m.x },
                         color: m.color,
-                        policy: m.policy
+                        policy: m.policy,
+                        value: m.value
                     });
                 }
             }
@@ -146,24 +165,25 @@ pub unsafe extern fn extract_single_example(
                 board: last_board.unwrap_or_else(|| Board::new(komi)),
                 index: 361,
                 color: last_color.opposite(),
-                policy: None
+                policy: None,
+                value: None
             });
             pass_count += 1;
         }
 
         // do not output games that had a questionable number of moves (early
         // resignations, or huge early blunders)
-        if examples.len() < 50 {
+        if examples.len() < 30 {
             return -31;
         }
 
         // if any of the candidate examples has full policies, then only consider
-        // those policies.
-        let candidate_examples: Vec<usize> = if examples.iter().any(|cand| cand.policy.is_some()) {
-            (0..examples.len()).filter(|&i| examples[i].policy.is_some()).collect()
-        } else {
-            (0..examples.len()).collect()
-        };
+        // those policies. Also remove any candidates whose `value` is too extreme
+        // since the MCTS does not tend to play too well in those situations.
+        let candidate_examples: Vec<usize> = (0..examples.len())
+            .filter(|&i| {
+                (!has_policy || examples[i].has_policy()) && examples[i].has_reasonable_value()
+            }).collect();
 
         candidate_examples.choose(&mut rand::thread_rng()).map(|&i| {
             let features = examples[i].board.get_features::<HWC, f32>(
@@ -189,3 +209,4 @@ pub unsafe extern fn extract_single_example(
         }).unwrap_or(-30)
     }).unwrap_or(-1) as c_int
 }
+
