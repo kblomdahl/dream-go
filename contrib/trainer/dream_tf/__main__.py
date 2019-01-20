@@ -486,13 +486,16 @@ def get_dataset(files, batch_size=1, is_training=True):
     with tf.device('cpu:0'):
         num_parallel_calls = max(os.cpu_count() - 8, 4)
 
-        file_names = tf.data.Dataset.from_tensor_slices(files)
-        dataset = file_names.interleave(
-            lambda file: tf.data.TextLineDataset(file),
-            cycle_length=16,
-            block_length=1,
-            num_parallel_calls=16
-        )
+        if len(files) > 1:
+            file_names = tf.data.Dataset.from_tensor_slices(files)
+            dataset = file_names.interleave(
+                lambda file: tf.data.TextLineDataset(file),
+                cycle_length=16,
+                block_length=1,
+                num_parallel_calls=16
+            )
+        else:
+            dataset = tf.data.TextLineDataset(files)
         if is_training:
             dataset = dataset.shuffle(524288, reshuffle_each_iteration=True)
         dataset = dataset.map(_parse, num_parallel_calls=num_parallel_calls)
