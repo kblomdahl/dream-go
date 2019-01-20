@@ -2,7 +2,7 @@
 
 all: .staging/dream_go .staging/dream_go.json .cgos_password
 	docker-compose build \
-	    --build-arg GIT_REV=`git show-ref --hash=6 HEAD`.`sha1sum < .staging/dream_go.json | head -c 6` \
+	    --build-arg GIT_REV=`git show-ref --head --tags --hash=6 HEAD`.`sha1sum < .staging/dream_go.json | head -c 6` \
 	    --build-arg CGOS_PASSWORD=`cat .cgos_password`
 
 clean:

@@ -1,7 +1,7 @@
 .PHONY: all staging clean
 
 all: staging
-	GIT_REV=`git show-ref -s HEAD` docker-compose build
+	GIT_REV=`git show-ref --head --tags -s HEAD` docker-compose build
 
 clean:
 	docker-compose down --rmi 'all'
