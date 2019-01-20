@@ -14,10 +14,10 @@ services:
       args:
         - GIT_REV
     environment:
-      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=0
     volumes:
-      - ./data:/app/data
-      - ./models:/app/models
+      - ./data:/app/data:cached
+      - ./models:/app/models:delegated
     shm_size: 1g
     ulimits:
       memlock: -1
@@ -31,7 +31,7 @@ services:
       args:
         - GIT_REV
     environment:
-      - CUDA_VISIBLE_DEVICES=0,1
+      - NVIDIA_VISIBLE_DEVICES=all
     volumes:
       - ./networks:/app/networks
 
@@ -41,7 +41,7 @@ services:
       context: .
       dockerfile: Dockerfile.board
     environment:
-      - CUDA_VISIBLE_DEVICES=1
+      - NVIDIA_VISIBLE_DEVICES=none
     volumes:
       - ./models:/app/models
     network_mode: host
