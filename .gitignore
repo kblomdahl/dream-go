@@ -1,7 +1,10 @@
+.idea
 rls/
 target/
+.vscode/
 *~
 *.log
+*.iml
 dream_go
 dream_go.json
 
