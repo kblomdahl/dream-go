@@ -7,11 +7,14 @@ Script ./run_dreamgo.py
 # * Lower bound
 # * Upper bound
 #
-LinearParameter FPU_REDUCE 0.0 1.0
+LinearParameter FPU_REDUCE[0] 0.01 0.99
+LinearParameter FPU_REDUCE[400] 0.01 0.99
+LinearParameter FPU_REDUCE[800] 0.01 0.99
+LinearParameter FPU_REDUCE[1600] 0.01 0.99
 
 # Parallelization parameters
 Processor localhost
-Replications 2
+Replications 1
 
 # Parameters for statistical model of outcome
 DrawElo 0
