@@ -87,13 +87,13 @@ impl FromB85<f32> for f32 {
 /// 
 /// * `input` -
 /// 
-pub fn decode<T, O>(input: &str) -> Option<Vec<O>>
+pub fn decode<T, O>(input: &[u8]) -> Option<Vec<O>>
     where T: FromB85<O> + Clone
 {
     let decode_table = &*DECODE_85;  // de-ref once
 
     let mut output = Vec::with_capacity(input.len());
-    let mut iter = input.chars();
+    let mut iter = input.into_iter();
 
     'outer: loop {
         // decode the alphabet into raw bits
@@ -101,7 +101,7 @@ pub fn decode<T, O>(input: &str) -> Option<Vec<O>>
 
         for _ in 0..5 {
             if let Some(ch) = iter.next() {
-                let de = decode_table[ch as usize];
+                let de = decode_table[*ch as usize];
                 if de < 0 {
                     return None;  // invalid character
                 }
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn pi_e() {
-        let string = "NJ4Ny";
+        let string = b"NJ4Ny";
 
         assert_eq!(
             decode::<f16, _>(string),
@@ -171,7 +171,7 @@ mod tests {
     // Test that we can handle padding correctly
     #[test]
     fn _1234567() {
-        let string = "06YLd073vn07U>s07n1-";
+        let string = b"06YLd073vn07U>s07n1-";
 
         assert_eq!(
             decode::<f16, _>(string).map(|it| it.into_iter().map(|value| f32::from(value)).collect()),
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn _f32() {
-        let string = "000<4";
+        let string = b"000<4";
 
         assert_eq!(decode::<f32, _>(string), Some(vec! [9.5]));
     }
@@ -204,7 +204,7 @@ mod tests {
                 .map(|&value| f16::from(value))
                 .collect::<Vec<f16>>();
 
-            assert_eq!(decode::<f16, _>(&encode(&example)).unwrap(), result);
+            assert_eq!(decode::<f16, _>(encode(&example).as_bytes()).unwrap(), result);
         }
     }
 }

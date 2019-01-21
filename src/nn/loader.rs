@@ -14,10 +14,9 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::intrinsics::unlikely;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, BufRead, ErrorKind};
 use std::path::Path;
-use std::char;
+use memchr::memchr;
 
 use nn::tensor::Tensor;
 use nn::Error;
@@ -25,62 +24,78 @@ use util::b85;
 
 /// Step the iterator forward until the character given `stop` character is
 /// encountered. The character `stop` is also skipped.
+///
+/// The implementation is a slight adaptation of `BufRead::read_until` to
+/// not include `stop`, and to use `memchr` from the external crate for better
+/// performance.
 /// 
 /// # Arguments
 /// 
 /// * `iter` - the iterator to step forward
 /// * `stop` - the character to step until
 /// 
-fn skip_until<I>(iter: &mut I, stop: char) -> String
-    where I: Iterator<Item=u8>
-{
-    let mut out: String = String::with_capacity(32);
+fn skip_until<R: BufRead>(buf_read: &mut R, stop: u8) -> Vec<u8> {
+    let mut out = Vec::with_capacity(32);
 
-    for ch in iter {
-        let ch = char::from_u32(ch as u32).unwrap();
+    loop {
+        let (done, used) = {
+            let available = match buf_read.fill_buf() {
+                Ok(n) => n,
+                Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => panic!(e)
+            };
 
-        if unsafe { unlikely(ch == stop) } {
-            break
+            match memchr(stop, available) {
+                Some(i) => {
+                    out.extend_from_slice(&available[..i]);
+                    (true, i + 1)
+                },
+                None => {
+                    out.extend_from_slice(available);
+                    (false, available.len())
+                }
+            }
+        };
+
+        buf_read.consume(used);
+        if done || used == 0 {
+            return out;
         }
-
-        out.push(ch);
     }
-
-    out
 }
 
 /// An iterator that parse entries with the following format:
 /// 
 /// `"name": { "s": "...", v: "..." }`
 /// 
-struct JsonEntryIter<I: Iterator<Item=u8>> {
-    iter: I
+struct JsonEntryIter<R: BufRead> {
+    buf_read: R
 }
 
-impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
+impl<R: BufRead> Iterator for JsonEntryIter<R> {
     type Item = (String, Result<Tensor, Error>);
 
     fn next(&mut self) -> Option<Self::Item> {
         // skip until the quote before the name
-        skip_until(&mut self.iter, '"');
+        skip_until(&mut self.buf_read, b'"');
 
-        let name = skip_until(&mut self.iter, '"');
+        let name = String::from_utf8(skip_until(&mut self.buf_read, b'"')).unwrap();
         if name.is_empty() {
             return None;
         }
 
         // skip until the next `{` and then parse the interior of the
         // object by iterating over the properties
-        skip_until(&mut self.iter, '{');
+        skip_until(&mut self.buf_read, b'{');
 
         let mut tensor = Tensor::default();
 
         loop {
-            skip_until(&mut self.iter, '"');
-            let key = skip_until(&mut self.iter, '"');
+            skip_until(&mut self.buf_read, b'"');
+            let key = String::from_utf8(skip_until(&mut self.buf_read, b'"')).unwrap();
 
-            skip_until(&mut self.iter, '"');
-            let value = skip_until(&mut self.iter, '"');
+            skip_until(&mut self.buf_read, b'"');
+            let value = skip_until(&mut self.buf_read, b'"');
 
             if key == "s" {
                 let array = b85::decode::<f32, _>(&value).unwrap();
@@ -96,8 +111,8 @@ impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
             }
 
             // check if the object terminated
-            let more = skip_until(&mut self.iter, ',');
-            if more.contains('}') {
+            let more = skip_until(&mut self.buf_read, b',');
+            if memchr(b'}', &more).is_some() {
                 break
             }
         };
@@ -114,9 +129,9 @@ impl<I: Iterator<Item=u8>> Iterator for JsonEntryIter<I> {
 /// 
 /// * `path` -
 /// 
-fn load_aux<I: Iterator<Item=u8>>(reader: I) -> Result<HashMap<String, Tensor>, Error> {
+fn load_aux<R: BufRead>(reader: R) -> Result<HashMap<String, Tensor>, Error> {
     let mut out: HashMap<String, Tensor> = HashMap::new();
-    let iter = JsonEntryIter { iter: reader };
+    let iter = JsonEntryIter { buf_read: reader };
 
     for (name, t) in iter {
         out.insert(name, t?);
@@ -140,7 +155,7 @@ fn load_aux<I: Iterator<Item=u8>>(reader: I) -> Result<HashMap<String, Tensor>, 
 /// 
 pub fn load(path: &Path) -> Result<HashMap<String, Tensor>, Error> {
     if let Ok(file) = File::open(path) {
-        load_aux(BufReader::new(file).bytes().map(|ch| ch.unwrap()))
+        load_aux(BufReader::new(file))
     } else {
         Err(Error::MissingWeights)
     }
@@ -149,23 +164,24 @@ pub fn load(path: &Path) -> Result<HashMap<String, Tensor>, Error> {
 #[cfg(test)]
 mod tests {
     use nn::loader::load_aux;
+    use std::io::Cursor;
 
     #[test]
     fn empty_json() {
-        let out = load_aux("".as_bytes().into_iter().map(|ch| *ch));
+        let out = load_aux(Cursor::new(""));
 
         assert!(out.is_err());
     }
 
     #[test]
     fn load_json() {
-        let out = load_aux("{\"11v_value/linear_2/offset:0\": {\"s\": \"(^d>V\", \"v\": \"(^d>V\"}}".as_bytes().into_iter().map(|ch| *ch));
+        let out = load_aux(Cursor::new("{\"11v_value/linear_2/offset:0\": {\"s\": \"(^d>V\", \"v\": \"(^d>V\"}}"));
         assert!(out.is_ok());
 
         // verify internal values
         let out = out.unwrap();
 
-        assert_eq!(out.len(), 1);
+        assert_eq!(out.len(), 1, "{:?}", out.keys().map(|x| x.clone()).collect::<Vec<String>>());
         assert_eq!(out["11v_value/linear_2/offset:0"].scale, 0.13704996);
         assert_eq!(out["11v_value/linear_2/offset:0"].size_in_bytes, 4);
     }

@@ -17,6 +17,7 @@
 extern crate go;
 #[macro_use] extern crate lazy_static;
 extern crate libc;
+extern crate memchr;
 extern crate ordered_float;
 extern crate rand;
 extern crate regex;
