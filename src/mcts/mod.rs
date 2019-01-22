@@ -470,6 +470,7 @@ fn get_random_komi() -> f32 {
 #[cfg(test)]
 mod tests {
     use go::{Board, Color};
+    use util::types::f16;
     use mcts;
 
     use std::sync::Arc;
@@ -502,5 +503,37 @@ mod tests {
 
         mcts::predict_worker(context, mcts::predict::RandomPredictor::default());
         assert_eq!(unsafe { &*root.get() }.best(0.0), (::std::f32::NEG_INFINITY, 361));
+    }
+
+    #[derive(Clone, Default)]
+    struct NanPredictor;
+
+    impl mcts::predict::Predictor for NanPredictor {
+        fn predict(&self, _features: Vec<f16>) -> (f32, Vec<f32>) {
+            (0.0, vec! [::std::f32::NEG_INFINITY; 362])
+        }
+
+        fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<(f32, Vec<f32>)> {
+            features_list.map(|features| self.predict(features)).collect()
+        }
+
+        fn synchronize(&self) {
+            // pass
+        }
+    }
+
+    #[test]
+    fn no_finite_candidates() {
+        let (value, index, _root) = mcts::predict(
+            &NanPredictor::default(),
+            None,
+            mcts::time_control::RolloutLimit::new(1600),
+            None,
+            &Board::new(7.5),
+            Color::Black
+        );
+
+        assert_eq!(value, 0.5);
+        assert_eq!(index, 361);
     }
 }

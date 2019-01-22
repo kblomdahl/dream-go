@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ pub fn add_ex(x: &mut [f32], shape: f32, beta: f32) {
 
     loop {
         let gamma = Gamma::new(shape as f64, 1.0);
+        let mut count = 0;
 
         g_sum = 0.0;
 
@@ -52,12 +53,13 @@ pub fn add_ex(x: &mut [f32], shape: f32, beta: f32) {
             if x_.is_finite() {
                 let g_ = gamma.sample(&mut thread_rng());
 
+                count += 1;
                 g_sum += g_;
                 g[i] = g_;
             }
         }
 
-        if g_sum > ::std::f64::MIN_POSITIVE {
+        if count == 0 || g_sum > ::std::f64::MIN_POSITIVE {
             break;
         }
     }

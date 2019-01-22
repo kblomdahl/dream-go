@@ -261,7 +261,7 @@ fn percentile<I: Iterator<Item=i32>>(array: I, total: i32, n: f64) -> (i32, f64)
         }
     }
 
-    unreachable!();
+    (::std::i32::MAX, so_far)
 }
 
 /// Flyweight structure used to contain the values of a single child in a `Node`. These
@@ -560,6 +560,13 @@ impl BigChildrenImpl {
                 big.expanding[other] = small.expanding[index];
                 big.ptr[other] = small.ptr[index];
             }
+        }
+
+        // set the meta information of moves that are out of bounds to -Inf to
+        // ensure that they are never picked
+        for i in 362..368 {
+            big.count[i] = ::std::i32::MIN;
+            big.value[i] = ::std::f32::NEG_INFINITY;
         }
 
         big
@@ -962,6 +969,19 @@ impl Node {
         }
     }
 
+    /// Returns true if the given vertex is a valid candidate move in this tree.
+    ///
+    /// # Arguments
+    ///
+    /// * `board` -
+    /// * `index` -
+    ///
+    fn is_valid_candidate(&self, board: &Board, index: usize) -> bool {
+        self.prior[index].is_finite() && {
+            index == 361 || board.is_valid(self.color, X[index] as usize, Y[index] as usize)
+        } && self.with(index, |cand| cand.value().is_finite())
+    }
+
     /// Returns true if any of the valid candidate moves in this tree are
     /// valid moves on the given board.
     ///
@@ -970,15 +990,7 @@ impl Node {
     /// * `board` -
     ///
     pub fn has_valid_candidates(&self, board: &Board) -> bool {
-        let color = self.color;
-
-        for i in 0..361 {
-            if self.with(i, |cand| cand.value.is_finite()) && board.is_valid(color, X[i] as usize, Y[i] as usize) {
-                return true;
-            }
-        }
-
-        self.with(361, |cand| cand.value.is_finite())
+        (0..362).any(|i| self.is_valid_candidate(board, i))
     }
 
     /// Returns the total size of this search tree.
@@ -1165,7 +1177,7 @@ impl Node {
             debug_assert!(s_total.is_finite());
 
             if s_total < ::std::f64::MIN_POSITIVE {
-                (0.5, thread_rng().gen_range(0, 362))
+                (self.initial_value, 361)  // no valid moves
             } else {
                 let threshold = s_total * thread_rng().gen::<f64>();
                 let max_i = (0..362).find(|&i| s[i] >= threshold).unwrap();
