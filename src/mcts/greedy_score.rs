@@ -14,8 +14,11 @@
 
 use ordered_float::OrderedFloat;
 
+use go::util::score::Score;
+use go::util::sgf::{Sabaki, SgfCoordinate};
 use go::{Board, Color};
-use mcts::*;
+use mcts::predict::Predictor;
+use mcts::{tree, full_forward};
 
 /// Returns true if the given move would fill ones own eye. An eye in this case
 /// is recognized as an empty spot that is surrounded by at least 7 stones of
@@ -65,7 +68,7 @@ fn is_eye(board: &Board, color: Color, index: usize) -> bool {
 /// * `board` - the board to score
 /// * `next_color` - the color of the player whose turn it is to play
 /// 
-pub fn greedy_score(server: &PredictGuard, board: &Board, next_color: Color) -> (Board, String) {
+pub fn greedy_score<P: Predictor>(server: &P, board: &Board, next_color: Color) -> (Board, String) {
     let mut board = board.clone();
     let mut sgf = String::new();
     let mut current = next_color;
@@ -73,14 +76,10 @@ pub fn greedy_score(server: &PredictGuard, board: &Board, next_color: Color) -> 
     let mut count = 0;
 
     while count < 722 && pass_count < 2 && !board.is_scorable() {
-        let result = full_forward(&server, &board, current);
-        if result.is_none() {
-            break
-        }
+        let (_, policy) = full_forward(server, &board, current);
 
         // pick the move with the largest prior value that does not fill an
         // eye
-        let (_, policy) = result.unwrap();
         let index = (0..361)
             .filter(|&i| policy[i].is_finite() && !is_eye(&board, current, i))
             .max_by_key(|&i| OrderedFloat(policy[i]));

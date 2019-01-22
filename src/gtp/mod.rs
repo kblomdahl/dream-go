@@ -312,8 +312,8 @@ impl Gtp {
                     .map(|tree| tree.total_count)
                     .unwrap_or(0);
 
-                mcts::predict::<_>(
-                    &service.lock(),
+                mcts::predict(
+                    &service.lock().clone_to_static(),
                     None,
                     time_control::ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods),
                     search_tree,
@@ -321,8 +321,8 @@ impl Gtp {
                     color
                 )
             } else {
-                mcts::predict::<_>(
-                    &service.lock(),
+                mcts::predict(
+                    &service.lock().clone_to_static(),
                     None,
                     time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
                     search_tree,
@@ -456,8 +456,8 @@ impl Gtp {
     fn heatmap(&mut self, id: Option<usize>, color: Color, prior: bool) {
         let board = self.history.last().unwrap();
         let result = self.ponder.service(|service, search_tree, p_state| {
-            let (_value, _index, tree) = mcts::predict::<_>(
-                &service.lock(),
+            let (_value, _index, tree) = mcts::predict(
+                &service.lock().clone_to_static(),
                 None,
                 time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
                 None,

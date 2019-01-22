@@ -18,6 +18,7 @@ mod global_cache;
 mod greedy_score;
 mod policy_play;
 pub mod predict;
+pub mod predict_service;
 mod self_play;
 pub mod tree;
 pub mod time_control;
@@ -34,22 +35,19 @@ use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
 use std::fmt;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, channel};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use time;
 
 use go::util::features::{HWC, Features};
 use go::util::score::{Score};
-use go::util::sgf::*;
 use go::util::symmetry;
 use go::{Board, Color};
-use mcts::time_control::{TimeStrategy, RolloutLimit};
-use mcts::predict::{PredictService, PredictGuard, PredictRequest};
-use nn::{Network, Profiler};
+use mcts::time_control::TimeStrategy;
+use mcts::predict::Predictor;
+use nn::Profiler;
+use util::config;
 use util::types::f16;
-use util::{b85, config, min};
 use mcts::asm::sum_finite_f32;
 use mcts::asm::normalize_finite_f32;
 use parallel::rcu;
@@ -97,7 +95,7 @@ impl fmt::Display for GameResult {
 /// * `board` - the board position to evaluate
 /// * `color` - the color to evaluate for
 ///
-fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
+fn full_forward<P: Predictor>(server: &P, board: &Board, color: Color) -> (f32, Vec<f32>) {
     let (initial_policy, indices) = create_initial_policy(board, color);
     let mut policy = initial_policy.clone();
     let mut value = 0.0f32;
@@ -111,36 +109,30 @@ fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f
             for i in 0..362 { policy[i] += other_policy[i]; }
             value += other_value;
         } else {
-            new_requests.push(PredictRequest::Ask(board.get_features::<HWC, f16>(color, t)));
+            new_requests.push(board.get_features::<HWC, f16>(color, t));
             new_symmetries.push(t);
         }
     }
 
     // calculate any symmetries that were missing, and then accumulate them
-    if let Some(new_responses) = server.send_all(new_requests) {
-        for (resp, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
-            if let Some((other_value, other_policy)) = resp {
-                let (other_value, other_policy) = global_cache::get_or_insert(board, color, t, || {
-                    let mut identity_policy = initial_policy.clone();
-                    add_valid_candidates(&mut identity_policy, other_policy, &indices, t);
-                    normalize_policy(&mut identity_policy);
+    let new_responses = server.predict_all(new_requests.into_iter());
 
-                    Some((0.5 + 0.5 * other_value, identity_policy))
-                }).unwrap();
+    for ((other_value, other_policy), t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
+        let (other_value, other_policy) = global_cache::get_or_insert(board, color, t, || {
+            let mut identity_policy = initial_policy.clone();
+            add_valid_candidates(&mut identity_policy, other_policy, &indices, t);
+            normalize_policy(&mut identity_policy);
 
-                for i in 0..362 { policy[i] += other_policy[i]; }
-                value += other_value;
-            } else {
-                return None;
-            }
-        }
+            Some((0.5 + 0.5 * other_value, identity_policy))
+        }).unwrap();
 
-        normalize_policy(&mut policy);
+        for i in 0..362 { policy[i] += other_policy[i]; }
+        value += other_value;
+}
 
-        Some((value * 0.125, policy))
-    } else {
-        None
-    }
+    normalize_policy(&mut policy);
+
+    (value * 0.125, policy)
 }
 
 /// Performs a forward pass through the neural network for the given board
@@ -152,18 +144,13 @@ fn full_forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f
 /// * `board` - the board position
 /// * `color` - the current player
 ///
-fn forward(server: &PredictGuard, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
+fn forward<P: Predictor>(server: &P, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
     let t = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
 
     global_cache::get_or_insert(board, color, t, || {
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
-        let response = server.send(PredictRequest::Ask(board.get_features::<HWC, f16>(color, t)));
-        let (value, original_policy) = if let Some(x) = response {
-            x.unwrap()
-        } else {
-            return None;
-        };
+        let (value, original_policy) = server.predict(board.get_features::<HWC, f16>(color, t));
 
         // fix-up the potentially broken policy
         let (mut policy, indices) = create_initial_policy(board, color);
@@ -298,8 +285,9 @@ unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
 /// * `context` -
 /// * `server` -
 ///
-fn predict_worker<T>(context: ThreadContext<T>, server: PredictGuard)
-    where T: TimeStrategy + Clone + Send + 'static
+fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
+    where T: TimeStrategy + Clone + Send + 'static,
+          P: Predictor
 {
     let root = unsafe { &mut *context.root.get() };
 
@@ -328,7 +316,7 @@ fn predict_worker<T>(context: ThreadContext<T>, server: PredictGuard)
             } else if !root.has_valid_candidates(&context.starting_point) {
                 return;  // skip `rcu::unregister` since we are not registered
             } else {
-                server.send(PredictRequest::Wait);
+                server.synchronize();
                 rcu::register_thread();
             }
         }
@@ -347,24 +335,18 @@ fn predict_worker<T>(context: ThreadContext<T>, server: PredictGuard)
 /// * `starting_point` -
 /// * `starting_color` -
 ///
-fn predict_aux<T>(
-    server: &PredictGuard,
+fn predict_aux<T, P>(
+    server: &P,
     num_workers: usize,
     time_strategy: T,
     starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
 ) -> (f32, usize, tree::Node)
-    where T: TimeStrategy + Clone + Send + 'static
+    where T: TimeStrategy + Clone + Send + 'static,
+          P: Predictor + 'static
 {
-    let (starting_value, mut starting_policy) =
-        full_forward(&server, starting_point, starting_color)
-            .unwrap_or_else(|| {
-                let mut policy = vec! [0.0; 362];
-                policy[361] = 1.0;
-
-                (0.5, policy)
-            });
+    let (starting_value, mut starting_policy) = full_forward(server, starting_point, starting_color);
 
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
@@ -398,17 +380,17 @@ fn predict_aux<T>(
 
     if num_workers <= 1 {
         let context = context.clone();
-        let server = server.clone_static();
+        let server = server.clone();
 
-        predict_worker::<T>(context, server);
+        predict_worker(context, server);
     } else {
         let handles = (0..num_workers).map(|_| {
             let context = context.clone();
-            let server = server.clone_static();
+            let server = server.clone();
 
             thread::Builder::new()
                 .name("predict_worker".into())
-                .spawn(move || predict_worker::<T>(context, server))
+                .spawn(move || predict_worker(context, server))
                 .unwrap()
         }).collect::<Vec<JoinHandle<()>>>();
 
@@ -443,20 +425,21 @@ fn predict_aux<T>(
 /// * `starting_point` -
 /// * `starting_color` -
 ///
-pub fn predict<T>(
-    server: &PredictGuard,
+pub fn predict<T, P>(
+    server: &P,
     num_workers: Option<usize>,
     time_control: T,
     starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
 ) -> (f32, usize, tree::Node)
-    where T: TimeStrategy + Clone + Send + 'static
+    where T: TimeStrategy + Clone + Send + 'static,
+          P: Predictor + 'static
 {
     let num_workers = num_workers.unwrap_or(*config::NUM_THREADS);
 
     Profiler::with(move || {
-        predict_aux::<T>(server, num_workers, time_control, starting_tree, starting_point, starting_color)
+        predict_aux::<T, _>(server, num_workers, time_control, starting_tree, starting_point, starting_color)
     })
 }
 
@@ -488,7 +471,7 @@ fn get_random_komi() -> f32 {
 mod tests {
     use go::{Board, Color};
     use mcts;
-    use nn;
+
     use std::sync::Arc;
     use std::cell::UnsafeCell;
 
@@ -503,10 +486,9 @@ mod tests {
         }
     }
 
+
     #[test]
     fn no_allowed_moves() {
-        let network = nn::Network::new().unwrap();
-        let server = mcts::predict::service(network);
         let root = Arc::new(UnsafeCell::new(mcts::tree::Node::new(Color::Black, 0.0, vec! [1.0; 362])));
         let context = mcts::ThreadContext {
             root: root.clone(),
@@ -518,7 +500,7 @@ mod tests {
             unsafe { &mut *context.root.get() }.disqualify(i);
         }
 
-        mcts::predict_worker(context, server.lock());
+        mcts::predict_worker(context, mcts::predict::RandomPredictor::default());
         assert_eq!(unsafe { &*root.get() }.best(0.0), (::std::f32::NEG_INFINITY, 361));
     }
 }

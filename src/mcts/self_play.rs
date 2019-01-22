@@ -12,10 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use go::util::sgf::{CGoban, SgfCoordinate};
 use go::{Board, Color};
+use util::b85;
 use util::config;
-use mcts::*;
+use mcts::predict::Predictor;
+use mcts::time_control::RolloutLimit;
+use mcts::{GameResult, get_random_komi};
+use mcts::{predict_service, predict_aux, tree};
+use nn::Network;
 
+use rand::{thread_rng, Rng};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
+use std::thread;
 use std::mem;
 
 /// Play a game against the engine and return the result of the game.
@@ -25,7 +36,7 @@ use std::mem;
 /// * `server` - the server to use during evaluation
 /// * `num_parallel` - the number of games that are being played in parallel
 ///
-fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> GameResult
+fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUsize>) -> GameResult
 {
     let mut board = Board::new(get_random_komi());
     let mut sgf = String::new();
@@ -42,8 +53,8 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
 
     while count < 722 {
         let num_workers = *config::NUM_THREADS / num_parallel.load(Ordering::Acquire);
-        let (value, index, tree) = predict_aux::<_>(
-            &server,
+        let (value, index, tree) = predict_aux(
+            server,
             num_workers,
             RolloutLimit::new((*config::NUM_ROLLOUT).into()),
             root_current,
@@ -114,8 +125,8 @@ fn self_play_one(server: &PredictGuard, num_parallel: &Arc<AtomicUsize>) -> Game
 /// * `network` - the neural network to use during evaluation
 /// * `num_games` - the number of games to generate
 ///
-pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, PredictService) {
-    let server = predict::service(network);
+pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, predict_service::PredictService) {
+    let server = predict_service::service(network);
     let (sender, receiver) = channel();
 
     // spawn the worker threads that generate the self-play games
@@ -127,7 +138,7 @@ pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, P
         let num_workers = num_workers.clone();
         let processed = processed.clone();
         let sender = sender.clone();
-        let server = server.lock().clone_static();
+        let server = server.lock().clone_to_static();
 
         thread::spawn(move || {
             while processed.fetch_add(1, Ordering::SeqCst) < num_games {

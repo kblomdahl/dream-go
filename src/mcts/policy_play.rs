@@ -13,11 +13,21 @@
 // limitations under the License.
 
 use ordered_float::OrderedFloat;
+use rand::{thread_rng, Rng};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
+use std::thread;
 
+use go::util::sgf::{CGoban, SgfCoordinate};
 use go::{Board, Color};
-use util::config;
+use util::{b85, config, min};
 use mcts::asm::sum_finite_f32;
-use mcts::*;
+use mcts::predict::Predictor;
+use mcts::time_control::RolloutLimit;
+use mcts::{dirichlet, tree, predict_service};
+use mcts::{GameResult, full_forward, get_random_komi, predict_aux};
+use nn::Network;
 
 /// Returns the skewness of the given policy. A large return value says that
 /// the given input `policy` is less certain, and therefore more interesting
@@ -99,9 +109,9 @@ fn policy_choose(policy: &[f32], temperature: f32) -> Option<usize> {
     }
 }
 
-fn policy_ex_it(server: &PredictGuard, board: &Board, color: Color) -> (String, f32) {
-    let (value, _index, tree) = predict_aux::<_>(
-        &server,
+fn policy_ex_it<P: Predictor + 'static>(server: &P, board: &Board, color: Color) -> (String, f32) {
+    let (value, _index, tree) = predict_aux::<_, _>(
+        server,
         1,
         RolloutLimit::new((*config::NUM_ROLLOUT).into()),
         None,
@@ -128,24 +138,22 @@ fn policy_ex_it(server: &PredictGuard, board: &Board, color: Color) -> (String, 
 /// * `board` -
 /// * `color` -
 ///
-fn policy_forward(
-    server: &PredictGuard,
+fn policy_forward<P: Predictor + 'static>(
+    server: &P,
     board: &Board,
     color: Color
-) -> Option<(f32, Vec<f32>)>
+) -> (f32, Vec<f32>)
 {
     let num_policy_rollout = *config::NUM_POLICY_ROLLOUT;
 
     if num_policy_rollout <= 1 {
-        if let Some((value, mut policy)) = full_forward(server, board, color) {
-            dirichlet::add(&mut policy[0..362], 0.03);
-            Some((value, policy))
-        } else {
-            None
-        }
+        let (value, mut policy) = full_forward(server, board, color);
+        dirichlet::add(&mut policy[0..362], 0.03);
+
+        (value, policy)
     } else {
-        let (value, _index, tree) = predict_aux::<_>(
-            &server,
+        let (value, _index, tree) = predict_aux::<_, _>(
+            server,
             1,
             RolloutLimit::new(num_policy_rollout),
             None,
@@ -153,7 +161,7 @@ fn policy_forward(
             color
         );
 
-        Some((value, tree.softmax()))
+        (value, tree.softmax())
     }
 }
 
@@ -167,7 +175,7 @@ fn policy_forward(
 /// * `server` - the server to use during evaluation
 /// * `ex_it` - whether to emit one full policy
 ///
-fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
+fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> GameResult {
     let mut temperature = (*config::TEMPERATURE + 1e-3).recip();
     let mut sgf = vec! [];
 
@@ -179,14 +187,13 @@ fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
     let mut total_skew = 0.0;
 
     while pass_count < 2 && board.count() < 722 {
-        let result = policy_forward(&server, &board, color);
-        let (index, skew) = if let Some((_value, policy)) = result {
+        let (index, skew) = {
+            let (_value, policy) = policy_forward(server, &board, color);
+
             match policy_choose(&policy, temperature) {
                 Some(index) => (index, skewness(&policy)),
                 None => (361, 0.0)
             }
-        } else {
-            break;  // failure?
         };
 
         if index == 361 {
@@ -258,8 +265,8 @@ fn policy_play_one(server: &PredictGuard, ex_it: bool) -> GameResult {
 /// * `num_games` -
 /// * `ex_it` - whether to emit one full policy per game
 ///
-pub fn policy_play(network: Network, num_games: usize, ex_it: bool) -> (Receiver<GameResult>, PredictService) {
-    let server = predict::service(network);
+pub fn policy_play(network: Network, num_games: usize, ex_it: bool) -> (Receiver<GameResult>, predict_service::PredictService) {
+    let server = predict_service::service(network);
     let (sender, receiver) = channel();
 
     // spawn the worker threads that generate the self-play games
@@ -269,7 +276,7 @@ pub fn policy_play(network: Network, num_games: usize, ex_it: bool) -> (Receiver
     for _ in 0..num_workers {
         let remaining = remaining.clone();
         let sender = sender.clone();
-        let server = server.lock().clone_static();
+        let server = server.lock().clone_to_static();
 
         thread::spawn(move || {
             while remaining.load(Ordering::Acquire) > 0 {

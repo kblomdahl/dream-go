@@ -268,10 +268,10 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
     /// 
     /// * `reqs` -
     /// 
-    pub fn send_all(&self, reqs: Vec<I::Request>) -> Option<Vec<I::Response>> {
+    pub fn send_all<E: Iterator<Item=I::Request>>(&self, reqs: E) -> Option<Vec<I::Response>> {
         if let Ok(mut inner_lock) = self.inner.0.lock() {
             if inner_lock.is_running {
-                let responses = reqs.into_iter().map(|req| {
+                let responses = reqs.map(|req| {
                     let (tx, rx) = one_channel();
 
                     inner_lock.queue.push((req, tx));
@@ -296,7 +296,7 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
 
     /// Returns a clone of this guard with a `'static` lifetime. This
     /// is useful for transferring a guard across the thread boundary.
-    pub fn clone_static(&self) -> ServiceGuard<'static, I> {
+    pub fn clone_to_static(&self) -> ServiceGuard<'static, I> {
         ServiceGuard {
             _owner: ::std::marker::PhantomData::default(),
 

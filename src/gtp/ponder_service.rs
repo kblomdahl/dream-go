@@ -18,7 +18,7 @@ use std::thread;
 
 use go::{Board, Color};
 use util::config;
-use mcts::predict::PredictService;
+use mcts::predict_service::PredictService;
 use mcts::time_control::{TimeStrategy, TimeStrategyResult};
 use mcts::tree;
 use mcts;
@@ -80,8 +80,8 @@ fn ponder_worker(
 ) -> PonderResult
 {
     let max_tree_size = (*config::NUM_ROLLOUT).user_defined_or(500_000);
-    let (_, _, next_tree) = mcts::predict::<_>(
-        &service.lock(),
+    let (_, _, next_tree) = mcts::predict(
+        &service.lock().clone_to_static(),
         None,
         PonderTimeControl { is_running, max_tree_size },
         search_tree,
@@ -130,7 +130,7 @@ impl PonderService {
             is_running: is_running,
             worker: Some(thread::spawn(move || {
                 if let Some(network) = Network::new() {
-                    let service = mcts::predict::service(network);
+                    let service = mcts::predict_service::service(network);
 
                     ponder_worker(service, None, board, next_color, is_running_worker)
                 } else {
