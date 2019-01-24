@@ -12,15 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use ordered_float::*;
 use regex::Regex;
 use std::io::BufRead;
 use std::time::Instant;
 
-use go::util::sgf::*;
 use go::util::score::{Score, StoneStatus};
 use go::{DEFAULT_KOMI, Board, Color};
-use mcts::asm::{sum_finite_f32, normalize_finite_f32};
 use mcts::time_control;
 use mcts;
 use util::config;
@@ -34,13 +31,12 @@ use gtp::ponder_service::PonderService;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&str; 23] = [
+const KNOWN_COMMANDS: [&str; 20] = [
     "protocol_version", "name", "version", "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove",
     "kgs-genmove_cleanup", "undo",
     "time_settings", "kgs-time_settings", "time_left", "quit",
-    "final_score", "final_status_list",
-    "heatmap", "heatmap-nn", "sabaki-genmovelog"
+    "final_score", "final_status_list"
 ];
 
 #[derive(Debug, PartialEq)]
@@ -51,15 +47,12 @@ enum Command {
     Version,  // report the version number of the program
     BoardSize(usize),  // set the board size to NxN
     ClearBoard,  // clear the board
-    Heatmap(Color),  // sabaki heatmap for the given color
-    HeatmapPrior(Color),  // sabaki heatmap (of the prior value) for the given color
     Komi(f32),  // set the komi
     Play(Color, Vertex),  // play a stone of the given color at the given vertex
     ListCommands,  // list all available commands
     KnownCommand(String),  // tell whether a command is known
     ShowBoard,  // write the position to stdout
     GenMove(Color, bool),  // generate and play the supposedly best move for either color, the second argument indicate whether it is a clean-up move
-    GenMoveLog,  // output all variations considered by the most recent search
     FinalScore,  // write the score to stdout
     FinalStatusList(StoneStatus),  // write status of stones to stdout
     RegGenMove(Color),  // generate the supposedly best move for either color
@@ -93,8 +86,6 @@ macro_rules! error {
 lazy_static! {
     static ref ID_PREFIX: Regex = Regex::new(r"^([0-9]+)(?: +(.*)$|$)").unwrap();
     static ref BOARD_SIZE: Regex = Regex::new(r"^boardsize +([0-9]+)").unwrap();
-    static ref HEATMAP: Regex = Regex::new(r"^heatmap +([bw])").unwrap();
-    static ref HEATMAP_PRIOR: Regex = Regex::new(r"^heatmap-nn +([bw])").unwrap();
     static ref KOMI: Regex = Regex::new(r"^komi +(-?[0-9\.]+)").unwrap();
     static ref PLAY: Regex = Regex::new(r"^play +([bBwW]) +([a-z][0-9]+|pass)").unwrap();
     static ref KNOWN_COMMAND: Regex = Regex::new(r"^known_command +([^ ]+)").unwrap();
@@ -112,7 +103,6 @@ lazy_static! {
 
 struct Gtp {
     ponder: PonderService,
-    last_log: String,
     history: Vec<Board>,
     komi: f32,
     time_settings: [Box<time_settings::TimeSettings>; 3]
@@ -142,14 +132,6 @@ impl Gtp {
             Ok((id, Command::BoardSize(size)))
         } else if line == "clear_board" {
             Ok((id, Command::ClearBoard))
-        } else if let Some(caps) = HEATMAP.captures(line) {
-            let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
-
-            Ok((id, Command::Heatmap(color)))
-        } else if let Some(caps) = HEATMAP_PRIOR.captures(line) {
-            let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
-
-            Ok((id, Command::HeatmapPrior(color)))
         } else if let Some(caps) = KOMI.captures(line) {
             let komi = caps[1].parse::<f32>().map_err(|_| "syntax error")?;
 
@@ -171,8 +153,6 @@ impl Gtp {
             let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
             Ok((id, Command::GenMove(color, *config::TROMP_TAYLOR)))
-        } else if line == "sabaki-genmovelog" {
-            Ok((id, Command::GenMoveLog))
         } else if line == "final_score" {
             Ok((id, Command::FinalScore))
         } else if let Some(caps) = FINAL_STATUS_LIST.captures(line) {
@@ -297,7 +277,7 @@ impl Gtp {
     fn generate_move(&mut self, id: Option<usize>, color: Color, is_cleanup: bool) -> Option<Vertex> {
         let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[color as usize].remaining();
         let board = self.history.last().unwrap();
-        let result = self.ponder.service(|service, search_tree, _p_state| {
+        let result = self.ponder.service(|service, search_tree, p_state| {
             let search_tree = if search_tree.color != color {
                 // passing moves are not recorded in the GTP protocol, so we
                 // will just assume the other player passed once if we are in
@@ -307,7 +287,7 @@ impl Gtp {
                 Some(search_tree)
             };
 
-            let (value, index, mut tree) = if main_time.is_finite() && byo_yomi_time.is_finite() {
+            let result = if main_time.is_finite() && byo_yomi_time.is_finite() {
                 let total_visits = search_tree.as_ref()
                     .map(|tree| tree.total_count)
                     .unwrap_or(0);
@@ -331,8 +311,13 @@ impl Gtp {
                 )
             };
 
+            if result.is_none() {
+                return (None, None, p_state)
+            }
+
             // disqualify the `pass` move, and any move that is not in contested territory, if
             // we are doing clean-up and the board is not scorable.
+            let (value, index, mut tree) = result.unwrap();
             let (value, index) = if is_cleanup && index == 361 && !board.is_scorable() {
                 tree.disqualify(361);
 
@@ -347,12 +332,6 @@ impl Gtp {
 
             eprintln!("{}", mcts::tree::to_pretty(&tree));
 
-            let last_log = if *config::WITH_SABAKI {
-                Some(format!("{}", mcts::tree::to_sgf::<Sabaki>(&tree, &board, false)))
-            } else {
-                None
-            };
-
             let should_resign = !*config::NO_RESIGN && value.is_finite() && value < 0.1;  // 10% chance of winning
             let index = if should_resign { 361 } else { index };
             let (vertex, tree, other) = if index >= 361 {  // passing move
@@ -365,14 +344,10 @@ impl Gtp {
                 (Some(Vertex { x, y }), mcts::tree::Node::forward(tree, index), other)
             };
 
-            ((vertex, should_resign, last_log), tree, (other, color.opposite()))
+            (Some((vertex, should_resign)), tree, (other, color.opposite()))
         });
 
-        if let Ok((vertex, should_resign, last_log)) = result {
-            if let Some(last_log) = last_log {
-                self.last_log = last_log;
-            }
-
+        if let Ok(Some((vertex, should_resign))) = result {
             if should_resign {
                 success!(id, "resign");
                 None
@@ -383,108 +358,14 @@ impl Gtp {
                 success!(id, "pass");
                 None
             }
+        } else if let Ok(None) = result {
+            error!(id, "unrecognized error");
+
+            None
         } else {
             error!(id, result.err().unwrap());
 
             None
-        }
-    }
-
-    /// Output all variations that were considered in the most recent search
-    /// tree.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `id` -
-    /// 
-    fn generate_move_log(&mut self, id: Option<usize>) {
-        success!(id, &format!("#sabaki{{\"variations\":\"{}\"}}", self.last_log));
-    }
-
-    /// Returns a Sabaki heatmap that represents the given softmax policy.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `softmax` -
-    /// 
-    fn to_heatmap(softmax: &[f32]) -> String {
-        // format the flat softmax policy as a nested list (in JSON), where
-        // each list correspond to one row on the board. The elements in the
-        // inner list is the heat of each vertex, discretized to an integer
-        // in `0..9`.
-        let mut json = String::new();
-        let max_heat = softmax.iter().take(361)
-            .max_by_key(|&&v| OrderedFloat(v))
-            .unwrap();
-
-        for (index, _heat) in softmax.iter().take(361).enumerate() {
-            let y = index / 19;
-            let x = index % 19;
-
-            if x == 0 {
-                if y > 0 {
-                    json += "],";
-                }
-
-                json += "[";
-            }
-
-            if x > 0 {
-                json += ",";
-            }
-
-            // the GTP coordinates go from the bottom-left to the top-right, but
-            // Sabaki heatmap coordinates go from the top-left to the
-            // bottom-right (...) so inverse the y-axis.
-            let other = softmax[19 * (18 - y) + x];
-
-            json += &format!("{}", (9.0 * other / max_heat).ceil());
-        }
-
-        format!("{{\"heatmap\":[{}]]}}", json)
-    }
-
-    /// Generate a move using the engine and then output an Sabaki GTP extension
-    /// string that allows us to draw the heatmap directly on the board.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `id` -
-    /// * `color` -
-    /// * `prior` - whether to show the _prior_ as the heatmap
-    /// 
-    fn heatmap(&mut self, id: Option<usize>, color: Color, prior: bool) {
-        let board = self.history.last().unwrap();
-        let result = self.ponder.service(|service, search_tree, p_state| {
-            let (_value, _index, tree) = mcts::predict(
-                &service.lock().clone_to_static(),
-                None,
-                time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
-                None,
-                &board,
-                color
-            );
-
-            eprintln!("{}", mcts::tree::to_pretty(&tree));
-
-            // output the heatmap in Sabaki format
-            let json = if prior {
-                let mut s = tree.prior.clone();
-                let mut s_total = sum_finite_f32(&s);
-                normalize_finite_f32(&mut s, s_total);
-
-                Gtp::to_heatmap(&s)
-            } else {
-                Gtp::to_heatmap(&tree.softmax())
-            };
-
-            (json, Some(search_tree), p_state)
-        });
-
-        if let Ok(json) = result {
-            success!(id, &format!("#sabaki{}", json));
-        } else {
-            error!(id, result.err().unwrap());
         }
     }
 
@@ -534,12 +415,6 @@ impl Gtp {
 
                 success!(id, "");
             },
-            Command::Heatmap(color) => {
-                self.heatmap(id, color, false);
-            },
-            Command::HeatmapPrior(color) => {
-                self.heatmap(id, color, true);
-            },
             Command::Play(color, vertex) => {
                 let next_board = {
                     let board = self.history.last().unwrap();
@@ -568,13 +443,7 @@ impl Gtp {
                 }
             },
             Command::ListCommands => {
-                let known_commands = KNOWN_COMMANDS.iter()
-                    .cloned()
-                    .filter(|&c| {
-                        !c.starts_with("sabaki-") || *config::WITH_SABAKI
-                    }).collect::<Vec<&str>>();
-
-                success!(id, known_commands.join("\n"));
+                success!(id, KNOWN_COMMANDS.join("\n"));
             },
             Command::KnownCommand(other) => {
                 success!(id, {
@@ -609,9 +478,6 @@ impl Gtp {
 
                 self.time_settings[c].update(elapsed_secs);
             },
-            Command::GenMoveLog => {
-                self.generate_move_log(id);
-            },
             Command::FinalScore => {
                 let board = self.history.last().unwrap();
                 let result = self.ponder.service(|service, search_tree, p_state| {
@@ -625,16 +491,12 @@ impl Gtp {
                     ((black, white, rollout), Some(search_tree), p_state)
                 });
 
-                if let Ok((black, white, rollout)) = result {
+                if let Ok((black, white, _rollout)) = result {
                     eprintln!("Black: {}", black);
                     eprintln!("White: {} + {}", white, self.komi);
 
                     let black = black as f32;
                     let white = white as f32 + self.komi;
-
-                    if *config::WITH_SABAKI {
-                        self.last_log = format!("({})", rollout);
-                    }
 
                     if black == white {
                         success!(id, "0");
@@ -759,7 +621,6 @@ pub fn run() {
     let stdin_lock = stdin.lock();
     let mut gtp = Gtp {
         ponder: PonderService::new(Board::new(DEFAULT_KOMI), Color::Black),
-        last_log: "{}".to_string(),
         history: vec! [Board::new(DEFAULT_KOMI)],
         komi: DEFAULT_KOMI,
         time_settings: [

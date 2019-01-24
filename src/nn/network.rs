@@ -140,7 +140,7 @@ impl Network {
 
             for ((_batch_size, device_id), value) in workspaces.drain() {
                 set_current_device(device_id).expect("Failed to set the device for the current thread");
-                check!(cuda::cudaDeviceSynchronize()).expect("Failed to synchronize the current device");
+                cuda::cudaDeviceSynchronize();  // this should be allowed to fail
 
                 drop(value);
             }

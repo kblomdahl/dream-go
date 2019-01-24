@@ -107,7 +107,7 @@ impl PredictState {
     /// * `batch_size` -
     /// * `features_list` -
     ///
-    fn forward(network: &Network, batch_size: usize, features_list: &[f16]) -> (Vec<f32>, Vec<Vec<f32>>) {
+    fn forward(network: &Network, batch_size: usize, features_list: &[f16]) -> Result<(Vec<f32>, Vec<Vec<f32>>), ()> {
         let mut count = 0;
 
         loop {
@@ -116,13 +116,13 @@ impl PredictState {
             });
 
             match result {
-                Ok(content) => { return content },
+                Ok(content) => { return Ok(content) },
                 Err(reason) => {
                     eprintln!("Encountered CUDA error, retrying {} more times -- {:?}", 2 - count, reason);
 
                     count += 1;
                     if count >= 3 {
-                        panic!();  // unrecoverable
+                        return Err(())
                     }
 
                     network.synchronize();
@@ -153,17 +153,17 @@ impl PredictState {
 
         // perform the neural network predictions and then inform all of
         // the receivers
-        let (value_list, policy_list) = PredictState::forward(
-            &network,
-            batch_size,
-            &features_list
-        );
+        if let Ok((value_list, policy_list)) = PredictState::forward(&network, batch_size, &features_list) {
+            // send out our predictions to all of the receivers
+            let response_iter = value_list.into_iter().zip(policy_list.into_iter());
 
-        // send out our predictions to all of the receivers
-        let response_iter = value_list.into_iter().zip(policy_list.into_iter());
-
-        for (sender, response) in sender_list.into_iter().zip(response_iter) {
-            sender.send(Some(response));
+            for (sender, response) in sender_list.into_iter().zip(response_iter) {
+                sender.send(Some(response));
+            }
+        } else {
+            for sender in sender_list.into_iter() {
+                sender.send(None);
+            }
         }
 
         // wake up all of the receivers that are waiting for something to change
@@ -274,22 +274,15 @@ impl Clone for PredictGuard<'_> {
 }
 
 impl Predictor for PredictGuard<'_> {
-    fn predict(&self, features: Vec<f16>) -> (f32, Vec<f32>) {
+    fn predict(&self, features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
         self.send(PredictRequest::Ask(features))
             .expect("predict_service could not provide a response")
-            .expect("illegal response from predict_service, expected `Some`")
     }
 
-    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<(f32, Vec<f32>)> {
-        let responses = self.send_all(features_list.into_iter().map(|features| {
+    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
+        self.send_all(features_list.into_iter().map(|features| {
             PredictRequest::Ask(features)
-        })).expect("predict_service could not provide a response");
-
-        responses.into_iter()
-            .map(|resp| {
-                resp.expect("illegal response from predict_service, expected `Some`")
-            })
-            .collect()
+        })).expect("predict_service could not provide a response")
     }
 
     fn synchronize(&self) {

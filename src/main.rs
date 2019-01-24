@@ -51,7 +51,6 @@ fn main() {
             println!("  --tt                  Play using Tromp-Taylor rules");
             println!("  --no-ponder           Do not think in the background during idle time");
             println!("  --no-resign           Do not allow the engine to resign in games");
-            println!("  --with-sabaki         Include Sabaki extensions amongst the GTP commands");
         },
 
         Procedure::SelfPlay(n) => {

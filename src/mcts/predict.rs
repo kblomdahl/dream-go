@@ -21,7 +21,7 @@ pub trait Predictor : Clone + Send {
     ///
     /// * `features` - the features to query
     ///
-    fn predict(&self, features: Vec<f16>) -> (f32, Vec<f32>);
+    fn predict(&self, features: Vec<f16>) -> Option<(f32, Vec<f32>)>;
 
     /// Returns the results of the given queries.
     ///
@@ -29,7 +29,7 @@ pub trait Predictor : Clone + Send {
     ///
     /// * `features_list` - the features to query over
     ///
-    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<(f32, Vec<f32>)>;
+    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>>;
 
     /// waits until all other predicts that are currently running in the
     /// background has finished.
@@ -42,7 +42,7 @@ pub trait Predictor : Clone + Send {
 pub struct RandomPredictor;
 
 impl Predictor for RandomPredictor {
-    fn predict(&self, _features: Vec<f16>) -> (f32, Vec<f32>) {
+    fn predict(&self, _features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
         use rand::{thread_rng, Rng};
         use mcts::asm::normalize_finite_f32;
 
@@ -57,10 +57,10 @@ impl Predictor for RandomPredictor {
         }
 
         normalize_finite_f32(&mut policy, total_policy);
-        (thread_rng().gen_range(-1.0, 1.0), policy)
+        Some((thread_rng().gen_range(-1.0, 1.0), policy))
     }
 
-    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<(f32, Vec<f32>)> {
+    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
         features_list.map(|features| self.predict(features)).collect()
     }
 

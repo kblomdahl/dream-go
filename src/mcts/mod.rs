@@ -95,7 +95,7 @@ impl fmt::Display for GameResult {
 /// * `board` - the board position to evaluate
 /// * `color` - the color to evaluate for
 ///
-fn full_forward<P: Predictor>(server: &P, board: &Board, color: Color) -> (f32, Vec<f32>) {
+fn full_forward<P: Predictor>(server: &P, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
     let (initial_policy, indices) = create_initial_policy(board, color);
     let mut policy = initial_policy.clone();
     let mut value = 0.0f32;
@@ -114,10 +114,12 @@ fn full_forward<P: Predictor>(server: &P, board: &Board, color: Color) -> (f32, 
         }
     }
 
-    // calculate any symmetries that were missing, and then accumulate them
+    // calculate any symmetries that were missing, add them to the cache, and then take the
+    // average of them
     let new_responses = server.predict_all(new_requests.into_iter());
 
-    for ((other_value, other_policy), t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
+    for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
+        let (other_value, other_policy) = new_response?;
         let (other_value, other_policy) = global_cache::get_or_insert(board, color, t, || {
             let mut identity_policy = initial_policy.clone();
             add_valid_candidates(&mut identity_policy, other_policy, &indices, t);
@@ -128,11 +130,11 @@ fn full_forward<P: Predictor>(server: &P, board: &Board, color: Color) -> (f32, 
 
         for i in 0..362 { policy[i] += other_policy[i]; }
         value += other_value;
-}
+    }
 
     normalize_policy(&mut policy);
 
-    (value * 0.125, policy)
+    Some((value * 0.125, policy))
 }
 
 /// Performs a forward pass through the neural network for the given board
@@ -150,7 +152,7 @@ fn forward<P: Predictor>(server: &P, board: &Board, color: Color) -> Option<(f32
     global_cache::get_or_insert(board, color, t, || {
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
-        let (value, original_policy) = server.predict(board.get_features::<HWC, f16>(color, t));
+        let (value, original_policy) = server.predict(board.get_features::<HWC, f16>(color, t))?;
 
         // fix-up the potentially broken policy
         let (mut policy, indices) = create_initial_policy(board, color);
@@ -311,6 +313,8 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
                         break
                     }
                 } else {
+                    unsafe { tree::undo(trace, true) };
+
                     return  // unrecognized error
                 }
             } else if !root.has_valid_candidates(&context.starting_point) {
@@ -342,11 +346,11 @@ fn predict_aux<T, P>(
     starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
-) -> (f32, usize, tree::Node)
+) -> Option<(f32, usize, tree::Node)>
     where T: TimeStrategy + Clone + Send + 'static,
           P: Predictor + 'static
 {
-    let (starting_value, mut starting_policy) = full_forward(server, starting_point, starting_color);
+    let (starting_value, mut starting_policy) = full_forward(server, starting_point, starting_color)?;
 
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
@@ -411,7 +415,7 @@ fn predict_aux<T, P>(
     #[cfg(feature = "trace-mcts")]
     eprintln!("{}", tree::to_sgf::<CGoban>(&root, starting_point, true));
 
-    (value, index, root)
+    Some((value, index, root))
 }
 
 /// Predicts the _best_ next move according to the given neural network when applied
@@ -432,7 +436,7 @@ pub fn predict<T, P>(
     starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
-) -> (f32, usize, tree::Node)
+) -> Option<(f32, usize, tree::Node)>
     where T: TimeStrategy + Clone + Send + 'static,
           P: Predictor + 'static
 {
@@ -509,11 +513,11 @@ mod tests {
     struct NanPredictor;
 
     impl mcts::predict::Predictor for NanPredictor {
-        fn predict(&self, _features: Vec<f16>) -> (f32, Vec<f32>) {
-            (0.0, vec! [::std::f32::NEG_INFINITY; 362])
+        fn predict(&self, _features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
+            Some((0.0, vec! [::std::f32::NEG_INFINITY; 362]))
         }
 
-        fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<(f32, Vec<f32>)> {
+        fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
             features_list.map(|features| self.predict(features)).collect()
         }
 
@@ -531,7 +535,7 @@ mod tests {
             None,
             &Board::new(7.5),
             Color::Black
-        );
+        ).unwrap();
 
         assert_eq!(value, 0.5);
         assert_eq!(index, 361);

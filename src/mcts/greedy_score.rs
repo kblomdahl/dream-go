@@ -76,7 +76,11 @@ pub fn greedy_score<P: Predictor>(server: &P, board: &Board, next_color: Color) 
     let mut count = 0;
 
     while count < 722 && pass_count < 2 && !board.is_scorable() {
-        let (_, policy) = full_forward(server, &board, current);
+        let policy = if let Some(response) = full_forward(server, &board, current) {
+            response.1
+        } else {
+            return (board, sgf)
+        };
 
         // pick the move with the largest prior value that does not fill an
         // eye

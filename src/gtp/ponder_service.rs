@@ -80,7 +80,7 @@ fn ponder_worker(
 ) -> PonderResult
 {
     let max_tree_size = (*config::NUM_ROLLOUT).user_defined_or(500_000);
-    let (_, _, next_tree) = mcts::predict(
+    let result = mcts::predict(
         &service.lock().clone_to_static(),
         None,
         PonderTimeControl { is_running, max_tree_size },
@@ -89,7 +89,11 @@ fn ponder_worker(
         next_color
     );
 
-    Ok((service, next_tree, board, next_color))
+    if let Some((_value, _index, next_tree)) = result {
+        Ok((service, next_tree, board, next_color))
+    } else {
+        Err("unrecognized error")
+    }
 }
 
 /* -------- PonderService -------- */

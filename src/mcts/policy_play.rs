@@ -109,7 +109,7 @@ fn policy_choose(policy: &[f32], temperature: f32) -> Option<usize> {
     }
 }
 
-fn policy_ex_it<P: Predictor + 'static>(server: &P, board: &Board, color: Color) -> (String, f32) {
+fn policy_ex_it<P: Predictor + 'static>(server: &P, board: &Board, color: Color) -> Option<(String, f32)> {
     let (value, _index, tree) = predict_aux::<_, _>(
         server,
         1,
@@ -117,7 +117,7 @@ fn policy_ex_it<P: Predictor + 'static>(server: &P, board: &Board, color: Color)
         None,
         board,
         color
-    );
+    )?;
 
     let policy_sgf = b85::encode(&tree.softmax());
     let value_sgf = if color == Color::Black {
@@ -126,7 +126,7 @@ fn policy_ex_it<P: Predictor + 'static>(server: &P, board: &Board, color: Color)
         -2.0 * value + 1.0
     };
 
-    (policy_sgf, value_sgf)
+    Some((policy_sgf, value_sgf))
 }
 
 /// Perform a _search_ of the given board state, using the number of rollouts
@@ -142,15 +142,15 @@ fn policy_forward<P: Predictor + 'static>(
     server: &P,
     board: &Board,
     color: Color
-) -> (f32, Vec<f32>)
+) -> Option<(f32, Vec<f32>)>
 {
     let num_policy_rollout = *config::NUM_POLICY_ROLLOUT;
 
     if num_policy_rollout <= 1 {
-        let (value, mut policy) = full_forward(server, board, color);
+        let (value, mut policy) = full_forward(server, board, color)?;
         dirichlet::add(&mut policy[0..362], 0.03);
 
-        (value, policy)
+        Some((value, policy))
     } else {
         let (value, _index, tree) = predict_aux::<_, _>(
             server,
@@ -159,9 +159,9 @@ fn policy_forward<P: Predictor + 'static>(
             None,
             &board,
             color
-        );
+        )?;
 
-        (value, tree.softmax())
+        Some((value, tree.softmax()))
     }
 }
 
@@ -175,7 +175,7 @@ fn policy_forward<P: Predictor + 'static>(
 /// * `server` - the server to use during evaluation
 /// * `ex_it` - whether to emit one full policy
 ///
-fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> GameResult {
+fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> Option<GameResult> {
     let mut temperature = (*config::TEMPERATURE + 1e-3).recip();
     let mut sgf = vec! [];
 
@@ -188,7 +188,7 @@ fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> GameResul
 
     while pass_count < 2 && board.count() < 722 {
         let (index, skew) = {
-            let (_value, policy) = policy_forward(server, &board, color);
+            let (_value, policy) = policy_forward(server, &board, color)?;
 
             match policy_choose(&policy, temperature) {
                 Some(index) => (index, skewness(&policy)),
@@ -241,7 +241,7 @@ fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> GameResul
             }
 
             // for each `i`, compute the _true_ policy using MCTS
-            let (policy_sgf, value_sgf) = policy_ex_it(server, &sgf[i].0, sgf[i].1);
+            let (policy_sgf, value_sgf) = policy_ex_it(server, &sgf[i].0, sgf[i].1)?;
 
             sgf[i].3 = format!("{}P[{}]V[{:.4}]", sgf[i].3, policy_sgf, value_sgf);
 
@@ -251,7 +251,10 @@ fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> GameResul
         }
     }
 
-    GameResult::Ended(sgf.into_iter().fold(String::new(), |acc, (_board, _color, _skew, sgf)| acc + &sgf), board)
+    Some(GameResult::Ended(
+        sgf.into_iter().fold(String::new(), |acc, (_board, _color, _skew, sgf)| acc + &sgf),
+        board
+    ))
 }
 
 /// Play games against the engine and return the results of the game over
@@ -282,10 +285,10 @@ pub fn policy_play(network: Network, num_games: usize, ex_it: bool) -> (Receiver
             while remaining.load(Ordering::Acquire) > 0 {
                 remaining.fetch_sub(1, Ordering::AcqRel);
 
-                let result = policy_play_one(&server, ex_it);
-
-                if sender.send(result).is_err() {
-                    break
+                if let Some(result) = policy_play_one(&server, ex_it) {
+                    if sender.send(result).is_err() {
+                        break
+                    }
                 }
             }
         });

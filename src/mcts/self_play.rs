@@ -36,7 +36,7 @@ use std::mem;
 /// * `server` - the server to use during evaluation
 /// * `num_parallel` - the number of games that are being played in parallel
 ///
-fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUsize>) -> GameResult
+fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUsize>) -> Option<GameResult>
 {
     let mut board = Board::new(get_random_komi());
     let mut sgf = String::new();
@@ -60,7 +60,7 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
             root_current,
             &board,
             current
-        );
+        )?;
 
         debug_assert!(0.0 <= value && value <= 1.0);
         debug_assert!(index < 362);
@@ -70,13 +70,13 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
         let value_sgf = if current == Color::Black { 2.0 * value - 1.0 } else { -2.0 * value + 1.0 };
 
         if allow_resign && value < 0.05 {  // resign the game if the evaluation looks bad
-            return GameResult::Resign(sgf, board, current.opposite(), -value);
+            return Some(GameResult::Resign(sgf, board, current.opposite(), -value))
         } else if index == 361 {  // passing move
             sgf += &format!(";{}[]P[{}]V[{}]", current, b85::encode(&policy), value_sgf);
             pass_count += 1;
 
             if pass_count >= 2 {
-                return GameResult::Ended(sgf, board)
+                return Some(GameResult::Ended(sgf, board))
             }
         } else {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
@@ -114,7 +114,7 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
         count += 1;
     }
 
-    GameResult::Ended(sgf, board)
+    Some(GameResult::Ended(sgf, board))
 }
 
 /// Play games against the engine and return the result of the games
@@ -142,10 +142,10 @@ pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, p
 
         thread::spawn(move || {
             while processed.fetch_add(1, Ordering::SeqCst) < num_games {
-                let result = self_play_one(&server, &num_workers);
-
-                if sender.send(result).is_err() {
-                    break
+                if let Some(result) = self_play_one(&server, &num_workers) {
+                    if sender.send(result).is_err() {
+                        break
+                    }
                 }
             }
 

@@ -437,6 +437,13 @@ impl ChildMut {
         unsafe { atomic_or(self.expanding as *mut u8, true as u8) != 0 }
     }
 
+    /// Unsets this child as having been expanding.
+    fn unset_expanding(&mut self) {
+        use std::intrinsics::atomic_and;
+
+        unsafe { atomic_and(self.expanding as *mut u8, false as u8) };
+    }
+
     /// Sets the number of visits to this child.
     ///
     /// # Arguments
@@ -1289,6 +1296,28 @@ impl Node {
 
 pub type NodeTrace = Vec<(*mut Node, Color, usize)>;
 
+/// Undo a probe into the search tree by undoing any virtual losses, and / or visits
+/// added during the probe.
+///
+/// # Arguments
+///
+/// * `trace` - the trace to undo
+/// * `undo_expanding` - whether to also revert the `expanding` flag
+///
+pub unsafe fn undo(trace: NodeTrace, undo_expanding: bool) {
+    for (node, _, next_child) in trace.into_iter() {
+        atomic_xsub(&mut (*node).vtotal_count, *config::VLOSS_CNT as i32);
+
+        (*node).children.with_mut(next_child, |mut child| {
+            child.sub_vcount(*config::VLOSS_CNT);
+
+            if undo_expanding && child.ptr().is_null() {
+                child.unset_expanding();
+            }
+        }, (*node).initial_value);
+    }
+}
+
 /// Probe down the search tree, while updating the given board with the
 /// moves the traversed edges represents, and return a list of the
 /// edges. Which edges to traverse are determined according to the UCT
@@ -1327,13 +1356,7 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
         } else {
             // undo the entire trace, since we added virtual losses (optimistically)
             // on the way down.
-            for (node, _, next_child) in trace.into_iter() {
-                atomic_xsub(&mut (*node).vtotal_count, *config::VLOSS_CNT as i32);
-
-                (*node).children.with_mut(next_child, |mut child| {
-                    child.sub_vcount(*config::VLOSS_CNT);
-                }, (*node).initial_value);
-            }
+            undo(trace, false);
 
             return None;
         }
