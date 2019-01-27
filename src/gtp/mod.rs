@@ -422,14 +422,16 @@ impl Gtp {
                 if size != 19 {
                     error!(id, "unacceptable size");
                 } else {
-                    self.history = vec! [Board::new(self.komi)];
                     success!(id, "");
                 }
             },
             Command::ClearBoard => {
-                self.history = vec! [Board::new(self.komi)];
-                self.explain_last_move = String::new();
-                self.ponder = PonderService::new(Board::new(self.komi), Color::Black);
+                if self.history.len() > 1 {
+                    self.history = vec![Board::new(self.komi)];
+                    self.explain_last_move = String::new();
+                    self.ponder = PonderService::new(Board::new(self.komi), Color::Black);
+                }
+
                 success!(id, "");
             },
             Command::Komi(komi) => {
