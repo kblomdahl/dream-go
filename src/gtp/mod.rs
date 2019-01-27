@@ -31,13 +31,31 @@ use gtp::ponder_service::PonderService;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&str; 20] = [
-    "protocol_version", "name", "version", "boardsize", "clear_board", "komi", "play",
+const KNOWN_COMMANDS: [&str; 23] = [
+    "protocol_version", "name", "version", "gomill-describe_engine", "gomill-cpu_time",
+    "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove",
-    "kgs-genmove_cleanup", "undo",
+    "kgs-genmove_cleanup", "gomill-explain_last_move", "undo",
     "time_settings", "kgs-time_settings", "time_left", "quit",
     "final_score", "final_status_list"
 ];
+
+#[derive(Clone, Debug, PartialEq)]
+enum GenMoveMode {
+    Normal,
+    CleanUp,
+    Regression
+}
+
+impl GenMoveMode {
+    fn is_cleanup(&self) -> bool {
+        *self == GenMoveMode::CleanUp
+    }
+
+    fn is_regression(&self) -> bool {
+        *self == GenMoveMode::Regression
+    }
+}
 
 #[derive(Debug, PartialEq)]
 enum Command {
@@ -47,15 +65,17 @@ enum Command {
     Version,  // report the version number of the program
     BoardSize(usize),  // set the board size to NxN
     ClearBoard,  // clear the board
+    CpuTime,  // write the number of (cpu) seconds spent thinking
+    DescribeEngine,  // write a description of the engine
+    ExplainLastMove,  // write a description of why the last move was played
     Komi(f32),  // set the komi
     Play(Color, Vertex),  // play a stone of the given color at the given vertex
     ListCommands,  // list all available commands
     KnownCommand(String),  // tell whether a command is known
     ShowBoard,  // write the position to stdout
-    GenMove(Color, bool),  // generate and play the supposedly best move for either color, the second argument indicate whether it is a clean-up move
+    GenMove(Color, GenMoveMode),  // generate and play the supposedly best move for either color
     FinalScore,  // write the score to stdout
     FinalStatusList(StoneStatus),  // write status of stones to stdout
-    RegGenMove(Color),  // generate the supposedly best move for either color
     Undo,  // undo one move
     TimeSettingsNone,  // set the time settings
     TimeSettingsAbsolute(f32),  // set the time settings
@@ -90,7 +110,7 @@ lazy_static! {
     static ref PLAY: Regex = Regex::new(r"^play +([bBwW]) +([a-z][0-9]+|pass)").unwrap();
     static ref KNOWN_COMMAND: Regex = Regex::new(r"^known_command +([^ ]+)").unwrap();
     static ref GENMOVE: Regex = Regex::new(r"^genmove +([bw])").unwrap();
-    static ref REG_GENMOVE: Regex = Regex::new(r"^reg_genmove +([bBwW])").unwrap();
+    static ref REG_GENMOVE: Regex = Regex::new(r"^reg_genmove +([bw])").unwrap();
     static ref KGS_GENMOVE_CLEANUP: Regex = Regex::new(r"^kgs-genmove_cleanup +([bw])").unwrap();
     static ref FINAL_STATUS_LIST: Regex = Regex::new(r"^final_status_list +(dead|alive|seki)").unwrap();
     static ref TIME_SETTINGS: Regex = Regex::new(r"^time_settings +([0-9]+\.?[0-9]*) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
@@ -105,7 +125,8 @@ struct Gtp {
     ponder: PonderService,
     history: Vec<Board>,
     komi: f32,
-    time_settings: [Box<time_settings::TimeSettings>; 3]
+    time_settings: [Box<time_settings::TimeSettings>; 3],
+    explain_last_move: String
 }
 
 impl Gtp {
@@ -152,7 +173,7 @@ impl Gtp {
         } else if let Some(caps) = GENMOVE.captures(line) {
             let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
-            Ok((id, Command::GenMove(color, *config::TROMP_TAYLOR)))
+            Ok((id, Command::GenMove(color, if *config::TROMP_TAYLOR { GenMoveMode::CleanUp } else { GenMoveMode::Normal })))
         } else if line == "final_score" {
             Ok((id, Command::FinalScore))
         } else if let Some(caps) = FINAL_STATUS_LIST.captures(line) {
@@ -162,11 +183,11 @@ impl Gtp {
         } else if let Some(caps) = REG_GENMOVE.captures(line) {
             let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
-            Ok((id, Command::RegGenMove(color)))
+            Ok((id, Command::GenMove(color, GenMoveMode::Regression)))
         } else if let Some(caps) = KGS_GENMOVE_CLEANUP.captures(line) {
             let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
 
-            Ok((id, Command::GenMove(color, true)))
+            Ok((id, Command::GenMove(color, GenMoveMode::CleanUp)))
         } else if line == "undo" {
             Ok((id, Command::Undo))
         } else if let Some(caps) = TIME_SETTINGS.captures(line) {
@@ -212,6 +233,12 @@ impl Gtp {
             let byo_yomi_stones = caps[3].parse::<usize>().map_err(|_| "syntax error")?;
 
             Ok((id, Command::TimeLeft(color, main_time, byo_yomi_stones)))
+        } else if line == "gomill-cpu_time" {
+            Ok((id, Command::CpuTime))
+        } else if line == "gomill-describe_engine" {
+            Ok((id, Command::DescribeEngine))
+        } else if line == "gomill-explain_last_move" {
+            Ok((id, Command::ExplainLastMove))
         } else if line == "quit" {
             Ok((id, Command::Quit))
         } else {
@@ -272,9 +299,9 @@ impl Gtp {
     /// 
     /// * `id` - the identifier of the command
     /// * `color` - the color to generate the move for
-    /// * `is_cleanup` - determine whether this is a clean-up move
+    /// * `mode` - determine whether this is a clean-up move
     /// 
-    fn generate_move(&mut self, id: Option<usize>, color: Color, is_cleanup: bool) -> Option<Vertex> {
+    fn generate_move(&mut self, id: Option<usize>, color: Color, mode: &GenMoveMode) -> Option<Vertex> {
         let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[color as usize].remaining();
         let board = self.history.last().unwrap();
         let result = self.ponder.service(|service, search_tree, p_state| {
@@ -318,7 +345,7 @@ impl Gtp {
             // disqualify the `pass` move, and any move that is not in contested territory, if
             // we are doing clean-up and the board is not scorable.
             let (value, index, mut tree) = result.unwrap();
-            let (value, index) = if is_cleanup && index == 361 && !board.is_scorable() {
+            let (value, index) = if mode.is_cleanup() && index == 361 && !board.is_scorable() {
                 tree.disqualify(361);
 
                 for &index in &board.get_scorable_territory() {
@@ -330,7 +357,8 @@ impl Gtp {
                 (value, index)
             };
 
-            eprintln!("{}", mcts::tree::to_pretty(&tree));
+            let explain_last_move = mcts::tree::to_pretty(&tree).to_string();
+            eprintln!("{}", explain_last_move);
 
             let should_resign = !*config::NO_RESIGN && value.is_finite() && value < 0.1;  // 10% chance of winning
             let index = if should_resign { 361 } else { index };
@@ -344,10 +372,12 @@ impl Gtp {
                 (Some(Vertex { x, y }), mcts::tree::Node::forward(tree, index), other)
             };
 
-            (Some((vertex, should_resign)), tree, (other, color.opposite()))
+            (Some((vertex, should_resign, explain_last_move)), tree, (other, color.opposite()))
         });
 
-        if let Ok(Some((vertex, should_resign))) = result {
+        if let Ok(Some((vertex, should_resign, explain_last_move))) = result {
+            self.explain_last_move = explain_last_move;
+
             if should_resign {
                 success!(id, "resign");
                 None
@@ -375,14 +405,18 @@ impl Gtp {
             Command::Pass => {},
             Command::ProtocolVersion => { success!(id, "2"); },
             Command::Name => {
-                success!(id, config::get_env::<String>("DG_NAME")
-                    .unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string())
-                );
+                success!(id, config::get_name());
             },
             Command::Version => {
-                success!(id, config::get_env::<String>("DG_VERSION")
-                    .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
-                );
+                success!(id, config::get_version());
+            },
+            Command::DescribeEngine => {
+                success!(id, format!(
+                    "{} {}\n{}",
+                    config::get_name(),
+                    config::get_version(),
+                    config::get_description()
+                ));
             },
             Command::BoardSize(size) => {
                 if size != 19 {
@@ -394,24 +428,27 @@ impl Gtp {
             },
             Command::ClearBoard => {
                 self.history = vec! [Board::new(self.komi)];
+                self.explain_last_move = String::new();
                 self.ponder = PonderService::new(Board::new(self.komi), Color::Black);
                 success!(id, "");
             },
             Command::Komi(komi) => {
-                self.komi = komi;
-                for board in self.history.iter_mut() {
-                    (*board).set_komi(komi);
+                if self.komi != komi {
+                    self.komi = komi;
+                    for board in self.history.iter_mut() {
+                        (*board).set_komi(komi);
+                    }
+
+                    // restart the pondering service, since we have been thinking
+                    // with the wrong komi.
+                    let board = self.history.last().unwrap().clone();
+                    let next_color = match board.last_played() {
+                        Some(color) => color.opposite(),
+                        None => Color::Black
+                    };
+
+                    self.ponder = PonderService::new(board, next_color);
                 }
-
-                // restart the pondering service, since we have been thinking
-                // with the wrong komi.
-                let board = self.history.last().unwrap().clone();
-                let next_color = match board.last_played() {
-                    Some(color) => color.opposite(),
-                    None => Color::Black
-                };
-
-                self.ponder = PonderService::new(board, next_color);
 
                 success!(id, "");
             },
@@ -459,15 +496,17 @@ impl Gtp {
 
                 success!(id, &format!("\n{}", board));
             },
-            Command::GenMove(color, is_cleanup) => {
+            Command::GenMove(color, mode) => {
                 let start_time = Instant::now();
-                let vertex = self.generate_move(id, color, is_cleanup);
+                let vertex = self.generate_move(id, color, &mode);
 
-                if let Some(vertex) = vertex {
-                    let mut board = self.history.last().unwrap().clone();
-                    board.place(color, vertex.x, vertex.y);
+                if !mode.is_regression() {
+                    if let Some(vertex) = vertex {
+                        let mut board = self.history.last().unwrap().clone();
+                        board.place(color, vertex.x, vertex.y);
 
-                    self.history.push(board);
+                        self.history.push(board);
+                    }
                 }
 
                 // update the remaining main time, saturating at zero instead of
@@ -477,6 +516,9 @@ impl Gtp {
                 let c = color as usize;
 
                 self.time_settings[c].update(elapsed_secs);
+            },
+            Command::ExplainLastMove => {
+                success!(id, self.explain_last_move);
             },
             Command::FinalScore => {
                 let board = self.history.last().unwrap();
@@ -543,12 +585,6 @@ impl Gtp {
                     error!(id, result.err().unwrap());
                 }
             },
-            Command::RegGenMove(color) => {
-                let board = self.history.last().unwrap().clone();
-
-                self.ponder = PonderService::new(board, color);
-                self.generate_move(id, color, false);
-            },
             Command::Undo => {
                 if self.history.len() > 1 {
                     self.history.pop();
@@ -560,6 +596,7 @@ impl Gtp {
                         None => Color::Black
                     };
 
+                    self.explain_last_move = String::new();
                     self.ponder = PonderService::new(board, next_color);
 
                     success!(id, "");
@@ -608,6 +645,12 @@ impl Gtp {
 
                 self.time_settings[c].time_left(main_time, byo_yomi_stones);
                 success!(id, "");
+            },
+            Command::CpuTime => {
+                let cpu_time = self.ponder.cpu_time();
+                let secs = cpu_time.as_secs() as f64 + cpu_time.subsec_nanos() as f64 / 1e6;
+
+                success!(id, format!("{:.4}", secs));
             }
         }
     }
@@ -623,6 +666,7 @@ pub fn run() {
         ponder: PonderService::new(Board::new(DEFAULT_KOMI), Color::Black),
         history: vec! [Board::new(DEFAULT_KOMI)],
         komi: DEFAULT_KOMI,
+        explain_last_move: String::new(),
         time_settings: [
             Box::new(time_settings::None::new()),
             Box::new(time_settings::None::new()),
@@ -714,8 +758,8 @@ mod tests {
 
     #[test]
     fn genmove() {
-        assert_eq!(Gtp::parse_line("1 genmove b"), Some((Some(1), Command::GenMove(Color::Black, false))));
-        assert_eq!(Gtp::parse_line("genmove w"), Some((None, Command::GenMove(Color::White, false))));
+        assert_eq!(Gtp::parse_line("1 genmove b"), Some((Some(1), Command::GenMove(Color::Black, GenMoveMode::Normal))));
+        assert_eq!(Gtp::parse_line("genmove w"), Some((None, Command::GenMove(Color::White, GenMoveMode::Normal))));
     }
 
     #[test]
@@ -734,14 +778,14 @@ mod tests {
 
     #[test]
     fn reg_genmove() {
-        assert_eq!(Gtp::parse_line("1 reg_genmove b"), Some((Some(1), Command::RegGenMove(Color::Black))));
-        assert_eq!(Gtp::parse_line("reg_genmove w"), Some((None, Command::RegGenMove(Color::White))));
+        assert_eq!(Gtp::parse_line("1 reg_genmove b"), Some((Some(1), Command::GenMove(Color::Black, GenMoveMode::Regression))));
+        assert_eq!(Gtp::parse_line("reg_genmove w"), Some((None, Command::GenMove(Color::White, GenMoveMode::Regression))));
     }
 
     #[test]
     fn kgs_genmove_cleanup() {
-        assert_eq!(Gtp::parse_line("1 kgs-genmove_cleanup b"), Some((Some(1), Command::GenMove(Color::Black, true))));
-        assert_eq!(Gtp::parse_line("kgs-genmove_cleanup w"), Some((None, Command::GenMove(Color::White, true))));
+        assert_eq!(Gtp::parse_line("1 kgs-genmove_cleanup b"), Some((Some(1), Command::GenMove(Color::Black, GenMoveMode::CleanUp))));
+        assert_eq!(Gtp::parse_line("kgs-genmove_cleanup w"), Some((None, Command::GenMove(Color::White, GenMoveMode::CleanUp))));
     }
 
     #[test]
@@ -776,6 +820,24 @@ mod tests {
     fn time_left() {
         assert_eq!(Gtp::parse_line("1 time_left b 3.14 0"), Some((Some(1), Command::TimeLeft(Color::Black, 3.14, 0))));
         assert_eq!(Gtp::parse_line("time_left W 278.1 1"), Some((None, Command::TimeLeft(Color::White, 278.1, 1))));
+    }
+
+    #[test]
+    fn gomill_explain_last_move() {
+        assert_eq!(Gtp::parse_line("1 gomill-explain_last_move"), Some((Some(1), Command::ExplainLastMove)));
+        assert_eq!(Gtp::parse_line("gomill-explain_last_move"), Some((None, Command::ExplainLastMove)));
+    }
+
+    #[test]
+    fn gomill_describe_engine() {
+        assert_eq!(Gtp::parse_line("1 gomill-describe_engine"), Some((Some(1), Command::DescribeEngine)));
+        assert_eq!(Gtp::parse_line("gomill-describe_engine"), Some((None, Command::DescribeEngine)));
+    }
+
+    #[test]
+    fn gomill_cpu_time() {
+        assert_eq!(Gtp::parse_line("1 gomill-cpu_time"), Some((Some(1), Command::CpuTime)));
+        assert_eq!(Gtp::parse_line("gomill-cpu_time"), Some((None, Command::CpuTime)));
     }
 
     #[test]

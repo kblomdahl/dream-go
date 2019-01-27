@@ -15,6 +15,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
+
+use libc::{clock_gettime, timespec, CLOCK_PROCESS_CPUTIME_ID};
 
 use go::{Board, Color};
 use util::config;
@@ -59,6 +62,17 @@ impl TimeStrategy for PonderTimeControl {
     }
 }
 
+/// Return the total CPU time that has elapsed since the start of this process.
+fn cpu_time() -> Duration {
+    let mut time = timespec { tv_sec: 0, tv_nsec: 0 };
+
+    if unsafe { clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &mut time) } < 0 {
+        Duration::new(0, 0)
+    } else {
+        Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+    }
+}
+
 /// The worker that performs the pondering in the background. It will keep
 /// probing into the given `search_tree`, for the given board state and color
 /// until `is_running` is set to false.
@@ -77,8 +91,9 @@ fn ponder_worker(
     board: Board,
     next_color: Color,
     is_running: Arc<AtomicBool>
-) -> PonderResult
+) -> (PonderResult, Duration)
 {
+    let start_time = cpu_time();
     let max_tree_size = (*config::NUM_ROLLOUT).user_defined_or(500_000);
     let result = mcts::predict(
         &service.lock().clone_to_static(),
@@ -90,9 +105,9 @@ fn ponder_worker(
     );
 
     if let Some((_value, _index, next_tree)) = result {
-        Ok((service, next_tree, board, next_color))
+        (Ok((service, next_tree, board, next_color)), cpu_time() - start_time)
     } else {
-        Err("unrecognized error")
+        (Err("unrecognized error"), cpu_time() - start_time)
     }
 }
 
@@ -103,8 +118,9 @@ fn ponder_worker(
 /// point.
 pub struct PonderService {
     is_running: Arc<AtomicBool>,
-    worker: Option<thread::JoinHandle<PonderResult>>,
-    last_error: &'static str
+    worker: Option<thread::JoinHandle<(PonderResult, Duration)>>,
+    last_error: &'static str,
+    cpu_time: Duration
 }
 
 impl Drop for PonderService {
@@ -138,11 +154,18 @@ impl PonderService {
 
                     ponder_worker(service, None, board, next_color, is_running_worker)
                 } else {
-                    Err("unable to load network weights")
+                    (Err("unable to load network weights"), Duration::new(0, 0))
                 }
             })),
-            last_error: ""
+            last_error: "",
+            cpu_time: Duration::new(0, 0)
         }
+    }
+
+    /// Returns the total amount of time the service has spent pondering in the background, or in
+    /// the `service` handler.
+    pub fn cpu_time(&self) -> Duration {
+        self.cpu_time
     }
 
     /// Pauses the pondering and gives the caller access to the internal state
@@ -168,12 +191,14 @@ impl PonderService {
         self.is_running.store(false, Ordering::SeqCst);
 
         match handle.join().unwrap() {
-            Err(reason) => {
+            (Err(reason), duration) => {
+                self.cpu_time += duration;
                 self.last_error = reason;
 
                 Err(reason)
             },
-            Ok((service, search_tree, board, next_color)) => {
+            (Ok((service, search_tree, board, next_color)), duration) => {
+                let start_time = cpu_time();
                 let (result, search_tree, (board, next_color)) = callback(
                     &service,
                     search_tree,
@@ -184,6 +209,7 @@ impl PonderService {
                 // executed.
                 let is_running_worker = self.is_running.clone();
 
+                self.cpu_time += (cpu_time() - start_time) + duration;
                 self.is_running.store(!*config::NO_PONDER, Ordering::SeqCst);
                 self.worker = Some(thread::spawn(move || {
                     ponder_worker(service, search_tree, board, next_color, is_running_worker)

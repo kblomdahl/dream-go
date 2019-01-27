@@ -25,7 +25,7 @@ pub enum Procedure {
     Help
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum RolloutLimit {
     Default(usize),
     UserDefined(usize),
@@ -186,6 +186,31 @@ lazy_static! {
     /// The UCT exploration rate.
     pub static ref UCT_EXP: Vec<(i32, f32)> = get_intp_list("UCT_EXP")
         .unwrap_or_else(|| vec! [(0, 0.88), (3200, 1.44)]);
+}
+
+/// Returns the name of this engine.
+pub fn get_name() -> String {
+    get_env::<String>("DG_NAME").unwrap_or_else(|| env!("CARGO_PKG_NAME").to_string())
+}
+
+/// Returns the version of this engine.
+pub fn get_version() -> String {
+    get_env::<String>("DG_VERSION").unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+
+/// Returns a description of the configurations for this engine.
+pub fn get_description() -> String {
+    vec! [
+        format!("TROMP_TAYLOR {}", *TROMP_TAYLOR),
+        format!("NO_RESIGN {}", *NO_RESIGN),
+        format!("NUM_ROLLOUT {:?}", *NUM_ROLLOUT),
+        format!("DIRICHLET_NOISE {}", *DIRICHLET_NOISE),
+        format!("TEMPERATURE {}", *TEMPERATURE),
+        format!("SOFTMAX_TEMPERATURE {}", *SOFTMAX_TEMPERATURE),
+        format!("VLOSS_CNT {}", *VLOSS_CNT),
+        format!("FPU_REDUCE {:?}", *FPU_REDUCE),
+        format!("UCT_EXP {:?}", *UCT_EXP)
+    ].join("\n")
 }
 
 /// Returns true if any command-line argument with the given name is present.
