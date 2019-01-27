@@ -101,9 +101,6 @@ lazy_static! {
         Procedure::Gtp
     };
 
-    /// Whether to include Sabaki extentions amongst the GTP commands.
-    pub static ref WITH_SABAKI: bool = has_opt("--with-sabaki");
-
     /// Whether to think in the background during idle time.
     pub static ref NO_PONDER: bool = has_opt("--no-ponder");
 
@@ -179,7 +176,7 @@ lazy_static! {
     /// The _First Play Urgency_ reduction. Setting this is `1.0`, or `0.0`
     /// effectively disables FPU.
     pub static ref FPU_REDUCE: Vec<(i32, f32)> = get_intp_list("FPU_REDUCE")
-        .unwrap_or_else(|| vec! [(0, 0.60), (200, 0.50), (800, 0.22)]);
+        .unwrap_or_else(|| vec! [(0, 0.35), (800, 0.22), (1600, 0.10)]);
 
     /// The number of virtual losses to add during async probes into the monte
     /// carlo search tree. A higher value avoids multiple probes exploring the
@@ -188,7 +185,7 @@ lazy_static! {
 
     /// The UCT exploration rate.
     pub static ref UCT_EXP: Vec<(i32, f32)> = get_intp_list("UCT_EXP")
-        .unwrap_or_else(|| vec! [(0, 0.88)]);
+        .unwrap_or_else(|| vec! [(0, 0.88), (3200, 1.44)]);
 }
 
 /// Returns true if any command-line argument with the given name is present.

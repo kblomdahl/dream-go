@@ -491,7 +491,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn no_allowed_moves() {
         let root = Arc::new(UnsafeCell::new(mcts::tree::Node::new(Color::Black, 0.0, vec! [1.0; 362])));
@@ -528,7 +527,7 @@ mod tests {
 
     #[test]
     fn no_finite_candidates() {
-        let (value, index, _root) = mcts::predict(
+        let (value, index, root) = mcts::predict(
             &NanPredictor::default(),
             None,
             mcts::time_control::RolloutLimit::new(1600),
@@ -539,5 +538,7 @@ mod tests {
 
         assert_eq!(value, 0.5);
         assert_eq!(index, 361);
+        assert_eq!(root.total_count, 0);
+        assert_eq!(root.vtotal_count, 0);
     }
 }

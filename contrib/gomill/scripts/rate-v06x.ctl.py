@@ -4,43 +4,42 @@ stderr_to_log = True
 
 from glob import glob
 from os.path import basename
-import re
+from os import access, X_OK
 
 """ The directory that contains all engines to match against each other """
 DIST = '/app/dist/'
 
 """ The number of rollouts to instruct each engine to use """
-NUM_ROLLOUT = 3200
+NUM_ROLLOUT = 800
 
 """ The players to generate match-ups for, if `None` then matchups are generated
 for all engines """
-MAIN_PLAYERS = [
-    'dg-v060',
-    'dg-v061-newly_wanted_walrus',
-    'dg-v061-really_heroic_kite',
-    'dg-v061-truly_happy_akita',
-    'dg-v061-wholly_deep_guinea',
-    'dg-v061-wholly_witty_tarpon',
-]
+MAIN_PLAYERS = sorted([
+    engine
+    for engine in glob(DIST + '/*')
+    if access(engine, X_OK)
+])
 
 def dream_go(name, num_rollout=None, is_reliable_scorer=True):
     if num_rollout is None:
         num_rollout = NUM_ROLLOUT
 
     # make it output the _correct_ name from the GTP `name` command
-    environ = {'DG_NAME': name, 'CUDA_VISIBLE_DEVICES': '0,1'}
-    command = [DIST + name, '--no-ponder', '--num-rollout', str(num_rollout)]
+    environ = {'DG_NAME': basename(name), 'CUDA_VISIBLE_DEVICES': '0,1'}
+    command = [name, '--num-rollout', str(num_rollout)]
 
     return Player(
         command,
         cwd=DIST,
         environ=environ,
         is_reliable_scorer=is_reliable_scorer,
-        startup_gtp_commands=[]
+        startup_gtp_commands=[
+            #'kgs-time_settings byoyomi 0 1 1'
+        ]
     )
 
 """ All players that will participate in this playoff """
-players = { name: dream_go(name) for name in MAIN_PLAYERS }
+players = { basename(name): dream_go(name) for name in MAIN_PLAYERS }
 
 #
 # Setup the gomill configuration
@@ -48,9 +47,10 @@ players = { name: dream_go(name) for name in MAIN_PLAYERS }
 board_size = 19
 komi = 7.5
 
+names = list(players.keys())
 matchups = list([
-    Matchup(name_1, name_2, alternating=True, number_of_games=50)
-    for (i, name_1) in enumerate(MAIN_PLAYERS)
-    for name_2 in MAIN_PLAYERS
-        if name_2 not in MAIN_PLAYERS[:i+1]
+    Matchup(name_1, name_2, alternating=True, number_of_games=200)
+    for (i, name_1) in enumerate(names)
+    for name_2 in names
+        if name_2 not in names[:i+1]
 ])
