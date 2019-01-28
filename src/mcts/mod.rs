@@ -50,7 +50,7 @@ use util::config;
 use util::types::f16;
 use mcts::asm::sum_finite_f32;
 use mcts::asm::normalize_finite_f32;
-use parallel::rcu;
+use parallel::global_rwlock;
 
 pub enum GameResult {
     Resign(String, Board, Color, f32),
@@ -293,12 +293,12 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
 {
     let root = unsafe { &mut *context.root.get() };
 
-    rcu::register_thread();
+    global_rwlock::read_lock();
     while !time_control::is_done(root, &context.time_strategy) {
         loop {
             let mut board = context.starting_point.clone();
             let trace = unsafe { tree::probe(root, &mut board) };
-            rcu::unregister_thread();
+            global_rwlock::read_unlock();
 
             if let Some(trace) = trace {
                 let &(_, color, _) = trace.last().unwrap();
@@ -306,7 +306,7 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
                 let result = forward(&server, &board, next_color);
 
                 if let Some((value, policy)) = result {
-                    rcu::register_thread();
+                    global_rwlock::read_lock();
 
                     unsafe {
                         tree::insert(&trace, next_color, value, policy);
@@ -321,11 +321,11 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
                 return;  // skip `rcu::unregister` since we are not registered
             } else {
                 server.synchronize();
-                rcu::register_thread();
+                global_rwlock::read_lock();
             }
         }
     }
-    rcu::unregister_thread();
+    global_rwlock::read_unlock();
 }
 
 /// Predicts the _best_ next move according to the given neural network when applied

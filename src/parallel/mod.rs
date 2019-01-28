@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod filo_queue;
 mod one_shot_channel;
-pub mod rcu;
+pub mod global_rwlock;
 mod service;
 pub mod spin;
 

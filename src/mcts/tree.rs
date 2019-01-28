@@ -15,7 +15,7 @@
 use go::util::sgf::SgfCoordinate;
 use go::{Board, Color};
 use parallel::spin::Mutex;
-use parallel::rcu::{self, SendablePtr};
+use parallel::global_rwlock;
 use mcts::asm::{argmax_f32, argmax_i32};
 use util::{config, max};
 
@@ -894,15 +894,14 @@ impl ChildrenImpl {
         if let Some(child) = child {
             callback(child)
         } else {
-            let other = SendablePtr(self as *mut _);
-
-            rcu::update(move || {
+            global_rwlock::write(|| {
                 unsafe {
-                    if let ChildrenImpl::Small(ref small) = *(other.0) {
-                        *(other.0) = ChildrenImpl::Big(Box::new(
-                            BigChildrenImpl::from_small(small, initial_value)
-                        ));
-                    }
+                    *self = ChildrenImpl::Big(match self {
+                        ChildrenImpl::Big(ref _big) => { return },
+                        ChildrenImpl::Small(ref small) => {
+                            Box::new(BigChildrenImpl::from_small(small, initial_value))
+                        }
+                    });
                 }
             });
 
