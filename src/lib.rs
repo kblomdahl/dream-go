@@ -14,6 +14,7 @@
 #![feature(core_intrinsics, link_llvm_intrinsics, manually_drop_take)]
 #![feature(test)]
 
+extern crate cpu_time;
 extern crate go;
 #[macro_use] extern crate lazy_static;
 extern crate libc;

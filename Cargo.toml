@@ -32,6 +32,7 @@ lto = true
 members = ["contrib/go"]
 
 [dependencies]
+cpu-time = "0.1"
 go = { path = "contrib/go" }
 lazy_static = {version = "1.2", features = ["nightly"]}
 libc = "0.2"
