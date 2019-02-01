@@ -16,6 +16,7 @@
 
 extern crate cpu_time;
 extern crate crossbeam_channel;
+extern crate crossbeam_utils;
 extern crate go;
 #[macro_use] extern crate lazy_static;
 extern crate libc;

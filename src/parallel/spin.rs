@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crossbeam_utils::Backoff;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
 
 pub struct MutexGuard<'a> {
     is_available: &'a AtomicBool
@@ -40,8 +40,10 @@ impl Mutex {
 
     #[inline]
     pub fn lock(&self) -> MutexGuard {
+        let backoff = Backoff::new();
+
         while !self.is_available.compare_and_swap(true, false, Ordering::Acquire) {
-            thread::yield_now();
+            backoff.snooze();
         }
 
         MutexGuard { is_available: &self.is_available }

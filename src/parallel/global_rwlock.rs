@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{RwLock, RwLockReadGuard};
+use crossbeam_utils::sync::{ShardedLock, ShardedLockReadGuard};
 use std::cell::RefCell;
 
 /// The state of the current thread, whether it is holding the read-lock or not.
 enum ThreadLockState {
     None,
-    Read(RwLockReadGuard<'static, ()>)
+    Read(ShardedLockReadGuard<'static, ()>)
 }
 
 lazy_static! {
     /// The global rw-lock
-    static ref RWLOCK: RwLock<()> = RwLock::new(());
+    static ref RWLOCK: ShardedLock<()> = ShardedLock::new(());
 }
 
 thread_local! {

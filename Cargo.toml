@@ -35,6 +35,7 @@ members = ["contrib/go"]
 [dependencies]
 cpu-time = "0.1"
 crossbeam-channel = "0.3"
+crossbeam-utils = "0.6"
 go = { path = "contrib/go" }
 lazy_static = {version = "1.2", features = ["nightly"]}
 libc = "0.2"
