@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod one_shot_channel;
 pub mod global_rwlock;
 mod service;
 pub mod spin;
 
-pub use self::one_shot_channel::*;
 pub use self::service::*;

@@ -26,6 +26,7 @@ opt-level = 1
 debug = true
 
 [profile.release]
+incremental = false
 lto = true
 
 [workspace]
@@ -33,6 +34,7 @@ members = ["contrib/go"]
 
 [dependencies]
 cpu-time = "0.1"
+crossbeam-channel = "0.3"
 go = { path = "contrib/go" }
 lazy_static = {version = "1.2", features = ["nightly"]}
 libc = "0.2"

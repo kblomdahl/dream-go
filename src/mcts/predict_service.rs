@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crossbeam_channel::Sender;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use parallel::{self, OneSender};
+
+use parallel;
 use go::util::features::{FEATURE_SIZE};
 use mcts::predict::Predictor;
 use nn::devices::{DEVICES, set_current_device};
@@ -51,10 +53,10 @@ pub struct PredictState {
 
     /// The sender to response to each of the features in `features_list`
     /// over.
-    sender_list: Vec<OneSender<Option<(f32, Vec<f32>)>>>,
+    sender_list: Vec<Sender<Option<(f32, Vec<f32>)>>>,
 
     /// All threads that want to get notified when something changed.
-    waiting_list: Vec<OneSender<Option<(f32, Vec<f32>)>>>,
+    waiting_list: Vec<Sender<Option<(f32, Vec<f32>)>>>,
 }
 
 impl PredictState {
@@ -158,11 +160,11 @@ impl PredictState {
             let response_iter = value_list.into_iter().zip(policy_list.into_iter());
 
             for (sender, response) in sender_list.into_iter().zip(response_iter) {
-                sender.send(Some(response));
+                sender.send(Some(response)).expect("Failed to send predictor response");
             }
         } else {
             for sender in sender_list.into_iter() {
-                sender.send(None);
+                sender.send(None).expect("Failed to send predictor response");
             }
         }
 
@@ -171,7 +173,7 @@ impl PredictState {
         let num_waiting = state_lock.waiting_list.len();
 
         for waiting in state_lock.waiting_list.drain(0..num_waiting) {
-            waiting.send(None);
+            waiting.send(None).expect("Failed to send predictor response");;
         }
 
         // decrease the number of running neural network evaluations
@@ -210,7 +212,7 @@ impl PredictState {
             let num_waiting = state_lock.waiting_list.len();
 
             for waiting in state_lock.waiting_list.drain(0..num_waiting) {
-                waiting.send(None);
+                waiting.send(None).expect("Failed to send predictor response");;
             }
         } else {
             // wait until the currently running request finish instead of
@@ -249,7 +251,7 @@ impl parallel::ServiceImpl for PredictState {
         state: &Mutex<Self::State>,
         mut state_lock: MutexGuard<Self::State>,
         req: Self::Request,
-        sender: OneSender<Self::Response>,
+        sender: Sender<Self::Response>,
         has_more: bool
     )
     {

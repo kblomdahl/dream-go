@@ -14,8 +14,7 @@
 
 use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-
-use parallel::*;
+use crossbeam_channel::{bounded, Sender};
 
 /// The implementation details of a service that is responsible for actually
 /// answering the requests. A service can be distributed over multiple threads,
@@ -67,7 +66,7 @@ pub trait ServiceImpl {
         state: &Mutex<Self::State>,
         state_lock: MutexGuard<Self::State>,
         req: Self::Request,
-        resp: OneSender<Self::Response>,
+        resp: Sender<Self::Response>,
         has_more: bool
     );
 }
@@ -82,7 +81,7 @@ pub struct ServiceState<I: ServiceImpl> {
 
     /// The queue of pending requests, and the channel to send the response
     /// over.
-    queue: Vec<(I::Request, OneSender<I::Response>)>
+    queue: Vec<(I::Request, Sender<I::Response>)>
 }
 
 /// The worker thread that is responsible for receiving requests and dispatching
@@ -240,7 +239,7 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
     /// * `req` -
     /// 
     pub fn send(&self, req: I::Request) -> Option<I::Response> {
-        let (tx, rx) = one_channel();
+        let (tx, rx) = bounded(1);
 
         if let Ok(mut inner_lock) = self.inner.0.lock() {
             if inner_lock.is_running {
@@ -252,7 +251,7 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
                 drop(inner_lock);
 
                 // wait for a response
-                OneReceiver::recv(rx)
+                rx.recv().ok()
             } else {
                 None
             }
@@ -272,7 +271,7 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
         if let Ok(mut inner_lock) = self.inner.0.lock() {
             if inner_lock.is_running {
                 let responses = reqs.map(|req| {
-                    let (tx, rx) = one_channel();
+                    let (tx, rx) = bounded(1);
 
                     inner_lock.queue.push((req, tx));
                     rx
@@ -285,7 +284,7 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
                 drop(inner_lock);
 
                 // wait for all of the responses
-                responses.into_iter().map(|rx| { OneReceiver::recv(rx) }).collect()
+                responses.into_iter().map(|rx| { rx.recv().ok() }).collect()
             } else {
                 None
             }
@@ -303,5 +302,81 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
             state: self.state.clone(),
             inner: self.inner.clone()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use test::Bencher;
+    use super::*;
+
+    struct DoubleServiceImpl;
+
+    impl ServiceImpl for DoubleServiceImpl {
+        type State = ();
+        type Request = i32;
+        type Response = i32;
+
+        fn get_thread_count() -> usize {
+            4
+        }
+
+        fn setup_thread(_index: usize) {
+            // pass
+        }
+
+        fn check_sleep(_state: MutexGuard<Self::State>) {
+            // pass
+        }
+
+        fn process(_state: &Mutex<Self::State>, _state_lock: MutexGuard<Self::State>, req: Self::Request, resp: Sender<Self::Response>, _has_more: bool) {
+            resp.send(2 * req).unwrap();
+        }
+    }
+
+    #[test]
+    fn check_double_service() {
+        let double: Service<DoubleServiceImpl> = Service::new(None, ());
+        let double_lock = double.lock();
+
+        assert_eq!(double_lock.send( 0), Some( 0));
+        assert_eq!(double_lock.send( 3), Some( 6));
+        assert_eq!(double_lock.send(10), Some(20));
+        assert_eq!(double_lock.send(15), Some(30));
+        assert_eq!(double_lock.send(33), Some(66));
+    }
+
+    struct NoServiceImpl;
+
+    impl ServiceImpl for NoServiceImpl {
+        type State = ();
+        type Request = ();
+        type Response = ();
+
+        fn get_thread_count() -> usize {
+            1
+        }
+
+        fn setup_thread(_index: usize) {
+            // pass
+        }
+
+        fn check_sleep(_state: MutexGuard<Self::State>) {
+            // pass
+        }
+
+        fn process(_state: &Mutex<Self::State>, _state_lock: MutexGuard<Self::State>, _req: Self::Request, resp: Sender<Self::Response>, _has_more: bool) {
+            resp.send(()).unwrap();
+        }
+    }
+
+    #[bench]
+    fn bench_service(b: &mut Bencher) {
+        let no: Service<NoServiceImpl> = Service::new(None, ());
+        let no_lock = no.lock();
+
+        b.iter(move || {
+            no_lock.send(()).unwrap();
+        })
     }
 }
