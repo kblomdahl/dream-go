@@ -500,7 +500,7 @@ def get_dataset(files, batch_size=1, is_training=True):
         dataset = dataset.filter(_illegal_policy)
         dataset = dataset.map(_fix_shape)
         if is_training:
-            dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(10000))  # 524288
+            dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(524288))
             dataset = dataset.map(_augment, num_parallel_calls=4)
             dataset = dataset.map(_fix_history, num_parallel_calls=4)
         dataset = dataset.batch(batch_size)
