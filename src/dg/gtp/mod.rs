@@ -17,7 +17,7 @@ use std::env;
 use std::io::BufRead;
 use std::time::Instant;
 
-use dg_go::util::score::{Score, StoneStatus};
+use dg_go::utils::score::{Score, StoneStatus};
 use dg_go::{DEFAULT_KOMI, Board, Color};
 use dg_mcts::time_control;
 use dg_mcts as mcts;

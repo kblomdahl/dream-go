@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use super::parallel;
-use dg_go::util::features::{FEATURE_SIZE};
+use dg_go::utils::features::{FEATURE_SIZE};
 use super::predict::Predictor;
 use dg_nn::devices::{DEVICES, set_current_device};
 use dg_nn::{self as nn, Network, Output, OutputSet, Workspace};

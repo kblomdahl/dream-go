@@ -20,8 +20,8 @@ extern crate test;
 use test::Bencher;
 
 use dg_go::{DEFAULT_KOMI, Board, Color};
-use dg_go::util::features::{HWC, Features};
-use dg_go::util::symmetry::Transform;
+use dg_go::utils::features::{HWC, Features};
+use dg_go::utils::symmetry::Transform;
 
 /// Benchmark the full playout of a game as a serie of `is_valid` and `place` calls.
 #[bench]

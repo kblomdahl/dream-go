@@ -15,7 +15,7 @@
 extern crate dg_go;
 extern crate dg_nn;
 
-use dg_go::util::extract_example::*;
+use dg_go::utils::extract_example::*;
 
 use std::ffi::CString;
 use std::fs::File;

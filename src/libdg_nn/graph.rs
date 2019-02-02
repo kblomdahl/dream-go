@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use libc::c_void;
 
-use dg_go::util::features::{FEATURE_SIZE, NUM_FEATURES};
+use dg_go::utils::features::{FEATURE_SIZE, NUM_FEATURES};
 use dg_utils::types::f16;
 use dg_utils::config;
 use super::devices::get_current_device;

@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use std::hash::{Hash, Hasher};
 use std::ptr;
 
-use dg_go::util::symmetry;
+use dg_go::utils::symmetry;
 use dg_go::{Board, Color};
 
 /// The maximum number of entries to be stored in the transposition table

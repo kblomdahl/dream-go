@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_go::util::sgf::SgfCoordinate;
+use dg_go::utils::sgf::SgfCoordinate;
 use dg_go::{Board, Color};
 use super::parallel::spin::Mutex;
 use super::parallel::global_rwlock;

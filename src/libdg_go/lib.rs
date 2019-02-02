@@ -28,7 +28,7 @@ mod board;
 mod circular_buf;
 mod codegen;
 mod color;
-pub mod util;
+pub mod utils;
 mod small_set;
 mod zobrist;
 

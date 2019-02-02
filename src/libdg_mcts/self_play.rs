@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_go::util::sgf::{CGoban, SgfCoordinate};
+use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color};
 use dg_utils::{b85, config};
 use super::predict::Predictor;

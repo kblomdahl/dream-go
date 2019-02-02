@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#![feature(test)]
 
 extern crate dg_go;
 extern crate test;
 
-use dg_go::util::extract_example::*;
+use dg_go::utils::extract_example::*;
 
 use std::ffi::CString;
 use std::fs::File;

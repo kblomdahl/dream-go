@@ -14,8 +14,8 @@
 
 use ordered_float::OrderedFloat;
 
-use dg_go::util::score::Score;
-use dg_go::util::sgf::{Sabaki, SgfCoordinate};
+use dg_go::utils::score::Score;
+use dg_go::utils::sgf::{Sabaki, SgfCoordinate};
 use dg_go::{Board, Color};
 use super::predict::Predictor;
 use super::{tree, full_forward};

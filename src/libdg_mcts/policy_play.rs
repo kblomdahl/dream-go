@@ -19,7 +19,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::thread;
 
-use dg_go::util::sgf::{CGoban, SgfCoordinate};
+use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color};
 use dg_utils::{b85, config, min};
 use super::asm::sum_finite_f32;

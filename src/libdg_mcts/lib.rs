@@ -55,9 +55,9 @@ use std::fmt;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use dg_go::util::features::{HWC, Features};
-use dg_go::util::score::{Score};
-use dg_go::util::symmetry;
+use dg_go::utils::features::{HWC, Features};
+use dg_go::utils::score::{Score};
+use dg_go::utils::symmetry;
 use dg_go::{Board, Color};
 use self::time_control::TimeStrategy;
 use self::predict::Predictor;

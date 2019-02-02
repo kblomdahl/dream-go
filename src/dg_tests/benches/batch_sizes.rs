@@ -22,7 +22,7 @@ extern crate rand;
 use test::Bencher;
 use rand::{Rng, thread_rng};
 
-use dg_go::util::features::FEATURE_SIZE;
+use dg_go::utils::features::FEATURE_SIZE;
 use dg_nn::*;
 use dg_utils::types::f16;
 
