@@ -20,17 +20,19 @@ use super::features::{HWC, FEATURE_SIZE, NUM_FEATURES, Features};
 use super::sgf::{Sgf, SgfError};
 use super::symmetry;
 
-use libc::{c_float, c_char, c_int, c_uchar};
+use dg_utils::types::f16;
+use dg_utils::b85;
+use libc::{c_char, c_int};
 use rand::prelude::SliceRandom;
 use regex::Regex;
 use std::ffi::CStr;
 
 #[repr(C)]
 pub struct Example {
-    pub features: [c_float; FEATURE_SIZE],
+    pub features: [f16; FEATURE_SIZE],
     pub index: c_int,
     pub color: c_int,
-    pub policy: [c_uchar; 905],
+    pub policy: [f16; 362],
     pub winner: c_int,
     pub number: c_int
 }
@@ -38,10 +40,10 @@ pub struct Example {
 impl Default for Example {
     fn default() -> Example {
         Example {
-            features: [0.0; FEATURE_SIZE],
+            features: [f16::from(0.0); FEATURE_SIZE],
             index: 0,
             color: 0,
-            policy: [0; 905],
+            policy: [f16::from(0.0); 362],
             winner: 0,
             number: 0
         }
@@ -91,7 +93,7 @@ pub unsafe extern fn extract_single_example(
 ) -> c_int
 {
     lazy_static! {
-        static ref EMPTY_POLICY: String = "0".repeat(905);
+        static ref EMPTY_POLICY: Vec<f16> = vec! [f16::from(0.0); 362];
 
         static ref WINNER: Regex = Regex::new(r"RE\[([^\]]+)\]").unwrap();
         static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
@@ -186,7 +188,7 @@ pub unsafe extern fn extract_single_example(
             }).collect();
 
         candidate_examples.choose(&mut rand::thread_rng()).map(|&i| {
-            let features = examples[i].board.get_features::<HWC, f32>(
+            let features = examples[i].board.get_features::<HWC, f16>(
                 examples[i].color,
                 symmetry::Transform::Identity
             );
@@ -194,13 +196,13 @@ pub unsafe extern fn extract_single_example(
             (*out).features.clone_from_slice(&features);
             (*out).index = examples[i].index as c_int;
             (*out).color = examples[i].color as c_int;
-            (*out).policy.clone_from_slice(match examples[i].policy {
+            (*out).policy.clone_from_slice(&match examples[i].policy {
                 Some(ref policy) => {
                     assert_eq!(policy.len(), 905, "illegal policy -- {:?}", policy);
 
-                    policy
+                    b85::decode::<f16, f16>(policy).unwrap()
                 },
-                None => EMPTY_POLICY.as_bytes()
+                None => EMPTY_POLICY.clone()
             });
             (*out).winner = winner as c_int;
             (*out).number = i as c_int;

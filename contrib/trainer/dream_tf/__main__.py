@@ -380,9 +380,9 @@ def get_dataset(files, batch_size=1, is_training=True):
             value = np.zeros((), 'f4')
             policy = np.zeros((362,), 'f2')
         else:
-            features = np.frombuffer(example['features'], 'f4').astype('f2')
+            features = np.frombuffer(example['features'], 'f2')
             value = np.asarray(1.0 if example['color'] == example['winner'] else -1.0, 'f4')
-            policy = np.fromstring(base64.b85decode(example['policy']), 'f2')
+            policy = np.frombuffer(example['policy'], 'f2')
 
             if example['number'] <= len(BOOST_PER_MOVE_NUMBER):
                 boost = np.asarray(BOOST_PER_MOVE_NUMBER[example['number'] - 1], 'f4')

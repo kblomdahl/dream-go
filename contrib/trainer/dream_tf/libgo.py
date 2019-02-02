@@ -48,10 +48,10 @@ def get_num_features():
 COMPLEX_FFI = FFI()
 COMPLEX_FFI.cdef("""
     typedef struct {
-        float features[""" + str(361 * get_num_features()) + """];
+        short features[""" + str(361 * get_num_features()) + """];
         int index;
         int color;
-        char policy[905];
+        short policy[362];
         int winner;
         int number;
     } Example;
@@ -60,7 +60,8 @@ COMPLEX_FFI.cdef("""
 """)
 
 COMPLEX_LIB = load_shared_library(COMPLEX_FFI)
-FEATURE_SIZE = get_num_features() * 361 * COMPLEX_FFI.sizeof('float')
+FEATURE_SIZE = get_num_features() * 361 * COMPLEX_FFI.sizeof('short')
+POLICY_SIZE = 362 * COMPLEX_FFI.sizeof('short')
 
 def get_single_example(line):
     """ Returns a single example, from the given SGF file. """
@@ -73,7 +74,7 @@ def get_single_example(line):
             'features': COMPLEX_FFI.buffer(raw_example[0].features, FEATURE_SIZE),
             'color': raw_example[0].color,
             'index': raw_example[0].index,
-            'policy': COMPLEX_FFI.string(raw_example[0].policy),
+            'policy': COMPLEX_FFI.buffer(raw_example[0].policy, POLICY_SIZE),
             'winner': raw_example[0].winner,
             'number': raw_example[0].number
         }

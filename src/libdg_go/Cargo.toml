@@ -11,8 +11,9 @@ name = "dg_go"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
+dg_utils = { path = "../libdg_utils" }
 lazy_static = {version = "1.2", features = ["nightly"]}
+libc = "0.2"
 memchr = "2.1"
 rand = "0.6"
 regex = "1.1"
-libc = "0.2"

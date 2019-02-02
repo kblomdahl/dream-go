@@ -15,6 +15,7 @@
 #![feature(core_intrinsics)]
 #![feature(test)]
 
+extern crate dg_utils;
 #[macro_use] extern crate lazy_static;
 extern crate libc;
 extern crate memchr;
