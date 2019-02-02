@@ -1,0 +1,15 @@
+[package]
+name = "dg_utils"
+version = "0.0.0"
+authors = ["Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>"]
+license = "Apache-2.0"
+publish = false
+
+[lib]
+path = "lib.rs"
+name = "dg_utils"
+crate-type = ["lib"]
+
+[dependencies]
+lazy_static = {version = "1.2", features = ["nightly"]}
+regex = {version = "1.1", features = ["unstable"]}

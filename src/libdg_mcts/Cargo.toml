@@ -1,0 +1,25 @@
+[package]
+name = "dg_mcts"
+version = "0.0.0"
+authors = ["Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>"]
+license = "Apache-2.0"
+publish = false
+
+[lib]
+path = "lib.rs"
+name = "dg_mcts"
+crate-type = ["lib"]
+
+[features]
+trace-mcts = []  # dump all finished search tree's to stderr
+
+[dependencies]
+dg_go = { path = "../libdg_go" }
+dg_nn = { path = "../libdg_nn" }
+dg_utils = { path = "../libdg_utils" }
+crossbeam-channel = "0.3"
+crossbeam-utils = "0.6"
+lazy_static = {version = "1.2", features = ["nightly"]}
+ordered-float = "1.0"
+rand = "0.6"
+time = "0.1"

@@ -1,0 +1,24 @@
+[package]
+name = "dg_nn"
+version = "0.0.0"
+authors = ["Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>"]
+license = "Apache-2.0"
+publish = false
+build = "build.rs"
+
+[features]
+tensor-core = []  # whether to enable tensor-cores in the cuDNN routines
+trace-cuda = []  # print (a lot) of debug info during neural network evaluation to stderr
+
+[lib]
+path = "lib.rs"
+name = "dg_nn"
+crate-type = ["lib"]
+
+[dependencies]
+dg_go = { path = "../libdg_go" }
+dg_utils = { path = "../libdg_utils" }
+
+lazy_static = {version = "1.2", features = ["nightly"]}
+libc = "0.2"
+memchr = "2.1"

@@ -21,13 +21,13 @@
 from cffi import FFI
 
 def load_shared_library(ffi):
-    for library_name in ['./libgo.so', './go.dll']:
+    for library_name in ['./libdg_go.so', './dg_go.dll']:
         try:
             return ffi.dlopen(library_name)
         except:
             pass
 
-    print('Failed to load the shared library -- libgo.so')
+    print('Failed to load the shared library -- libdg_go.so')
     quit(1)
 
 # -------- Simple FFI (independent functions) --------

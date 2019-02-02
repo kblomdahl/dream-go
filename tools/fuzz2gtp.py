@@ -19,7 +19,7 @@
 Super simple fuzzing tool for GTP clients, and generate _self-play_ games forever
 using the GTP interface.
 
-Usage: ./fuzz2gtp.py ./dream_go --gtp
+Usage: ./fuzz2gtp.py ./dream_go --dg.gtp
 """
 
 from random import random, choice

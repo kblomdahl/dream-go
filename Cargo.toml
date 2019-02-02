@@ -1,46 +1,9 @@
-[package]
-name = "dream_go"
-version = "0.6.3"
-authors = ["Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>"]
-license = "Apache-2.0"
-publish = false
-build = "build.rs"
-
-[features]
-default = []
-
-# print (a lot) of debug info during neural network evaluation to stderr
-trace-cuda = []
-
-# whether to enable tensor-cores in the cuDNN routines
-tensor-core = []
-
-# dump all finished search tree's to stderr
-trace-mcts = []
-
-[profile.bench]
-debug = true
-
-[profile.dev]
-opt-level = 1
-debug = true
-
-[profile.release]
-incremental = false
-lto = true
-
 [workspace]
-members = ["contrib/go"]
-
-[dependencies]
-cpu-time = "0.1"
-crossbeam-channel = "0.3"
-crossbeam-utils = "0.6"
-go = { path = "contrib/go" }
-lazy_static = {version = "1.2", features = ["nightly"]}
-libc = "0.2"
-memchr = "2.1"
-ordered-float = "1.0"
-rand = "0.6"
-regex = {version = "1.1", features = ["unstable"]}
-time = "0.1"
+members = [
+    "src/dg",
+    "src/dg_tests",
+    "src/libdg_go",
+    "src/libdg_mcts",
+    "src/libdg_nn",
+    "src/libdg_utils"
+]

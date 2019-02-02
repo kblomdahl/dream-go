@@ -1,0 +1,18 @@
+[package]
+name = "dg_go"
+version = "0.0.0"
+authors = ["Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>"]
+license = "Apache-2.0"
+publish = false
+
+[lib]
+path = "lib.rs"
+name = "dg_go"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+lazy_static = {version = "1.2", features = ["nightly"]}
+memchr = "2.1"
+rand = "0.6"
+regex = "1.1"
+libc = "0.2"

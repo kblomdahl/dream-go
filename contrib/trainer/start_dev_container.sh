@@ -1,7 +1,7 @@
 #!/bin/sh
 
-(cd "../go" && cargo build --release) && \
-    (cp ../../target/release/libgo.so . || cp ../../target/release/go.dll .)
+cargo build --release --frozen && \
+    (cp ../../target/release/libdg_go.so . || cp ../../target/release/libdg_go.dll .)
 
 exec nvidia-docker run \
 	--shm-size=1g --ulimit memlock=-1 --ulimit stack=67108864 \
