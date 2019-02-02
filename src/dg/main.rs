@@ -47,7 +47,7 @@ fn main() {
             println!("  --policy-play <n>     Extract a dataset from self-play using only the policy network");
             println!("  --ex-it               When combined with --policy-play perform search on some partial");
             println!("                        policies");
-            println!("  --dg.gtp                 Run GTP client (default)");
+            println!("  --gtp                 Run GTP client (default)");
             println!();
             println!("Advanced options:");
             println!("  --safe-time <n>       The minimum number of milliseconds to leave on the game clock");
