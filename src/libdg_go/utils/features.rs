@@ -16,6 +16,7 @@ use asm::count_zeros;
 use board_fast::*;
 use board::Board;
 use color::Color;
+use dg_utils::{max, min};
 
 use super::ladder::Ladder;
 use super::symmetry;
@@ -199,7 +200,7 @@ impl Features for Board {
         }
 
         // global properties
-        let c_komi = T::from(0.5 + (0.5 * self.komi) / 7.5);
+        let c_komi = T::from(max(min(0.5 + (0.5 * self.komi) / 7.5, 1.0), 0.0));
 
         let is_black = if color == Color::Black { c_komi } else { c_0 };
         let is_white = if color == Color::White { c_komi } else { c_0 };
