@@ -14,10 +14,10 @@
 
 use dg_go::utils::sgf::SgfCoordinate;
 use dg_go::{Board, Color};
+use dg_utils::{config, max};
+use super::asm::{argmax_f32, argmax_i32};
 use super::parallel::spin::Mutex;
 use super::parallel::global_rwlock;
-use super::asm::{argmax_f32, argmax_i32};
-use dg_utils::{config, max};
 
 use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};

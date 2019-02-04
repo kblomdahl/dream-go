@@ -41,42 +41,42 @@ lazy_static! {
 }
 
 pub trait FromB85<T> {
-    fn decode(bits: [u8; 4], output: &mut Vec<T>);
+    fn decode<O: From<T>>(bits: [u8; 4], output: &mut Vec<O>);
 }
 
 impl FromB85<u8> for u8 {
-    fn decode(bits: [u8; 4], output: &mut Vec<u8>) {
-        output.push(bits[3]);
-        output.push(bits[2]);
-        output.push(bits[1]);
-        output.push(bits[0]);
+    fn decode<O: From<u8>>(bits: [u8; 4], output: &mut Vec<O>) {
+        output.push(O::from(bits[3]));
+        output.push(O::from(bits[2]));
+        output.push(O::from(bits[1]));
+        output.push(O::from(bits[0]));
     }
 }
 
 impl FromB85<i8> for i8 {
-    fn decode(bits: [u8; 4], output: &mut Vec<i8>) {
-        output.push(unsafe { ::std::mem::transmute::<_, _>(bits[3]) });
-        output.push(unsafe { ::std::mem::transmute::<_, _>(bits[2]) });
-        output.push(unsafe { ::std::mem::transmute::<_, _>(bits[1]) });
-        output.push(unsafe { ::std::mem::transmute::<_, _>(bits[0]) });
+    fn decode<O: From<i8>>(bits: [u8; 4], output: &mut Vec<O>) {
+        output.push(O::from(unsafe { ::std::mem::transmute::<_, _>(bits[3]) }));
+        output.push(O::from(unsafe { ::std::mem::transmute::<_, _>(bits[2]) }));
+        output.push(O::from(unsafe { ::std::mem::transmute::<_, _>(bits[1]) }));
+        output.push(O::from(unsafe { ::std::mem::transmute::<_, _>(bits[0]) }));
     }
 }
 
 impl FromB85<f16> for f16 {
-    fn decode(bits: [u8; 4], output: &mut Vec<f16>) {
-        output.push(f16::from_bits(u16::from_be(((bits[3] as u16) << 8) | (bits[2] as u16))));
-        output.push(f16::from_bits(u16::from_be(((bits[1] as u16) << 8) | (bits[0] as u16))));
+    fn decode<O: From<f16>>(bits: [u8; 4], output: &mut Vec<O>) {
+        output.push(O::from(f16::from_bits(u16::from_be(((bits[3] as u16) << 8) | (bits[2] as u16)))));
+        output.push(O::from(f16::from_bits(u16::from_be(((bits[1] as u16) << 8) | (bits[0] as u16)))));
     }
 }
 
 impl FromB85<f32> for f32 {
-    fn decode(bits: [u8; 4], output: &mut Vec<f32>) {
+    fn decode<O: From<f32>>(bits: [u8; 4], output: &mut Vec<O>) {
         let raw_bits = (bits[0] as u32)
             | ((bits[1] as u32) << 8)
             | ((bits[2] as u32) << 16)
             | ((bits[3] as u32) << 24);
 
-        output.push(f32::from_bits(u32::from_be(raw_bits)));
+        output.push(O::from(f32::from_bits(u32::from_be(raw_bits))));
     }
 }
 
@@ -87,8 +87,7 @@ impl FromB85<f32> for f32 {
 /// 
 /// * `input` -
 /// 
-pub fn decode<T, O>(input: &[u8]) -> Option<Vec<O>>
-    where T: FromB85<O> + Clone
+pub fn decode<T: FromB85<T> + Clone, O: From<T>>(input: &[u8]) -> Option<Vec<O>>
 {
     let decode_table = &*DECODE_85;  // de-ref once
 
@@ -174,7 +173,7 @@ mod tests {
         let string = b"06YLd073vn07U>s07n1-";
 
         assert_eq!(
-            decode::<f16, _>(string).map(|it| it.into_iter().map(|value| f32::from(value)).collect()),
+            decode::<f16, f32>(string).map(|it| it.into_iter().map(|value| f32::from(value)).collect()),
             Some(vec! [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 0.0])
         );
     }
@@ -204,7 +203,7 @@ mod tests {
                 .map(|&value| f16::from(value))
                 .collect::<Vec<f16>>();
 
-            assert_eq!(decode::<f16, _>(encode(&example).as_bytes()).unwrap(), result);
+            assert_eq!(decode::<f16, f16>(encode(&example).as_bytes()).unwrap(), result);
         }
     }
 }

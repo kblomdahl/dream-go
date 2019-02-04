@@ -20,6 +20,7 @@ use memchr::memchr;
 
 use super::tensor::Tensor;
 use super::Error;
+use dg_utils::types::f16;
 use dg_utils::b85;
 
 /// Step the iterator forward until the character given `stop` character is
@@ -98,11 +99,11 @@ impl<R: BufRead> Iterator for JsonEntryIter<R> {
             let value = skip_until(&mut self.buf_read, b'"');
 
             if key == "s" {
-                let array = b85::decode::<f32, _>(&value).unwrap();
+                let array = b85::decode::<f32, f32>(&value).unwrap();
 
                 tensor.scale = array[0];
             } else if key == "v" {
-                match tensor.set_host(b85::decode::<u8, _>(&value).unwrap()) {
+                match tensor.set_host(b85::decode::<f16, f16>(&value).unwrap()) {
                     Ok(()) => (),
                     Err(reason) => { return Some((name, Err(reason))) }
                 }

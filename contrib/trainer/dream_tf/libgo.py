@@ -51,9 +51,10 @@ COMPLEX_FFI.cdef("""
         short features[""" + str(361 * get_num_features()) + """];
         int index;
         int color;
-        short policy[362];
+        float policy[362];
         int winner;
         int number;
+        float komi;
     } Example;
 
     int extract_single_example(const char*, Example*);
@@ -61,7 +62,7 @@ COMPLEX_FFI.cdef("""
 
 COMPLEX_LIB = load_shared_library(COMPLEX_FFI)
 FEATURE_SIZE = get_num_features() * 361 * COMPLEX_FFI.sizeof('short')
-POLICY_SIZE = 362 * COMPLEX_FFI.sizeof('short')
+POLICY_SIZE = 362 * COMPLEX_FFI.sizeof('float')
 
 def get_single_example(line):
     """ Returns a single example, from the given SGF file. """
@@ -76,7 +77,8 @@ def get_single_example(line):
             'index': raw_example[0].index,
             'policy': COMPLEX_FFI.buffer(raw_example[0].policy, POLICY_SIZE),
             'winner': raw_example[0].winner,
-            'number': raw_example[0].number
+            'number': raw_example[0].number,
+            'komi': raw_example[0].komi
         }
     else:
         example = None

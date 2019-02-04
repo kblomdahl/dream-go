@@ -32,9 +32,10 @@ pub struct Example {
     pub features: [f16; FEATURE_SIZE],
     pub index: c_int,
     pub color: c_int,
-    pub policy: [f16; 362],
+    pub policy: [f32; 362],
     pub winner: c_int,
-    pub number: c_int
+    pub number: c_int,
+    pub komi: f32
 }
 
 impl Default for Example {
@@ -43,9 +44,10 @@ impl Default for Example {
             features: [f16::from(0.0); FEATURE_SIZE],
             index: 0,
             color: 0,
-            policy: [f16::from(0.0); 362],
+            policy: [f32::from(0.0); 362],
             winner: 0,
-            number: 0
+            number: 0,
+            komi: DEFAULT_KOMI
         }
     }
 }
@@ -93,7 +95,7 @@ pub unsafe extern fn extract_single_example(
 ) -> c_int
 {
     lazy_static! {
-        static ref EMPTY_POLICY: Vec<f16> = vec! [f16::from(0.0); 362];
+        static ref EMPTY_POLICY: Vec<f32> = vec! [0.0; 362];
 
         static ref WINNER: Regex = Regex::new(r"RE\[([^\]]+)\]").unwrap();
         static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
@@ -200,12 +202,13 @@ pub unsafe extern fn extract_single_example(
                 Some(ref policy) => {
                     assert_eq!(policy.len(), 905, "illegal policy -- {:?}", policy);
 
-                    b85::decode::<f16, f16>(policy).unwrap()
+                    b85::decode::<f16, f32>(policy).unwrap()
                 },
                 None => EMPTY_POLICY.clone()
             });
             (*out).winner = winner as c_int;
             (*out).number = i as c_int;
+            (*out).komi = examples[i].board.komi();
 
             0
         }).unwrap_or(-30)

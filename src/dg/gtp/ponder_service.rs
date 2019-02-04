@@ -30,7 +30,7 @@ type SearchTree = tree::Node;
 type PonderResult = Result<(PredictService, SearchTree, Board, Color), &'static str>;
 
 /// A very simple _time control_ that thinks until a boolean flag is set to
-/// `false`.
+/// `false` or the tree has reached its maximum size.
 #[derive(Clone)]
 pub struct PonderTimeControl {
     is_running: Arc<AtomicBool>,

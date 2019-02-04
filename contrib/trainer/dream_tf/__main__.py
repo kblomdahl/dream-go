@@ -378,11 +378,11 @@ def get_dataset(files, batch_size=1, is_training=True):
             features = np.zeros((19, 19, NUM_FEATURES), 'f2')
             boost = np.zeros((), 'f4')
             value = np.zeros((), 'f4')
-            policy = np.zeros((362,), 'f2')
+            policy = np.zeros((362,), 'f4')
         else:
             features = np.frombuffer(example['features'], 'f2')
             value = np.asarray(1.0 if example['color'] == example['winner'] else -1.0, 'f4')
-            policy = np.frombuffer(example['policy'], 'f2')
+            policy = np.frombuffer(example['policy'], 'f4')
 
             if example['number'] <= len(BOOST_PER_MOVE_NUMBER):
                 boost = np.asarray(BOOST_PER_MOVE_NUMBER[example['number'] - 1], 'f4')
@@ -398,7 +398,7 @@ def get_dataset(files, batch_size=1, is_training=True):
         return tuple(tf.py_func(
             __parse,
             [line],
-            [tf.float16, tf.float32, tf.float32, tf.float16]
+            [tf.float16, tf.float32, tf.float32, tf.float32]
         ))
 
     def _illegal_policy(features, boost, value, policy):
@@ -504,7 +504,7 @@ def get_dataset(files, batch_size=1, is_training=True):
             dataset = dataset.map(_augment, num_parallel_calls=4)
             dataset = dataset.map(_fix_history, num_parallel_calls=4)
         dataset = dataset.batch(batch_size)
-        dataset = dataset.prefetch(4)
+        dataset = dataset.prefetch(2)
 
         return dataset
 
@@ -525,12 +525,12 @@ def model_fn(features, labels, mode, params):
         # - Policy head
         #
         loss_value = tf.reshape(tf.squared_difference(
-            tf.stop_gradient(labels['value']),
-            value_hat
+            tf.check_numerics(tf.stop_gradient(labels['value']), "value_labels"),
+            tf.check_numerics(value_hat, "value_hat")
         ), (-1, 1))
         loss_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=tf.stop_gradient(labels['policy']),
-            logits=policy_hat
+            labels=tf.check_numerics(tf.stop_gradient(labels['policy']), "policy_labels"),
+            logits=tf.check_numerics(policy_hat, "policy_hat")
         ), (-1, 1))
 
         loss_unboosted = loss_policy + 2.0 * loss_value
