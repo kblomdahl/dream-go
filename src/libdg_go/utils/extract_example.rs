@@ -108,7 +108,11 @@ pub unsafe extern fn extract_single_example(
         let komi = {
             if let Some(caps) = KOMI.captures(&content) {
                 if caps[1] == *"0" {
-                    DEFAULT_KOMI  // foxwq always output an empty komi
+                    DEFAULT_KOMI  // Fox sometimes output an empty komi
+                } else if caps[1] == *"650" {
+                    6.5  // Fox sometimes output this instead of 6.5
+                } else if caps[1] == *"750" {
+                    7.5  // Fox sometimes output this instead of 7.5
                 } else {
                     match caps[1].parse::<f32>() {
                         Ok(komi) => komi,
@@ -134,7 +138,7 @@ pub unsafe extern fn extract_single_example(
         };
 
         // find _all_ recorded moves, and their policies (if applicable).
-        let mut examples = vec! [];
+        let mut examples = Vec::with_capacity(254);
         let mut has_policy = false;
         let mut pass_count = 0;
 

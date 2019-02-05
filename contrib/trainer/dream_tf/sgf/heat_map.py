@@ -18,50 +18,50 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-LETTERS = [
-    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
-    'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x',
-    'y', 'z'
-]
+from . import to_sgf_coord
 
-def to_sgf_coord(x, y):
-    return '{}{}'.format(LETTERS[x], LETTERS[y])
 
-def to_sgf_heatmap(features, tower):
-    AB = [] # black vertices
-    AW = [] # white vertices
-    LBs = []
+def to_sgf_heat_map(features, tower):
+    """ Returns the SGF properties for a heat map of the given tensor """
+
+    black_vertices = []
+    white_vertices = []
 
     for y in range(19):
         for x in range(19):
             ch = to_sgf_coord(x, y)
 
             if features[3, y, x] > 0.0:
-                AB += (ch,)
+                black_vertices += (ch,)
             elif features[4, y, x] > 0.0:
-                AW += (ch,)
+                white_vertices += (ch,)
 
+    # collect the actual heat map
     num_channels = tower.shape[0]
+    labels = []
 
     for i in range(num_channels):
-        LB = {}
+        labels_for_channel = {}
 
         for y in range(19):
             for x in range(19):
                 ch = to_sgf_coord(x, y)
 
                 if tower[i, y, x] > 1e-4:
-                    LB[ch] = tower[i, y, x]
+                    labels_for_channel[ch] = tower[i, y, x]
 
-        LBs += (LB,)
+        labels += (labels_for_channel,)
 
-    # x
+    # pretty-print as a SGF properties (without the prefix)
     sgf = '{}{}'.format(
-        'AB' + ''.join(map(lambda x: '[{}]'.format(x), AB)) if len(AB) > 0 else '',
-        'AW' + ''.join(map(lambda x: '[{}]'.format(x), AW)) if len(AW) > 0 else '',
+        'AB' + ''.join(map(lambda v: '[{}]'.format(v), black_vertices)) if len(black_vertices) > 0 else '',
+        'AW' + ''.join(map(lambda v: '[{}]'.format(v), white_vertices)) if len(white_vertices) > 0 else '',
     )
 
-    for LB in LBs:
-        sgf += ';LB' + ''.join(map(lambda key: '[{}:{:.1f}]'.format(key[0], key[1]), LB.items())) if len(LB) > 0 else ''
+    for labels_for_channel in labels:
+        if len(labels_for_channel) > 0:
+            sgf += ';LB' + ''.join(map(
+                lambda key: '[{}:{:.1f}]'.format(key[0], key[1]), labels_for_channel.items()
+            ))
 
     return sgf

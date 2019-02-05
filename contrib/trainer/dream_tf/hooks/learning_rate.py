@@ -1,4 +1,4 @@
-# Copyright (c) 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+# Copyright (c) 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,8 +24,12 @@ import numpy as np
 import scipy.stats
 import tensorflow as tf
 
-LEARNING_RATE = 'LearningRate'  # the graph collection that contains the learning rate
-LOSS = 'Loss'  # the graph collection that contains the loss
+""" The graph collection that contains the learning rate """
+LEARNING_RATE = 'LearningRate'
+
+""" The graph collection that contains the loss """
+LOSS = 'Loss'
+
 
 class LearningRateScheduler(tf.train.SessionRunHook):
     """

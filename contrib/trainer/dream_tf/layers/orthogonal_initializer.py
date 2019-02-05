@@ -21,6 +21,7 @@
 import numpy as np
 import tensorflow as tf
 
+
 def orthogonal_initializer():
     """ Returns an orthogonal initializer that use QR-factorization to find
     the orthogonal basis of a random matrix. This differs from the Tensorflow
@@ -66,36 +67,3 @@ def orthogonal_initializer():
         return np.reshape(q / (np.sqrt(shape[-1]) * q_n[np.newaxis, :]), shape)
 
     return _init
-
-def orthogonal_loss(x):
-    """ Returns a value that decrease the closer `x` is to being orthogonal. """
-
-    if len(x.shape) < 2:
-        return 0
-
-    # flatten the input shape with the last dimension remaining.
-    num_rows = 1
-
-    for dim in x.shape[:-1]:
-        num_rows *= dim
-    num_cols = x.shape[-1]
-
-    if num_rows < num_cols:
-        flat_shape = (num_rows, num_cols)
-    else:
-        flat_shape = (num_cols, num_rows)
-
-    # calculate how orthogonal this matrix is
-    if type(x) == np.ndarray:
-        x = np.reshape(x, flat_shape)
-        x_t = np.transpose(x, [1, 0])
-        i = np.matmul(x, x_t)
-
-        return np.sum(np.abs(i - np.identity(i.shape[0])))
-    else:
-        x = tf.reshape(x, flat_shape)
-        x_t = tf.transpose(x, [1, 0])
-        i = tf.matmul(x, x_t)
-
-        return tf.reduce_sum(tf.abs(i - tf.eye(int(i.shape[0]))))
-

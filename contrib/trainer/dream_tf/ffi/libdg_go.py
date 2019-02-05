@@ -20,6 +20,7 @@
 
 from cffi import FFI
 
+
 def load_shared_library(ffi):
     for library_name in ['./libdg_go.so', './dg_go.dll']:
         try:
@@ -30,7 +31,9 @@ def load_shared_library(ffi):
     print('Failed to load the shared library -- libdg_go.so')
     quit(1)
 
+
 # -------- Simple FFI (independent functions) --------
+
 
 SIMPLE_FFI = FFI()
 SIMPLE_FFI.cdef("""
@@ -39,11 +42,14 @@ SIMPLE_FFI.cdef("""
 
 SIMPLE_LIB = load_shared_library(SIMPLE_FFI)
 
+
 def get_num_features():
     """ Returns the number of features that the Go engine will use. """
     return SIMPLE_LIB.get_num_features()
 
+
 # -------- Complex FFI (depends on the number of features) --------
+
 
 COMPLEX_FFI = FFI()
 COMPLEX_FFI.cdef("""
@@ -63,6 +69,7 @@ COMPLEX_FFI.cdef("""
 COMPLEX_LIB = load_shared_library(COMPLEX_FFI)
 FEATURE_SIZE = get_num_features() * 361 * COMPLEX_FFI.sizeof('short')
 POLICY_SIZE = 362 * COMPLEX_FFI.sizeof('float')
+
 
 def get_single_example(line):
     """ Returns a single example, from the given SGF file. """
