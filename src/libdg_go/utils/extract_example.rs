@@ -107,15 +107,18 @@ pub unsafe extern fn extract_single_example(
         // in the file.
         let komi = {
             if let Some(caps) = KOMI.captures(&content) {
-                if caps[1] == *"0" {
+                if caps[1] == *"0" || caps[1] == *"0.0" {
                     DEFAULT_KOMI  // Fox sometimes output an empty komi
-                } else if caps[1] == *"650" {
-                    6.5  // Fox sometimes output this instead of 6.5
-                } else if caps[1] == *"750" {
-                    7.5  // Fox sometimes output this instead of 7.5
                 } else {
                     match caps[1].parse::<f32>() {
-                        Ok(komi) => komi,
+                        Ok(komi) => {
+                            if komi >= 100.0 {
+                                // Fox seems to sometimes output 550 instead of 5.5, etc.
+                                komi / 100.0
+                            } else {
+                                komi
+                            }
+                        },
                         Err(_) => { return -21; },
                     }
                 }
@@ -124,7 +127,7 @@ pub unsafe extern fn extract_single_example(
             }
         };
 
-        // find the winner by looking for the pattern `KM[...]`.
+        // find the winner by looking for the pattern `RE[...]`.
         let winner = {
             if let Some(caps) = WINNER.captures(&content) {
                 match caps[1].chars().nth(0) {

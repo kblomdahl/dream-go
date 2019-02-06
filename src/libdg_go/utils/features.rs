@@ -302,7 +302,7 @@ fn _is_valid_memoize(board: &BoardFast, color: Color, index: usize, memoize: &mu
             return true;
         }
 
-        // check for the following two conditions simplied into one case:
+        // check for the following two conditions simplified into one case:
         //
         // 1. If a neighbour is friendly then we are fine if it has at
         //    least two liberties.
