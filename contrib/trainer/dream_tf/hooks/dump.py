@@ -20,6 +20,8 @@
 
 import base64
 import json
+import numpy as np
+import sys
 import tensorflow as tf
 
 """ The graph collection that contains all dump operations """
@@ -31,8 +33,6 @@ class DumpHook(tf.train.SessionRunHook):
     collection to standard output at the end of the session. """
 
     def end(self, session):
-        import sys
-
         # dump the variables to JSON in `f16` precision in order to save disk
         # space.
         output = {}
