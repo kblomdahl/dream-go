@@ -63,12 +63,18 @@ COMPLEX_FFI.cdef("""
         float komi;
     } Example;
 
+    void set_seed(int seed);
     int extract_single_example(const char*, Example*);
 """)
 
 COMPLEX_LIB = load_shared_library(COMPLEX_FFI)
 FEATURE_SIZE = get_num_features() * 361 * COMPLEX_FFI.sizeof('short')
 POLICY_SIZE = 362 * COMPLEX_FFI.sizeof('float')
+
+
+def set_seed(seed):
+    """ Sets the seed of the extraction """
+    COMPLEX_LIB.set_seed(seed)
 
 
 def get_single_example(line):

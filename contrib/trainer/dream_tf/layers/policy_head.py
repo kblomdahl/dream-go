@@ -20,7 +20,7 @@
 
 import tensorflow as tf
 
-from . import conv2d, normalize_constraint
+from . import conv2d, normalize_constraint, COMPUTE_TYPE
 from ..hooks.dump import DUMP_OPS
 from .batch_norm import batch_norm
 from .recompute_grad import recompute_grad
@@ -55,7 +55,7 @@ def policy_head(x, mode, params):
         y = tf.nn.relu(y)
 
         y = tf.reshape(y, (-1, 722))
-        y = tf.matmul(y, tf.cast(linear_1, tf.float16)) + tf.cast(offset_1, tf.float16)
+        y = tf.matmul(y, tf.cast(linear_1, COMPUTE_TYPE)) + tf.cast(offset_1, COMPUTE_TYPE)
 
         return tf.to_float(y)
 

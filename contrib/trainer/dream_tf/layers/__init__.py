@@ -25,6 +25,9 @@ from ..ffi.libdg_go import get_num_features
 """ The total number of input features """
 NUM_FEATURES = get_num_features()
 
+""" The type to perform convolution operations in """
+COMPUTE_TYPE = tf.float16
+
 
 def normalize_constraint(x):
     """ Returns a constraint that set each output vector to `tf.norm(x) = 1` """
@@ -43,4 +46,4 @@ def unit_constraint(x):
 
 def conv2d(x, weights):
     """ Shortcut for `tf.nn.conv2d` """
-    return tf.nn.conv2d(x, tf.cast(weights, tf.float16), (1, 1, 1, 1), 'SAME', True, 'NHWC')
+    return tf.nn.conv2d(x, tf.cast(weights, COMPUTE_TYPE), (1, 1, 1, 1), 'SAME', True, 'NHWC')

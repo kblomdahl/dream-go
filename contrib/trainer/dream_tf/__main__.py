@@ -57,6 +57,8 @@ def parse_args():
     opt_group.add_argument('--model', nargs=1, help='the directory that contains the model')
     opt_group.add_argument('--name', nargs=1, help='the name of this session')
     opt_group.add_argument('--debug', action='store_true', help='enable command-line debugging')
+    opt_group.add_argument('--deterministic', action='store_true', help='enable deterministic mode')
+    opt_group.add_argument('--mask', nargs=1, metavar='M', help='mask to multiply features with')
 
     op_group = parser.add_mutually_exclusive_group(required=True)
     op_group.add_argument('--start', action='store_true', help='start training of a new model')
@@ -105,6 +107,7 @@ def main():
     }
 
     config = tf.estimator.RunConfig(
+        tf_random_seed=0xfde6885f if args.deterministic else None,
         session_config=tf.ConfigProto(
             graph_options=tf.GraphOptions(
                 optimizer_options=tf.OptimizerOptions(
@@ -129,6 +132,11 @@ def main():
         steps_to_skip = 0
         warm_start_from = None
 
+    if args.mask:
+        features_mask = list(map(lambda x: float(x), args.mask[0].split(';')))
+    else:
+        features_mask = None
+
     hooks = [tf_debug.LocalCLIDebugHook()] if args.debug else []
     nn = tf.estimator.Estimator(
         config=config,
@@ -141,7 +149,7 @@ def main():
     if args.start or args.resume:
         nn.train(
             hooks=hooks + [LearningRateScheduler(steps_to_skip)],
-            input_fn=lambda: input_fn(args.files, params['batch_size'], True),
+            input_fn=lambda: input_fn(args.files, params['batch_size'], features_mask, True, args.deterministic),
             steps=params['steps'] // params['batch_size']
         )
     elif args.verify:
@@ -149,7 +157,7 @@ def main():
         # then pretty-print as a JSON object to standard output
         results = nn.evaluate(
             hooks=hooks,
-            input_fn=lambda: input_fn(args.files, params['batch_size'], False),
+            input_fn=lambda: input_fn(args.files, params['batch_size'], features_mask, False, args.deterministic),
             steps=params['steps'] // params['batch_size']
         )
 
@@ -162,7 +170,7 @@ def main():
         ))
     elif args.dump:
         predictor = nn.predict(
-            input_fn=lambda: input_fn([], params['batch_size'], False),
+            input_fn=lambda: input_fn([], params['batch_size'], None, False, False),
             hooks=[DumpHook()]
         )
 
@@ -170,7 +178,7 @@ def main():
             pass
     elif args.features_map > 0:
         predictor = nn.predict(
-            input_fn=lambda: input_fn(args.files, 1, False)
+            input_fn=lambda: input_fn(args.files, 1, features_mask, False, args.deterministic)
         )
         count = 0
 

@@ -22,10 +22,14 @@ use super::symmetry;
 
 use dg_utils::types::f16;
 use dg_utils::b85;
+
 use libc::{c_char, c_int};
 use rand::prelude::SliceRandom;
+use rand::rngs::StdRng;
+use rand::{FromEntropy, SeedableRng};
 use regex::Regex;
 use std::ffi::CStr;
+use std::sync::Mutex;
 
 #[repr(C)]
 pub struct Example {
@@ -75,10 +79,28 @@ impl Candidate<'_> {
     }
 }
 
+lazy_static! {
+    static ref RNG: Mutex<StdRng> = Mutex::new(StdRng::from_entropy());
+}
+
 /// Returns the number of features used internally.
 #[no_mangle]
 pub unsafe extern fn get_num_features() -> c_int {
     NUM_FEATURES as i32
+}
+
+/// Sets the random seed used to determine which example is extracted from
+/// each SGF file.
+///
+/// # Arguments
+///
+/// * `seed` -
+///
+#[no_mangle]
+pub unsafe extern fn set_seed(seed: i32) {
+    let mut rng = RNG.lock().unwrap();
+
+    *rng = StdRng::seed_from_u64(seed as u64);
 }
 
 /// Extract a single example from the given SGF file. If the file contains
@@ -87,6 +109,7 @@ pub unsafe extern fn get_num_features() -> c_int {
 /// # Arguments
 ///
 /// - `raw_sgf_content` - The UTF-8 encoded content of an SGF file.
+/// - `out` - Output of the extracted example.
 ///
 #[no_mangle]
 pub unsafe extern fn extract_single_example(
@@ -196,7 +219,13 @@ pub unsafe extern fn extract_single_example(
                 (!has_policy || examples[i].has_policy()) && examples[i].has_reasonable_value()
             }).collect();
 
-        candidate_examples.choose(&mut rand::thread_rng()).map(|&i| {
+        let chosen_candidate = RNG.lock().map(|ref mut rng| {
+            use std::ops::DerefMut;
+
+            candidate_examples.choose(rng.deref_mut())
+        }).unwrap_or(None);
+
+        chosen_candidate.map(|&i| {
             let features = examples[i].board.get_features::<HWC, f16>(
                 examples[i].color,
                 symmetry::Transform::Identity

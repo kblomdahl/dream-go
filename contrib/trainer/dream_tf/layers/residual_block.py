@@ -20,7 +20,7 @@
 
 import tensorflow as tf
 
-from . import conv2d, normalize_constraint, unit_constraint
+from . import conv2d, normalize_constraint, unit_constraint, COMPUTE_TYPE
 from ..hooks.dump import DUMP_OPS
 from .batch_norm import batch_norm
 from .orthogonal_initializer import orthogonal_initializer
@@ -58,7 +58,7 @@ def residual_block(x, mode, params):
 
         # the 2nd convolution
         y = batch_norm(conv2d(y, conv_2), conv_2, mode, params, is_recomputing=is_recomputing)
-        y = tf.nn.relu(tf.cast(alpha, tf.float16) * y + tf.cast(1.0 - alpha, tf.float16) * x)
+        y = tf.nn.relu(tf.cast(alpha, COMPUTE_TYPE) * y + tf.cast(1.0 - alpha, COMPUTE_TYPE) * x)
 
         return y
 

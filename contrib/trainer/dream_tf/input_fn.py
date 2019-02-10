@@ -23,11 +23,11 @@ import os
 import tensorflow as tf
 
 from .constants.boost_table import BOOST_PER_MOVE_NUMBER
-from .ffi.libdg_go import get_single_example
+from .ffi.libdg_go import get_single_example, set_seed
 from .layers import NUM_FEATURES
 
 
-def _parse(line):
+def _parse(is_deterministic):
     def __parse(raw_example):
         result, example = get_single_example(raw_example)
 
@@ -51,11 +51,19 @@ def _parse(line):
 
         return features, boost, value, policy
 
-    return tuple(tf.py_func(
-        __parse,
-        [line],
-        [tf.float16, tf.float32, tf.float32, tf.float32]
-    ))
+    # by default the random number generator is seeded from entropy, but if we
+    # are running deterministically. Seed it manually instead*.
+    #
+    # * Since the Tensorflow graph seed has not been set yet :'(
+    if is_deterministic:
+        set_seed(0x454f1317)
+
+    return lambda line: \
+        tuple(tf.py_func(
+            __parse,
+            [line],
+            [tf.float16, tf.float32, tf.float32, tf.float32]
+        ))
 
 
 def _illegal_policy(features, boost, value, policy):
@@ -146,11 +154,11 @@ def _fix_history(features, boost, value, policy):
     return features, boost, value, policy
 
 
-def get_dataset(files, is_training=True):
+def get_dataset(files, is_training=True, is_deterministic=False):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
     with tf.device('cpu:0'):
-        num_parallel_calls = max(os.cpu_count() - 8, 4)
+        num_parallel_calls = max(os.cpu_count() - 8, 4) if (is_training and not is_deterministic) else 1
 
         if len(files) > 1:
             file_names = tf.data.Dataset.from_tensor_slices(files)
@@ -162,7 +170,7 @@ def get_dataset(files, is_training=True):
             )
         else:
             dataset = tf.data.TextLineDataset(files)
-        dataset = dataset.map(_parse, num_parallel_calls=num_parallel_calls)
+        dataset = dataset.map(_parse(is_deterministic), num_parallel_calls=num_parallel_calls)
         dataset = dataset.filter(_illegal_policy)
         dataset = dataset.map(_fix_shape)
         if is_training:
@@ -173,8 +181,17 @@ def get_dataset(files, is_training=True):
         return dataset
 
 
-def input_fn(files, batch_size, is_training):
-    dataset = get_dataset(files, is_training)
+def input_fn(files, batch_size, features_mask, is_training, is_deterministic=False):
+    dataset = get_dataset(files, is_training, is_deterministic)
+
+    if features_mask is not None:
+        features_mask = tf.constant(features_mask, tf.float16, (1, 1, NUM_FEATURES))
+
+        def _mask_features(features, boost, value, policy):
+            return features * features_mask, boost, value, policy
+
+        dataset = dataset.map(_mask_features)
+
     dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(2)
 
