@@ -146,7 +146,7 @@ def _fix_history(features, boost, value, policy):
     return features, boost, value, policy
 
 
-def get_dataset(files, batch_size=1, is_training=True):
+def get_dataset(files, is_training=True):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
     with tf.device('cpu:0'):
@@ -174,7 +174,7 @@ def get_dataset(files, batch_size=1, is_training=True):
 
 
 def input_fn(files, batch_size, is_training):
-    dataset = get_dataset(files, batch_size, is_training)
+    dataset = get_dataset(files, is_training)
     dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(2)
 

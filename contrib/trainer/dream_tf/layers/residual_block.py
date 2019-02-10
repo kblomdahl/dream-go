@@ -40,7 +40,7 @@ def residual_block(x, mode, params):
     7. A rectifier non-linearity
     """
     init_op = orthogonal_initializer()
-    half_op = tf.constant_initializer(0.5, tf.float32)
+    half_op = tf.constant_initializer(0.5)
     num_channels = params['num_channels']
 
     conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)

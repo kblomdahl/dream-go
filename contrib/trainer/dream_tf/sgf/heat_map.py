@@ -31,13 +31,13 @@ def to_sgf_heat_map(features, tower):
         for x in range(19):
             ch = to_sgf_coord(x, y)
 
-            if features[3, y, x] > 0.0:
+            if features[y, x, 5] > 0.0:  # player
                 black_vertices += (ch,)
-            elif features[4, y, x] > 0.0:
+            elif features[y, x, 21] > 0.0:  # opponent
                 white_vertices += (ch,)
 
     # collect the actual heat map
-    num_channels = tower.shape[0]
+    num_channels = tower.shape[2]
     labels = []
 
     for i in range(num_channels):
@@ -47,8 +47,8 @@ def to_sgf_heat_map(features, tower):
             for x in range(19):
                 ch = to_sgf_coord(x, y)
 
-                if tower[i, y, x] > 1e-4:
-                    labels_for_channel[ch] = tower[i, y, x]
+                if tower[y, x, i] > 1e-4:
+                    labels_for_channel[ch] = tower[y, x, i]
 
         labels += (labels_for_channel,)
 
