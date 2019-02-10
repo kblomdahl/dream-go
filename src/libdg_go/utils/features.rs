@@ -22,7 +22,7 @@ use super::ladder::Ladder;
 use super::symmetry;
 
 /// The number of features that the board will provide.
-pub const NUM_FEATURES: usize = 32;
+pub const NUM_FEATURES: usize = 40;
 
 /// The total size (in elements) of the feature set.
 pub const FEATURE_SIZE: usize = NUM_FEATURES * 361;
@@ -108,12 +108,20 @@ impl Features for Board {
     /// 27. Opponent liberties (>= 6)
     /// 28. Opponent liberties (>= 7)
     /// 29. Opponent liberties (>= 8)
-    /// 
+    /// 30. Opponent liberties after move (>= 1)
+    /// 31. Opponent liberties after move (>= 2)
+    /// 32. Opponent liberties after move (>= 3)
+    /// 33. Opponent liberties after move (>= 4)
+    /// 34. Opponent liberties after move (>= 5)
+    /// 35. Opponent liberties after move (>= 6)
+    /// 36. Opponent liberties after move (>= 7)
+    /// 37. Opponent liberties after move (>= 8)
+    ///
     /// ## Vertex properties
     /// 
-    /// 30. Is super-ko
-    /// 31. Is ladder capture
-    /// 32. Is ladder escape
+    /// 38. Is super-ko
+    /// 39. Is ladder capture
+    /// 40. Is ladder escape
     ///
     /// # Arguments
     ///
@@ -131,6 +139,7 @@ impl Features for Board {
         let mut features = vec! [c_0; FEATURE_SIZE];
         let symmetry_table = symmetry.get_table();
         let current = color as u8;
+        let opponent = color.opposite();
 
         // board state (one-hot historic)
         for (i, index) in self.history.iter().take(2).enumerate() {
@@ -159,14 +168,27 @@ impl Features for Board {
                 for i in 0..num_liberties {
                     features[O::index(start+i, other)] = c_1;
                 }
-            } else if _is_valid_memoize(&self.inner, color, index, &mut liberties) {
-                let num_liberties = ::std::cmp::min(
-                    get_num_liberties_if(&self.inner, color, index, &mut liberties),
-                    8
-                );
+            } else {
+                if _is_valid_memoize(&self.inner, color, index, &mut liberties) {
+                    let num_liberties = ::std::cmp::min(
+                        get_num_liberties_if(&self.inner, color, index, &mut liberties),
+                        8
+                    );
 
-                for i in 0..num_liberties {
-                    features[O::index(13+i, other)] = c_1;
+                    for i in 0..num_liberties {
+                        features[O::index(13+i, other)] = c_1;
+                    }
+                }
+
+                if _is_valid_memoize(&self.inner, opponent, index, &mut liberties) {
+                    let num_liberties = ::std::cmp::min(
+                        get_num_liberties_if(&self.inner, opponent, index, &mut liberties),
+                        8
+                    );
+
+                    for i in 0..num_liberties {
+                        features[O::index(29+i, other)] = c_1;
+                    }
                 }
             }
         }
@@ -184,17 +206,17 @@ impl Features for Board {
                 if self._is_ko(color, index) {
                     is_ko = c_1;
 
-                    features[O::index(29, other)] = c_1;
+                    features[O::index(37, other)] = c_1;
                 }
 
                 // is ladder capture
                 if self.inner.is_ladder_capture(color, index) {
-                    features[O::index(30, other)] = c_1;
+                    features[O::index(38, other)] = c_1;
                 }
 
                 // is ladder escape
                 if self.inner.is_ladder_escape(color, index) {
-                    features[O::index(31, other)] = c_1;
+                    features[O::index(39, other)] = c_1;
                 }
             }
         }
@@ -358,5 +380,21 @@ fn get_num_liberties_if(board: &BoardFast, color: Color, index: usize, memoize: 
 
 #[cfg(test)]
 mod tests {
-    // pass
+    use super::*;
+
+    #[test]
+    fn check_features_chw() {
+        let features = Board::new(0.5)
+            .get_features::<CHW, f32>(Color::Black, symmetry::Transform::Identity);
+
+        assert_eq!(features.len(), FEATURE_SIZE);
+    }
+
+    #[test]
+    fn check_features_hwc() {
+        let features = Board::new(0.5)
+            .get_features::<HWC, f32>(Color::Black, symmetry::Transform::Identity);
+
+        assert_eq!(features.len(), FEATURE_SIZE);
+    }
 }
