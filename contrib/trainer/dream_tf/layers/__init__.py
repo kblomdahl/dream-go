@@ -46,4 +46,16 @@ def unit_constraint(x):
 
 def conv2d(x, weights):
     """ Shortcut for `tf.nn.conv2d` """
-    return tf.nn.conv2d(x, tf.cast(weights, COMPUTE_TYPE), (1, 1, 1, 1), 'SAME', True, 'NHWC')
+    return tf.nn.conv2d(x, cast_to_compute_type(weights), (1, 1, 1, 1), 'SAME', True, 'NHWC')
+
+
+def cast_to_compute_type(var):
+    """ Returns the given variable as the current compute type """
+    return tf.cast(var, COMPUTE_TYPE)
+
+
+def set_compute_type(type):
+    """ Sets the compute type of the convolution operation, and other operations """
+    global COMPUTE_TYPE
+
+    COMPUTE_TYPE = type

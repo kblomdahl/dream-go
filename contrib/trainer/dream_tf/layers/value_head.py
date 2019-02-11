@@ -20,7 +20,7 @@
 
 import tensorflow as tf
 
-from . import conv2d, normalize_constraint, COMPUTE_TYPE
+from . import conv2d, normalize_constraint, cast_to_compute_type
 from ..hooks.dump import DUMP_OPS
 from .batch_norm import batch_norm
 from .recompute_grad import recompute_grad
@@ -60,9 +60,9 @@ def value_head(x, mode, params):
         y = tf.nn.relu(y)
 
         y = tf.reshape(y, (-1, 361))
-        y = tf.matmul(y, tf.cast(linear_1, COMPUTE_TYPE)) + tf.cast(offset_1, COMPUTE_TYPE)
+        y = tf.matmul(y, cast_to_compute_type(linear_1)) + cast_to_compute_type(offset_1)
         y = tf.nn.relu(y)
-        y = tf.matmul(y, tf.cast(linear_2, COMPUTE_TYPE)) + tf.cast(offset_2, COMPUTE_TYPE)
+        y = tf.matmul(y, cast_to_compute_type(linear_2)) + cast_to_compute_type(offset_2)
 
         return tf.cast(tf.nn.tanh(y), tf.float32)
 

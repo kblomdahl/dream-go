@@ -26,6 +26,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python import debug as tf_debug
 
+from .layers import set_compute_type
 from .hooks.dump import DumpHook
 from .hooks.learning_rate import LearningRateScheduler
 from .input_fn import input_fn
@@ -131,6 +132,11 @@ def main():
     else:
         steps_to_skip = 0
         warm_start_from = None
+
+    if args.deterministic:
+        # since 16-bit floating point is not accurate enough for deterministic output, fix
+        # it to `f32` instead.
+        set_compute_type(tf.float32)
 
     if args.mask:
         features_mask = list(map(lambda x: float(x), args.mask[0].split(';')))
