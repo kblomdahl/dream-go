@@ -68,14 +68,14 @@ impl TimeStrategy for PonderTimeControl {
 /// * `service` - the neural network service used for inference
 /// * `search_tree` - the search tree to probe into
 /// * `board` - the board state at the root of the search tree
-/// * `next_color` - the color of the player whose turn it is to play
+/// * `to_move` - the color of the player whose turn it is to play
 /// * `is_running` - the boolean used to determine when to terminate the search
 /// 
 fn ponder_worker(
     service: PredictService,
     search_tree: Option<SearchTree>,
     board: Board,
-    next_color: Color,
+    to_move: Color,
     is_running: Arc<AtomicBool>
 ) -> (PonderResult, Duration)
 {
@@ -87,11 +87,11 @@ fn ponder_worker(
         PonderTimeControl { is_running, max_tree_size },
         search_tree,
         &board,
-        next_color
+        to_move
     );
 
     if let Some((_value, _index, next_tree)) = result {
-        (Ok((service, next_tree, board, next_color)), start_time.elapsed())
+        (Ok((service, next_tree, board, to_move)), start_time.elapsed())
     } else {
         (Err("unrecognized error"), start_time.elapsed())
     }
@@ -126,11 +126,11 @@ impl PonderService {
     /// # Arguments
     /// 
     /// * `board` - the initial board.
-    /// * `next_color` - the color of the player whose turn it is.
-    /// 
-    pub fn new(board: Board, next_color: Color) -> PonderService {
+    ///
+    pub fn new(board: Board) -> PonderService {
         let is_running = Arc::new(AtomicBool::new(!*config::NO_PONDER));
         let is_running_worker = is_running.clone();
+        let to_move = board.to_move();
 
         PonderService {
             is_running: is_running,
@@ -138,7 +138,7 @@ impl PonderService {
                 if let Some(network) = Network::new() {
                     let service = mcts::predict_service::service(network);
 
-                    ponder_worker(service, None, board, next_color, is_running_worker)
+                    ponder_worker(service, None, board, to_move, is_running_worker)
                 } else {
                     (Err("unable to load network weights"), Duration::new(0, 0))
                 }
@@ -183,12 +183,12 @@ impl PonderService {
 
                 Err(reason)
             },
-            (Ok((service, search_tree, board, next_color)), duration) => {
+            (Ok((service, search_tree, board, to_move)), duration) => {
                 let start_time = ProcessTime::now();
-                let (result, search_tree, (board, next_color)) = callback(
+                let (result, search_tree, (board, to_move)) = callback(
                     &service,
                     search_tree,
-                    (board, next_color)
+                    (board, to_move)
                 );
 
                 // re-spawn the pondering thread now that the callback has been
@@ -198,7 +198,7 @@ impl PonderService {
                 self.cpu_time += start_time.elapsed() + duration;
                 self.is_running.store(!*config::NO_PONDER, Ordering::SeqCst);
                 self.worker = Some(thread::spawn(move || {
-                    ponder_worker(service, search_tree, board, next_color, is_running_worker)
+                    ponder_worker(service, search_tree, board, to_move, is_running_worker)
                 }));
 
                 Ok(result)
@@ -215,8 +215,8 @@ impl PonderService {
     /// * `coordinate` - `(x, y)` coordinates of the move, or `None` to pass.
     /// 
     pub fn forward(&mut self, color: Color, coordinate: Option<(usize, usize)>) {
-        let _result = self.service(move |_service, search_tree, (board, next_color)| {
-            let search_tree = if next_color != color {
+        let _result = self.service(move |_service, search_tree, (board, to_move)| {
+            let search_tree = if to_move != color {
                 // passing moves are not recorded in the GTP protocol, so we
                 // will just assume the other player passed once if we are in
                 // this situation

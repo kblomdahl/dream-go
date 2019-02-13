@@ -156,7 +156,7 @@ impl<K: Clone + Hash + Eq, V: Clone> LruCache<K, V> {
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct BoardTuple {
     board: Board,
-    color: Color,
+    to_move: Color,
     symmetry: symmetry::Transform
 }
 
@@ -167,15 +167,15 @@ struct BoardTuple {
 /// # Arguments
 /// 
 /// * `board` - the board to get from the table
-/// * `color` - the color to get from the table
-/// * `t` - the symmetry to get from the table
+/// * `to_move` - the color to get from the table
+/// * `symmetry` - the symmetry to get from the table
 /// * `supplier` - a function that can be used to compute the value
 ///   and policy if they are missing from the table.
 /// 
 pub fn get_or_insert<F>(
     board: &Board,
-    color: Color,
-    t: symmetry::Transform,
+    to_move: Color,
+    symmetry: symmetry::Transform,
     supplier: F
 ) -> Option<(f32, Vec<f32>)>
     where F: FnOnce() -> Option<(f32, Vec<f32>)>
@@ -188,8 +188,8 @@ pub fn get_or_insert<F>(
 
     let key = BoardTuple {
         board: board.clone(),
-        color: color,
-        symmetry: t
+        to_move: to_move,
+        symmetry: symmetry
     };
     let existing = {
         let mut table = TABLE.lock().unwrap();

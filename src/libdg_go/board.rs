@@ -95,6 +95,15 @@ impl Board {
         self.last_played
     }
 
+    /// Returns the color whose turn it is to play a move.
+    #[inline]
+    pub fn to_move(&self) -> Color {
+        match self.last_played() {
+            Some(color) => color.opposite(),
+            _ => Color::Black,
+        }
+    }
+
     /// Returns the color (if the vertex is not empty) of the stone at
     /// the given coordinates.
     ///
@@ -164,7 +173,7 @@ impl Board {
     /// * `index` - the index of the move
     /// * `workspace` - the memoization of the board liberties
     ///
-    pub(super) fn _is_valid_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
+    pub fn is_valid_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
         self.inner.is_valid_mut(color, index, workspace) && !self._is_ko_mut(color, index, workspace)
     }
 
@@ -179,19 +188,6 @@ impl Board {
     ///
     pub(super) fn _is_valid(&self, color: Color, index: usize) -> bool {
         self.inner.is_valid(color, index) && !self._is_ko(color, index)
-    }
-
-    /// Returns whether the given move is valid according to the
-    /// Tromp-Taylor rules, using a memoization
-    ///
-    /// # Arguments
-    ///
-    /// * `color` - the color of the move
-    /// * `x` - the column of the move
-    /// * `y` - the row of the move
-    ///
-    pub fn is_valid_mut(&self, color: Color, x: usize, y: usize, workspace: &mut [u8]) -> bool {
-        self._is_valid_mut(color, 19 * y + x, workspace)
     }
 
     /// Returns whether the given move is valid according to the
@@ -440,5 +436,27 @@ mod tests {
         assert_eq!(board.at(2, 1), Some(Color::Black));
         assert_eq!(board.at(0, 2), Some(Color::Black));
         assert_eq!(board.at(2, 0), Some(Color::Black));
+    }
+
+    #[test]
+    fn black_starts() {
+        let board = Board::new(0.5);
+
+        assert_eq!(board.to_move(), Color::Black);
+    }
+
+    #[test]
+    fn alternate_turns() {
+        let mut board = Board::new(0.5);
+
+        board.place(Color::Black, 0, 0);
+        assert_eq!(board.to_move(), Color::White);
+
+        board.place(Color::White, 1, 1);
+        assert_eq!(board.to_move(), Color::Black);
+
+        // if black pass, it should not mess everything up
+        board.place(Color::White, 2, 2);
+        assert_eq!(board.to_move(), Color::Black);
     }
 }

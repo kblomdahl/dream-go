@@ -109,18 +109,18 @@ fn policy_choose(policy: &[f32], temperature: f32) -> Option<usize> {
     }
 }
 
-fn policy_ex_it<P: Predictor + 'static>(server: &P, board: &Board, color: Color) -> Option<(String, f32)> {
+fn policy_ex_it<P: Predictor + 'static>(server: &P, board: &Board, to_move: Color) -> Option<(String, f32)> {
     let (value, _index, tree) = predict_aux::<_, _>(
         server,
         1,
         RolloutLimit::new((*config::NUM_ROLLOUT).into()),
         None,
         board,
-        color
+        to_move
     )?;
 
     let policy_sgf = b85::encode(&tree.softmax());
-    let value_sgf = if color == Color::Black {
+    let value_sgf = if to_move == Color::Black {
         2.0 * value - 1.0
     } else {
         -2.0 * value + 1.0
@@ -136,18 +136,18 @@ fn policy_ex_it<P: Predictor + 'static>(server: &P, board: &Board, color: Color)
 ///
 /// * `server` -
 /// * `board` -
-/// * `color` -
+/// * `to_move` -
 ///
 fn policy_forward<P: Predictor + 'static>(
     server: &P,
     board: &Board,
-    color: Color
+    to_move: Color
 ) -> Option<(f32, Vec<f32>)>
 {
     let num_policy_rollout = *config::NUM_POLICY_ROLLOUT;
 
     if num_policy_rollout <= 1 {
-        let (value, mut policy) = full_forward(server, board, color)?;
+        let (value, mut policy) = full_forward(server, board, to_move)?;
         dirichlet::add(&mut policy[0..362], 0.03);
 
         Some((value, policy))
@@ -158,7 +158,7 @@ fn policy_forward<P: Predictor + 'static>(
             RolloutLimit::new(num_policy_rollout),
             None,
             &board,
-            color
+            to_move
         )?;
 
         Some((value, tree.softmax()))

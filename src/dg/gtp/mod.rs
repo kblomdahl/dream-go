@@ -299,14 +299,14 @@ impl Gtp {
     /// # Arguments
     /// 
     /// * `id` - the identifier of the command
-    /// * `color` - the color to generate the move for
+    /// * `to_move` - the color to generate the move for
     /// * `mode` - determine whether this is a clean-up move
     /// 
-    fn generate_move(&mut self, id: Option<usize>, color: Color, mode: &GenMoveMode) -> Option<Vertex> {
-        let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[color as usize].remaining();
+    fn generate_move(&mut self, id: Option<usize>, to_move: Color, mode: &GenMoveMode) -> Option<Vertex> {
+        let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[to_move as usize].remaining();
         let board = self.history.last().unwrap();
         let result = self.ponder.service(|service, search_tree, p_state| {
-            let search_tree = if search_tree.color != color {
+            let search_tree = if search_tree.to_move != to_move {
                 // passing moves are not recorded in the GTP protocol, so we
                 // will just assume the other player passed once if we are in
                 // this situation
@@ -326,7 +326,7 @@ impl Gtp {
                     time_control::ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods),
                     search_tree,
                     &board,
-                    color
+                    to_move
                 )
             } else {
                 mcts::predict(
@@ -335,7 +335,7 @@ impl Gtp {
                     time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
                     search_tree,
                     &board,
-                    color
+                    to_move
                 )
             };
 
@@ -369,11 +369,11 @@ impl Gtp {
                 let (x, y) = (mcts::tree::X[index] as usize, mcts::tree::Y[index] as usize);
                 let mut other = board.clone();
 
-                other.place(color, x, y);
+                other.place(to_move, x, y);
                 (Some(Vertex { x, y }), mcts::tree::Node::forward(tree, index), other)
             };
 
-            (Some((vertex, should_resign, explain_last_move)), tree, (other, color.opposite()))
+            (Some((vertex, should_resign, explain_last_move)), tree, (other, to_move.opposite()))
         });
 
         if let Ok(Some((vertex, should_resign, explain_last_move))) = result {
@@ -430,7 +430,7 @@ impl Gtp {
                 if self.history.len() > 1 {
                     self.history = vec![Board::new(self.komi)];
                     self.explain_last_move = String::new();
-                    self.ponder = PonderService::new(Board::new(self.komi), Color::Black);
+                    self.ponder = PonderService::new(Board::new(self.komi));
                 }
 
                 success!(id, "");
@@ -445,12 +445,8 @@ impl Gtp {
                     // restart the pondering service, since we have been thinking
                     // with the wrong komi.
                     let board = self.history.last().unwrap().clone();
-                    let next_color = match board.last_played() {
-                        Some(color) => color.opposite(),
-                        None => Color::Black
-                    };
 
-                    self.ponder = PonderService::new(board, next_color);
+                    self.ponder = PonderService::new(board);
                 }
 
                 success!(id, "");
@@ -526,11 +522,7 @@ impl Gtp {
             Command::FinalScore => {
                 let board = self.history.last().unwrap();
                 let result = self.ponder.service(|service, search_tree, p_state| {
-                    let next_color = match board.last_played() {
-                        Some(color) => color.opposite(),
-                        _ => Color::Black,
-                    };
-                    let (finished, rollout) = mcts::greedy_score(&service.lock(), &board, next_color);
+                    let (finished, rollout) = mcts::greedy_score(&service.lock(), &board, board.to_move());
                     let (black, white) = board.get_guess_score(&finished);
 
                     ((black, white, rollout), Some(search_tree), p_state)
@@ -557,11 +549,7 @@ impl Gtp {
             Command::FinalStatusList(status) => {
                 let board = self.history.last().unwrap();
                 let result = self.ponder.service(|service, search_tree, p_state| {
-                    let next_color = match board.last_played() {
-                        Some(color) => color.opposite(),
-                        _ => Color::Black,
-                    };
-                    let (finished, _rollout) = mcts::greedy_score(&service.lock(), &board, next_color);
+                    let (finished, _rollout) = mcts::greedy_score(&service.lock(), &board, board.to_move());
 
                     (finished, Some(search_tree), p_state)
                 });
@@ -594,13 +582,9 @@ impl Gtp {
 
                     // update the ponder state with the new board position
                     let board = self.history.last().unwrap().clone();
-                    let next_color = match board.last_played() {
-                        Some(color) => color.opposite(),
-                        None => Color::Black
-                    };
 
                     self.explain_last_move = String::new();
-                    self.ponder = PonderService::new(board, next_color);
+                    self.ponder = PonderService::new(board);
 
                     success!(id, "");
                 } else {
@@ -676,7 +660,7 @@ pub fn run() {
     let stdin = ::std::io::stdin();
     let stdin_lock = stdin.lock();
     let mut gtp = Gtp {
-        ponder: PonderService::new(Board::new(DEFAULT_KOMI), Color::Black),
+        ponder: PonderService::new(Board::new(DEFAULT_KOMI)),
         history: vec! [Board::new(DEFAULT_KOMI)],
         komi: DEFAULT_KOMI,
         explain_last_move: String::new(),

@@ -113,7 +113,7 @@ impl PUCT {
         use std::intrinsics::{fadd_fast, fsub_fast, fdiv_fast};
 
         for &(node, _, index) in trace.iter() {
-            let value_ = if color == (*node).color { value } else { 1.0 - value };
+            let value_ = if color == (*node).to_move { value } else { 1.0 - value };
 
             // incremental update of the average value and remove any additional
             // virtual losses we added to the node
@@ -917,7 +917,7 @@ pub struct Node {
     pub lock: Mutex,
 
     /// The color of each edge.
-    pub color: Color,
+    pub to_move: Color,
 
     /// The initial vale of this node.
     pub initial_value: f32,
@@ -952,10 +952,10 @@ impl Node {
     ///
     /// # Arguments
     ///
-    /// * `color` - the color of the first players color
+    /// * `to_move` - the color of the first players color
     /// * `prior` - the prior values of the nodes
     ///
-    pub fn new(color: Color, value: f32, prior: Vec<f32>) -> Node {
+    pub fn new(to_move: Color, value: f32, prior: Vec<f32>) -> Node {
         assert!(prior.len() >= 362);
 
         // copy the prior values into an array size that is dividable
@@ -965,7 +965,7 @@ impl Node {
 
         Node {
             lock: Mutex::new(),
-            color,
+            to_move: to_move,
             initial_value: value,
             pass_count: 0,
             total_count: 0,
@@ -984,7 +984,7 @@ impl Node {
     ///
     fn is_valid_candidate(&self, board: &Board, index: usize) -> bool {
         self.prior[index].is_finite() && {
-            index == 361 || board.is_valid(self.color, X[index] as usize, Y[index] as usize)
+            index == 361 || board.is_valid(self.to_move, X[index] as usize, Y[index] as usize)
         } && self.with(index, |cand| cand.value().is_finite())
     }
 
@@ -1080,8 +1080,8 @@ impl Node {
 
             write!(fmt, "(")?;
             write!(fmt, ";{}[{}]",
-                if self.color == Color::Black { "B" } else { "W" },
-                if i == 361 { "tt".to_string() } else { S::to_sgf(X[i] as usize, Y[i] as usize) },
+                   if self.to_move == Color::Black { "B" } else { "W" },
+                   if i == 361 { "tt".to_string() } else { S::to_sgf(X[i] as usize, Y[i] as usize) },
             )?;
             write!(fmt, "C[prior {:.4} value {:.4} (visits {} / total {}) uct {:.4}]",
                 self.prior[i],
@@ -1113,7 +1113,7 @@ impl Node {
     /// * `index` - the move to pluck the sub-tree for
     ///
     pub fn forward(mut self, index: usize) -> Option<Node> {
-        let color = self.color;
+        let color = self.to_move;
         let pass_count = self.pass_count;
 
         self.with_mut(index, |mut child| {
@@ -1333,13 +1333,13 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> Option<NodeTrace> {
 
     loop {
         if let Some(next_child) = current.select(!trace.is_empty()) {
-            trace.push((current as *mut Node, current.color, next_child));
+            trace.push((current as *mut Node, current.to_move, next_child));
 
             if next_child != 361 {  // not a passing move
                 let (x, y) = (X[next_child] as usize, Y[next_child] as usize);
 
-                debug_assert!(board.is_valid(current.color, x, y), "{}\nx {}, y {}", board.to_string(), x, y);
-                board.place(current.color, x, y);
+                debug_assert!(board.is_valid(current.to_move, x, y), "{}\nx {}, y {}", board.to_string(), x, y);
+                board.place(current.to_move, x, y);
             } else if current.pass_count >= 1 {
                 break;  // at least two consecutive passes
             }
@@ -1417,7 +1417,7 @@ impl<'a, S: SgfCoordinate> fmt::Display for ToSgf<'a, S> {
             // add the standard SGF prefix
             write!(fmt, "(;GM[1]FF[4]SZ[19]RU[Chinese]KM[{:.1}]PL[{}]",
                 self.starting_point.komi(),
-                if self.root.color == Color::Black { "B" } else { "W" }
+                if self.root.to_move == Color::Black { "B" } else { "W" }
             )?;
 
             // write the starting point to the SGF file as pre-set variables
@@ -1586,12 +1586,12 @@ mod tests {
     use asm::normalize_finite_f32;
     use super::*;
 
-    fn get_prior_distribution(rng: &mut SmallRng, board: &Board, color: Color) -> Vec<f32> {
+    fn get_prior_distribution(rng: &mut SmallRng, board: &Board, to_move: Color) -> Vec<f32> {
         let mut prior: Vec<f32> = (0..368).map(|_| rng.gen::<f32>()).collect();
         let mut memoize = [0; 368];
 
         for i in 0..362 {
-            if i != 361 && !board.is_valid_mut(color, X[i] as usize, Y[i] as usize, &mut memoize) {
+            if i != 361 && !board.is_valid_mut(to_move, i, &mut memoize) {
                 prior[i] = ::std::f32::NEG_INFINITY;
             }
         }

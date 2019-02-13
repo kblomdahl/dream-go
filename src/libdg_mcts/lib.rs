@@ -109,10 +109,10 @@ impl fmt::Display for GameResult {
 ///
 /// * `server` - the server to use for predictions
 /// * `board` - the board position to evaluate
-/// * `color` - the color to evaluate for
+/// * `to_move` - the color to evaluate for
 ///
-fn full_forward<P: Predictor>(server: &P, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
-    let (initial_policy, indices) = create_initial_policy(board, color);
+fn full_forward<P: Predictor>(server: &P, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>)> {
+    let (initial_policy, indices) = create_initial_policy(board, to_move);
     let mut policy = initial_policy.clone();
     let mut value = 0.0f32;
 
@@ -121,11 +121,11 @@ fn full_forward<P: Predictor>(server: &P, board: &Board, color: Color) -> Option
     let mut new_symmetries = vec! [];
 
     for &t in &symmetry::ALL {
-        if let Some((other_value, other_policy)) = global_cache::get_or_insert(board, color, t, || { None }) {
+        if let Some((other_value, other_policy)) = global_cache::get_or_insert(board, to_move, t, || { None }) {
             for i in 0..362 { policy[i] += other_policy[i]; }
             value += other_value;
         } else {
-            new_requests.push(board.get_features::<HWC, f16>(color, t));
+            new_requests.push(board.get_features::<HWC, f16>(to_move, t));
             new_symmetries.push(t);
         }
     }
@@ -136,7 +136,7 @@ fn full_forward<P: Predictor>(server: &P, board: &Board, color: Color) -> Option
 
     for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
         let (other_value, other_policy) = new_response?;
-        let (other_value, other_policy) = global_cache::get_or_insert(board, color, t, || {
+        let (other_value, other_policy) = global_cache::get_or_insert(board, to_move, t, || {
             let mut identity_policy = initial_policy.clone();
             add_valid_candidates(&mut identity_policy, other_policy, &indices, t);
             normalize_policy(&mut identity_policy);
@@ -160,18 +160,18 @@ fn full_forward<P: Predictor>(server: &P, board: &Board, color: Color) -> Option
 ///
 /// * `workspace` - the workspace to use during the forward pass
 /// * `board` - the board position
-/// * `color` - the current player
+/// * `to_move` - the current player
 ///
-fn forward<P: Predictor>(server: &P, board: &Board, color: Color) -> Option<(f32, Vec<f32>)> {
+fn forward<P: Predictor>(server: &P, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>)> {
     let t = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
 
-    global_cache::get_or_insert(board, color, t, || {
+    global_cache::get_or_insert(board, to_move, t, || {
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
-        let (value, original_policy) = server.predict(board.get_features::<HWC, f16>(color, t))?;
+        let (value, original_policy) = server.predict(board.get_features::<HWC, f16>(to_move, t))?;
 
         // fix-up the potentially broken policy
-        let (mut policy, indices) = create_initial_policy(board, color);
+        let (mut policy, indices) = create_initial_policy(board, to_move);
         add_valid_candidates(&mut policy, original_policy, &indices, t);
         normalize_policy(&mut policy);
 
@@ -187,18 +187,14 @@ fn forward<P: Predictor>(server: &P, board: &Board, color: Color) -> Option<(f32
 /// * `board` -
 /// * `color` -
 ///
-fn create_initial_policy(
-    board: &Board,
-    color: Color
-) -> (Vec<f32>, Vec<usize>)
-{
+fn create_initial_policy(board: &Board, to_move: Color) -> (Vec<f32>, Vec<usize>) {
     // mark all illegal moves as -Inf, which effectively ensures they are never selected by
     // the tree search.
     let mut workspace = [0; 368];
     let mut policy = vec! [::std::f32::NEG_INFINITY; 368];
 
     for i in 0..362 {
-        if i == 361 || board.is_valid_mut(color, tree::X[i] as usize, tree::Y[i] as usize, &mut workspace) {
+        if i == 361 || board.is_valid_mut(to_move, i, &mut workspace) {
             policy[i] = 0.0;
         }
     }
@@ -318,14 +314,14 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
 
             if let Some(trace) = trace {
                 let &(_, color, _) = trace.last().unwrap();
-                let next_color = color.opposite();
-                let result = forward(&server, &board, next_color);
+                let to_move = color.opposite();
+                let result = forward(&server, &board, to_move);
 
                 if let Some((value, policy)) = result {
                     global_rwlock::read_lock();
 
                     unsafe {
-                        tree::insert(&trace, next_color, value, policy);
+                        tree::insert(&trace, to_move, value, policy);
                         break
                     }
                 } else {
@@ -376,7 +372,7 @@ fn predict_aux<T, P>(
     // checks), otherwise we need to query the neural network about what the
     // prior value should be at the root node.
     let starting_tree = if let Some(mut starting_tree) = starting_tree {
-        assert_eq!(starting_tree.color, starting_color);
+        assert_eq!(starting_tree.to_move, starting_color);
 
         // replace the prior value of the tree, since it was either:
         //

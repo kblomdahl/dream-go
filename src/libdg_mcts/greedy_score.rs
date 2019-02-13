@@ -66,17 +66,16 @@ fn is_eye(board: &Board, color: Color, index: usize) -> bool {
 /// 
 /// * `server` - the server to use during evaluation
 /// * `board` - the board to score
-/// * `next_color` - the color of the player whose turn it is to play
+/// * `to_move` - the color of the player whose turn it is to play
 /// 
-pub fn greedy_score<P: Predictor>(server: &P, board: &Board, next_color: Color) -> (Board, String) {
+pub fn greedy_score<P: Predictor>(server: &P, board: &Board, mut to_move: Color) -> (Board, String) {
     let mut board = board.clone();
     let mut sgf = String::new();
-    let mut current = next_color;
     let mut pass_count = 0;
     let mut count = 0;
 
     while count < 722 && pass_count < 2 && !board.is_scorable() {
-        let policy = if let Some(response) = full_forward(server, &board, current) {
+        let policy = if let Some(response) = full_forward(server, &board, to_move) {
             response.1
         } else {
             return (board, sgf)
@@ -85,22 +84,22 @@ pub fn greedy_score<P: Predictor>(server: &P, board: &Board, next_color: Color) 
         // pick the move with the largest prior value that does not fill an
         // eye
         let index = (0..361)
-            .filter(|&i| policy[i].is_finite() && !is_eye(&board, current, i))
+            .filter(|&i| policy[i].is_finite() && !is_eye(&board, to_move, i))
             .max_by_key(|&i| OrderedFloat(policy[i]));
 
         if let Some(index) = index {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
-            sgf += &format!(";{}[{}]", current, Sabaki::to_sgf(x, y));
+            sgf += &format!(";{}[{}]", to_move, Sabaki::to_sgf(x, y));
             pass_count = 0;
-            board.place(current, x, y);
+            board.place(to_move, x, y);
         } else {  // no valid moves remaining
-            sgf += &format!(";{}[]", current);
+            sgf += &format!(";{}[]", to_move);
             pass_count += 1;
         }
 
         // continue with the next turn
-        current = current.opposite();
+        to_move = to_move.opposite();
         count += 1;
     }
 

@@ -55,12 +55,12 @@ pub trait Features {
     ///
     /// # Arguments
     ///
-    /// * `color` - the color of the current player
+    /// * `to_move` - the color of the current player
     /// * `symmetry` - the symmetry to use
     ///
     fn get_features<O: Order, T: From<f32> + Copy>(
         &self,
-        color: Color,
+        to_move: Color,
         symmetry: symmetry::Transform
     ) -> Vec<T>;
 }
@@ -117,11 +117,11 @@ impl Features for Board {
     ///
     /// # Arguments
     ///
-    /// * `color` - the color of the current player
+    /// * `to_move` - the color of the current player
     ///
     fn get_features<O: Order, T: From<f32> + Copy>(
         &self,
-        color: Color,
+        to_move: Color,
         symmetry: symmetry::Transform
     ) -> Vec<T>
     {
@@ -130,7 +130,7 @@ impl Features for Board {
 
         let mut features = vec! [c_0; FEATURE_SIZE];
         let symmetry_table = symmetry.get_table();
-        let current = color as u8;
+        let current = to_move as u8;
 
         // board state (one-hot historic)
         for (i, index) in self.history.iter().take(2).enumerate() {
@@ -159,9 +159,9 @@ impl Features for Board {
                 for i in 0..num_liberties {
                     features[O::index(start+i, other)] = c_1;
                 }
-            } else if _is_valid_memoize(&self.inner, color, index, &mut liberties) {
+            } else if _is_valid_memoize(&self.inner, to_move, index, &mut liberties) {
                 let num_liberties = ::std::cmp::min(
-                    get_num_liberties_if(&self.inner, color, index, &mut liberties),
+                    get_num_liberties_if(&self.inner, to_move, index, &mut liberties),
                     8
                 );
 
@@ -179,21 +179,21 @@ impl Features for Board {
 
             if self.inner.vertices[index].color() != 0 {
                 // pass
-            } else if _is_valid_memoize(&self.inner, color, index, &mut liberties) {
+            } else if _is_valid_memoize(&self.inner, to_move, index, &mut liberties) {
                 // is super-ko
-                if self._is_ko(color, index) {
+                if self._is_ko(to_move, index) {
                     is_ko = c_1;
 
                     features[O::index(29, other)] = c_1;
                 }
 
                 // is ladder capture
-                if self.inner.is_ladder_capture(color, index) {
+                if self.inner.is_ladder_capture(to_move, index) {
                     features[O::index(30, other)] = c_1;
                 }
 
                 // is ladder escape
-                if self.inner.is_ladder_escape(color, index) {
+                if self.inner.is_ladder_escape(to_move, index) {
                     features[O::index(31, other)] = c_1;
                 }
             }
@@ -202,8 +202,8 @@ impl Features for Board {
         // global properties
         let c_komi = T::from(max(min(0.5 + (0.5 * self.komi) / 7.5, 1.0), 0.0));
 
-        let is_black = if color == Color::Black { c_komi } else { c_0 };
-        let is_white = if color == Color::White { c_komi } else { c_0 };
+        let is_black = if to_move == Color::Black { c_komi } else { c_0 };
+        let is_white = if to_move == Color::White { c_komi } else { c_0 };
 
         for index in 0..361 {
             let other = symmetry_table[index] as usize;
