@@ -25,6 +25,7 @@ Usage: ./sgf2big.py <directories...>
 import sys
 import os
 
+
 def skip_ws(string, i):
     """
     Returns the first index, larger than or equal to i that does not
@@ -36,6 +37,7 @@ def skip_ws(string, i):
 
     return i
 
+
 def parse_sgf_content(contents, i):
     """
     Parse the given SGF [1] content beginning at the given index and print a one-line version to stdout.
@@ -44,6 +46,7 @@ def parse_sgf_content(contents, i):
     """
 
     i = skip_ws(contents, i)
+    skip_game = False
     out = ''
 
     # GameTree   = "(" Sequence { GameTree } ")"
@@ -67,7 +70,7 @@ def parse_sgf_content(contents, i):
                     i += 1
 
                 if ident == 'AB':  # handicap
-                    return
+                    skip_game = True
 
                 i = skip_ws(contents, i)
 
@@ -79,7 +82,7 @@ def parse_sgf_content(contents, i):
                 # PropValue  = "[" CValueType "]"
                 value = ''
 
-                while i < len(contents) and contents[i] != ']':
+                while i < len(contents) and (contents[i-1] == '\\' or contents[i] != ']'):
                     value += contents[i]
                     i += 1
 
@@ -87,21 +90,22 @@ def parse_sgf_content(contents, i):
 
                 # skip handicap games
                 if ident == 'HA' and value != '0':
-                    return
+                    skip_game = True
 
                 # skip comments
-                if ident != 'C':
+                if not skip_game and ident != 'C':
                     out += ident
                     out += '['
                     out += value
                     out += ']'
 
-        i = skip_ws(contents, i + 1) # skip )
+        i = skip_ws(contents, i + 1)  # skip )
         out += ')'
     else:
         return  # invalid sgf
 
-    print(out)
+    if not skip_game:
+        print(out)
 
     if i < len(contents):
         parse_sgf_content(contents, i)
@@ -136,6 +140,7 @@ def main(base_dir):
             path = os.path.join(root, name)
 
             parse_sgf(path)
+
 
 if __name__ == '__main__':
     for arg in sys.argv[1:]:
