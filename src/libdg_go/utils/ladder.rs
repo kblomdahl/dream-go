@@ -30,23 +30,13 @@ pub trait Ladder {
 /// * `index` - the index of the group to check
 ///
 fn _can_escape_with_capture(board: &BoardFast, color: Color, index: usize) -> bool {
-    let mut current = index;
     let opponent = color.opposite() as u8;
 
-    loop {
-        foreach_4d!(board, current, |other_index, value| {
-            if value == opponent && !board.has_n_liberty::<Two>(other_index, 2) {
-                return true;
-            }
-        });
-
-        current = board.vertices[current].next_vertex() as usize;
-        if current == index {
-            break;
-        }
-    }
-
-    false
+    board.block_at(index).into_iter().any(|current| {
+        board.adjacent_to(current).any(|(other_index, other_vertex)| {
+            other_vertex.color() == opponent && !board.has_n_liberty::<Two>(other_index, 2)
+        })
+    })
 }
 
 /// Returns true if playing a stone at the given index successfully
@@ -66,8 +56,8 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, index: usize) -> bool 
     // that liberty. if no such group exists then this is not a ladder
     // capturing move.
     let opponent = color.opposite() as u8;
-    let opponent_index = find_4d!(board, index, |other_index, value| {
-        if value == opponent {
+    let opponent_index = board.adjacent_to(index).filter_map(|(other_index, other_vertex)| {
+        if other_vertex.color() == opponent {
             let is_in_atari = !board.has_n_liberty::<Two>(other_index, 2);
 
             if is_in_atari && !_can_escape_with_capture(&board, color.opposite(), other_index) {
@@ -78,7 +68,7 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, index: usize) -> bool 
         } else {
             None
         }
-    });
+    }).next();
 
     if opponent_index.is_none() {
         return false
@@ -100,30 +90,27 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, index: usize) -> bool 
         return false;
     }
 
-    // if playing `opponent_vertex` put any of my stones into atari
+    // if playing `opponent_index` put any of my stones into atari
     // then this is not a ladder capturing move.
     let player = color as u8;
-
-    foreach_4d!(board, opponent_index, |other_index, value| {
-        if value == player && !board.has_n_liberty::<Two>(other_index, 2) {
-            return false;
-        }
+    let in_atari = board.adjacent_to(opponent_index).any(|(other_index, other_vertex)| {
+        other_vertex.color() == player && !board.has_n_liberty::<Two>(other_index, 2)
     });
+
+    if in_atari  {
+        return false;
+    }
 
     // try capturing the new group by playing _ladder capturing moves_
     // in all of its liberties, if we succeed with either then this
     // is a ladder capturing move
-    foreach_4d!(board, opponent_index, |other_index, value| {
-        if value == 0 {
+    board.adjacent_to(opponent_index).any(|(other_index, other_vertex)| {
+        other_vertex.color() == 0 && {
             let other = board.clone();
 
-            if _is_ladder_capture(other, color, other_index) {
-                return true;
-            }
+            _is_ladder_capture(other, color, other_index)
         }
-    });
-
-    false
+    })
 }
 
 impl Ladder for BoardFast {
@@ -154,12 +141,8 @@ impl Ladder for BoardFast {
 
         // check if we are connected to a stone with one liberty
         let player = color as u8;
-        let connected_to_one = find_4d!(self, index, |other_index, value| {
-            if value == player && !self.has_n_liberty::<Two>(other_index, 2) {
-                Some(())
-            } else {
-                None
-            }
+        let connected_to_one = self.adjacent_to(index).find(|&(other_index, other_vertex)| {
+            other_vertex.color() == player && !self.has_n_liberty::<Two>(other_index, 2)
         });
 
         if connected_to_one.is_none() {
@@ -183,17 +166,13 @@ impl Ladder for BoardFast {
         }
 
         // check that we cannot be captured in a ladder from either direction
-        foreach_4d!(self, index, |other_index, value| {
-            if value == 0 {
+        self.adjacent_to(index).all(|(other_index, other_vertex)| {
+            other_vertex.color() != 0 || {
                 let board = board.clone();
 
-                if _is_ladder_capture(board, color.opposite(), other_index) {
-                    return false;
-                }
+                !_is_ladder_capture(board, color.opposite(), other_index)
             }
-        });
-
-        true
+        })
     }
 }
 

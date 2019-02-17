@@ -227,17 +227,9 @@ impl Features for Board {
 /// * `liberties` - output array containing the liberties of this group
 ///
 fn fill_liberties(board: &BoardFast, index: usize, liberties: &mut [u8]) {
-    let mut current = index;
-
-    loop {
-        foreach_4d!(board, current, |other_index, value| {
-            liberties[other_index] = value;
-        });
-
-        current = board.vertices[current].next_vertex() as usize;
-
-        if current == index {
-            break;
+    for current in board.block_at(index) {
+        for (other_index, vertex) in board.adjacent_to(current) {
+            liberties[other_index] = vertex.color();
         }
     }
 }
@@ -263,15 +255,9 @@ fn get_num_liberties(board: &BoardFast, index: usize, memoize: &mut [usize]) -> 
         // update the cached value in the memoize array for all stones
         // that are strongly connected to the given index
         let num_liberties = count_zeros(&liberties);
-        let mut current = index;
 
-        loop {
+        for current in board.block_at(index) {
             memoize[current] = num_liberties;
-
-            current = board.vertices[current].next_vertex() as usize;
-            if current == index {
-                break;
-            }
         }
 
         num_liberties
@@ -296,7 +282,9 @@ fn _is_valid_memoize(board: &BoardFast, color: Color, index: usize, memoize: &mu
 
     let current = color as u8;
 
-    foreach_4d!(board, index, |other_index, value| {
+    board.adjacent_to(index).any(|(other_index, vertex)| {
+        let value = vertex.color();
+
         // check for direct liberties
         if value == 0 {
             return true;
@@ -308,12 +296,8 @@ fn _is_valid_memoize(board: &BoardFast, color: Color, index: usize, memoize: &mu
         //    least two liberties.
         // 2. If a neighbour is unfriendly then we are fine if it has less
         //    than two liberties (i.e. one).
-        if value != 0x3 && (value == current) == (get_num_liberties(board, other_index, memoize) >= 2) {
-            return true;
-        }
-    });
-
-    false  // move is suicide :'(
+        value != 0x3 && (value == current) == (get_num_liberties(board, other_index, memoize) >= 2)
+    })
 }
 
 /// Returns the number of liberties of the group connected to the given stone
@@ -334,24 +318,26 @@ fn get_num_liberties_if(board: &BoardFast, color: Color, index: usize, memoize: 
     let current = color as u8;
     let opponent = color.opposite() as u8;
 
-    foreach_4d!(board, index, |other_index, value| {
-        if value == opponent && get_num_liberties(&board, other_index, memoize) == 1 {
+    for (other_index, other_vertex) in board.adjacent_to(index) {
+        if other_vertex.color() == opponent && get_num_liberties(&board, other_index, memoize) == 1 {
             other.capture(opponent as usize, other_index);
         }
-    });
+    }
 
     // add liberties based on the liberties of the friendly neighbouring
     // groups
     let mut liberties = [0xff; 384];
 
-    foreach_4d!(other, index, |other_index, value| {
-        if value == current {
+    for (other_index, other_vertex) in other.adjacent_to(index) {
+        let other_color = other_vertex.color();
+
+        if other_color == current {
             fill_liberties(&other, other_index, &mut liberties);
         }
 
         // add direct liberties of the new stone
-        liberties[other_index] = value;
-    });
+        liberties[other_index] = other_color;
+    }
 
     count_zeros(&liberties)
 }

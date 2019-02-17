@@ -15,6 +15,8 @@
 use color::Color;
 use zobrist;
 
+use std::marker::PhantomData;
+
 pub trait Counter {
     type Output;
 
@@ -132,76 +134,214 @@ impl Counter for N {
     }
 }
 
-/// Macro for iterating over directions around a point.
-/// 
-/// ```
-/// let index: usize = 100;
-/// 
-/// foreach_nd!(index, |other_index, value| {
-///     // ...
-/// }, N, E, S, W)
-/// ```
-macro_rules! foreach_nd {
-    ($this:expr, $source:expr, |$index:ident, $value:ident| $stmt:block, $($dir:ident),*) => ({
-        $(
-            let $index = ::codegen::$dir[$source] as usize;
-            let $value = $this.vertices[$index].color();
+/// Iterator over all vertices that are directly adjacent to the given one. It will
+/// always return four values:
+///
+/// - North
+/// - East
+/// - South
+/// - West
+///
+pub struct AdjacentIter(usize, usize);
+pub struct AdjacentVertexIter<'a>(AdjacentIter, &'a BoardFast);
 
-            $stmt
-        );*
-    })
+impl AdjacentIter {
+    pub fn new(source: usize) -> AdjacentIter {
+        AdjacentIter(source, 0)
+    }
+
+    pub fn with_vertex(self, board: &BoardFast) -> AdjacentVertexIter {
+        AdjacentVertexIter(self, board)
+    }
 }
 
-macro_rules! foreach_4d {
-    ($this:expr, $source:expr, |$index:ident, $value:ident| $stmt:block) => {{
-        foreach_nd!($this, $source, |$index, $value| $stmt, N, E, S, W)
-    }};
-}
+impl Iterator for AdjacentIter {
+    type Item = usize;
 
-/// Macro for finding a matching directions around a point.
-/// 
-/// ```
-/// let index: usize = 100;
-/// let other_index = find_nd!(index, |other_index, value| {
-///     Some(0)
-/// }, N, E, S, W)
-/// 
-/// assert_eq!(other_index, Some(0));
-/// ```
-macro_rules! find_nd {
-    ($this:expr, $source:expr, |$index:ident, $value:ident| $stmt:block) => ({
-        None
-    });
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = self.1;
 
-    ($this:expr, $source:expr, |$index:ident, $value:ident| $stmt:block, $dir:ident $(,$rest:ident)*) => ({
-        let __result = {
-            use ::board_fast::Vertex;
+        if index < 4 {
+            self.1 += 1;
 
-            let $index = ::codegen::$dir[$source] as usize;
-            let $value = $this.vertices[$index].color();
-
-            $stmt
-        };
-
-        if __result.is_some() {
-            __result
+            Some(::codegen::NESW[self.0][index] as usize)
         } else {
-            find_nd!($this, $source, |$index, $value| $stmt $(,$rest)*)
+            None
         }
-    })
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (4, Some(4))
+    }
 }
 
-macro_rules! find_4d {
-    ($this:expr, $source:expr, |$index:ident, $value:ident| $stmt:block) => {{
-        unsafe {
-            ::std::intrinsics::prefetch_read_data(::codegen::N.get_unchecked($source), 0);
-            ::std::intrinsics::prefetch_read_data(::codegen::E.get_unchecked($source), 0);
-            ::std::intrinsics::prefetch_read_data(::codegen::S.get_unchecked($source), 0);
-            ::std::intrinsics::prefetch_read_data(::codegen::W.get_unchecked($source), 0);
-        }
+impl<'a> Iterator for AdjacentVertexIter<'a> {
+    type Item = (usize, u16);
 
-        find_nd!($this, $source, |$index, $value| $stmt, N, E, S, W)
-    }};
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0.next() {
+            None => None,
+            Some(index) => {
+                let vertex = unsafe { *self.1.vertices.get_unchecked(index) };
+
+                Some((index, vertex))
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+/// Iterator over all vertices of the same color that are strongly connected to the
+/// given starting point.
+pub struct BlockIter<'a> {
+    board: &'a BoardFast,
+    starting_point: usize,
+    current_point: Option<usize>
+}
+
+impl<'a> BlockIter<'a> {
+    fn new(board: &'a BoardFast, starting_point: usize) -> BlockIter<'a> {
+        let current_point = Some(starting_point);
+
+        BlockIter { board, starting_point, current_point }
+    }
+}
+
+impl<'a> Iterator for BlockIter<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(current_point) = self.current_point {
+            let next_point = unsafe {
+                self.board.vertices.get_unchecked(current_point).next_vertex() as usize
+            };
+
+            self.current_point = if next_point != self.starting_point {
+                Some(next_point)
+            } else {
+                None
+            };
+
+            Some(current_point)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (1, Some(361))
+    }
+
+    fn any<F: FnMut(Self::Item) -> bool>(&mut self, mut f: F) -> bool {
+        if let Some(mut current_point) = self.current_point {
+            loop {
+                if f(current_point) {
+                    return true;
+                }
+
+                current_point = unsafe {
+                    self.board.vertices.get_unchecked(current_point).next_vertex() as usize
+                };
+
+                if current_point == self.starting_point {
+                    return false;
+                }
+            }
+        } else {
+            false
+        }
+    }
+}
+
+/// Iterator over all vertices, with a mutable reference, of the same color that are strongly
+/// connected to the given starting point.
+pub struct BlockIterMut<'a> {
+    board: *mut BoardFast,
+    starting_point: usize,
+    current_point: Option<usize>,
+    phantom_ref: PhantomData<&'a mut BoardFast>
+}
+
+impl<'a> BlockIterMut<'a> {
+    fn new(board: &'a mut BoardFast, starting_point: usize) -> BlockIterMut<'a> {
+        let current_point = Some(starting_point);
+        let phantom_ref = PhantomData::default();
+
+        BlockIterMut { board, starting_point, current_point, phantom_ref }
+    }
+}
+
+impl<'a> Iterator for BlockIterMut<'a> {
+    type Item = (usize, &'a mut u16);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(current_point) = self.current_point {
+            let vertex = unsafe {
+                (*self.board).vertices.get_unchecked_mut(current_point)
+            };
+            let next_point = vertex.next_vertex() as usize;
+
+            self.current_point = if next_point != self.starting_point {
+                Some(next_point)
+            } else {
+                None
+            };
+
+            Some((current_point, vertex))
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (1, Some(361))
+    }
+}
+
+/// Representation of a set of strongly connected vertices of the same color.
+pub struct Block<'a> {
+    board: &'a BoardFast,
+    starting_point: usize
+}
+
+impl<'a> Block<'a> {
+    fn new(board: &'a BoardFast, starting_point: usize) -> Block<'a> {
+        Block { board, starting_point }
+    }
+}
+
+impl<'a> IntoIterator for Block<'a> {
+    type Item = <BlockIter<'a> as Iterator>::Item;
+    type IntoIter = BlockIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BlockIter::new(self.board, self.starting_point)
+    }
+}
+
+pub struct BlockMut<'a> {
+    board: &'a mut BoardFast,
+    starting_point: usize
+}
+
+impl<'a> BlockMut<'a> {
+    fn new(board: &'a mut BoardFast, starting_point: usize) -> BlockMut<'a> {
+        BlockMut { board, starting_point }
+    }
+}
+
+impl<'a> IntoIterator for BlockMut<'a> {
+    type Item = <BlockIterMut<'a> as Iterator>::Item;
+    type IntoIter = BlockIterMut<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BlockIterMut::new(self.board, self.starting_point)
+    }
 }
 
 pub trait Vertex {
@@ -277,6 +417,39 @@ impl BoardFast {
         board
     }
 
+    /// Returns an iterator over all vertices that are adjacent to the given
+    /// vertex.
+    ///
+    /// # Arguments
+    ///
+    /// * `at_index` -
+    ///
+    pub fn adjacent_to(&self, at_index: usize) -> AdjacentVertexIter {
+        AdjacentIter::new(at_index).with_vertex(self)
+    }
+
+    /// Returns the block, set of strongly connected vertices of the same
+    /// color, at the given vertex.
+    ///
+    /// # Arguments
+    ///
+    /// * `at_index` -
+    ///
+    pub fn block_at(&self, at_index: usize) -> Block {
+        Block::new(self, at_index)
+    }
+
+    /// Returns the block, set of strongly connected vertices of the same
+    /// color, at the given vertex with a mutable reference to each vertex.
+    ///
+    /// # Arguments
+    ///
+    /// * `at_index` -
+    ///
+    pub fn block_at_mut(&mut self, at_index: usize) -> BlockMut {
+        BlockMut::new(self, at_index)
+    }
+
     /// Returns whether the given liberties of the given group (as counted by
     /// the given counter). It will stop counting after `n` liberties has been
     /// found.
@@ -294,22 +467,16 @@ impl BoardFast {
     ) -> C::Output
     {
         let mut counter = C::default();
-        let mut current = index;
 
-        loop {
-            foreach_4d!(self, current, |other_index, value| {
-                if value == 0 && counter.add(other_index) {
+        for current in self.block_at(index) {
+            for (other_index, other_vertex) in self.adjacent_to(current) {
+                if other_vertex.color() == 0 && counter.add(other_index) {
                     n -= 1;
 
                     if n == 0 {
                         return counter.get();
                     }
                 }
-            });
-
-            current = self.vertices[current].next_vertex() as usize;
-            if current == index {
-                break;
             }
         }
 
@@ -327,22 +494,16 @@ impl BoardFast {
     #[inline]
     pub fn has_n_liberty<C: Counter + Default>(&self, index: usize, mut n: usize) -> bool {
         let mut counter = C::default();
-        let mut current = index;
 
-        loop {
-            foreach_4d!(self, current, |other_index, value| {
-                if value == 0 && counter.add(other_index) {
+        for current in self.block_at(index) {
+            for (other_index, other_vertex) in self.adjacent_to(current) {
+                if other_vertex.color() == 0 && counter.add(other_index) {
                     n -= 1;
 
                     if n == 0 {
                         return true
                     }
                 }
-            });
-
-            current = self.vertices[current].next_vertex() as usize;
-            if current == index {
-                break;
             }
         }
 
@@ -364,13 +525,12 @@ impl BoardFast {
             workspace[index] == 0xff
         } else {
             let mut counter = C::default();
-            let mut current = index;
 
-            loop {
+            for current in self.block_at(index) {
                 workspace[current] = 1;
 
-                foreach_4d!(self, current, |other_index, value| {
-                    if value == 0 && counter.add(other_index) {
+                for (other_index, other_vertex) in self.adjacent_to(current) {
+                    if other_vertex.color() == 0 && counter.add(other_index) {
                         n -= 1;
 
                         if n == 0 {
@@ -378,11 +538,6 @@ impl BoardFast {
                             return true
                         }
                     }
-                });
-
-                current = self.vertices[current].next_vertex() as usize;
-                if current == index {
-                    break;
                 }
             }
 
@@ -399,15 +554,8 @@ impl BoardFast {
     /// * `workspace` -
     ///
     fn set_workspace_mut(&self, index: usize, value: u8, workspace: &mut [u8]) {
-        let mut current = index;
-
-        loop {
+        for current in self.block_at(index) {
             workspace[current] = value;
-
-            current = self.vertices[current].next_vertex() as usize;
-            if current == index {
-                break;
-            }
         }
     }
 
@@ -423,7 +571,9 @@ impl BoardFast {
         self.vertices[index].color() == 0 && {
             let current = color as u8;
 
-            foreach_4d!(self, index, |other_index, value| {
+            for (other_index, other_vertex) in self.adjacent_to(index) {
+                let value = other_vertex.color();
+
                 // check for direct liberties
                 if value == 0 {
                     return true;
@@ -438,7 +588,7 @@ impl BoardFast {
                 if value != 0x3 && (value == current) == self.has_n_liberty::<Two>(other_index, 2) {
                     return true;
                 }
-            });
+            }
 
             false  // move is suicide :'(
         }
@@ -458,7 +608,9 @@ impl BoardFast {
         self.vertices[index].color() == 0 && {
             let current = color as u8;
 
-            foreach_4d!(self, index, |other_index, value| {
+            for (other_index, other_vertex) in self.adjacent_to(index) {
+                let value = other_vertex.color();
+
                 // check for direct liberties
                 if value == 0 {
                     return true;
@@ -473,7 +625,7 @@ impl BoardFast {
                 if value != 0x3 && (value == current) == self.has_n_liberty_mut::<Two>(other_index, 2, workspace) {
                     return true;
                 }
-            });
+            }
 
             false  // move is suicide :'(
         }
@@ -493,17 +645,8 @@ impl BoardFast {
     fn join_vertices(&mut self, index: usize, other: usize) {
         // check so that other is not already in the chain starting
         // at index since that would lead to a corrupted chain.
-        let mut current = index;
-
-        loop {
-            if current == other {
-                return;
-            }
-
-            current = self.vertices[current].next_vertex() as usize;
-            if current == index {
-                break;
-            }
+        if self.block_at(index).into_iter().any(|current| current == other) {
+            return
         }
 
         // re-connect the two lists so if we have two chains `A` and `B`:
@@ -532,16 +675,10 @@ impl BoardFast {
     ///
     #[inline]
     pub fn capture_if(&self, color: usize, index: usize) -> u64 {
-        let mut current = index;
         let mut adjust = 0;
 
-        loop {
+        for current in self.block_at(index) {
             adjust ^= zobrist::TABLE[color][current];
-
-            current = self.vertices[current].next_vertex() as usize;
-            if current == index {
-                break;
-            }
         }
 
         adjust
@@ -557,17 +694,11 @@ impl BoardFast {
     ///
     #[inline]
     pub fn capture(&mut self, color: usize, index: usize) -> u64 {
-        let mut current = index;
         let mut hash = 0;
 
-        loop {
-            hash ^= zobrist::TABLE[color][current];
-            self.vertices[current].set_color(0);
-
-            current = self.vertices[current].next_vertex() as usize;
-            if current == index {
-                break;
-            }
+        for (other_index, other_vertex) in self.block_at_mut(index) {
+            hash ^= zobrist::TABLE[color][other_index];
+            other_vertex.set_color(0);
         }
 
         hash
@@ -586,11 +717,11 @@ impl BoardFast {
         let opponent = color.opposite() as u8;
         let mut adjust = zobrist::TABLE[color as usize][index];
 
-        foreach_4d!(self, index, |other_index, value| {
-            if value == opponent && !self.has_n_liberty::<Two>(other_index, 2) {
+        for (other_index, other_vertex) in self.adjacent_to(index) {
+            if other_vertex.color() == opponent && !self.has_n_liberty::<Two>(other_index, 2) {
                 adjust ^= self.capture_if(opponent as usize, other_index);
             }
-        });
+        }
 
         adjust
     }
@@ -609,11 +740,11 @@ impl BoardFast {
         let opponent = color.opposite() as u8;
         let mut adjust = zobrist::TABLE[color as usize][index];
 
-        foreach_4d!(self, index, |other_index, value| {
-            if value == opponent && !self.has_n_liberty_mut::<Two>(other_index, 2, workspace) {
+        for (other_index, other_vertex) in self.adjacent_to(index) {
+            if other_vertex.color() == opponent && !self.has_n_liberty_mut::<Two>(other_index, 2, workspace) {
                 adjust ^= self.capture_if(opponent as usize, other_index);
             }
-        });
+        }
 
         adjust
     }
@@ -637,21 +768,25 @@ impl BoardFast {
         self.vertices[index].set_visited(true);
 
         // connect this stone to any neighbouring groups
-        foreach_4d!(self, index, |other_index, value| {
+        for other_index in AdjacentIter::new(index) {
+            let value = unsafe { self.vertices.get_unchecked(other_index).color() };
+
             if value == player {
                 self.join_vertices(index, other_index);
             }
-        });
+        }
 
         // clear the opponents color
         let opponent = color.opposite() as u8;
         let mut hash = zobrist::TABLE[color as usize][index];
 
-        foreach_4d!(self, index, |other_index, value| {
+        for other_index in AdjacentIter::new(index) {
+            let value = unsafe { self.vertices.get_unchecked(other_index).color() };
+
             if value == opponent && !self.has_n_liberty::<One>(other_index, 1) {
                 hash ^= self.capture(opponent as usize, other_index);
             }
-        });
+        }
 
         hash
     }

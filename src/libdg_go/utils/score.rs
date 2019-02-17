@@ -235,12 +235,12 @@ fn get_territory_distance(board: &BoardFast, color: Color) -> [u8; 368] {
         let index = probes.pop_front().unwrap();
         let t = territory[index] + 1;
 
-        foreach_4d!(board, index, |other_index, value| {
-            if value == 0 && territory[other_index] > t {
+        for (other_index, other_vertex) in board.adjacent_to(index) {
+            if other_vertex.color() == 0 && territory[other_index] > t {
                 probes.push_back(other_index);
                 territory[other_index] = t;
             }
-        });
+        }
     }
 
     territory
