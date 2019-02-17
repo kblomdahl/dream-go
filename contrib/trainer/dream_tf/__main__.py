@@ -52,13 +52,17 @@ def parse_args():
     parser.add_argument('files', nargs=argparse.REMAINDER, help='The binary features files.')
 
     opt_group = parser.add_argument_group(title='optional configuration')
-    opt_group.add_argument('--warm-start', nargs=1, metavar='M', help='initialize weights from the given model')
     opt_group.add_argument('--batch-size', nargs=1, type=int, metavar='N', help='the number of examples per mini-batch')
+    opt_group.add_argument('--warm-start', nargs=1, metavar='M', help='initialize weights from the given model')
     opt_group.add_argument('--steps', nargs=1, type=int, metavar='N', help='the total number of examples to train over')
     opt_group.add_argument('--model', nargs=1, help='the directory that contains the model')
     opt_group.add_argument('--name', nargs=1, help='the name of this session')
     opt_group.add_argument('--debug', action='store_true', help='enable command-line debugging')
     opt_group.add_argument('--deterministic', action='store_true', help='enable deterministic mode')
+
+    opt_group = parser.add_argument_group(title='model configuration')
+    opt_group.add_argument('--num-channels', nargs=1, type=int, metavar='N', help='the number of channels per residual block')
+    opt_group.add_argument('--num-blocks', nargs=1, type=int, metavar='N', help='the number of residual blocks')
     opt_group.add_argument('--mask', nargs=1, metavar='M', help='mask to multiply features with')
 
     op_group = parser.add_mutually_exclusive_group(required=True)
@@ -84,6 +88,28 @@ def most_recent_model():
     )
 
 
+def get_num_channels(args, model_dir):
+    """ Returns the number of channels to use when constructing the model. """
+    if args.num_channels:
+        return args.num_channels[0]
+
+    try:
+        return tf.train.load_variable(model_dir, 'num_channels')
+    except tf.errors.NotFoundError:
+        return None
+
+
+def get_num_blocks(args, model_dir):
+    """ Returns the number of blocks to use when constructing the model. """
+    if args.num_blocks:
+        return args.num_blocks[0]
+
+    try:
+        return tf.train.load_variable(model_dir, 'num_blocks')
+    except tf.errors.NotFoundError:
+        return None
+
+
 def main():
     args = parse_args()
     model_dir = args.model[0] if args.model else None
@@ -103,8 +129,8 @@ def main():
         'batch_size': args.batch_size[0] if args.batch_size else BATCH_SIZE,
         'learning_rate': 1e-4 if args.warm_start else 3e-4,
 
-        'num_channels': 128,
-        'num_blocks': 9,
+        'num_channels': get_num_channels(args, model_dir) or 128,
+        'num_blocks': get_num_blocks(args, model_dir) or 9
     }
 
     config = tf.estimator.RunConfig(
