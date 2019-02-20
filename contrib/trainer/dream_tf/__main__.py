@@ -97,6 +97,8 @@ def get_num_channels(args, model_dir):
         return tf.train.load_variable(model_dir, 'num_channels')
     except tf.errors.NotFoundError:
         return None
+    except tf.errors.InvalidArgumentError:
+        return None
 
 
 def get_num_blocks(args, model_dir):
@@ -107,6 +109,8 @@ def get_num_blocks(args, model_dir):
     try:
         return tf.train.load_variable(model_dir, 'num_blocks')
     except tf.errors.NotFoundError:
+        return None
+    except tf.errors.InvalidArgumentError:
         return None
 
 
