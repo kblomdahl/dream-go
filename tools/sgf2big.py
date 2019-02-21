@@ -22,6 +22,7 @@ a single "big sgf" that is printed to stdout.
 Usage: ./sgf2big.py <directories...>
 """
 
+import mmap
 import sys
 import os
 
@@ -32,7 +33,7 @@ def skip_ws(string, i):
     contain a whitespace character in the specified string.
     """
 
-    while i < len(string) and string[i].isspace():
+    while i < len(string) and chr(string[i]).isspace():
         i += 1
 
     return i
@@ -46,35 +47,35 @@ def parse_sgf_content(contents, i):
     """
 
     i = skip_ws(contents, i)
-    skip_game = False
+    skip = False
     out = ''
 
     # GameTree   = "(" Sequence { GameTree } ")"
-    if i < len(contents) and contents[i] == '(':
+    if i < len(contents) and contents[i] == ord('('):
         i = skip_ws(contents, i + 1)  # skip (
         out += '('
 
         # Sequence   = Node { Node }
         # Node       = ";" { Property }
-        while i < len(contents) and contents[i] == ';':
+        while i < len(contents) and contents[i] == ord(';'):
             i = skip_ws(contents, i + 1)  # skip ;
             out += ';'
 
             # Property   = PropIdent PropValue { PropValue }
-            while i < len(contents) and contents[i].isalpha():
+            while i < len(contents) and chr(contents[i]).isalpha():
                 # PropIdent  = UcLetter { UcLetter }
                 ident = ''
 
-                while i < len(contents) and contents[i].isalpha():
-                    ident += contents[i]
+                while i < len(contents) and chr(contents[i]).isalpha():
+                    ident += chr(contents[i])
                     i += 1
 
                 if ident == 'AB':  # handicap
-                    skip_game = True
+                    skip = True
 
                 i = skip_ws(contents, i)
 
-                if i < len(contents) and contents[i] != '[':
+                if i < len(contents) and contents[i] != ord('['):
                     return
 
                 i += 1
@@ -82,18 +83,18 @@ def parse_sgf_content(contents, i):
                 # PropValue  = "[" CValueType "]"
                 value = ''
 
-                while i < len(contents) and (contents[i-1] == '\\' or contents[i] != ']'):
-                    value += contents[i]
+                while i < len(contents) and (contents[i-1] == ord('\\') or contents[i] != ord(']')):
+                    value += chr(contents[i])
                     i += 1
 
                 i = skip_ws(contents, i + 1)
 
                 # skip handicap games
                 if ident == 'HA' and value != '0':
-                    skip_game = True
+                    skip = True
 
                 # skip comments
-                if not skip_game and ident != 'C':
+                if not skip and ident != 'C':
                     out += ident
                     out += '['
                     out += value
@@ -104,11 +105,9 @@ def parse_sgf_content(contents, i):
     else:
         return  # invalid sgf
 
-    if not skip_game:
+    if not skip:
         print(out)
-
-    if i < len(contents):
-        parse_sgf_content(contents, i)
+    return i
 
 
 def parse_sgf(path):
@@ -126,10 +125,12 @@ def parse_sgf(path):
     # PropIdent  = UcLetter { UcLetter }
     # PropValue  = "[" CValueType "]"
 
-    with open(path, 'r') as f:
-        contents = f.read()
+    with open(path, 'rb') as f:
+        contents = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
+        current_position = 0
 
-    parse_sgf_content(contents, 0)
+        while current_position is not None and current_position < len(contents):
+            current_position = parse_sgf_content(contents, current_position)
 
 
 def main(base_dir):
