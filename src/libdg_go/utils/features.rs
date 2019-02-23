@@ -126,6 +126,7 @@ impl Features for Board {
     /// # Arguments
     ///
     /// * `to_move` - the color of the current player
+    /// * `symmetry` - the symmetry to extract the features to
     ///
     fn get_features<O: Order, T: From<f32> + Copy>(
         &self,

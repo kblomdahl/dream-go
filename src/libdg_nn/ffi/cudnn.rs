@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,6 +63,7 @@ pub enum DataType {
     Int8 = 3,
     Int32 = 4,
     Int8x4 = 5,
+    Int8x32 = 8
 }
 
 #[repr(i32)]
@@ -80,7 +81,8 @@ impl DataType {
             DataType::Half => 2,
             DataType::Int8 => 1,
             DataType::Int32 => 4,
-            DataType::Int8x4 => 1
+            DataType::Int8x4 => 1,
+            DataType::Int8x32 => 1
         }
     }
 
@@ -90,7 +92,8 @@ impl DataType {
             DataType::Half => true,
             DataType::Int8 => false,
             DataType::Int32 => false,
-            DataType::Int8x4 => false
+            DataType::Int8x4 => false,
+            DataType::Int8x32 => false
         }
     }
 
@@ -100,7 +103,8 @@ impl DataType {
             DataType::Half => cuda::DataType::R16F,
             DataType::Int8 => cuda::DataType::R8I,
             DataType::Int32 => cuda::DataType::R32I,
-            DataType::Int8x4 => panic!()
+            DataType::Int8x4 => panic!(),
+            DataType::Int8x32 => panic!(),
         }
     }
 }

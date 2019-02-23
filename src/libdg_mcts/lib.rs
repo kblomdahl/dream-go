@@ -158,7 +158,7 @@ fn full_forward<P: Predictor>(server: &P, board: &Board, to_move: Color) -> Opti
 ///
 /// # Arguments
 ///
-/// * `workspace` - the workspace to use during the forward pass
+/// * `server` - the workspace to use during the forward pass
 /// * `board` - the board position
 /// * `to_move` - the current player
 ///
@@ -168,7 +168,12 @@ fn forward<P: Predictor>(server: &P, board: &Board, to_move: Color) -> Option<(f
     global_cache::get_or_insert(board, to_move, t, || {
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
-        let (value, original_policy) = server.predict(board.get_features::<HWC, f16>(to_move, t))?;
+        let (value, original_policy) = server.predict(
+            board.get_features::<HWC, f16>(
+                to_move,
+                t
+            )
+        )?;
 
         // fix-up the potentially broken policy
         let (mut policy, indices) = create_initial_policy(board, to_move);

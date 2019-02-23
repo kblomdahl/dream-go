@@ -1,4 +1,4 @@
-// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 #![feature(test)]
 
 extern crate dg_nn;
@@ -217,6 +216,9 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     assert!(cuda::cudaFree(weights).is_ok());
 }
 
+/// The number of channels to use in *all* benchmarks.
+const NUM_FEATURES: usize = 192;
+
 /// Returns true if the current device supports `i8`.
 fn supports_i8() -> bool {
     let mut version_major: i32 = 0;
@@ -250,11 +252,11 @@ fn supports_f16() -> bool {
 // -------- 32-bit floating point --------
 
 #[bench]
-fn f32_128_winograd(b: &mut Bencher) {
+fn f32_winograd(b: &mut Bencher) {
     unsafe {
         bench_conv::<f32>(
             b,
-            128,
+            NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Float, cudnn::DataType::Float,
             cudnn::ConvolutionFwdAlgo::Winograd,
@@ -266,13 +268,13 @@ fn f32_128_winograd(b: &mut Bencher) {
 // -------- 16-bit floating point --------
 
 #[bench]
-fn f16_128_winogradnonfused_nchw(b: &mut Bencher) {
+fn f16_winogradnonfused_nchw(b: &mut Bencher) {
     if !supports_f16() { return }
 
     unsafe {
         bench_conv::<f16>(
             b,
-            128,
+            NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::ConvolutionFwdAlgo::WinogradNonFused,
@@ -282,13 +284,13 @@ fn f16_128_winogradnonfused_nchw(b: &mut Bencher) {
 }
 
 #[bench]
-fn f16_128_implicitprecompgemm_nhwc(b: &mut Bencher) {
+fn f16_implicitprecompgemm_nhwc(b: &mut Bencher) {
     if !supports_f16() { return }
 
     unsafe {
         bench_conv::<f16>(
             b,
-            128,
+            NUM_FEATURES,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
@@ -298,13 +300,13 @@ fn f16_128_implicitprecompgemm_nhwc(b: &mut Bencher) {
 }
 
 #[bench]
-fn f16_128_implicitprecompgemm_nchw(b: &mut Bencher) {
+fn f16_implicitprecompgemm_nchw(b: &mut Bencher) {
     if !supports_f16() { return }
 
     unsafe {
         bench_conv::<f16>(
             b,
-            128,
+            NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
@@ -316,11 +318,11 @@ fn f16_128_implicitprecompgemm_nchw(b: &mut Bencher) {
 // -------- 16-bit pseudo floating point --------
 
 #[bench]
-fn p16_128_winograd_nchw(b: &mut Bencher) {
+fn p16_winograd_nchw(b: &mut Bencher) {
     unsafe {
         bench_conv::<f16>(
             b,
-            128,
+            NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::ConvolutionFwdAlgo::Winograd,
@@ -330,11 +332,11 @@ fn p16_128_winograd_nchw(b: &mut Bencher) {
 }
 
 #[bench]
-fn p16_128_winogradnonfused_nchw(b: &mut Bencher) {
+fn p16_winogradnonfused_nchw(b: &mut Bencher) {
     unsafe {
         bench_conv::<f16>(
             b,
-            128,
+            NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::ConvolutionFwdAlgo::WinogradNonFused,
@@ -344,11 +346,11 @@ fn p16_128_winogradnonfused_nchw(b: &mut Bencher) {
 }
 
 #[bench]
-fn p16_128_implicitprecompgemm_nchw(b: &mut Bencher) {
+fn p16_implicitprecompgemm_nchw(b: &mut Bencher) {
     unsafe {
         bench_conv::<f16>(
             b,
-            128,
+            NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
@@ -358,11 +360,11 @@ fn p16_128_implicitprecompgemm_nchw(b: &mut Bencher) {
 }
 
 #[bench]
-fn p16_128_implicitprecompgemm_nhwc(b: &mut Bencher) {
+fn p16_implicitprecompgemm_nhwc(b: &mut Bencher) {
     unsafe {
         bench_conv::<f16>(
             b,
-            128,
+            NUM_FEATURES,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
@@ -374,13 +376,13 @@ fn p16_128_implicitprecompgemm_nhwc(b: &mut Bencher) {
 // -------- 8-bit signed integer --------
 
 #[bench]
-fn i8_128_implicitprecompgemm_nhwc(b: &mut Bencher) {
+fn i8_implicitprecompgemm_nhwc(b: &mut Bencher) {
     if !supports_i8() { return }
 
     unsafe {
         bench_conv::<q8>(
             b,
-            128,
+            NUM_FEATURES,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Int8, cudnn::DataType::Float,
             cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
@@ -390,15 +392,31 @@ fn i8_128_implicitprecompgemm_nhwc(b: &mut Bencher) {
 }
 
 #[bench]
-fn i8x4_128_implicitprecompgemm_nhwcvectc(b: &mut Bencher) {
+fn i8x4_implicitprecompgemm_nhwcvectc(b: &mut Bencher) {
     if !supports_i8() { return }
 
     unsafe {
         bench_conv::<q8>(
             b,
-            128,
+            NUM_FEATURES,
             cudnn::TensorFormat::NCHWVECTC,
             cudnn::DataType::Int8x4, cudnn::DataType::Float,
+            cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
+            cudnn::DataType::Int32
+        );
+    }
+}
+
+#[bench]
+fn i8x32_implicitprecompgemm_nhwcvectc(b: &mut Bencher) {
+    if !supports_i8() { return }
+
+    unsafe {
+        bench_conv::<q8>(
+            b,
+            NUM_FEATURES,
+            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::DataType::Int8x32, cudnn::DataType::Float,
             cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
             cudnn::DataType::Int32
         );
