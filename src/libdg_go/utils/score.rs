@@ -22,7 +22,9 @@ use std::collections::VecDeque;
 pub enum StoneStatus {
     Alive,
     Dead,
-    Seki
+    Seki,
+    BlackTerritory,
+    WhiteTerritory
 }
 
 impl ::std::str::FromStr for StoneStatus {
@@ -37,6 +39,10 @@ impl ::std::str::FromStr for StoneStatus {
             Ok(StoneStatus::Dead)
         } else if s == "seki" {
             Ok(StoneStatus::Seki)
+        } else if s == "black_territory" {
+            Ok(StoneStatus::BlackTerritory)
+        } else if s == "white_territory" {
+            Ok(StoneStatus::WhiteTerritory)
         } else {
             Err(())
         }
@@ -88,7 +94,7 @@ pub trait Score {
     ///
     /// * `finished` - A copy of this board that has been played to
     ///   finish, using some heuristic
-    fn get_stone_status(&self, finished: &Board) -> Vec<(usize, StoneStatus)>;
+    fn get_stone_status(&self, finished: &Board) -> Vec<(usize, Vec<StoneStatus>)>;
 }
 
 impl Score for Board {
@@ -148,7 +154,7 @@ impl Score for Board {
         get_tt_score(&other)
     }
 
-    fn get_stone_status(&self, finished: &Board) -> Vec<(usize, StoneStatus)> {
+    fn get_stone_status(&self, finished: &Board) -> Vec<(usize, Vec<StoneStatus>)> {
         let black_distance = get_territory_distance(&finished.inner, Color::Black);
         let white_distance = get_territory_distance(&finished.inner, Color::White);
         let mut status_list = vec! [];
@@ -156,19 +162,44 @@ impl Score for Board {
         for i in 0..361 {
             if self.inner.vertices[i].color() == finished.inner.vertices[i].color() {
                 if self.inner.vertices[i].color() != 0 {
-                    status_list.push((i, StoneStatus::Alive));
+                    let territory_status = match Color::from(self.inner.vertices[i].color()) {
+                        Color::Black => StoneStatus::BlackTerritory,
+                        Color::White => StoneStatus::WhiteTerritory,
+                    };
+
+                    status_list.push((i, vec! [StoneStatus::Alive, territory_status]));
+                } else {
+                    if black_distance[i] != 0xff && white_distance[i] == 0xff {
+                        status_list.push((i, vec! [StoneStatus::BlackTerritory]));
+                    } else if black_distance[i] == 0xff && white_distance[i] != 0xff {
+                        status_list.push((i, vec! [StoneStatus::WhiteTerritory]));
+                    }
                 }
             } else if self.inner.vertices[i].color() != 0 {
                 if finished.inner.vertices[i].color() == 0 {
                     let is_dead_black = self.inner.vertices[i].color() == Color::Black as u8 && white_distance[i] != 0xff;
                     let is_dead_white = self.inner.vertices[i].color() == Color::White as u8 && black_distance[i] != 0xff;
 
-                    if is_dead_black || is_dead_white {
-                        status_list.push((i, StoneStatus::Dead));
+                    if is_dead_black {
+                        status_list.push((i, vec! [StoneStatus::Dead, StoneStatus::WhiteTerritory]));
+                    } else if is_dead_white {
+                        status_list.push((i, vec! [StoneStatus::Dead, StoneStatus::BlackTerritory]));
                     }
                 } else {
-                    status_list.push((i, StoneStatus::Dead));
+                    let territory_status = match Color::from(self.inner.vertices[i].color()) {
+                        Color::Black => StoneStatus::WhiteTerritory,
+                        Color::White => StoneStatus::BlackTerritory
+                    };
+
+                    status_list.push((i, vec! [StoneStatus::Dead, territory_status]));
                 }
+            } else if self.inner.vertices[i].color() == 0 {
+                let territory_status = match Color::from(finished.inner.vertices[i].color()) {
+                    Color::Black => StoneStatus::BlackTerritory,
+                    Color::White => StoneStatus::WhiteTerritory
+                };
+
+                status_list.push((i, vec! [territory_status]));
             }
         }
 

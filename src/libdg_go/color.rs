@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,18 @@ use std::fmt;
 pub enum Color {
     Black = 1,
     White = 2
+}
+
+impl From<u8> for Color {
+    fn from(other: u8) -> Self {
+        if other == Color::Black as u8 {
+            Color::Black
+        } else if other == Color::White as u8 {
+            Color::White
+        } else {
+            unreachable!();
+        }
+    }
 }
 
 impl Color {

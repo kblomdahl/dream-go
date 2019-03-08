@@ -14,10 +14,12 @@
 
 use regex::Regex;
 use std::env;
-use std::io::BufRead;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read};
 use std::time::Instant;
 
 use dg_go::utils::score::{Score, StoneStatus};
+use dg_go::utils::sgf::Sgf;
 use dg_go::{DEFAULT_KOMI, Board, Color};
 use dg_mcts::time_control;
 use dg_mcts as mcts;
@@ -32,13 +34,13 @@ use self::ponder_service::PonderService;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
-const KNOWN_COMMANDS: [&str; 23] = [
+const KNOWN_COMMANDS: [&str; 24] = [
     "protocol_version", "name", "version", "gomill-describe_engine", "gomill-cpu_time",
     "boardsize", "clear_board", "komi", "play",
     "list_commands", "known_command", "showboard", "genmove", "reg_genmove",
     "kgs-genmove_cleanup", "gomill-explain_last_move", "undo",
     "time_settings", "kgs-time_settings", "time_left", "quit",
-    "final_score", "final_status_list"
+    "final_score", "final_status_list", "loadsgf"
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +79,7 @@ enum Command {
     GenMove(Color, GenMoveMode),  // generate and play the supposedly best move for either color
     FinalScore,  // write the score to stdout
     FinalStatusList(StoneStatus),  // write status of stones to stdout
+    LoadSgf(String, usize),  // load SGF file
     Undo,  // undo one move
     TimeSettingsNone,  // set the time settings
     TimeSettingsAbsolute(f32),  // set the time settings
@@ -113,7 +116,8 @@ lazy_static! {
     static ref GENMOVE: Regex = Regex::new(r"^genmove +([bw])").unwrap();
     static ref REG_GENMOVE: Regex = Regex::new(r"^reg_genmove +([bw])").unwrap();
     static ref KGS_GENMOVE_CLEANUP: Regex = Regex::new(r"^kgs-genmove_cleanup +([bw])").unwrap();
-    static ref FINAL_STATUS_LIST: Regex = Regex::new(r"^final_status_list +(dead|alive|seki)").unwrap();
+    static ref FINAL_STATUS_LIST: Regex = Regex::new(r"^final_status_list +(dead|alive|seki|black_territory|white_territory)").unwrap();
+    static ref LOADSGF: Regex = Regex::new(r"^loadsgf +([^ ]+) *([0-9]+)?").unwrap();
     static ref TIME_SETTINGS: Regex = Regex::new(r"^time_settings +([0-9]+\.?[0-9]*) +([0-9]+\.?[0-9]*) +([0-9]+)").unwrap();
     static ref KGS_TIME_SETTINGS_NONE: Regex = Regex::new(r"^kgs-time_settings +none").unwrap();
     static ref KGS_TIME_SETTINGS_ABSOLUTE: Regex = Regex::new(r"^kgs-time_settings +absolute +([0-9]+\.?[0-9]*)").unwrap();
@@ -127,7 +131,8 @@ struct Gtp {
     history: Vec<Board>,
     komi: f32,
     time_settings: [Box<time_settings::TimeSettings>; 3],
-    explain_last_move: String
+    explain_last_move: String,
+    finished_board: Option<Result<Board, &'static str>>
 }
 
 impl Gtp {
@@ -191,6 +196,15 @@ impl Gtp {
             Ok((id, Command::GenMove(color, GenMoveMode::CleanUp)))
         } else if line == "undo" {
             Ok((id, Command::Undo))
+        } else if let Some(caps) = LOADSGF.captures(line) {
+            let filename = caps[1].to_string();
+            let move_number = if let Some(move_number) = caps.get(2) {
+                move_number.as_str().parse::<usize>().map_err(|_| "syntax error")?
+            } else {
+                ::std::usize::MAX
+            };
+
+            Ok((id, Command::LoadSgf(filename, move_number)))
         } else if let Some(caps) = TIME_SETTINGS.captures(line) {
             let main_time = caps[1].parse::<f32>().map_err(|_| "syntax error")?;
             let byo_yomi_time = caps[2].parse::<f32>().map_err(|_| "syntax error")?;
@@ -378,6 +392,7 @@ impl Gtp {
 
         if let Ok(Some((vertex, should_resign, explain_last_move))) = result {
             self.explain_last_move = explain_last_move;
+            self.finished_board = None;
 
             if should_resign {
                 success!(id, "resign");
@@ -398,6 +413,25 @@ impl Gtp {
 
             None
         }
+    }
+
+    fn greedy_playout(&mut self, board: &Board) -> Result<Board, &'static str> {
+        let mut finished_board = self.finished_board.clone();
+
+        if finished_board.as_ref().map(|f| f.is_err()).unwrap_or(false) {
+            finished_board = None;
+        }
+
+        let result = finished_board.get_or_insert_with(|| {
+            self.ponder.service(|service, search_tree, p_state| {
+                let (finished, _rollout) = mcts::greedy_score(&service.lock(), &board, board.to_move());
+
+                (finished, Some(search_tree), p_state)
+            })
+        }).clone();
+
+        self.finished_board = Some(result.clone());
+        result
     }
 
     fn process(&mut self, id: Option<usize>, cmd: Command) {
@@ -430,6 +464,7 @@ impl Gtp {
                 if self.history.len() > 1 {
                     self.history = vec![Board::new(self.komi)];
                     self.explain_last_move = String::new();
+                    self.finished_board = None;
                     self.ponder = PonderService::new(Board::new(self.komi));
                 }
 
@@ -520,15 +555,12 @@ impl Gtp {
                 success!(id, self.explain_last_move);
             },
             Command::FinalScore => {
-                let board = self.history.last().unwrap();
-                let result = self.ponder.service(|service, search_tree, p_state| {
-                    let (finished, rollout) = mcts::greedy_score(&service.lock(), &board, board.to_move());
+                let board = self.history.last().unwrap().clone();
+                let result = self.greedy_playout(&board);
+
+                if let Ok(finished) = result {
                     let (black, white) = board.get_guess_score(&finished);
 
-                    ((black, white, rollout), Some(search_tree), p_state)
-                });
-
-                if let Ok((black, white, _rollout)) = result {
                     eprintln!("Black: {}", black);
                     eprintln!("White: {} + {}", white, self.komi);
 
@@ -547,18 +579,14 @@ impl Gtp {
                 }
             },
             Command::FinalStatusList(status) => {
-                let board = self.history.last().unwrap();
-                let result = self.ponder.service(|service, search_tree, p_state| {
-                    let (finished, _rollout) = mcts::greedy_score(&service.lock(), &board, board.to_move());
-
-                    (finished, Some(search_tree), p_state)
-                });
+                let board = self.history.last().unwrap().clone();
+                let result = self.greedy_playout(&board);
 
                 if let Ok(finished) = result {
                     let status_list = board.get_stone_status(&finished);
                     let vertices = status_list.into_iter()
                         .filter_map(|(index, stone_status)| {
-                            if stone_status == status {
+                            if stone_status.contains(&status) {
                                 let vertex = Vertex {
                                     x: mcts::tree::X[index] as usize,
                                     y: mcts::tree::Y[index] as usize
@@ -576,6 +604,40 @@ impl Gtp {
                     error!(id, result.err().unwrap());
                 }
             },
+            Command::LoadSgf(filename, move_number) => {
+                if let Ok(file) = File::open(filename) {
+                    let mut buf_reader = BufReader::new(file);
+                    let mut content = vec! [];
+
+                    if let Err(_reason) = buf_reader.read_to_end(&mut content) {
+                        error!(id, "cannot read file content");
+                    }
+
+                    self.history = vec! [];
+                    self.explain_last_move = String::new();
+                    self.finished_board = None;
+
+                    for entry in Sgf::new(&content, self.komi).take(move_number) {
+                        match entry {
+                            Ok(entry) => {
+                                self.history.push(entry.board);
+                            },
+                            Err(_reason) => {
+                                error!(id, "failed to parse file");
+                                return;
+                            }
+                        }
+                    }
+
+                    // start the pondering agent
+                    let board = self.history.last().unwrap().clone();
+                    self.ponder = PonderService::new(board);
+
+                    success!(id, "");
+                } else {
+                    error!(id, "cannot open file");
+                }
+            },
             Command::Undo => {
                 if self.history.len() > 1 {
                     self.history.pop();
@@ -584,6 +646,7 @@ impl Gtp {
                     let board = self.history.last().unwrap().clone();
 
                     self.explain_last_move = String::new();
+                    self.finished_board = None;
                     self.ponder = PonderService::new(board);
 
                     success!(id, "");
@@ -664,6 +727,7 @@ pub fn run() {
         history: vec! [Board::new(DEFAULT_KOMI)],
         komi: DEFAULT_KOMI,
         explain_last_move: String::new(),
+        finished_board: None,
         time_settings: [
             Box::new(time_settings::None::new()),
             Box::new(time_settings::None::new()),
@@ -771,6 +835,8 @@ mod tests {
         assert_eq!(Gtp::parse_line("final_status_list alive"), Some((None, Command::FinalStatusList(StoneStatus::Alive))));
         assert_eq!(Gtp::parse_line("final_status_list dead"), Some((None, Command::FinalStatusList(StoneStatus::Dead))));
         assert_eq!(Gtp::parse_line("final_status_list seki"), Some((None, Command::FinalStatusList(StoneStatus::Seki))));
+        assert_eq!(Gtp::parse_line("final_status_list black_territory"), Some((None, Command::FinalStatusList(StoneStatus::BlackTerritory))));
+        assert_eq!(Gtp::parse_line("final_status_list white_territory"), Some((None, Command::FinalStatusList(StoneStatus::WhiteTerritory))));
     }
 
     #[test]
@@ -783,6 +849,13 @@ mod tests {
     fn kgs_genmove_cleanup() {
         assert_eq!(Gtp::parse_line("1 kgs-genmove_cleanup b"), Some((Some(1), Command::GenMove(Color::Black, GenMoveMode::CleanUp))));
         assert_eq!(Gtp::parse_line("kgs-genmove_cleanup w"), Some((None, Command::GenMove(Color::White, GenMoveMode::CleanUp))));
+    }
+
+    #[test]
+    fn loadsgf() {
+        assert_eq!(Gtp::parse_line("1 loadsgf x.sgf"), Some((Some(1), Command::LoadSgf("x.sgf".into(), ::std::usize::MAX))));
+        assert_eq!(Gtp::parse_line("loadsgf x.sgf"), Some((None, Command::LoadSgf("x.sgf".into(), ::std::usize::MAX))));
+        assert_eq!(Gtp::parse_line("loadsgf x/y/z.sgf 120"), Some((None, Command::LoadSgf("x/y/z.sgf".into(), 120))));
     }
 
     #[test]
