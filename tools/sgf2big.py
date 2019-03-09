@@ -59,7 +59,7 @@ def parse_sgf_content(contents, i):
         # Node       = ";" { Property }
         while i < len(contents) and contents[i] == ord(';'):
             i = skip_ws(contents, i + 1)  # skip ;
-            out += ';'
+            first_property = True
 
             # Property   = PropIdent PropValue { PropValue }
             while i < len(contents) and chr(contents[i]).isalpha():
@@ -95,6 +95,9 @@ def parse_sgf_content(contents, i):
 
                 # skip comments
                 if not skip and ident != 'C':
+                    if first_property:
+                        first_property = False
+                        out += ';'
                     out += ident
                     out += '['
                     out += value
