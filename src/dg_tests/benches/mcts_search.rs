@@ -21,6 +21,7 @@ use dg_go::{Board, Color};
 use dg_mcts::time_control::RolloutLimit;
 use dg_mcts as mcts;
 use test::Bencher;
+use dg_mcts::options::StandardSearch;
 
 #[bench]
 fn lee_sedol_alphago_4_78(b: &mut Bencher) {
@@ -58,7 +59,7 @@ fn lee_sedol_alphago_4_78(b: &mut Bencher) {
     b.iter(move || {
         let server = mcts::predict::RandomPredictor::default();
 
-        mcts::predict(
+        mcts::predict::<_, _, StandardSearch>(
             &server,
             Some(4),
             RolloutLimit::new(40),

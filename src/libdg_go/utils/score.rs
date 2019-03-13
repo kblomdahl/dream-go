@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use board_fast::{BoardFast, Vertex};
+use board_fast::{BoardFast, Vertex, Two};
 use board::Board;
 use color::Color;
 
@@ -55,6 +55,7 @@ pub trait Score {
     ///
     /// * Both black and white has played at least one stone
     /// * All empty vertices are only reachable from one color
+    /// * There are no stones in atari (excluding super-ko)
     ///
     fn is_scorable(&self) -> bool;
 
@@ -107,6 +108,12 @@ impl Score for Board {
             let white_distance = get_territory_distance(&self.inner, Color::White);
 
             (0..361).all(|i| black_distance[i] == 0xff || white_distance[i] == 0xff)
+        } && {
+            let mut workspace = [0; 368];
+
+            (0..361).all(|i| {
+                self.inner.vertices[i].color() == 0 || self.inner.has_n_liberty_mut::<Two>(i, 2, &mut workspace)
+            })
         }
     }
 
@@ -307,12 +314,18 @@ mod tests {
         board.place(Color::White, 1, 0);
         board.place(Color::White, 0, 1);
         board.place(Color::White, 1, 1);
+        board.place(Color::White, 1, 2);
+        board.place(Color::White, 0, 3);
+        board.place(Color::White, 1, 3);
         board.place(Color::Black, 2, 0);
         board.place(Color::Black, 2, 1);
-        board.place(Color::Black, 0, 2);
-        board.place(Color::Black, 1, 2);
+        board.place(Color::Black, 2, 2);
+        board.place(Color::Black, 2, 3);
+        board.place(Color::Black, 0, 4);
+        board.place(Color::Black, 1, 4);
+        board.place(Color::Black, 2, 4);
 
         assert!(board.is_scorable());
-        assert_eq!(board.get_score(), (357, 4));
+        assert_eq!(board.get_score(), (353, 8));
     }
 }

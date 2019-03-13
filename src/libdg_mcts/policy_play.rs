@@ -28,6 +28,7 @@ use super::time_control::RolloutLimit;
 use super::{dirichlet, tree, predict_service};
 use super::{GameResult, full_forward, get_random_komi, predict_aux};
 use dg_nn::Network;
+use options::StandardSearch;
 
 /// Returns the skewness of the given policy. A large return value says that
 /// the given input `policy` is less certain, and therefore more interesting
@@ -110,7 +111,7 @@ fn policy_choose(policy: &[f32], temperature: f32) -> Option<usize> {
 }
 
 fn policy_ex_it<P: Predictor + 'static>(server: &P, board: &Board, to_move: Color) -> Option<(String, f32)> {
-    let (value, _index, tree) = predict_aux::<_, _>(
+    let (value, _index, tree) = predict_aux::<_, _, StandardSearch>(
         server,
         1,
         RolloutLimit::new((*config::NUM_ROLLOUT).into()),
@@ -147,12 +148,12 @@ fn policy_forward<P: Predictor + 'static>(
     let num_policy_rollout = *config::NUM_POLICY_ROLLOUT;
 
     if num_policy_rollout <= 1 {
-        let (value, mut policy) = full_forward(server, board, to_move)?;
+        let (value, mut policy) = full_forward::<_, StandardSearch>(server, board, to_move)?;
         dirichlet::add(&mut policy[0..362], 0.03);
 
         Some((value, policy))
     } else {
-        let (value, _index, tree) = predict_aux::<_, _>(
+        let (value, _index, tree) = predict_aux::<_, _, StandardSearch>(
             server,
             1,
             RolloutLimit::new(num_policy_rollout),

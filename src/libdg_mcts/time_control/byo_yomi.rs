@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::{TimeStrategy, TimeStrategyResult};
+use options::SearchOptions;
 use tree;
 use dg_utils::config::SAFE_TIME_MS;
 
@@ -86,9 +87,9 @@ impl ByoYomi {
 }
 
 impl TimeStrategy for ByoYomi {
-    fn try_extend<F: Fn() -> bool>(
+    fn try_extend<O: SearchOptions, F: Fn() -> bool>(
         &self,
-        root: &tree::Node,
+        root: &tree::Node<O>,
         predicate: F,
         factor: f32
     ) -> TimeStrategyResult

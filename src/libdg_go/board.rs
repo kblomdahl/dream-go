@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -212,7 +212,7 @@ impl Board {
     /// * `color` - the color of the move
     /// * `index` - The index of the move
     ///
-    pub(super) fn _place(&mut self, color: Color, index: usize) {
+    pub fn _place(&mut self, color: Color, index: usize) {
         // place the stone on the board regardless of whether it is legal
         // or not.
         self.zobrist_hash ^= self.inner.place(color, index);

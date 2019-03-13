@@ -14,49 +14,11 @@
 
 use ordered_float::OrderedFloat;
 
-use dg_go::utils::score::Score;
-use dg_go::utils::sgf::{Sabaki, SgfCoordinate};
+use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color};
 use super::predict::Predictor;
-use super::{tree, full_forward};
+use super::{tree, full_forward, ScoringSearch};
 
-/// Returns true if the given move would fill ones own eye. An eye in this case
-/// is recognized as an empty spot that is surrounded by at least 7 stones of
-/// the same color. This will miss some _complicated_ eyes, but this is good
-/// enough for the heuristic.
-/// 
-/// # Arguments
-/// 
-/// * `board` - 
-/// * `color` - 
-/// * `index` - 
-/// 
-fn is_eye(board: &Board, color: Color, index: usize) -> bool {
-    const DELTA: [i8; 8] = [-20, -19, -18, -1, 1, 18, 19, 20];
-
-    let count = DELTA.iter()
-        .map(|d| index as isize + *d as isize)
-        .filter(|other| *other >= 0 && *other < 361)
-        .filter(|other| {
-            let other = *other as usize;
-            let (x, y) = (tree::X[other] as usize, tree::Y[other] as usize);
-
-            board.at(x, y) == Some(color)
-        })
-        .count();
-
-    // distinguish between the three different cases, (i) an eye in the middle,
-    // (ii) an eye in along the edge, and (iii) an eye in the corner.
-    let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
-
-    if index == 0 || index == 18 || index == 342 || index == 360 {
-        count >= 3  // corner move
-    } else if x == 0 || x == 18 || y == 0 || y == 18 {
-        count >= 5  // edge
-    } else {
-        count >= 7
-    }
-}
 
 /// Play the given board until the end using the policy of the neural network
 /// in a greedy manner (ignoring the pass move every time) until it is scorable
@@ -74,8 +36,8 @@ pub fn greedy_score<P: Predictor>(server: &P, board: &Board, mut to_move: Color)
     let mut pass_count = 0;
     let mut count = 0;
 
-    while count < 722 && pass_count < 2 && !board.is_scorable() {
-        let policy = if let Some(response) = full_forward(server, &board, to_move) {
+    while count < 722 && pass_count < 2 {
+        let policy = if let Some(response) = full_forward::<_, ScoringSearch>(server, &board, to_move) {
             response.1
         } else {
             return (board, sgf)
@@ -84,13 +46,13 @@ pub fn greedy_score<P: Predictor>(server: &P, board: &Board, mut to_move: Color)
         // pick the move with the largest prior value that does not fill an
         // eye
         let index = (0..361)
-            .filter(|&i| policy[i].is_finite() && !is_eye(&board, to_move, i))
+            .filter(|&i| policy[i].is_finite())
             .max_by_key(|&i| OrderedFloat(policy[i]));
 
         if let Some(index) = index {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
-            sgf += &format!(";{}[{}]", to_move, Sabaki::to_sgf(x, y));
+            sgf += &format!(";{}[{}]", to_move, CGoban::to_sgf(x, y));
             pass_count = 0;
             board.place(to_move, x, y);
         } else {  // no valid moves remaining

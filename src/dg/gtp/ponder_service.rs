@@ -25,8 +25,9 @@ use dg_mcts::time_control::{TimeStrategy, TimeStrategyResult};
 use dg_mcts::tree;
 use dg_mcts as mcts;
 use dg_nn::Network;
+use dg_mcts::options::{StandardSearch, SearchOptions};
 
-type SearchTree = tree::Node;
+type SearchTree = tree::Node<StandardSearch>;
 type PonderResult = Result<(PredictService, SearchTree, Board, Color), &'static str>;
 
 /// A very simple _time control_ that thinks until a boolean flag is set to
@@ -38,9 +39,9 @@ pub struct PonderTimeControl {
 }
 
 impl TimeStrategy for PonderTimeControl {
-    fn try_extend<F: Fn() -> bool>(
+    fn try_extend<O: SearchOptions, F: Fn() -> bool>(
         &self,
-        root: &SearchTree,
+        root: &tree::Node<O>,
         _predicate: F,
         _factor: f32
     ) -> TimeStrategyResult
@@ -81,13 +82,13 @@ fn ponder_worker(
 {
     let start_time = ProcessTime::now();
     let max_tree_size = (*config::NUM_ROLLOUT).user_defined_or(500_000);
-    let result = mcts::predict(
+    let result = mcts::predict::<_, _, StandardSearch>(
         &service.lock().clone_to_static(),
         None,
         PonderTimeControl { is_running, max_tree_size },
         search_tree,
         &board,
-        to_move
+        to_move,
     );
 
     if let Some((_value, _index, next_tree)) = result {

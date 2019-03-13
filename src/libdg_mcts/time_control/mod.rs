@@ -18,6 +18,7 @@ mod rollout_limit;
 pub use self::byo_yomi::*;
 pub use self::rollout_limit::*;
 
+use options::SearchOptions;
 use tree;
 
 pub enum TimeStrategyResult {
@@ -38,9 +39,9 @@ pub trait TimeStrategy {
     ///   extended.
     /// * `factor` - asd
     /// 
-    fn try_extend<F: Fn() -> bool>(
+    fn try_extend<O: SearchOptions, F: Fn() -> bool>(
         &self,
-        root: &tree::Node,
+        root: &tree::Node<O>,
         predicate: F,
         factor: f32
     ) -> TimeStrategyResult;
@@ -54,7 +55,7 @@ pub trait TimeStrategy {
 /// 
 /// * `root` - the tree to check for stability
 /// 
-fn is_stable(root: &tree::Node) -> bool {
+fn is_stable<O: SearchOptions>(root: &tree::Node<O>) -> bool {
     let max_visits = root.children.argmax_count();
     let max_wins = root.children.argmax_value();
 
@@ -73,7 +74,7 @@ fn is_stable(root: &tree::Node) -> bool {
 /// 
 /// * `root` - the tree to get the lower bound for
 /// 
-fn min_promote_rollouts(root: &tree::Node) -> usize {
+fn min_promote_rollouts<O: SearchOptions>(root: &tree::Node<O>) -> usize {
     let top_1 = root.children.argmax_count();
 
     // find the most visited child that is **not** `top_1`.
@@ -108,8 +109,9 @@ fn min_promote_rollouts(root: &tree::Node) -> usize {
 /// [1] _Hendrik Baier_ and _Mark H.M. Winands_, "Time Management for
 ///     Monte-Carlo Tree Search in Go", https://pdfs.semanticscholar.org/a2e6/299fd3c8ab17e3a1a783d518688b55bb2363.pdf
 /// 
-pub fn is_done<T>(root: &tree::Node, ticket: &T) -> bool
-    where T: TimeStrategy
+pub fn is_done<T, O>(root: &tree::Node<O>, ticket: &T) -> bool
+    where T: TimeStrategy,
+          O: SearchOptions
 {
     if root.total_count == 0 {
         false

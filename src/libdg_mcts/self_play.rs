@@ -27,6 +27,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::thread;
 use std::mem;
+use options::StandardSearch;
 
 /// Play a game against the engine and return the result of the game.
 ///
@@ -52,7 +53,7 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
 
     while count < 722 {
         let num_workers = *config::NUM_THREADS / num_parallel.load(Ordering::Acquire);
-        let (value, index, tree) = predict_aux(
+        let (value, index, tree) = predict_aux::<_, _, StandardSearch>(
             server,
             num_workers,
             RolloutLimit::new((*config::NUM_ROLLOUT).into()),

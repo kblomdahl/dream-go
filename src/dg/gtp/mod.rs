@@ -31,6 +31,8 @@ mod vertex;
 
 use self::vertex::*;
 use self::ponder_service::PonderService;
+use dg_mcts::options::{ScoringSearch, StandardSearch};
+use dg_mcts::tree::GreedyPath;
 
 /// List containing all implemented commands, this is used to implement
 /// the `list_commands` and `known_command` commands.
@@ -334,7 +336,7 @@ impl Gtp {
                     .map(|tree| tree.total_count)
                     .unwrap_or(0);
 
-                mcts::predict(
+                mcts::predict::<_, _, StandardSearch>(
                     &service.lock().clone_to_static(),
                     None,
                     time_control::ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods),
@@ -343,7 +345,7 @@ impl Gtp {
                     to_move
                 )
             } else {
-                mcts::predict(
+                mcts::predict::<_, _, StandardSearch>(
                     &service.lock().clone_to_static(),
                     None,
                     time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
@@ -423,10 +425,40 @@ impl Gtp {
         }
 
         let result = finished_board.get_or_insert_with(|| {
-            self.ponder.service(|service, search_tree, p_state| {
-                let (finished, _rollout) = mcts::greedy_score(&service.lock(), &board, board.to_move());
+            self.ponder.service(|service, original_search_tree, p_state| {
+                // if the search tree is too small, the expand it before continuing
+                let mut board = board.clone();
+                let mut to_move = board.to_move();
+                let search_tree = match mcts::predict::<_, _, ScoringSearch>(
+                    &service.lock().clone_to_static(),
+                    None,
+                    time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
+                    None,
+                    &board,
+                    to_move
+                ) {
+                    Some((_value, _index, search_tree)) => search_tree,
+                    None => { return (board, None, p_state); }
+                };
 
-                (finished, Some(search_tree), p_state)
+                // before doing a greedy walk, traverse the current best path in any search tree
+                // we have computed
+                for index in GreedyPath::new(&search_tree, 8) {
+                    if index != 361 {
+                        board._place(to_move, index);
+                    }
+
+                    to_move = to_move.opposite();
+                }
+
+                // greedy rollout of the rest of the game
+                let (finished, _rollout) = mcts::greedy_score(
+                    &service.lock(),
+                    &board,
+                    to_move
+                );
+
+                (finished, Some(original_search_tree), p_state)
             })
         }).clone();
 

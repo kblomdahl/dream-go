@@ -1,4 +1,4 @@
-// Copyright 2018 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::{TimeStrategy, TimeStrategyResult};
+use options::SearchOptions;
 use tree;
 
 #[derive(Clone)]
@@ -33,9 +34,9 @@ impl RolloutLimit {
 }
 
 impl TimeStrategy for RolloutLimit {
-    fn try_extend<F: Fn() -> bool>(
+    fn try_extend<O: SearchOptions, F: Fn() -> bool>(
         &self,
-        root: &tree::Node,
+        root: &tree::Node<O>,
         _predicate: F,
         _factor: f32
     ) -> TimeStrategyResult
