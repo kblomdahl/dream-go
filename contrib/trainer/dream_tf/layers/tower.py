@@ -62,8 +62,12 @@ def tower(x, mode, params):
     with tf.variable_scope('{:02d}p_policy'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
         p = policy_head(y, mode, params)
 
+    # policy head
+    with tf.variable_scope('{:02d}p_next_policy'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
+        pn = policy_head(y, mode, params)
+
     # value head
     with tf.variable_scope('{:02d}v_value'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
         v = value_head(y, mode, params)
 
-    return v, p, y
+    return v, p, pn, y

@@ -33,13 +33,23 @@ def _parse(is_deterministic):
 
         if result != 0:
             features = np.zeros((19, 19, NUM_FEATURES), 'f2')
+
             boost = np.zeros((), 'f4')
             value = np.zeros((), 'f4')
             policy = np.zeros((362,), 'f4')
+            next_policy = np.zeros((362,), 'f4')
+            ownership = np.zeros((361,), 'f4')
+            komi = np.zeros((), 'f4')
         else:
             features = np.frombuffer(example['features'], 'f2').copy()
+
             value = np.asarray(1.0 if example['color'] == example['winner'] else -1.0, 'f4')
             policy = np.frombuffer(example['policy'], 'f4').copy()
+            next_policy = np.frombuffer(example['next_policy'], 'f4').copy()
+            ownership = np.frombuffer(example['ownership'], 'f4').copy()
+            komi = np.asarray(example['komi'], 'f4')
+            if example['color'] == 1:  # is black
+                komi = -komi
 
             if example['number'] <= len(BOOST_PER_MOVE_NUMBER):
                 boost = np.asarray(BOOST_PER_MOVE_NUMBER[example['number'] - 1], 'f4')
@@ -48,8 +58,9 @@ def _parse(is_deterministic):
 
             # fix any partial policy
             policy[example['index']] += 1.0 - np.sum(policy)
+            next_policy[example['next_index']] += 1.0 - np.sum(next_policy)
 
-        return features, boost, value, policy
+        return features, boost, value, policy, next_policy, ownership, komi
 
     # by default the random number generator is seeded from entropy, but if we
     # are running deterministically. Seed it manually instead*.
@@ -62,21 +73,23 @@ def _parse(is_deterministic):
         tuple(tf.py_func(
             __parse,
             [line],
-            [tf.float16, tf.float32, tf.float32, tf.float32]
+            [tf.float16, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32]
         ))
 
 
-def _illegal_policy(features, boost, value, policy):
+def _illegal_policy(features, boost, value, policy, next_policy, ownership, komi):
     return tf.greater(tf.reduce_sum(boost), 0.0)
 
 
-def _fix_shape(features, boost, value, policy):
+def _fix_shape(features, boost, value, policy, next_policy, ownership, komi):
     features = tf.reshape(features, [19, 19, NUM_FEATURES])
     boost = tf.reshape(boost, [1])
     value = tf.reshape(value, [1])
     policy = tf.reshape(policy, [362])
+    next_policy = tf.reshape(next_policy, [362])
+    ownership = tf.reshape(ownership, [361])
 
-    return features, boost, value, policy
+    return features, boost, value, policy, next_policy, ownership, komi
 
 
 def _apply_symmetry(symmetry_index, x):
@@ -120,7 +133,7 @@ def _apply_symmetry(symmetry_index, x):
     )
 
 
-def _augment(features, boost, value, policy):
+def _augment(features, boost, value, policy, next_policy, ownership, komi):
     # apply a random transformation to the input features
     symmetry_index = tf.random_uniform((), 0, 8, tf.int32)
     features = _apply_symmetry(symmetry_index, features)
@@ -132,12 +145,19 @@ def _augment(features, boost, value, policy):
     policy = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(policy, [19, 19, 1])), [361])
     policy = tf.concat([policy, policy_pass], 0)
 
+    next_policy, next_policy_pass = tf.split(next_policy, (361, 1))
+    next_policy = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(next_policy, [19, 19, 1])), [361])
+    next_policy = tf.concat([next_policy, next_policy_pass], 0)
+
+    ownership = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(ownership, [19, 19, 1])), [361])
+    ownership = tf.nn.softmax(0.5 + 0.5 * ownership)
+
     value = tf.reshape(value, [1])
 
-    return features, boost, value, policy
+    return features, boost, value, policy, next_policy, ownership, komi
 
 
-def _fix_history(features, boost, value, policy):
+def _fix_history(features, boost, value, policy, next_policy, ownership, komi):
     """ Zeros out the history planes for 25% of the features. """
     zero_history_mask = np.asarray([1.0] * NUM_FEATURES, 'f2')
     zero_history_mask[3:4] = 0.0
@@ -151,7 +171,7 @@ def _fix_history(features, boost, value, policy):
         default=lambda: features
     )
 
-    return features, boost, value, policy
+    return features, boost, value, policy, next_policy, ownership, komi
 
 
 def get_dataset(files, is_training=True, is_deterministic=False):
@@ -174,11 +194,24 @@ def get_dataset(files, is_training=True, is_deterministic=False):
         dataset = dataset.filter(_illegal_policy)
         dataset = dataset.map(_fix_shape)
         if is_training:
-            dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(524288))
+            dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(262144))
             dataset = dataset.map(_augment, num_parallel_calls=4)
             dataset = dataset.map(_fix_history, num_parallel_calls=4)
 
         return dataset
+
+
+def to_predictor(features, boost, value, policy, next_policy, ownership, komi):
+    labels = {
+        'boost': boost,
+        'value': value,
+        'policy': policy,
+        'next_policy': next_policy,
+        'ownership': ownership,
+        'komi': komi
+    }
+
+    return features, labels
 
 
 def input_fn(files, batch_size, features_mask, is_training, is_deterministic=False):
@@ -187,14 +220,12 @@ def input_fn(files, batch_size, features_mask, is_training, is_deterministic=Fal
     if features_mask is not None:
         features_mask = tf.constant(features_mask, tf.float16, (1, 1, NUM_FEATURES))
 
-        def _mask_features(features, boost, value, policy):
-            return features * features_mask, boost, value, policy
+        def _mask_features(features, boost, value, policy, next_policy, ownership, komi):
+            return features * features_mask, boost, value, policy, next_policy, ownership, komi
 
         dataset = dataset.map(_mask_features)
 
     dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(2)
 
-    return dataset.map(
-        lambda features, boost, value, policy: (features, {'boost': boost, 'value': value, 'policy': policy})
-    )
+    return dataset.map(to_predictor)

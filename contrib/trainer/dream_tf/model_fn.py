@@ -26,24 +26,33 @@ from .layers.tower import tower
 
 
 def model_fn(features, labels, mode, params):
-    value_hat, policy_hat, tower_hat = tower(features, mode, params)
+    value_hat, policy_hat, next_policy_hat, tower_hat = tower(features, mode, params)
 
     if labels:
         # determine the loss for each of the components:
         #
         # - Value head
-        # - Policy head
+        # - Policy head (2x)
         #
         loss_value = tf.reshape(tf.squared_difference(
             tf.check_numerics(tf.stop_gradient(labels['value']), 'value_labels'),
             tf.check_numerics(value_hat, 'value_hat')
         ), (-1, 1))
+
         loss_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
             labels=tf.check_numerics(tf.stop_gradient(labels['policy']), 'policy_labels'),
             logits=tf.check_numerics(policy_hat, 'policy_hat')
         ), (-1, 1))
 
-        loss_unboosted = loss_policy + 2.0 * loss_value
+        loss_next_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
+            labels=tf.check_numerics(tf.stop_gradient(labels['next_policy']), 'next_policy_labels'),
+            logits=tf.check_numerics(next_policy_hat, 'next_policy_hat')
+        ), (-1, 1))
+
+        loss_unboosted = 1.00 * tf.check_numerics(loss_policy, 'loss_policy') \
+                         + 0.25 * tf.check_numerics(loss_next_policy, 'loss_next_policy') \
+                         + 1.50 * tf.check_numerics(loss_value, 'loss_value') \
+
         loss = tf.reduce_mean(tf.stop_gradient(labels['boost']) * loss_unboosted)
         tf.add_to_collection(LOSS, loss_unboosted)
 
@@ -87,28 +96,40 @@ def model_fn(features, labels, mode, params):
             train_op = None
 
         tf.summary.scalar('loss/policy', tf.reduce_mean(loss_policy))
+        tf.summary.scalar('loss/next_policy', tf.reduce_mean(loss_next_policy))
         tf.summary.scalar('loss/value', tf.reduce_mean(loss_value))
 
         # evaluation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look
         # at the accuracy instead of the loss.
         policy_hot = tf.argmax(labels['policy'], axis=1)
+        next_policy_hot = tf.argmax(labels['next_policy'], axis=1)
         policy_1 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 1), tf.float32)
         policy_3 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 3), tf.float32)
         policy_5 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 5), tf.float32)
+        next_policy_1 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 1), tf.float32)
+        next_policy_3 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 3), tf.float32)
+        next_policy_5 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 5), tf.float32)
         value_1 = tf.cast(tf.equal(tf.sign(labels['value']), tf.sign(value_hat)), tf.float32)
 
         tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_1))
         tf.summary.scalar('accuracy/policy_3', tf.reduce_mean(policy_3))
         tf.summary.scalar('accuracy/policy_5', tf.reduce_mean(policy_5))
+        tf.summary.scalar('accuracy/next_policy_1', tf.reduce_mean(next_policy_1))
+        tf.summary.scalar('accuracy/next_policy_3', tf.reduce_mean(next_policy_3))
+        tf.summary.scalar('accuracy/next_policy_5', tf.reduce_mean(next_policy_5))
         tf.summary.scalar('accuracy/value', tf.reduce_mean(value_1))
 
         eval_metric_ops = {
             'accuracy/policy_1': tf.metrics.mean(policy_1),
             'accuracy/policy_3': tf.metrics.mean(policy_3),
             'accuracy/policy_5': tf.metrics.mean(policy_5),
+            'accuracy/next_policy_1': tf.metrics.mean(next_policy_1),
+            'accuracy/next_policy_3': tf.metrics.mean(next_policy_3),
+            'accuracy/next_policy_5': tf.metrics.mean(next_policy_5),
             'accuracy/value': tf.metrics.mean(value_1),
             'loss/policy': tf.metrics.mean(loss_policy),
+            'loss/next_policy': tf.metrics.mean(loss_next_policy),
             'loss/value': tf.metrics.mean(loss_value)
         }
     else:
@@ -122,6 +143,7 @@ def model_fn(features, labels, mode, params):
         'features': features,
         'value': value_hat,
         'policy': tf.nn.softmax(policy_hat),
+        'next_policy': tf.nn.softmax(next_policy_hat),
         'tower': tower_hat
     }
 
