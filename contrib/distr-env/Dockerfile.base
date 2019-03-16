@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/cuda:10.0-cudnn7-devel as base
+FROM nvcr.io/nvidia/cuda:10.1-cudnn7-devel as base
 RUN apt-get update -qy --no-upgrade && \
     apt-get install -qy --no-upgrade curl && \
     curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly
