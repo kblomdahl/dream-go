@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::thread::{self, JoinHandle};
 use crossbeam_channel::{bounded, Sender};
 
 /// The implementation details of a service that is responsible for actually
@@ -277,14 +277,14 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
                     rx
                 }).collect::<Vec<_>>();
 
-                self.inner.1.notify_one();
+                self.inner.1.notify_all();
 
                 // get ride of the lock so that one of the service workers
                 // can acquire it
                 drop(inner_lock);
 
                 // wait for all of the responses
-                responses.into_iter().map(|rx| { rx.recv().ok() }).collect()
+                responses.into_iter().map(|rx| rx.recv().ok()).collect()
             } else {
                 None
             }

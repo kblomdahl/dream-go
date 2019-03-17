@@ -170,10 +170,9 @@ impl PredictState {
 
         // wake up all of the receivers that are waiting for something to change
         let mut state_lock = state.lock().unwrap();
-        let num_waiting = state_lock.waiting_list.len();
 
-        for waiting in state_lock.waiting_list.drain(0..num_waiting) {
-            waiting.send(None).expect("Failed to send predictor response");;
+        for waiting in state_lock.waiting_list.drain(0..) {
+            waiting.send(None).expect("Failed to send predictor response");
         }
 
         // decrease the number of running neural network evaluations
@@ -202,17 +201,16 @@ impl PredictState {
 
             // immediately evaluate when we hit a barrier in order to:
             //   1. minimize the latency between request and response
-            //   2. avoid a race condition where a request that arrives
-            //      during an evaluation does not trigger one.
+            //   2. avoid a scenario where a request is flagged as
+            //      `has_more`, but the rest of the events are `Wait`
+            //      events.
             PredictState::predict(state, state_lock, num_requests);
         } else if state_lock.running_count.load(Ordering::SeqCst) == 0 {
             // everything is asleep? probably a race condition between the
             // pending message being sent and it being received. Just wake
             // everything up and it should normalize.
-            let num_waiting = state_lock.waiting_list.len();
-
-            for waiting in state_lock.waiting_list.drain(0..num_waiting) {
-                waiting.send(None).expect("Failed to send predictor response");;
+            for waiting in state_lock.waiting_list.drain(0..) {
+                waiting.send(None).expect("Failed to send predictor response");
             }
         } else {
             // wait until the currently running request finish instead of
