@@ -57,6 +57,6 @@ def policy_head(x, mode, params):
         y = tf.reshape(y, (-1, 722))
         y = tf.matmul(y, cast_to_compute_type(linear_1)) + cast_to_compute_type(offset_1)
 
-        return tf.to_float(y)
+        return tf.cast(y, tf.float32)
 
     return recompute_grad(_forward)(x)

@@ -62,6 +62,25 @@ def _parse(is_deterministic):
 
         return features, boost, value, policy, next_policy, ownership, komi
 
+    def __do_parse(line):
+        features, boost, value, policy, next_policy, ownership, komi = tuple(tf.py_func(
+            __parse,
+            [line],
+            [tf.float16, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32]
+        ))
+
+        features = tf.reshape(features, [19, 19, NUM_FEATURES])
+        labels = {
+            'boost': tf.reshape(boost, [1]),
+            'value': tf.reshape(value, [1]),
+            'policy': tf.reshape(policy, [362]),
+            'next_policy': tf.reshape(next_policy, [362]),
+            'ownership': tf.reshape(ownership, [361]),
+            'komi': tf.reshape(komi, [1])
+        }
+
+        return features, labels
+
     # by default the random number generator is seeded from entropy, but if we
     # are running deterministically. Seed it manually instead*.
     #
@@ -69,27 +88,11 @@ def _parse(is_deterministic):
     if is_deterministic:
         set_seed(0x454f1317)
 
-    return lambda line: \
-        tuple(tf.py_func(
-            __parse,
-            [line],
-            [tf.float16, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32]
-        ))
+    return __do_parse
 
 
-def _illegal_policy(features, boost, value, policy, next_policy, ownership, komi):
-    return tf.greater(tf.reduce_sum(boost), 0.0)
-
-
-def _fix_shape(features, boost, value, policy, next_policy, ownership, komi):
-    features = tf.reshape(features, [19, 19, NUM_FEATURES])
-    boost = tf.reshape(boost, [1])
-    value = tf.reshape(value, [1])
-    policy = tf.reshape(policy, [362])
-    next_policy = tf.reshape(next_policy, [362])
-    ownership = tf.reshape(ownership, [361])
-
-    return features, boost, value, policy, next_policy, ownership, komi
+def _illegal_policy(features, labels):
+    return tf.greater(tf.reduce_sum(labels['boost']), 0.0)
 
 
 def _apply_symmetry(symmetry_index, x):
@@ -133,7 +136,7 @@ def _apply_symmetry(symmetry_index, x):
     )
 
 
-def _augment(features, boost, value, policy, next_policy, ownership, komi):
+def _augment(features, labels):
     # apply a random transformation to the input features
     symmetry_index = tf.random_uniform((), 0, 8, tf.int32)
     features = _apply_symmetry(symmetry_index, features)
@@ -141,23 +144,20 @@ def _augment(features, boost, value, policy, next_policy, ownership, komi):
     # transforming the policy is _harder_ since it has that extra pass
     # element at the end, so we temporarily remove it while the tensor gets
     # a random transformation applied
-    policy, policy_pass = tf.split(policy, (361, 1))
+    policy, policy_pass = tf.split(labels['policy'], (361, 1))
     policy = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(policy, [19, 19, 1])), [361])
-    policy = tf.concat([policy, policy_pass], 0)
-
-    next_policy, next_policy_pass = tf.split(next_policy, (361, 1))
+    next_policy, next_policy_pass = tf.split(labels['next_policy'], (361, 1))
     next_policy = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(next_policy, [19, 19, 1])), [361])
-    next_policy = tf.concat([next_policy, next_policy_pass], 0)
+    ownership = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(labels['ownership'], [19, 19, 1])), [361])
 
-    ownership = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(ownership, [19, 19, 1])), [361])
-    ownership = tf.nn.softmax(0.5 + 0.5 * ownership)
+    labels['policy'] = tf.concat([policy, policy_pass], 0)
+    labels['next_policy'] = tf.concat([next_policy, next_policy_pass], 0)
+    labels['ownership'] = tf.nn.softmax(0.5 + 0.5 * ownership)
 
-    value = tf.reshape(value, [1])
-
-    return features, boost, value, policy, next_policy, ownership, komi
+    return features, labels
 
 
-def _fix_history(features, boost, value, policy, next_policy, ownership, komi):
+def _fix_history(features, labels):
     """ Zeros out the history planes for 25% of the features. """
     zero_history_mask = np.asarray([1.0] * NUM_FEATURES, 'f2')
     zero_history_mask[3:4] = 0.0
@@ -171,7 +171,7 @@ def _fix_history(features, boost, value, policy, next_policy, ownership, komi):
         default=lambda: features
     )
 
-    return features, boost, value, policy, next_policy, ownership, komi
+    return features, labels
 
 
 def get_dataset(files, is_training=True, is_deterministic=False):
@@ -192,7 +192,6 @@ def get_dataset(files, is_training=True, is_deterministic=False):
             dataset = tf.data.TextLineDataset(files)
         dataset = dataset.map(_parse(is_deterministic), num_parallel_calls=num_parallel_calls)
         dataset = dataset.filter(_illegal_policy)
-        dataset = dataset.map(_fix_shape)
         if is_training:
             dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(262144))
             dataset = dataset.map(_augment, num_parallel_calls=4)
@@ -201,31 +200,18 @@ def get_dataset(files, is_training=True, is_deterministic=False):
         return dataset
 
 
-def to_predictor(features, boost, value, policy, next_policy, ownership, komi):
-    labels = {
-        'boost': boost,
-        'value': value,
-        'policy': policy,
-        'next_policy': next_policy,
-        'ownership': ownership,
-        'komi': komi
-    }
-
-    return features, labels
-
-
 def input_fn(files, batch_size, features_mask, is_training, is_deterministic=False):
     dataset = get_dataset(files, is_training, is_deterministic)
 
     if features_mask is not None:
         features_mask = tf.constant(features_mask, tf.float16, (1, 1, NUM_FEATURES))
 
-        def _mask_features(features, boost, value, policy, next_policy, ownership, komi):
-            return features * features_mask, boost, value, policy, next_policy, ownership, komi
+        def _mask_features(features, labels):
+            return features * features_mask, labels
 
         dataset = dataset.map(_mask_features)
 
     dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(2)
 
-    return dataset.map(to_predictor)
+    return dataset
