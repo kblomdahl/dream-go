@@ -160,13 +160,13 @@ def _augment(features, labels):
 def _fix_history(features, labels):
     """ Zeros out the history planes for 25% of the features. """
     zero_history_mask = np.asarray([1.0] * NUM_FEATURES, 'f2')
-    zero_history_mask[3:4] = 0.0
+    zero_history_mask[3:5] = 0.0
     zero_history_mask = tf.constant(zero_history_mask, tf.float16, (1, 1, NUM_FEATURES))
 
     random = tf.random_uniform((), 0, 100, tf.int32)
     features = tf.case(
         [
-            (tf.less(random, 10), lambda: features * zero_history_mask)
+            (tf.less(random, 5), lambda: features * zero_history_mask)
         ],
         default=lambda: features
     )
