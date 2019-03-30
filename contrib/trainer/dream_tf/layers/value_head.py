@@ -43,8 +43,8 @@ def value_head(x, mode, params):
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
-    linear_1 = tf.get_variable('linear_1', (361, 256), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
+    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 2), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
+    linear_1 = tf.get_variable('linear_1', (722, 256), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
     linear_2 = tf.get_variable('linear_2', (256, 1), tf.float32, init_op, use_resource=True)
     offset_1 = tf.get_variable('linear_1/offset', (256,), tf.float32, zeros_op, use_resource=True)
     offset_2 = tf.get_variable('linear_2/offset', (1,), tf.float32, zeros_op, use_resource=True)
@@ -59,7 +59,7 @@ def value_head(x, mode, params):
         y = batch_norm(conv2d(x, conv_1), conv_1, mode, params, is_recomputing=is_recomputing)
         y = tf.nn.relu(y)
 
-        y = tf.reshape(y, (-1, 361))
+        y = tf.reshape(y, (-1, 722))
         y = tf.matmul(y, cast_to_compute_type(linear_1)) + cast_to_compute_type(offset_1)
         y = tf.nn.relu(y)
         y = tf.matmul(y, cast_to_compute_type(linear_2)) + cast_to_compute_type(offset_2)

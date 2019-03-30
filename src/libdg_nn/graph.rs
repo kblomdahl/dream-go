@@ -699,7 +699,7 @@ impl ValueLayer {
             out.value_1,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half,
-            n, 1, 19, 19
+            n, 2, 19, 19
         ))?;
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_2))?;
@@ -723,7 +723,7 @@ impl ValueLayer {
             out.offset,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half,
-            1, 1, 1, 1
+            1, 2, 1, 1
         ))?;
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias_1))?;
@@ -747,7 +747,7 @@ impl ValueLayer {
             out.filter,
             cudnn::DataType::Half,
             cudnn::TensorFormat::NHWC,
-            1, num_channels, 1, 1
+            2, num_channels, 1, 1
         ))?;
 
         check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu))?;
@@ -824,7 +824,7 @@ impl ValueLayer {
 
         // perform the forward convolution
         let workspace_v = slots.get_slot(Slot::Workspace_v, self.fwd_algo.memory, workspace.value_stream)?;
-        let value_1 = slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 361, workspace.value_stream)?;
+        let value_1 = slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 722, workspace.value_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -840,7 +840,7 @@ impl ValueLayer {
             self.value_1, *value_1
         ))?;
 
-        load_output::<T::Output>(output_set, output_map, Output::ValueDown, *value_1, workspace.batch_size * 361, workspace.value_stream)?;
+        load_output::<T::Output>(output_set, output_map, Output::ValueDown, *value_1, workspace.batch_size * 722, workspace.value_stream)?;
 
         // perform the feed-forward linear layer (relu)
         let value_2 = slots.get_slot(Slot::Value_2, size_of::<T::Output>() * workspace.batch_size * 256, workspace.value_stream)?;
@@ -850,10 +850,10 @@ impl ValueLayer {
             workspace.handle_blas,
             cublas::Operation::N,
             cublas::Operation::N,
-            256, workspace.batch_size as i32, 361,  // output, batch_size, input
+            256, workspace.batch_size as i32, 722,  // output, batch_size, input
             &ONE as *const f32 as *const c_void,
             weights_2.get(device_id), cuda::DataType::R16F, 256,  // input_2
-            *value_1, cuda::DataType::R16F, 361,  // input_1
+            *value_1, cuda::DataType::R16F, 722,  // input_1
             &ZERO as *const f32 as *const c_void,
             *value_2, cuda::DataType::R16F, 256,  // output
             cuda::DataType::R32F, cublas::GemmAlgo::DfaltTensorOp
@@ -982,7 +982,7 @@ impl PolicyLayer {
             out.policy_1,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half,
-            n, 2, 19, 19
+            n, 4, 19, 19
         ))?;
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.policy_2))?;
@@ -998,7 +998,7 @@ impl PolicyLayer {
             out.offset,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half,
-            1, 2, 1, 1
+            1, 4, 1, 1
         ))?;
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias))?;
@@ -1014,7 +1014,7 @@ impl PolicyLayer {
             out.filter,
             cudnn::DataType::Half,
             cudnn::TensorFormat::NHWC,
-            2, num_channels as i32, 1, 1
+            4, num_channels as i32, 1, 1
         ))?;
 
         check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu))?;
@@ -1079,7 +1079,7 @@ impl PolicyLayer {
 
         // perform the forward convolution
         let workspace_p = slots.get_slot(Slot::Workspace_p, self.fwd_algo.memory, workspace.policy_stream)?;
-        let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 722, workspace.policy_stream)?;
+        let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 1444, workspace.policy_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -1095,7 +1095,7 @@ impl PolicyLayer {
             self.policy_1, *policy_1
         ))?;
 
-        load_output::<T::Output>(output_set, output_map, Output::PolicyDown, *policy_1, workspace.batch_size * 722, workspace.policy_stream)?;
+        load_output::<T::Output>(output_set, output_map, Output::PolicyDown, *policy_1, workspace.batch_size * 1444, workspace.policy_stream)?;
 
         // perform the feed-forward linear layers
         let policy_2 = slots.get_slot(Slot::Policy_2, size_of::<T::Output>() * workspace.batch_size * 362, workspace.policy_stream)?;
@@ -1105,10 +1105,10 @@ impl PolicyLayer {
             workspace.handle_blas,
             cublas::Operation::N,
             cublas::Operation::N,
-            362, workspace.batch_size as i32, 722,  // output, batch_size, input
+            362, workspace.batch_size as i32, 1444,  // output, batch_size, input
             &ONE as *const f32 as *const c_void,
             weights_2.get(device_id), cuda::DataType::R16F, 362,  // input_2
-            *policy_1, cuda::DataType::R16F, 722,  // input_1
+            *policy_1, cuda::DataType::R16F, 1444,  // input_1
             &ZERO as *const f32 as *const c_void,
             *policy_2, cuda::DataType::R16F, 362,  // output
             cuda::DataType::R32F, cublas::GemmAlgo::DfaltTensorOp

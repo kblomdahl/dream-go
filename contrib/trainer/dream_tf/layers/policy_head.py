@@ -42,8 +42,8 @@ def policy_head(x, mode, params):
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 2), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
-    linear_1 = tf.get_variable('linear_1', (722, 362), tf.float32, init_op, use_resource=True)
+    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 4), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
+    linear_1 = tf.get_variable('linear_1', (1444, 362), tf.float32, init_op, use_resource=True)
     offset_1 = tf.get_variable('linear_1/offset', (362,), tf.float32, zeros_op, use_resource=True)
 
     tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f2'])
@@ -54,7 +54,7 @@ def policy_head(x, mode, params):
         y = batch_norm(conv2d(x, conv_1), conv_1, mode, params, is_recomputing=is_recomputing)
         y = tf.nn.relu(y)
 
-        y = tf.reshape(y, (-1, 722))
+        y = tf.reshape(y, (-1, 1444))
         y = tf.matmul(y, cast_to_compute_type(linear_1)) + cast_to_compute_type(offset_1)
 
         return tf.cast(y, tf.float32)
