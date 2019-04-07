@@ -19,7 +19,7 @@
 Reads a _big_ SGF file from standard input and writes to standard output a sub-set
 of the read SGF file that contains the _k_ most recent games:
 
-Usage: ./sgf2recent.py [number] < kgs_big.sgf > kgs_big_recent.sgf
+Usage: ./sgf2recent.py [number|date] < kgs_big.sgf > kgs_big_recent.sgf
 """
 from datetime import datetime
 import heapq
@@ -34,26 +34,31 @@ DT_FORMATS = [
 ]
 
 
+def str_to_time(s):
+    """ Try to parse the given string as a datetime object """
+    d = None
+
+    for dt_format in DT_FORMATS:
+        try:
+            d = datetime.strptime(s, dt_format)
+            break
+        except ValueError:
+            pass
+
+    return d
+
+
 def sgf_to_time(line):
     """ Returns the creation time of the given SGF file """
     m = DT.search(line)
 
     if m:
-        d = None
-
-        for dt_format in DT_FORMATS:
-            try:
-                d = datetime.strptime(m.group(1), dt_format)
-                break
-            except ValueError:
-                pass
-
-        return d
+        return str_to_time(m.group(1))
     else:
         return None
 
-def main(k):
-    """ Main function """
+def dump_most_recent(k):
+    """ Print the `k` most recent games from standard input """
 
     # collect all lines into a min-heap, discarding the minimum
     # element every time it grows too large
@@ -85,11 +90,43 @@ def main(k):
         print(line)
 
     if unrecognized > 0:
-        print('Discarded {} games no date'.format(unrecognized), file=sys.stderr)
+        print('Discarded {} games with no date'.format(unrecognized), file=sys.stderr)
+
+
+def dump_since(since_time):
+    """ Print all games generated since `since_time` from standard input """
+
+    unrecognized = 0
+
+    for line in sys.stdin:
+        line = line.strip()
+        d = sgf_to_time(line)
+
+        if not d:
+            unrecognized += 1
+        elif d >= since_time:
+            print(line)
+
+    if unrecognized > 0:
+        print('Discarded {} games with no date'.format(unrecognized), file=sys.stderr)
+
+
+def main():
+    """ Main function """
+
+    if len(sys.argv) < 2:
+        print('Usage: ./sgf2recent.py [number|date]')
+        quit(1)
+
+    since_time = str_to_time(sys.argv[1])
+
+    if since_time:
+        dump_since(since_time)
+    else:
+        number_of_games = int(sys.argv[1])
+
+        dump_most_recent(number_of_games)
+
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print('Usage: ./sgf2recent.py [number]')
-        quit()
-
-    main(int(sys.argv[1]))
+    main()
