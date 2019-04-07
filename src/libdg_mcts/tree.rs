@@ -14,7 +14,7 @@
 
 use dg_go::utils::sgf::SgfCoordinate;
 use dg_go::{Board, Color};
-use dg_utils::lcb::{normal_lcb, normal_lcb_m};
+use dg_utils::lcb::normal_lcb_m;
 use dg_utils::{config, max};
 use super::asm::{argmax_f32, argmax_i32};
 use super::parallel::spin::Mutex;
@@ -1230,7 +1230,7 @@ impl<O: SearchOptions> Node<O> {
                         )
                     })
                 })
-                .unwrap();
+                .unwrap_or(361);
 
             (self.with(max_i, |child| child.value()), max_i)
         } else {
@@ -1640,7 +1640,7 @@ impl<'a, O: SearchOptions> fmt::Display for ToPretty<'a, O> {
                      pretty_vertex,
                      child.total_count,
                      100.0 * self.root.with(i, |child| child.value()),
-                     100.0 * self.root.with(i, |child| normal_lcb(child.value(), child.value_std(), child.count())),
+                     100.0 * self.root.with(i, |child| normal_lcb_m(child.value(), child.value_std(), child.count(), self.root.total_count)),
                      100.0 * self.root.prior[i],
                      pretty_vertex,
                      likely_path

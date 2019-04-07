@@ -15,25 +15,6 @@
 use ::config;
 
 /// Returns the lower confidence bound of the normal distribution with
-/// mean `p_hat`, and `n` samples.
-///
-/// # Arguments
-///
-/// * `p_hat` -
-/// * `p_std` -
-/// * `n` -
-///
-pub fn normal_lcb(p_hat: f32, p_std: f32, n: i32) -> f32 {
-    if n > 0 {
-        let z = config::get_lcb_critical_value(n);
-
-        p_hat - z * p_std / (n as f32).sqrt()
-    } else {
-        0.0
-    }
-}
-
-/// Returns the lower confidence bound of the normal distribution with
 /// mean `p_hat`, and `n` samples. Using the confidence interval for `m`
 /// visits.
 ///
