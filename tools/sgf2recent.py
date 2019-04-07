@@ -26,57 +26,54 @@ import heapq
 import sys
 import re
 
+DT = re.compile(r'DT\[([^\]]*)\]')
+DT_FORMATS = [
+    '%Y-%m-%dT%H:%M:%S%z',  # internal dream go
+    '%Y.%m.%d %H:%M',  # tygem
+    '%Y-%m-%d',  # standard sgf
+]
+
+
+def sgf_to_time(line):
+    """ Returns the creation time of the given SGF file """
+    m = DT.search(line)
+
+    if m:
+        d = None
+
+        for dt_format in DT_FORMATS:
+            try:
+                d = datetime.strptime(m.group(1), dt_format)
+                break
+            except ValueError:
+                pass
+
+        return d
+    else:
+        return None
+
 def main(k):
     """ Main function """
 
-    DT = re.compile(r'DT\[([^\]]*)\]')
-
     # collect all lines into a min-heap, discarding the minimum
-    # element everytime it grows too large
+    # element every time it grows too large
     entries = []
     unrecognized = 0
     count = 0
 
     for line in sys.stdin:
         line = line.strip()
-        m = DT.search(line)
+        d = sgf_to_time(line)
 
-        if m:
-            d = None
-
-            try:
-                # check for our extended date-time format first (which
-                # includes the time with a higher precision)
-                if not d:
-                    d = datetime.strptime(m.group(1), '%Y-%m-%dT%H:%M:%S%z')
-            except ValueError:
-                pass
-
-            try:
-                # this is the Tygem SGF format
-                if not d:
-                    d = datetime.strptime(m.group(1), '%Y.%m.%d %H:%M')
-            except ValueError:
-                pass
-
-            try:
-                # this is the standard SGF format
-                if not d:
-                    d = datetime.strptime(m.group(1), '%Y-%m-%d')
-            except ValueError:
-                pass
-
-            if not d:
-                unrecognized += 1
-            else:
-                item = (d, line)
-
-                if len(entries) > k:
-                    heapq.heapreplace(entries, item)
-                else:
-                    heapq.heappush(entries, item)
-        else:
+        if not d:
             unrecognized += 1
+        else:
+            item = (d, line)
+
+            if len(entries) > k:
+                heapq.heapreplace(entries, item)
+            else:
+                heapq.heappush(entries, item)
 
         count += 1
 
