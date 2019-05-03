@@ -92,7 +92,7 @@ lazy_static! {
 
 /// Returns the number of features used internally.
 #[no_mangle]
-pub unsafe extern fn get_num_features() -> c_int {
+pub unsafe extern "C" fn get_num_features() -> c_int {
     NUM_FEATURES as i32
 }
 
@@ -104,7 +104,7 @@ pub unsafe extern fn get_num_features() -> c_int {
 /// * `seed` -
 ///
 #[no_mangle]
-pub unsafe extern fn set_seed(seed: i32) {
+pub unsafe extern "C" fn set_seed(seed: i32) {
     let mut rng = RNG.lock().unwrap();
 
     *rng = StdRng::seed_from_u64(seed as u64);
@@ -119,7 +119,7 @@ pub unsafe extern fn set_seed(seed: i32) {
 /// - `out` - Output of the extracted example.
 ///
 #[no_mangle]
-pub unsafe extern fn extract_single_example(
+pub unsafe extern "C" fn extract_single_example(
     raw_sgf_content: *const c_char,
     out: *mut Example
 ) -> c_int

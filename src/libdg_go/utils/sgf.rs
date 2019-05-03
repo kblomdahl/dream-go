@@ -268,7 +268,7 @@ impl<'a> Iterator for Sgf<'a> {
             }
 
             // if we have a valid, or pass, move then advance the board state
-            let mut board = self.board.last_mut().unwrap();
+            let board = self.board.last_mut().unwrap();
             let prev_board = board.clone();
 
             if m.x < 19 && m.y < 19 {
