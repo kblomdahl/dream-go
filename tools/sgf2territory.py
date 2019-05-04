@@ -57,9 +57,22 @@ GTP_TO_SGF = {
 
 def gtp_to_sgf(coord):
     x = GTP_TO_SGF[coord[0]]
-    y = coord[1:]
+    y = 18 - (int(coord[1:]) - 1)
 
-    return x + chr(ord('a') + int(y) - 1)
+    return x + chr(ord('a') + y)
+
+def inf_to_territory(line, line_nr):
+    count = 0
+
+    for value in line.split(' '):
+        if not value:
+            continue
+
+        coordinate = chr(ord('a') + count) + chr(ord('a') + line_nr)
+        value = float(value)
+
+        yield (coordinate, value)
+        count += 1
 
 def score_game(engine, sgf):
     """
@@ -72,24 +85,41 @@ def score_game(engine, sgf):
         sgf_file.flush()
 
         engine.stdin.write('1000 loadsgf {}\n'.format(sgf_file.name))
-        engine.stdin.write('2000 final_status_list black_territory\n')
-        engine.stdin.write('3000 final_status_list white_territory\n')
-        engine.stdin.write('4000 clear_board\n')
+        engine.stdin.write('2000 initial_influence B territory_value\n')
+        engine.stdin.write('3000 list_stones black\n')
+        engine.stdin.write('4000 list_stones white\n')
+        engine.stdin.write('5000 clear_board\n')
         engine.stdin.flush()
 
-        black_territory = []
-        white_territory = []
+        black_territory = set()
+        white_territory = set()
 
         for line in engine.stdout:
-            line = line.strip()
+            line = line.strip().lower()
 
             if line.startswith('?'):
                 break
             elif line.startswith('=2000'):
-                black_territory = map(gtp_to_sgf, line.split(' ')[1:])
+                line = line[5:].strip()
+                line_nr = 0
+                black_territory |= set([coord for (coord, value) in inf_to_territory(line, line_nr) if value < 0.0])
+                white_territory |= set([coord for (coord, value) in inf_to_territory(line, line_nr) if value > 0.0])
+
+                for line in engine.stdout:
+                    line = line.strip().lower()
+                    if not line:
+                        break
+
+                    line_nr += 1
+                    black_territory |= set([coord for (coord, value) in inf_to_territory(line, line_nr) if value < 0.0])
+                    white_territory |= set([coord for (coord, value) in inf_to_territory(line, line_nr) if value > 0.0])
             elif line.startswith('=3000'):
-                white_territory = map(gtp_to_sgf, line.split(' ')[1:])
+                black_stones = set(map(gtp_to_sgf, line.split(' ')[1:]))
+                black_territory |= {b for b in black_stones if b not in white_territory}
             elif line.startswith('=4000'):
+                white_stones = set(map(gtp_to_sgf, line.split(' ')[1:]))
+                white_territory |= {w for w in white_stones if w not in black_territory}
+            elif line.startswith('=5000'):
                 break
 
         return black_territory, white_territory
@@ -108,7 +138,14 @@ class ScoreThread(Thread):
 
     def start_engine(self):
         engine = Popen(
-            ['./target/release/dream_go', '--no-ponder'],
+            [
+                '/usr/games/gnugo',
+                '--mode', 'gtp',
+                '--score', 'aftermath',
+                '--play-out-aftermath',
+                '--chinese-rules',
+                '--cache-size', '512M'
+            ],
             stdin=PIPE,
             stdout=PIPE,
             stderr=DEVNULL,
