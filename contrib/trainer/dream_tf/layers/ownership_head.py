@@ -27,24 +27,21 @@ from .recompute_grad import recompute_grad
 from .orthogonal_initializer import orthogonal_initializer
 
 
-def policy_head(x, mode, params):
+def ownership_head(x, mode, params):
     """
-    The policy head attached after the residual blocks as described by DeepMind:
+    The territory head attached after the residual blocks as described by DeepMind:
 
-    1. A convolution of 2 filters of kernel size 1 × 1 with stride 1
+    1. A convolution of 1 filter of kernel size 1 × 1 with stride 1
     2. Batch normalisation
-    3. A rectifier non-linearity
-    4. A fully connected linear layer that outputs a vector of size 19²+1 = 362
-       corresponding to logit probabilities for all intersections and the pass
-       move
+    3. A tanh non-linearity outputting a scalar in the range [-1, 1]
     """
     init_op = orthogonal_initializer()
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 4), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
-    linear_1 = tf.get_variable('linear_1', (1444, 362), tf.float32, init_op, use_resource=True)
-    offset_1 = tf.get_variable('linear_1/offset', (362,), tf.float32, zeros_op, use_resource=True)
+    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 2), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
+    linear_1 = tf.get_variable('linear_1', (722, 361), tf.float32, init_op, use_resource=True)
+    offset_1 = tf.get_variable('linear_1/offset', (361,), tf.float32, zeros_op, use_resource=True)
 
     tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f2'])
     tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f2'])
@@ -54,9 +51,9 @@ def policy_head(x, mode, params):
         y = batch_norm(conv2d(x, conv_1), conv_1, mode, params, is_recomputing=is_recomputing)
         y = tf.nn.relu(y)
 
-        y = tf.reshape(y, (-1, 1444))
+        y = tf.reshape(y, (-1, 722))
         y = tf.matmul(y, cast_to_compute_type(linear_1)) + cast_to_compute_type(offset_1)
 
-        return tf.cast(y, tf.float32, name='output')
+        return tf.cast(tf.nn.tanh(y), tf.float32, name='output')
 
     return recompute_grad(_forward)(x)

@@ -18,6 +18,7 @@ use super::cuda::{self, Stream};
 #[repr(i32)]
 #[allow(dead_code)]
 pub enum ActivationMode {
+    Sigmoid = 0,
     Relu = 1,
     Tanh = 2,
     Identity = 5,
@@ -114,8 +115,9 @@ impl DataType {
 #[allow(dead_code)]
 pub enum OpTensorOp {
     Add = 0,
+    Mul = 1,
     Min = 2,
-    Max = 3
+    Max = 3,
 }
 
 #[repr(i32)]
@@ -585,14 +587,27 @@ extern {
         computeType: DataType
     ) -> Status;
 
-    /// This function allows the user to specify whether or not the use of tensor op is permitted
-    /// in library routines associated with a given convolution descriptor.
+    /// This function allows the user to specify the number of groups to be used in the
+    /// associated convolution.
     /// 
     /// # Arguments
     /// 
     /// * `convDesc` -
-    /// * `mathType` -
+    /// * `groupCount` -
     /// 
+    pub fn cudnnSetConvolutionGroupCount(
+        convDesc: ConvolutionDescriptor,
+        groupCount: c_int
+    ) -> Status;
+
+    /// This function allows the user to specify whether or not the use of tensor op is permitted
+    /// in library routines associated with a given convolution descriptor.
+    ///
+    /// # Arguments
+    ///
+    /// * `convDesc` -
+    /// * `mathType` -
+    ///
     #[cfg(feature = "tensor-core")]
     pub fn cudnnSetConvolutionMathType(
         convDesc: ConvolutionDescriptor,

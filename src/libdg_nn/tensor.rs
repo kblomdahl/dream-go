@@ -102,10 +102,6 @@ impl Tensor {
         }
     }
 
-    pub unsafe fn as_f32(&self) -> f32 {
-        *(self.host as *const f32)
-    }
-
     pub unsafe fn as_i32(&self) -> i32 {
         *(self.host as *const i32)
     }

@@ -24,36 +24,52 @@ from .hooks.dump import DUMP_OPS
 from .hooks.learning_rate import LEARNING_RATE, LOSS
 from .layers.tower import tower
 
+def reduce_head(heads, f):
+    alpha = 1.0
+    results = []
+
+    for h in reversed(heads):
+        results.append(alpha * f(h))
+        alpha /= 1.5
+
+    return tf.reduce_sum(results, axis=0)
 
 def model_fn(features, labels, mode, params):
-    value_hat, policy_hat, next_policy_hat, tower_hat = tower(features, mode, params)
+    value_hat, ownership_hat, policy_hat, next_policy_hat, tower_hat = tower(features, mode, params)
 
     if labels:
         # determine the loss for each of the components:
         #
         # - Value head
+        # - Ownership head
         # - Policy head (2x)
         #
-        loss_value = tf.reshape(tf.squared_difference(
-            tf.check_numerics(tf.stop_gradient(labels['value']), 'value_labels'),
-            tf.check_numerics(value_hat, 'value_hat')
-        ), (-1, 1))
+        loss_value = reduce_head(value_hat, lambda v: tf.reshape(tf.squared_difference(
+            tf.check_numerics(labels['value'], 'value_labels'),
+            tf.check_numerics(v, 'value_hat')
+        ), (-1, 1)))
 
-        loss_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=tf.check_numerics(tf.stop_gradient(labels['policy']), 'policy_labels'),
-            logits=tf.check_numerics(policy_hat, 'policy_hat')
-        ), (-1, 1))
+        loss_ownership = reduce_head(ownership_hat, lambda o: tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+            labels=tf.nn.softmax(0.5 + 0.5 * tf.check_numerics(tf.stack([labels['ownership'], -labels['ownership']], axis=2), 'ownership_labels')),
+            logits=tf.check_numerics(0.5 + 0.5 * tf.stack([o, -o], axis=2), 'ownership_hat')
+        ), axis=1, keep_dims=True))
 
-        loss_next_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=tf.check_numerics(tf.stop_gradient(labels['next_policy']), 'next_policy_labels'),
-            logits=tf.check_numerics(next_policy_hat, 'next_policy_hat')
-        ), (-1, 1))
+        loss_policy = reduce_head(policy_hat, lambda p: tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
+            labels=tf.check_numerics(labels['policy'], 'policy_labels'),
+            logits=tf.check_numerics(p, 'policy_hat')
+        ), (-1, 1)))
 
-        loss_unboosted = 1.00 * tf.check_numerics(loss_policy, 'loss_policy') \
-                         + 0.25 * tf.check_numerics(loss_next_policy, 'loss_next_policy') \
-                         + 1.50 * tf.check_numerics(loss_value, 'loss_value') \
+        loss_next_policy = reduce_head(next_policy_hat, lambda pn: tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
+            labels=tf.check_numerics(labels['next_policy'], 'next_policy_labels'),
+            logits=tf.check_numerics(pn, 'next_policy_hat')
+        ), (-1, 1)))
 
-        loss = tf.reduce_mean(tf.stop_gradient(labels['boost']) * loss_unboosted)
+        loss_unboosted = 1.00 * loss_policy \
+                         + 0.25 * loss_next_policy \
+                         + 1.50 * loss_value \
+                         + 1.00 * loss_ownership
+
+        loss = tf.reduce_mean(labels['boost'] * loss_unboosted)
         tf.add_to_collection(LOSS, loss_unboosted)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
@@ -95,22 +111,29 @@ def model_fn(features, labels, mode, params):
         else:
             train_op = None
 
+        tf.summary.histogram('activations/policy', policy_hat)
+        tf.summary.histogram('activations/next_policy', next_policy_hat)
+        tf.summary.histogram('activations/value', value_hat)
+        tf.summary.histogram('activations/ownership', ownership_hat)
+
         tf.summary.scalar('loss/policy', tf.reduce_mean(loss_policy))
         tf.summary.scalar('loss/next_policy', tf.reduce_mean(loss_next_policy))
         tf.summary.scalar('loss/value', tf.reduce_mean(loss_value))
+        tf.summary.scalar('loss/ownership', tf.reduce_mean(loss_ownership))
 
         # evaluation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look
         # at the accuracy instead of the loss.
         policy_hot = tf.argmax(labels['policy'], axis=1)
         next_policy_hot = tf.argmax(labels['next_policy'], axis=1)
-        policy_1 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 1), tf.float32)
-        policy_3 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 3), tf.float32)
-        policy_5 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 5), tf.float32)
-        next_policy_1 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 1), tf.float32)
-        next_policy_3 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 3), tf.float32)
-        next_policy_5 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 5), tf.float32)
-        value_1 = tf.cast(tf.equal(tf.sign(labels['value']), tf.sign(value_hat)), tf.float32)
+        policy_1 = tf.cast(tf.nn.in_top_k(policy_hat[-1], policy_hot, 1), tf.float32)
+        policy_3 = tf.cast(tf.nn.in_top_k(policy_hat[-1], policy_hot, 3), tf.float32)
+        policy_5 = tf.cast(tf.nn.in_top_k(policy_hat[-1], policy_hot, 5), tf.float32)
+        next_policy_1 = tf.cast(tf.nn.in_top_k(next_policy_hat[-1], next_policy_hot, 1), tf.float32)
+        next_policy_3 = tf.cast(tf.nn.in_top_k(next_policy_hat[-1], next_policy_hot, 3), tf.float32)
+        next_policy_5 = tf.cast(tf.nn.in_top_k(next_policy_hat[-1], next_policy_hot, 5), tf.float32)
+        value_1 = tf.cast(tf.equal(tf.sign(labels['value']), tf.sign(value_hat[-1])), tf.float32)
+        ownership_1 = tf.cast(tf.equal(tf.sign(labels['ownership']), tf.sign(ownership_hat[-1])), tf.float32)
 
         tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_1))
         tf.summary.scalar('accuracy/policy_3', tf.reduce_mean(policy_3))
@@ -119,6 +142,7 @@ def model_fn(features, labels, mode, params):
         tf.summary.scalar('accuracy/next_policy_3', tf.reduce_mean(next_policy_3))
         tf.summary.scalar('accuracy/next_policy_5', tf.reduce_mean(next_policy_5))
         tf.summary.scalar('accuracy/value', tf.reduce_mean(value_1))
+        tf.summary.scalar('accuracy/ownership', tf.reduce_mean(ownership_1))
 
         eval_metric_ops = {
             'accuracy/policy_1': tf.metrics.mean(policy_1),
@@ -130,7 +154,8 @@ def model_fn(features, labels, mode, params):
             'accuracy/value': tf.metrics.mean(value_1),
             'loss/policy': tf.metrics.mean(loss_policy),
             'loss/next_policy': tf.metrics.mean(loss_next_policy),
-            'loss/value': tf.metrics.mean(loss_value)
+            'loss/value': tf.metrics.mean(loss_value),
+            'loss/ownership': tf.metrics.mean(loss_ownership)
         }
     else:
         loss = None
@@ -141,9 +166,10 @@ def model_fn(features, labels, mode, params):
     # be useful.
     predictions = {
         'features': features,
-        'value': value_hat,
-        'policy': tf.nn.softmax(policy_hat),
-        'next_policy': tf.nn.softmax(next_policy_hat),
+        'value': value_hat[-1],
+        'policy': tf.nn.softmax(policy_hat[-1]),
+        'next_policy': tf.nn.softmax(next_policy_hat[-1]),
+        'ownership': ownership_hat[-1],
         'tower': tower_hat
     }
 

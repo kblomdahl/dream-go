@@ -152,7 +152,7 @@ def _augment(features, labels):
 
     labels['policy'] = tf.concat([policy, policy_pass], 0)
     labels['next_policy'] = tf.concat([next_policy, next_policy_pass], 0)
-    labels['ownership'] = tf.nn.softmax(0.5 + 0.5 * ownership)
+    labels['ownership'] = ownership
 
     return features, labels
 
@@ -215,3 +215,9 @@ def input_fn(files, batch_size, features_mask, is_training, is_deterministic=Fal
     dataset = dataset.prefetch(2)
 
     return dataset
+
+
+def serving_input_receiver_fn():
+    features = tf.placeholder(tf.float16, (1, 19, 19, NUM_FEATURES), name='input')
+
+    return tf.estimator.export.TensorServingInputReceiver(features, {})

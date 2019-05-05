@@ -20,9 +20,9 @@
 
 import tensorflow as tf
 
-from . import conv2d, normalize_constraint, unit_constraint, cast_to_compute_type
-from ..hooks.dump import DUMP_OPS
+from . import conv2d, normalize_constraint, cast_to_compute_type
 from .batch_norm import batch_norm
+from .gather_excite import gather_excite
 from .orthogonal_initializer import orthogonal_initializer
 from .recompute_grad import recompute_grad
 
@@ -40,14 +40,10 @@ def residual_block(x, mode, params):
     7. A rectifier non-linearity
     """
     init_op = orthogonal_initializer()
-    half_op = tf.constant_initializer(0.5)
     num_channels = params['num_channels']
 
     conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
     conv_2 = tf.get_variable('conv_2', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
-    alpha = tf.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=True, use_resource=True)
-
-    tf.add_to_collection(DUMP_OPS, [alpha, alpha, 'f4'])
 
     def _forward(x, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """
@@ -58,7 +54,13 @@ def residual_block(x, mode, params):
 
         # the 2nd convolution
         y = batch_norm(conv2d(y, conv_2), conv_2, mode, params, is_recomputing=is_recomputing)
-        y = tf.nn.relu(cast_to_compute_type(alpha) * y + cast_to_compute_type(1.0 - alpha) * x)
+
+        # residual connection with gather excite (GE-Identity)
+        with tf.variable_scope('gather_excite'):
+            alpha = gather_excite(x, mode, params, is_recomputing=is_recomputing)
+            tf.summary.histogram('gather_excite/alpha', alpha)
+
+        y = tf.nn.relu(cast_to_compute_type(alpha) * x + y)
 
         return y
 

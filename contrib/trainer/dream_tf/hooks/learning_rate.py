@@ -103,7 +103,7 @@ class LearningRateScheduler(tf.train.SessionRunHook):
         y_hat = m * x[:, 0] + c
         variance = 1.0 / (n - 2.0) * np.sum(np.square(y[:-1] - y_hat[:-1]))
         variance = (12.0 * variance) / (n**3 - n)
-        p = scipy.stats.norm.cdf(-5e-6, loc=m, scale=math.sqrt(variance))
+        p = scipy.stats.norm.cdf(-1e-4, loc=m, scale=math.sqrt(variance))
 
         return p, m
 

@@ -169,8 +169,8 @@ impl Builder {
 
         let c_up = unsafe { Rc::new(UpLayer::new(handle_dnn, batch_size as i32, &self.tensors)?) };
         let c_residual = unsafe { self.get_residual_layers(handle_dnn, batch_size)? };
-        let c_value = unsafe { Rc::new(ValueLayer::new(handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?) };
-        let c_policy = unsafe { Rc::new(PolicyLayer::new(handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?) };
+        let c_value = unsafe { Rc::new(ValueLayer::new(handle_dnn, batch_size as i32, &self.tensors)?) };
+        let c_policy = unsafe { Rc::new(PolicyLayer::new(handle_dnn, batch_size as i32, &self.tensors)?) };
 
         let mut w = Workspace {
             batch_size: batch_size,
@@ -422,6 +422,249 @@ impl UpLayer {
     }
 }
 
+struct GatherExciteLayer {
+    tensor_in: cudnn::TensorDescriptor,
+    tensor_1x: cudnn::TensorDescriptor,
+    tensor_gx: cudnn::TensorDescriptor,
+    filter: cudnn::FilterDescriptor,
+    relu: cudnn::ActivationDescriptor,
+    sigmoid: cudnn::ActivationDescriptor,
+    descr: cudnn::ConvolutionDescriptor,
+    fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
+    num_channels: usize,
+    group_size: i32,
+
+    count: usize
+}
+
+impl Drop for GatherExciteLayer {
+    fn drop(&mut self) {
+        unsafe {
+            cudnn::cudnnDestroyTensorDescriptor(self.tensor_in);
+            cudnn::cudnnDestroyTensorDescriptor(self.tensor_1x);
+            cudnn::cudnnDestroyTensorDescriptor(self.tensor_gx);
+            cudnn::cudnnDestroyFilterDescriptor(self.filter);
+            cudnn::cudnnDestroyActivationDescriptor(self.relu);
+            cudnn::cudnnDestroyActivationDescriptor(self.sigmoid);
+            cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
+        }
+    }
+}
+
+impl GatherExciteLayer {
+    /// Create a layer that takes a tensor and returns
+    ///
+    /// # Arguments
+    ///
+    /// * `handle` - The cuDNN handle
+    /// * `n` - The number of images.
+    /// * `i` - The index of the layer.
+    /// * `tensors` -
+    ///
+    unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<GatherExciteLayer, Error> {
+        // calculate the `group_count` from the second linear layer which has
+        // the shape `(group_count * num_channels, num_channels)`
+        let linear_2 = &tensors[&format!("{:02}_residual/gather_excite/linear_2:0", i)];
+        let num_channels = tensors.get("num_channels:0")
+            .map(|x| { x.as_i32() })
+            .unwrap_or(DEFAULT_NUM_CHANNELS);
+        let group_size = linear_2.size_in_elements as i32 / (num_channels * num_channels);
+
+        let mut out = GatherExciteLayer {
+            tensor_in: ptr::null_mut(),
+            tensor_1x: ptr::null_mut(),
+            tensor_gx: ptr::null_mut(),
+            filter: ptr::null_mut(),
+            relu: ptr::null_mut(),
+            sigmoid: ptr::null_mut(),
+            descr: ptr::null_mut(),
+            fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
+            num_channels: num_channels as usize,
+            group_size: group_size,
+
+            count: i
+        };
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.tensor_in))?;
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.tensor_in,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
+            n, num_channels as i32, 19, 19
+        ))?;
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.tensor_1x))?;
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.tensor_1x,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
+            n, num_channels as i32, 1, 1
+        ))?;
+
+        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.tensor_gx))?;
+        check!(cudnn::cudnnSetTensor4dDescriptor(
+            out.tensor_gx,
+            cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half,
+            n, group_size * num_channels, 1, 1
+        ))?;
+
+        check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter))?;
+        check!(cudnn::cudnnSetFilter4dDescriptor(
+            out.filter,
+            cudnn::DataType::Half,
+            cudnn::TensorFormat::NHWC,
+            (num_channels * group_size) as i32, 1, 19, 19
+        ))?;
+
+        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu))?;
+        check!(cudnn::cudnnSetActivationDescriptor(
+            out.relu,
+            cudnn::ActivationMode::Relu,
+            cudnn::NanPropagation::NotPropagateNan,
+            0.0
+        ))?;
+
+        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.sigmoid))?;
+        check!(cudnn::cudnnSetActivationDescriptor(
+            out.sigmoid,
+            cudnn::ActivationMode::Sigmoid,
+            cudnn::NanPropagation::NotPropagateNan,
+            0.0
+        ))?;
+
+        check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr))?;
+        check!(cudnn::cudnnSetConvolution2dDescriptor(
+            out.descr,
+            0, 0, 1, 1, 1, 1,
+            cudnn::ConvolutionMode::CrossCorrelation,
+            if has_true_half() { cudnn::DataType::Half } else { cudnn::DataType::Float }
+        ))?;
+        check!(cudnn::cudnnSetConvolutionGroupCount(out.descr, num_channels))?;
+
+        #[cfg(feature = "tensor-core")] {
+            check!(cudnn::cudnnSetConvolutionMathType(out.descr, cudnn::MathType::TensorOpMath))?;
+        }
+
+        // determine the best algorithm to use for this convolution
+        let mut num_fwd_algo = 0;
+
+        check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
+            handle,
+            out.tensor_in,
+            out.filter,
+            out.descr,
+            out.tensor_gx,
+            1, &mut num_fwd_algo, &mut out.fwd_algo
+        ))?;
+
+        assert!(num_fwd_algo > 0);
+
+        Ok(out)
+    }
+
+    unsafe fn forward<'a, T: InferenceType>(
+        &self,
+        workspace: &mut Workspace,
+        slots: &'a SlotsGuard,
+        input: SlotGuard<'a>
+    ) -> Result<(SlotGuard<'a>, SlotGuard<'a>), Error>
+    {
+        // gather excite block
+        let conv_1 = &workspace.tensors[&format!("{:02}_residual/gather_excite/conv_1:0", self.count)];
+        let bias_1 = &workspace.tensors[&format!("{:02}_residual/gather_excite/conv_1/offset:0", self.count)];
+        let linear_1 = &workspace.tensors[&format!("{:02}_residual/gather_excite/linear_1:0", self.count)];
+        let offset_1 = &workspace.tensors[&format!("{:02}_residual/gather_excite/linear_1/offset:0", self.count)];
+        let linear_2 = &workspace.tensors[&format!("{:02}_residual/gather_excite/linear_2:0", self.count)];
+        let offset_2 = &workspace.tensors[&format!("{:02}_residual/gather_excite/linear_2/offset:0", self.count)];
+        let device_id = get_current_device()?;
+
+        conv_1.copy_to_device(device_id, workspace.tower_stream)?;
+        bias_1.copy_to_device(device_id, workspace.tower_stream)?;
+        linear_1.copy_to_device(device_id, workspace.tower_stream)?;
+        offset_1.copy_to_device(device_id, workspace.tower_stream)?;
+        linear_2.copy_to_device(device_id, workspace.tower_stream)?;
+        offset_2.copy_to_device(device_id, workspace.tower_stream)?;
+
+        let workspace_g = slots.get_slot(Slot::Workspace_g, self.fwd_algo.memory, workspace.tower_stream)?;
+        let gather_excite_size = size_of::<T::Tower>() * workspace.batch_size * self.num_channels * self.group_size as usize;
+        let gather_excite_1 = slots.get_slot(Slot::GatherExcite_1, gather_excite_size, workspace.tower_stream)?;
+        let gather_excite_2 = slots.get_slot(Slot::GatherExcite_2, gather_excite_size, workspace.tower_stream)?;
+        let num_channels_ = self.num_channels as i32 * self.group_size;
+
+        // depth-wise convolution to shape `(N, 1, 1, C)` into `gather_excite_1`
+        check!(cudnn::cudnnConvolutionBiasActivationForward(
+            workspace.handle_dnn,
+            &ONE,
+            self.tensor_in, *input,
+            self.filter, conv_1.get(device_id),
+            self.descr, self.fwd_algo.algo,
+            *workspace_g, self.fwd_algo.memory,
+            &ZERO,
+            self.tensor_gx, *gather_excite_1,
+            self.tensor_gx, bias_1.get(device_id),
+            self.relu,
+            self.tensor_gx, *gather_excite_1
+        ))?;
+
+        // excite the vector (1) into `gather_excite_2`
+        check!(cublas::cublasGemmEx(
+            workspace.handle_blas,
+            cublas::Operation::N,
+            cublas::Operation::N,
+            num_channels_, workspace.batch_size as i32, num_channels_,  // output, batch_size, input
+            &ONE as *const f32 as *const c_void,
+            linear_1.get(device_id), cuda::DataType::R16F, num_channels_,  // input_2
+            *gather_excite_1, cuda::DataType::R16F, num_channels_,  // input_1
+            &ZERO as *const f32 as *const c_void,
+            *gather_excite_2, cuda::DataType::R16F, num_channels_,  // output
+            cuda::DataType::R32F, cublas::GemmAlgo::DfaltTensorOp
+        ))?;
+
+        check!(cudnn::cudnnAddTensor(
+            workspace.handle_dnn,
+            &ONE, self.tensor_gx, offset_1.get(device_id),
+            &ONE, self.tensor_gx, *gather_excite_2
+        ))?;
+
+        check!(cudnn::cudnnActivationForward(
+            workspace.handle_dnn,
+            self.relu,
+            &ONE, self.tensor_gx, *gather_excite_2,  // input
+            &ZERO, self.tensor_gx, *gather_excite_2,  // output
+        ))?;
+
+        // excite the vector (2) into `gather_excite_1`
+        check!(cublas::cublasGemmEx(
+            workspace.handle_blas,
+            cublas::Operation::N,
+            cublas::Operation::N,
+            self.num_channels as i32, workspace.batch_size as i32, num_channels_,  // output, batch_size, input
+            &ONE as *const f32 as *const c_void,
+            linear_2.get(device_id), cuda::DataType::R16F, self.num_channels as i32,  // input_2
+            *gather_excite_2, cuda::DataType::R16F, num_channels_,  // input_1
+            &ZERO as *const f32 as *const c_void,
+            *gather_excite_1, cuda::DataType::R16F, self.num_channels as i32,  // output
+            cuda::DataType::R32F, cublas::GemmAlgo::DfaltTensorOp
+        ))?;
+
+        check!(cudnn::cudnnAddTensor(
+            workspace.handle_dnn,
+            &ONE, self.tensor_1x, offset_2.get(device_id),
+            &ONE, self.tensor_1x, *gather_excite_1
+        ))?;
+
+        check!(cudnn::cudnnActivationForward(
+            workspace.handle_dnn,
+            self.sigmoid,
+            &ONE, self.tensor_gx, *gather_excite_1,  // input
+            &ZERO, self.tensor_gx, *gather_excite_1,  // output
+        ))?;
+
+        Ok((input, gather_excite_1))
+    }
+}
+
 struct ResidualLayer {
     tensor: cudnn::TensorDescriptor,
     offset: cudnn::TensorDescriptor,
@@ -429,11 +672,11 @@ struct ResidualLayer {
     relu: cudnn::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
+    op_mul: cudnn::OpTensorDescriptor,
+    gather_excite: GatherExciteLayer,
     num_channels: usize,
 
-    count: usize,
-    gate_c: f32,  // carry gate
-    gate_t: f32   // transform gate
+    count: usize
 }
 
 impl Drop for ResidualLayer {
@@ -444,13 +687,13 @@ impl Drop for ResidualLayer {
             cudnn::cudnnDestroyFilterDescriptor(self.filter);
             cudnn::cudnnDestroyActivationDescriptor(self.relu);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
+            cudnn::cudnnDestroyOpTensorDescriptor(self.op_mul);
         }
     }
 }
 
 impl ResidualLayer {
-    /// Create a layer that takes the final output of the residual block and
-    /// transforms it into a scalar value.
+    /// Create a layer that takes a tensor add returns a transformed tensor of the same size.
     ///
     /// # Arguments
     ///
@@ -462,7 +705,6 @@ impl ResidualLayer {
     unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<Option<ResidualLayer>, Error> {
         let weights_1 = tensors.get(&format!("{:02}_residual/conv_1:0", i));
         let weights_2 = tensors.get(&format!("{:02}_residual/conv_2:0", i));
-        let alpha = tensors.get(&format!("{:02}_residual/alpha:0", i));
 
         if weights_1.is_none() || weights_2.is_none() {
             return Ok(None);
@@ -471,8 +713,6 @@ impl ResidualLayer {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
-        let gate_t = alpha.map(|t| t.as_f32()).unwrap_or(0.5);
-        let gate_c = 1.0 - gate_t;
         let mut out = ResidualLayer {
             tensor: ptr::null(),
             offset: ptr::null(),
@@ -480,12 +720,11 @@ impl ResidualLayer {
             relu: ptr::null(),
             descr: ptr::null(),
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
+            op_mul: ptr::null(),
+            gather_excite: GatherExciteLayer::new(handle, n, i, tensors)?,
             num_channels: num_channels as usize,
 
-            count: i,
-
-            gate_c: gate_c,
-            gate_t: gate_t
+            count: i
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.tensor))?;
@@ -518,6 +757,14 @@ impl ResidualLayer {
             cudnn::ActivationMode::Relu,
             cudnn::NanPropagation::NotPropagateNan,
             0.0
+        ))?;
+
+        check!(cudnn::cudnnCreateOpTensorDescriptor(&mut out.op_mul))?;
+        check!(cudnn::cudnnSetOpTensorDescriptor(
+            out.op_mul,
+            cudnn::OpTensorOp::Mul,
+            cudnn::DataType::Float,
+            cudnn::NanPropagation::NotPropagateNan
         ))?;
 
         check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr))?;
@@ -559,6 +806,10 @@ impl ResidualLayer {
         check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream))?;
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream))?;
 
+        // start the GE-Identity edge
+        let (input, alpha) = self.gather_excite.forward::<T>(workspace, slots, input)?;
+
+        // copy all residual variables to the current device
         let device_id = get_current_device()?;
         let weights_1 = &workspace.tensors[&format!("{:02}_residual/conv_1:0", self.count)];
         let weights_2 = &workspace.tensors[&format!("{:02}_residual/conv_2:0", self.count)];
@@ -568,20 +819,14 @@ impl ResidualLayer {
         weights_1.copy_to_device(device_id, workspace.tower_stream)?;
         weights_2.copy_to_device(device_id, workspace.tower_stream)?;
         offset_1.copy_to_device(device_id, workspace.tower_stream)?;
-        if offset_2.copy_to_device(device_id, workspace.tower_stream)? {
-            check!(cudnn::cudnnScaleTensor(
-                workspace.handle_dnn,
-                self.offset, offset_2.get(device_id),
-                &self.gate_t
-            ))?;
-        }
+        offset_2.copy_to_device(device_id, workspace.tower_stream)?;
 
         debug_assert!(offset_1.size_in_elements == offset_2.size_in_elements);
 
         // perform the forward convolution (1)
         let workspace_r = slots.get_slot(Slot::Workspace_r, self.fwd_algo.memory, workspace.tower_stream)?;
-        let residual_2_size = size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361;
-        let residual_2 = slots.get_slot(Slot::Residual_2, residual_2_size, workspace.tower_stream)?;
+        let residual_size = size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361;
+        let residual_2 = slots.get_slot(Slot::Residual_2, residual_size, workspace.tower_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
@@ -598,14 +843,22 @@ impl ResidualLayer {
         ))?;
 
         // perform the forward convolution (2)
+        check!(cudnn::cudnnOpTensor(
+            workspace.handle_dnn,
+            self.op_mul,
+            &ONE, self.tensor, *input,  // input_1
+            &ONE, self.gather_excite.tensor_1x, *alpha,  // input_2
+            &ZERO, self.tensor, *input,  // output
+        ))?;
+
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             workspace.handle_dnn,
-            &self.gate_t,
+            &ONE,
             self.tensor, *residual_2,
             self.filter, weights_2.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_r, self.fwd_algo.memory,
-            &self.gate_c,
+            &ONE,
             self.tensor, *input,
             self.offset, offset_2.get(device_id),
             self.relu,
@@ -630,8 +883,6 @@ struct ValueLayer {
     bias_1: cudnn::TensorDescriptor,
     bias_2: cudnn::TensorDescriptor,
     tanh: cudnn::ActivationDescriptor,
-
-    count: usize
 }
 
 impl Drop for ValueLayer {
@@ -661,10 +912,9 @@ impl ValueLayer {
     ///
     /// * `handle` - The cuDNN handle
     /// * `n` - The number of images.
-    /// * `i` - The index of the layer.
     /// * `tensors` -
     ///
-    unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<ValueLayer, Error> {
+    unsafe fn new(handle: cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> Result<ValueLayer, Error> {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
@@ -682,8 +932,6 @@ impl ValueLayer {
             bias_1: ptr::null(),
             bias_2: ptr::null(),
             tanh: ptr::null(),
-
-            count: i
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input))?;
@@ -808,12 +1056,12 @@ impl ValueLayer {
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.value_stream))?;
 
         let device_id = get_current_device()?;
-        let weights_1 = &workspace.tensors[&format!("{:02}v_value/conv_1:0", self.count)];
-        let weights_2 = &workspace.tensors[&format!("{:02}v_value/linear_1:0", self.count)];
-        let weights_3 = &workspace.tensors[&format!("{:02}v_value/linear_2:0", self.count)];
-        let offset_1 = &workspace.tensors[&format!("{:02}v_value/conv_1/offset:0", self.count)];
-        let offset_2 = &workspace.tensors[&format!("{:02}v_value/linear_1/offset:0", self.count)];
-        let offset_3 = &workspace.tensors[&format!("{:02}v_value/linear_2/offset:0", self.count)];
+        let weights_1 = &workspace.tensors["zz_value/conv_1:0"];
+        let weights_2 = &workspace.tensors["zz_value/linear_1:0"];
+        let weights_3 = &workspace.tensors["zz_value/linear_2:0"];
+        let offset_1 = &workspace.tensors["zz_value/conv_1/offset:0"];
+        let offset_2 = &workspace.tensors["zz_value/linear_1/offset:0"];
+        let offset_3 = &workspace.tensors["zz_value/linear_2/offset:0"];
 
         weights_1.copy_to_device(device_id, workspace.value_stream)?;
         weights_2.copy_to_device(device_id, workspace.value_stream)?;
@@ -917,8 +1165,6 @@ struct PolicyLayer {
 
     policy_1: cudnn::TensorDescriptor,
     policy_2: cudnn::TensorDescriptor,
-
-    count: usize
 }
 
 impl Drop for PolicyLayer {
@@ -946,10 +1192,9 @@ impl PolicyLayer {
     ///
     /// * `handle` - The cuDNN handle
     /// * `n` - The number of images.
-    /// * `i` - The index of the layer.
     /// * `tensors` -
     ///
-    unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<PolicyLayer, Error> {
+    unsafe fn new(handle: cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> Result<PolicyLayer, Error> {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
@@ -965,8 +1210,6 @@ impl PolicyLayer {
 
             policy_1: ptr::null(),
             policy_2: ptr::null(),
-
-            count: i
         };
 
         check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input))?;
@@ -1067,10 +1310,10 @@ impl PolicyLayer {
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream))?;
 
         let device_id = get_current_device()?;
-        let weights_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1:0", self.count)];
-        let weights_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1:0", self.count)];
-        let offset_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1/offset:0", self.count)];
-        let offset_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1/offset:0", self.count)];
+        let weights_1 = &workspace.tensors["zz_policy/conv_1:0"];
+        let weights_2 = &workspace.tensors["zz_policy/linear_1:0"];
+        let offset_1 = &workspace.tensors["zz_policy/conv_1/offset:0"];
+        let offset_2 = &workspace.tensors["zz_policy/linear_1/offset:0"];
 
         offset_1.copy_to_device(device_id, workspace.policy_stream)?;
         offset_2.copy_to_device(device_id, workspace.policy_stream)?;

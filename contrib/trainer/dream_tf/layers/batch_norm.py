@@ -25,17 +25,19 @@ from ..hooks.dump import DUMP_OPS
 
 def batch_norm(x, weights, mode, params, is_recomputing=False):
     """ Batch normalization layer. """
-    num_channels = weights.shape[3]
+    num_channels = x.shape[3]
     ones_op = tf.ones_initializer()
     zeros_op = tf.zeros_initializer()
 
     with tf.variable_scope(weights.op.name.split('/')[-1]):
-        scale = tf.get_variable('scale', (num_channels,), tf.float32, ones_op, trainable=False, use_resource=True)
+        scale = tf.get_variable('scale', (num_channels,), tf.float32, ones_op, trainable=True, use_resource=True)
         mean = tf.get_variable('mean', (num_channels,), tf.float32, zeros_op, trainable=False, use_resource=True)
         variance = tf.get_variable('variance', (num_channels,), tf.float32, ones_op, trainable=False, use_resource=True)
         offset = tf.get_variable('offset', (num_channels,), tf.float32, zeros_op, trainable=True, use_resource=True)
 
     if not is_recomputing:
+        is_depthwise = 'depthwise' in x.name
+
         # fold the batch normalization into the convolutional weights and one
         # additional bias term. By scaling the weights and the mean by the
         # term `scale / sqrt(variance + 0.001)`.
@@ -48,10 +50,20 @@ def batch_norm(x, weights, mode, params, is_recomputing=False):
         #
         std_ = tf.sqrt(variance + 0.001)
         offset_ = offset - mean / std_
-        weights_ = tf.multiply(
-            weights,
-            tf.reshape(scale / std_, (1, 1, 1, num_channels))
-        )
+
+        if is_depthwise:
+            num_in_channels = weights.shape[2]
+            num_in_multiplier = weights.shape[3]
+
+            weights_ = tf.multiply(
+                weights,
+                tf.reshape(scale / std_, (1, 1, num_in_channels, num_in_multiplier))
+            )
+        else:
+            weights_ = tf.multiply(
+                weights,
+                tf.reshape(scale / std_, (1, 1, 1, num_channels))
+            )
 
         # fix the weights so that they appear in the _correct_ order according
         # to cuDNN (for NHWC):

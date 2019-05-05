@@ -27,7 +27,9 @@ from .orthogonal_initializer import orthogonal_initializer
 from .policy_head import policy_head
 from .residual_block import residual_block
 from .value_head import value_head
+from .ownership_head import ownership_head
 
+HEAD_EVERY_X_BLOCK = 1
 
 def tower(x, mode, params):
     """ The full neural network used to predict the value and policy tensors for
@@ -54,20 +56,29 @@ def tower(x, mode, params):
         y = batch_norm(conv2d(y, conv_1), conv_1, mode, params)
         y = tf.nn.relu(y)
 
+    policy = []
+    next_policy = []
+    value = []
+    ownership = []
+
     for i in range(num_blocks):
         with tf.variable_scope('{:02d}_residual'.format(2 + i), reuse=tf.AUTO_REUSE):
             y = residual_block(y, mode, params)
 
-    # policy head
-    with tf.variable_scope('{:02d}p_policy'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
-        p = policy_head(y, mode, params)
+        if i == (num_blocks - 1) or i % HEAD_EVERY_X_BLOCK == 0:
+            # policy heads
+            with tf.variable_scope('zz_policy'.format(2 + i), reuse=tf.AUTO_REUSE):
+                policy += [policy_head(y, mode, params)]
 
-    # policy head
-    with tf.variable_scope('{:02d}p_next_policy'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
-        pn = policy_head(y, mode, params)
+            with tf.variable_scope('zz_next_policy'.format(2 + i), reuse=tf.AUTO_REUSE):
+                next_policy += [policy_head(y, mode, params)]
 
-    # value head
-    with tf.variable_scope('{:02d}v_value'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
-        v = value_head(y, mode, params)
+            # value head
+            with tf.variable_scope('zz_value'.format(2 + i), reuse=tf.AUTO_REUSE):
+                value += [value_head(y, mode, params)]
 
-    return v, p, pn, y
+            # territory head
+            with tf.variable_scope('zz_ownership'.format(2 + i), reuse=tf.AUTO_REUSE):
+                ownership += [ownership_head(y, mode, params)]
+
+    return value, ownership, policy, next_policy, y

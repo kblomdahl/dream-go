@@ -64,6 +64,6 @@ def value_head(x, mode, params):
         y = tf.nn.relu(y)
         y = tf.matmul(y, cast_to_compute_type(linear_2)) + cast_to_compute_type(offset_2)
 
-        return tf.cast(tf.nn.tanh(y), tf.float32)
+        return tf.cast(tf.nn.tanh(y), tf.float32, name='output')
 
     return recompute_grad(_forward)(x)

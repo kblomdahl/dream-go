@@ -39,14 +39,14 @@ def normalize_constraint(x):
     return tf.reshape(x_n, x.shape)
 
 
-def unit_constraint(x):
-    """ Return a constraint that clip `x` to the range [0, 1] """
-    return tf.clip_by_value(x, 0.0, 1.0)
-
-
 def conv2d(x, weights):
     """ Shortcut for `tf.nn.conv2d` """
     return tf.nn.conv2d(x, cast_to_compute_type(weights), (1, 1, 1, 1), 'SAME', True, 'NHWC')
+
+
+def global_depthwise_conv2d(x, weights):
+    """ Shortcut for `tf.nn.depthwise_conv2d` with _global pooling_ """
+    return tf.nn.depthwise_conv2d(x, cast_to_compute_type(weights), (1, 1, 1, 1), 'VALID', None, None, 'NHWC')
 
 
 def cast_to_compute_type(var):

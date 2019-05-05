@@ -34,10 +34,13 @@ pub enum Slot {
     Value_3 = 6,
     Residual_1 = 7,
     Residual_2 = 8,
-    Workspace_1 = 9,  // workspace for tower head
-    Workspace_r = 10,  // workspace for residual blocks
-    Workspace_p = 11,  // workspace for policy head
-    Workspace_v = 12,  // workspace for value head
+    GatherExcite_1 = 9,
+    GatherExcite_2 = 10,
+    Workspace_1 = 11,  // workspace for tower head
+    Workspace_g = 12,  // workspace for gather excite
+    Workspace_r = 13,  // workspace for residual blocks
+    Workspace_p = 14,  // workspace for policy head
+    Workspace_v = 15,  // workspace for value head
 }
 
 struct SlotInner {
