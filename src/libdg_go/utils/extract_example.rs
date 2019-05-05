@@ -24,7 +24,7 @@ use dg_utils::types::f16;
 use dg_utils::b85;
 
 use libc::{c_char, c_int};
-use rand::prelude::SliceRandom;
+use rand::distributions::{Normal, Distribution};
 use rand::rngs::StdRng;
 use rand::{FromEntropy, SeedableRng};
 use regex::{Regex, Captures};
@@ -227,9 +227,21 @@ pub unsafe extern "C" fn extract_single_example(
             }).collect();
 
         let chosen_candidate = RNG.lock().map(|ref mut rng| {
-            use std::ops::DerefMut;
+            let normal_distr = Normal::new(
+                0.5 * candidate_examples.len() as f64,
+                0.25 * candidate_examples.len() as f64
+            );
+            let mut index;
 
-            candidate_examples.choose(rng.deref_mut())
+            loop {
+                index = normal_distr.sample(&mut **rng).round() as isize;
+
+                if index >= 0 && (index as usize) < candidate_examples.len() {
+                    break
+                }
+            }
+
+            candidate_examples.get(index as usize)
         }).unwrap_or(None);
 
         chosen_candidate.map(|&i| {
