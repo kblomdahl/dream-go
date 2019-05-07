@@ -14,7 +14,6 @@
 
 use dg_go::utils::sgf::SgfCoordinate;
 use dg_go::{Board, Color};
-use dg_utils::lcb::normal_lcb_m;
 use dg_utils::{config, max};
 use super::asm::{argmax_f32, argmax_i32};
 use super::parallel::spin::Mutex;
@@ -126,22 +125,8 @@ impl PUCT {
                 let _guard = (*node).lock.lock();
 
                 let prev_value = child.value();
-                let prev_value_s = child.value_s();
                 let prev_count = child.add_count(1);
-                let next_value = child.set_value(fadd_fast(
-                    prev_value,
-                    fdiv_fast(
-                        fsub_fast(value_, prev_value),
-                        (prev_count + 1) as f32
-                    )
-                ));
-                child.set_value_s(fadd_fast(
-                    prev_value_s,
-                    fmul_fast(
-                        fsub_fast(value_, prev_value),
-                        fsub_fast(value_, next_value)
-                    )
-                ));
+                child.set_value(fadd_fast(prev_value, fdiv_fast(fsub_fast(value_, prev_value), (prev_count + 1) as f32)));
                 child.sub_vcount(*config::VLOSS_CNT);
             }, (*node).initial_value);
         }
@@ -288,8 +273,7 @@ pub struct Child<O: SearchOptions> {
     count: i32,
     vcount: i16,
     ptr: *mut Node<O>,
-    value: f32,
-    value_s: f32
+    value: f32
 }
 
 impl<O: SearchOptions> Child<O> {
@@ -305,7 +289,6 @@ impl<O: SearchOptions> Child<O> {
             count: 0,
             vcount: 0,
             value: value,
-            value_s: 0.0,
             expanding: false,
             ptr: ptr::null_mut()
         }
@@ -323,7 +306,6 @@ impl<O: SearchOptions> Child<O> {
             count: small.count[index],
             vcount: small.vcount[index],
             value: small.value[index],
-            value_s: small.value_s[index],
             expanding: small.expanding[index],
             ptr: small.ptr[index]
         }
@@ -343,7 +325,6 @@ impl<O: SearchOptions> Child<O> {
             count: big.count[index],
             vcount: big.vcount[index],
             value: big.value[index],
-            value_s: big.value_s[index],
             expanding: big.expanding[index],
             ptr: big.ptr[index]
         }
@@ -373,16 +354,6 @@ impl<O: SearchOptions> Child<O> {
     pub fn value(&self) -> f32 {
         self.value
     }
-
-    /// Returns the variance of the value of this child.
-    pub fn value_var(&self) -> f32 {
-        self.value_s / (self.count as f32 + 1e-5)
-    }
-
-    /// Returns the standard deviation of the value of this child.
-    pub fn value_std(&self) -> f32 {
-        self.value_var().sqrt()
-    }
 }
 
 /// Flyweight mutable structure used to contain the values of a single child in a `Node`.
@@ -392,8 +363,7 @@ pub struct ChildMut<O: SearchOptions> {
     count: *mut i32,
     vcount: *mut i16,
     ptr: *mut *mut Node<O>,
-    value: *mut f32,
-    value_s: *mut f32
+    value: *mut f32
 }
 
 impl<O: SearchOptions> ChildMut<O> {
@@ -410,7 +380,6 @@ impl<O: SearchOptions> ChildMut<O> {
             count: small.count.get_unchecked_mut(index),
             vcount: small.vcount.get_unchecked_mut(index),
             value: small.value.get_unchecked_mut(index),
-            value_s: small.value_s.get_unchecked_mut(index),
             expanding: small.expanding.get_unchecked_mut(index),
             ptr: small.ptr.get_unchecked_mut(index)
         }
@@ -431,7 +400,6 @@ impl<O: SearchOptions> ChildMut<O> {
             count: big.count.get_unchecked_mut(index),
             vcount: big.vcount.get_unchecked_mut(index),
             value: big.value.get_unchecked_mut(index),
-            value_s: big.value_s.get_unchecked_mut(index),
             expanding: big.expanding.get_unchecked_mut(index),
             ptr: big.ptr.get_unchecked_mut(index)
         }
@@ -460,11 +428,6 @@ impl<O: SearchOptions> ChildMut<O> {
     /// Returns the average value of this child.
     pub fn value(&self) -> f32 {
         unsafe { *self.value }
-    }
-
-    /// Returns the average value of this child.
-    pub fn value_s(&self) -> f32 {
-        unsafe { *self.value_s }
     }
 
     /// Sets this child as having been expanded, returning whether this
@@ -542,20 +505,8 @@ impl<O: SearchOptions> ChildMut<O> {
     ///
     /// * `value` - the new average value of this child
     ///
-    fn set_value(&mut self, value: f32) -> f32 {
+    fn set_value(&mut self, value: f32) {
         unsafe { *self.value = value; }
-
-        value
-    }
-
-    /// Sets the square sum of average distances for the value of this child.
-    ///
-    /// # Arguments
-    ///
-    /// * `value_s` - new square sum of this child
-    ///
-    fn set_value_s(&mut self, value_s: f32) {
-        unsafe { *self.value_s = value_s; }
     }
 }
 
@@ -570,10 +521,6 @@ pub struct BigChildrenImpl<O: SearchOptions> {
 
     /// The average value for the sub-tree of each edge.
     pub value: [f32; 368],
-
-    /// The sum of squares of the value for the sub-tree of each edge. This can be used to
-    /// calculate the variance of the value by `(s / count).sqrt()`.
-    pub value_s: [f32; 368],
 
     /// Whether some thread is currently busy (or is done) expanding the given
     /// child. This is used to avoid the same child being expanded multiple
@@ -607,7 +554,6 @@ impl<O: SearchOptions> BigChildrenImpl<O> {
             count: [0; 368],
             vcount: [0; 368],
             value: [value; 368],
-            value_s: [0.0; 368],
             expanding: [false; 362],
             ptr: [ptr::null_mut(); 362]
         };
@@ -619,7 +565,6 @@ impl<O: SearchOptions> BigChildrenImpl<O> {
                 big.count[other] = small.count[index];
                 big.vcount[other] = small.vcount[index];
                 big.value[other] = small.value[index];
-                big.value_s[other] = small.value_s[index];
                 big.expanding[other] = small.expanding[index];
                 big.ptr[other] = small.ptr[index];
             }
@@ -659,10 +604,6 @@ pub struct SmallChildrenImpl<O: SearchOptions> {
     /// The average value for the sub-tree of each edge.
     pub value: [f32; SMALL_SIZE],
 
-    /// The sum of squares of the value for the sub-tree of each edge. This can be used to
-    /// calculate the variance of the value by `(s / count).sqrt()`.
-    pub value_s: [f32; SMALL_SIZE],
-
     /// Whether some thread is currently busy (or is done) expanding the given
     /// child. This is used to avoid the same child being expanded multiple
     /// times by different threads.
@@ -697,7 +638,6 @@ impl<O: SearchOptions> SmallChildrenImpl<O> {
             count: [0; SMALL_SIZE],
             vcount: [0; SMALL_SIZE],
             value: [value; SMALL_SIZE],
-            value_s: [0.0; SMALL_SIZE],
             expanding: [false; SMALL_SIZE],
             ptr: [ptr::null_mut(); SMALL_SIZE],
             indices: [::std::i16::MIN; SMALL_SIZE]
@@ -1213,21 +1153,9 @@ impl<O: SearchOptions> Node<O> {
     pub fn best(&self, temperature: f32) -> (f32, usize) {
         if temperature <= 9e-2 { // greedy
             let max_i = (0..362)
-                .filter(|&i| self.with(i, |child| child.count() > 0))
                 .max_by_key(|&i| {
                     self.with(i, |child| {
-                        let lcb = normal_lcb_m(
-                            child.value(),
-                            child.value_std(),
-                            child.count(),
-                            self.total_count
-                        );
-
-                        (
-                            OrderedFloat(lcb),
-                            child.count(),
-                            OrderedFloat(self.prior[i])
-                        )
+                        (child.count(), OrderedFloat(self.prior[i]))
                     })
                 })
                 .unwrap_or(361);
@@ -1600,11 +1528,7 @@ pub struct ToPretty<'a, O: SearchOptions> {
 impl<'a, O: SearchOptions> fmt::Display for ToPretty<'a, O> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         let mut children = self.root.children.nonzero().collect::<Vec<usize>>();
-        children.sort_by_key(|&i| {
-            OrderedFloat(-self.root.with(i, |child| {
-                normal_lcb_m(child.value(), child.value_std(), child.count(), self.root.total_count)
-            }))
-        });
+        children.sort_by_key(|&i| -self.root.with(i, |child| child.count()));
 
         if !*config::VERBOSE {
             children.truncate(10);
@@ -1615,7 +1539,7 @@ impl<'a, O: SearchOptions> fmt::Display for ToPretty<'a, O> {
             .map(|i| self.root.with(i, |child| child.count() as f32 * child.value()))
             .filter(|v| v.is_finite())
             .sum();
-        let norm_value = total_value / (self.root.total_count as f32 + 1e-5);
+        let norm_value = total_value / (self.root.total_count as f32);
         let likely_path: String = GreedyPath::new(self.root, 1)
                 .map(|i| PrettyVertex { inner: i })
                 .map(|v| format!("{}", v))
@@ -1636,14 +1560,13 @@ impl<'a, O: SearchOptions> fmt::Display for ToPretty<'a, O> {
                     .map(|v| format!("{}", v))
                     .collect::<Vec<String>>().join(" ");
 
-            writeln!(fmt, "{: >5} -> {:7} (W: {:5.2}% / {:5.2}%) (N: {:5.2}%) PV: {} {}",
-                     pretty_vertex,
-                     child.total_count,
-                     100.0 * self.root.with(i, |child| child.value()),
-                     100.0 * self.root.with(i, |child| normal_lcb_m(child.value(), child.value_std(), child.count(), self.root.total_count)),
-                     100.0 * self.root.prior[i],
-                     pretty_vertex,
-                     likely_path
+            writeln!(fmt, "{: >5} -> {:7} (W: {:5.2}%) (N: {:5.2}%) PV: {} {}",
+                pretty_vertex,
+                child.total_count,
+                100.0 * self.root.with(i, |child| child.value()),
+                100.0 * self.root.prior[i],
+                pretty_vertex,
+                likely_path
             )?;
         }
 

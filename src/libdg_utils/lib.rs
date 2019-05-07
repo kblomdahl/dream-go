@@ -1,4 +1,4 @@
-// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2017 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ extern crate regex;
 
 pub mod b85;
 pub mod config;
-pub mod lcb;
 pub mod types;
 
 /// Returns the smallest of `x` and `y`.

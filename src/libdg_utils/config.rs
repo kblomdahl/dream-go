@@ -186,10 +186,6 @@ lazy_static! {
     /// The UCT exploration rate.
     pub static ref UCT_EXP: Vec<(i32, f32)> = get_intp_list("UCT_EXP")
         .unwrap_or_else(|| vec! [(0, 0.88), (3200, 1.44)]);
-
-    /// The LCB critical value.
-    pub static ref CRITICAL_VALUE: Vec<(i32, f32)> = get_intp_list("CRITICAL_VALUE")
-        .unwrap_or_else(|| vec! [(0, 1.645), (3200, 1.96), (16000, 2.576)]);
 }
 
 /// Returns a description of the configurations for this engine.
@@ -203,8 +199,7 @@ pub fn get_description() -> String {
         format!("SOFTMAX_TEMPERATURE {}", *SOFTMAX_TEMPERATURE),
         format!("VLOSS_CNT {}", *VLOSS_CNT),
         format!("FPU_REDUCE {:?}", *FPU_REDUCE),
-        format!("UCT_EXP {:?}", *UCT_EXP),
-        format!("CRITICAL_VALUE {:?}", *CRITICAL_VALUE)
+        format!("UCT_EXP {:?}", *UCT_EXP)
     ].join("\n")
 }
 
@@ -319,17 +314,6 @@ pub fn get_fpu_reduce(visits: i32) -> f32 {
     get_intp_value(&FPU_REDUCE, visits)
 }
 
-/// Returns the critical value to use when calculating the LCB of values for the given
-/// number of visits.
-///
-/// # Arguments
-///
-/// * `visits` -
-///
-pub fn get_lcb_critical_value(visits: i32) -> f32 {
-    get_intp_value(&CRITICAL_VALUE, visits)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,3 +343,4 @@ mod tests {
         assert_eq!(get_intp_value(&vec! [(0, 0.0), (100, 1.0)], 40), 0.4);
     }
 }
+
