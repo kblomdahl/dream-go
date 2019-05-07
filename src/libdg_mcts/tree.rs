@@ -111,7 +111,7 @@ impl PUCT {
     ///
     #[inline]
     unsafe fn update<O: SearchOptions>(trace: &NodeTrace<O>, color: Color, value: f32) {
-        use std::intrinsics::{fadd_fast, fsub_fast, fmul_fast, fdiv_fast};
+        use std::intrinsics::{fadd_fast, fsub_fast, fdiv_fast};
 
         for &(node, _, index) in trace.iter() {
             let value_ = if color == (*node).to_move { value } else { 1.0 - value };
