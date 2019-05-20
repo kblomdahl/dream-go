@@ -57,18 +57,19 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use dg_go::utils::features::{HWC, Features};
-use dg_go::utils::score::{Score};
+use dg_go::utils::score::{Score, StoneStatus};
+use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::utils::symmetry;
 use dg_go::{Board, Color};
-use self::options::{SearchOptions, ScoringSearch};
-use self::time_control::TimeStrategy;
-use self::predict::Predictor;
 use dg_nn::Profiler;
 use dg_utils::config;
 use dg_utils::types::f16;
 use self::asm::sum_finite_f32;
 use self::asm::normalize_finite_f32;
 use self::parallel::global_rwlock;
+use self::options::{SearchOptions, ScoringSearch};
+use self::time_control::TimeStrategy;
+use self::predict::Predictor;
 
 pub enum GameResult {
     Resign(String, Board, Color, f32),
@@ -88,6 +89,9 @@ impl fmt::Display for GameResult {
                 let (black, white) = board.get_score();
                 let black = black as f32;
                 let white = white as f32 + board.komi();
+                let stone_status = board.get_stone_status(board);
+                let black_territory = territory_to_property(&stone_status, StoneStatus::BlackTerritory);
+                let white_territory = territory_to_property(&stone_status, StoneStatus::WhiteTerritory);
                 let winner = {
                     if black > white {
                         format!("B+{:.1}", black - white)
@@ -98,10 +102,43 @@ impl fmt::Display for GameResult {
                     }
                 };
 
-                write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[{:.1}]RE[{}]{})", iso8601, board.komi(), winner, sgf)
+                write!(
+                    fmt,
+                    "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[{:.1}]RE[{}]{}{}{})",
+                    iso8601,
+                    board.komi(),
+                    winner,
+                    sgf,
+                    format!("{}{}", if black_territory.is_empty() { "" } else { "TB" }, black_territory),
+                    format!("{}{}", if white_territory.is_empty() { "" } else { "TW" }, white_territory),
+                )
             }
         }
     }
+}
+
+/// Returns a property string of all vertices that has the given `StoneStatus`, for example
+/// `[aa][bb][cc]`.
+///
+/// # Arguments
+///
+/// * `stone_status` -
+/// * `to_keep` -
+///
+fn territory_to_property(stone_status: &Vec<(usize, Vec<StoneStatus>)>, to_keep: StoneStatus) -> String {
+    stone_status.iter()
+        .filter_map(|status| {
+            match status {
+                (index, status) if status.contains(&to_keep) => {
+                    let (x, y) = (tree::X[*index] as usize, tree::Y[*index] as usize);
+
+                    Some(CGoban::to_sgf(x, y))
+                },
+                _ => None
+            }
+        })
+        .map(|property| format!("[{}]", property))
+        .collect()
 }
 
 /// Return the value and policy for the given board position, as the interpolation
