@@ -15,6 +15,7 @@
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color};
 use dg_utils::{b85, config};
+use super::greedy_score::greedy_score;
 use super::predict::Predictor;
 use super::time_control::RolloutLimit;
 use super::{GameResult, get_random_komi};
@@ -40,7 +41,7 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
 {
     let mut board = Board::new(get_random_komi());
     let mut sgf = String::new();
-    let mut current = Color::Black;
+    let mut to_move = Color::Black;
     let mut pass_count = 0;
     let mut count = 0;
 
@@ -59,7 +60,7 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
             RolloutLimit::new((*config::NUM_ROLLOUT).into()),
             root_current,
             &board,
-            current
+            to_move
         )?;
 
         debug_assert!(0.0 <= value && value <= 1.0);
@@ -67,22 +68,24 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
 
         let policy = tree.softmax();
         let (_, prior_index) = tree.prior();
-        let value_sgf = if current == Color::Black { 2.0 * value - 1.0 } else { -2.0 * value + 1.0 };
+        let value_sgf = if to_move == Color::Black { 2.0 * value - 1.0 } else { -2.0 * value + 1.0 };
 
         if allow_resign && value < 0.05 {  // resign the game if the evaluation looks bad
-            return Some(GameResult::Resign(sgf, board, current.opposite(), -value))
+            return Some(GameResult::Resign(sgf, board, to_move.opposite(), -value))
         } else if index == 361 {  // passing move
-            sgf += &format!(";{}[]P[{}]V[{}]", current, b85::encode(&policy), value_sgf);
+            sgf += &format!(";{}[]P[{}]V[{}]", to_move, b85::encode(&policy), value_sgf);
             pass_count += 1;
 
             if pass_count >= 2 {
-                return Some(GameResult::Ended(sgf, board))
+                let (finished, _) = greedy_score(server, &board, to_move);
+
+                return Some(GameResult::Ended(sgf, board, finished))
             }
         } else {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
             sgf += &format!(";{}[{}]P[{}]V[{}]",
-                current,
+                to_move,
                 CGoban::to_sgf(x, y),
                 b85::encode(&policy),
                 value_sgf
@@ -97,7 +100,7 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
             };
 
             pass_count = 0;
-            board.place(current, x, y);
+            board.place(to_move, x, y);
         }
 
         // update the search trees
@@ -110,11 +113,13 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
 
         // swap whose turn it is to place a stone
         mem::swap(&mut root_current, &mut root_other);
-        current = current.opposite();
+        to_move = to_move.opposite();
         count += 1;
     }
 
-    Some(GameResult::Ended(sgf, board))
+    let (finished, _) = greedy_score(server, &board, to_move);
+
+    Some(GameResult::Ended(sgf, board, finished))
 }
 
 /// Play games against the engine and return the result of the games

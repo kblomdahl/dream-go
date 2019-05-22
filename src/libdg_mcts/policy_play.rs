@@ -23,6 +23,7 @@ use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color};
 use dg_utils::{b85, config, min};
 use super::asm::sum_finite_f32;
+use super::greedy_score::greedy_score;
 use super::predict::Predictor;
 use super::time_control::RolloutLimit;
 use super::{dirichlet, tree, predict_service};
@@ -183,13 +184,13 @@ fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> Option<Ga
     // loop until we run or of legal moves, the board is fully scorable, or
     // we have played 722 moves in total.
     let mut board = Board::new(get_random_komi());
-    let mut color = Color::Black;
+    let mut to_move = Color::Black;
     let mut pass_count = 0;
     let mut total_skew = 0.0;
 
     while pass_count < 2 && board.count() < 722 {
         let (index, skew) = {
-            let (_value, policy) = policy_forward(server, &board, color)?;
+            let (_value, policy) = policy_forward(server, &board, to_move)?;
 
             match policy_choose(&policy, temperature) {
                 Some(index) => (index, skewness(&policy)),
@@ -198,19 +199,19 @@ fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> Option<Ga
         };
 
         if index == 361 {
-            sgf.push((board.clone(), color, skew, format!(";{}[]", color)));
+            sgf.push((board.clone(), to_move, skew, format!(";{}[]", to_move)));
             pass_count += 1;
         } else {
             let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
 
-            sgf.push((board.clone(), color, skew, format!(";{}[{}]", color, CGoban::to_sgf(x, y))));
-            board.place(color, x, y);
+            sgf.push((board.clone(), to_move, skew, format!(";{}[{}]", to_move, CGoban::to_sgf(x, y))));
+            board.place(to_move, x, y);
             pass_count = 0;
         }
 
         total_skew += skew;
         temperature = min(5.0, 1.03 * temperature);
-        color = color.opposite();
+        to_move = to_move.opposite();
     }
 
     // if we are running with --ex-it then we need compute policies for some
@@ -252,9 +253,12 @@ fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> Option<Ga
         }
     }
 
+    let (finished, _) = greedy_score(server, &board, to_move);
+
     Some(GameResult::Ended(
         sgf.into_iter().fold(String::new(), |acc, (_board, _color, _skew, sgf)| acc + &sgf),
-        board
+        board,
+        finished
     ))
 }
 

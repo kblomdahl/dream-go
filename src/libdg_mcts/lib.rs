@@ -73,7 +73,7 @@ use self::predict::Predictor;
 
 pub enum GameResult {
     Resign(String, Board, Color, f32),
-    Ended(String, Board)
+    Ended(String, Board, Board)
 }
 
 impl fmt::Display for GameResult {
@@ -85,11 +85,11 @@ impl fmt::Display for GameResult {
             GameResult::Resign(ref sgf, ref board, winner, _) => {
                 write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[{:.1}]RE[{}+Resign]{})", iso8601, board.komi(), winner, sgf)
             },
-            GameResult::Ended(ref sgf, ref board) => {
-                let (black, white) = board.get_score();
+            GameResult::Ended(ref sgf, ref board, ref finished) => {
+                let (black, white) = board.get_guess_score(&finished);
                 let black = black as f32;
                 let white = white as f32 + board.komi();
-                let stone_status = board.get_stone_status(board);
+                let stone_status = board.get_stone_status(&finished);
                 let black_territory = territory_to_property(&stone_status, StoneStatus::BlackTerritory);
                 let white_territory = territory_to_property(&stone_status, StoneStatus::WhiteTerritory);
                 let winner = {
