@@ -1,0 +1,16 @@
+[package]
+name = "dg_cuda"
+version = "0.0.0"
+authors = ["Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>"]
+license = "Apache-2.0"
+publish = false
+
+[lib]
+path = "lib.rs"
+name = "dg_cuda"
+crate-type = ["lib"]
+
+[dependencies]
+dg_utils = { path = "../libdg_utils" }
+lazy_static = "1.3"
+libc = "0.2"

@@ -24,11 +24,11 @@ use dg_mcts::predict_service::PredictService;
 use dg_mcts::time_control::{TimeStrategy, TimeStrategyResult};
 use dg_mcts::tree;
 use dg_mcts as mcts;
-use dg_nn::Network;
 use dg_mcts::options::{StandardSearch, SearchOptions};
+use dg_graph::{GraphLoader, GraphLoaderError};
 
 type SearchTree = tree::Node<StandardSearch>;
-type PonderResult = Result<(PredictService, SearchTree, Board, Color), &'static str>;
+type PonderResult = Result<(PredictService, SearchTree, Board, Color), String>;
 
 /// A very simple _time control_ that thinks until a boolean flag is set to
 /// `false` or the tree has reached its maximum size.
@@ -66,7 +66,7 @@ impl TimeStrategy for PonderTimeControl {
 /// 
 /// # Arguments
 /// 
-/// * `service` - the neural network service used for inference
+/// * `service` - the graph service used for inference
 /// * `search_tree` - the search tree to probe into
 /// * `board` - the board state at the root of the search tree
 /// * `to_move` - the color of the player whose turn it is to play
@@ -94,7 +94,10 @@ fn ponder_worker(
     if let Some((_value, _index, next_tree)) = result {
         (Ok((service, next_tree, board, to_move)), start_time.elapsed())
     } else {
-        (Err("unrecognized error"), start_time.elapsed())
+        (
+            Err("unknown error encountered during search".into()),
+            start_time.elapsed()
+        )
     }
 }
 
@@ -106,7 +109,7 @@ fn ponder_worker(
 pub struct PonderService {
     is_running: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<(PonderResult, Duration)>>,
-    last_error: &'static str,
+    last_error: String,
     cpu_time: Duration
 }
 
@@ -134,17 +137,29 @@ impl PonderService {
         let to_move = board.to_move();
 
         PonderService {
-            is_running: is_running,
+            is_running,
             worker: Some(thread::spawn(move || {
-                if let Some(network) = Network::new() {
-                    let service = mcts::predict_service::service(network);
+                match GraphLoader::new() {
+                    Ok(graph_loader) => {
+                        let service = mcts::predict_service::service(graph_loader);
 
-                    ponder_worker(service, None, board, to_move, is_running_worker)
-                } else {
-                    (Err("unable to load network weights"), Duration::new(0, 0))
+                        ponder_worker(service, None, board, to_move, is_running_worker)
+                    },
+                    Err(GraphLoaderError::InvalidGraph(path, err)) => {
+                        (
+                            Err(format!("invalid graph from \"{}\" -- {}", path, err)),
+                            Duration::new(0, 0)
+                        )
+                    },
+                    Err(GraphLoaderError::NotFound) => {
+                        (
+                            Err("could not find the inference graph. Try putting the \"dream_go.json\" in the same folder as the executable.".into()),
+                            Duration::new(0, 0)
+                        )
+                    },
                 }
             })),
-            last_error: "",
+            last_error: String::new(),
             cpu_time: Duration::new(0, 0)
         }
     }
@@ -167,12 +182,12 @@ impl PonderService {
     /// 
     /// * `callback` - the callback to execute during the pause
     /// 
-    pub fn service<F, T>(&mut self, callback: F) -> Result<T, &'static str>
+    pub fn service<F, T>(&mut self, callback: F) -> Result<T, String>
         where F: FnOnce(&PredictService, SearchTree, (Board, Color)) -> (T, Option<SearchTree>, (Board, Color))
     {
         let handle = match self.worker.take() {
             Some(x) => x,
-            None => return Err(self.last_error)
+            None => return Err(self.last_error.clone())
         };
 
         self.is_running.store(false, Ordering::SeqCst);
@@ -180,7 +195,7 @@ impl PonderService {
         match handle.join().unwrap() {
             (Err(reason), duration) => {
                 self.cpu_time += duration;
-                self.last_error = reason;
+                self.last_error = reason.clone();
 
                 Err(reason)
             },

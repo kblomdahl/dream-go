@@ -17,14 +17,17 @@
 
 extern crate crossbeam_channel;
 extern crate crossbeam_utils;
+extern crate dg_cuda;
 extern crate dg_go;
-extern crate dg_nn;
+extern crate dg_graph;
 extern crate dg_utils;
 #[macro_use] extern crate lazy_static;
 extern crate ordered_float;
 extern crate rand;
 #[cfg(test)] extern crate test;
+extern crate thread_local;
 extern crate time;
+extern crate core;
 
 /* -------- Modules -------- */
 
@@ -61,7 +64,6 @@ use dg_go::utils::score::{Score, StoneStatus};
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::utils::symmetry;
 use dg_go::{Board, Color};
-use dg_nn::Profiler;
 use dg_utils::config;
 use dg_utils::types::f16;
 use self::asm::sum_finite_f32;
@@ -505,9 +507,7 @@ pub fn predict<T, P, O>(
 {
     let num_workers = num_workers.unwrap_or(*config::NUM_THREADS);
 
-    Profiler::with(move || {
-        predict_aux::<T, _, O>(server, num_workers, time_control, starting_tree, starting_point, starting_color)
-    })
+    predict_aux::<T, _, O>(server, num_workers, time_control, starting_tree, starting_point, starting_color)
 }
 
 /// Returns a weighted random komi between `-7.5` to `7.5`, with the most common

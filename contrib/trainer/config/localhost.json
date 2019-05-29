@@ -1,0 +1,15 @@
+{
+  "setup": [
+    { "exec": "docker-compose build" },
+    { "exec": "docker-compose start" }
+  ],
+
+  "teardown": [
+    { "exec": "docker-compose down" }
+  ],
+
+  "workers": [
+    { "exec": "docker exec -it worker_1 \"cat > dream_go.json && ./dream_go\"" },
+    { "exec": "docker exec -it worker_2 \"cat > dream_go.json && ./dream_go\"" }
+  ]
+}

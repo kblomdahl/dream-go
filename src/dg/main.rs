@@ -15,8 +15,8 @@
 
 extern crate cpu_time;
 extern crate dg_go;
+extern crate dg_graph;
 extern crate dg_mcts;
-extern crate dg_nn;
 extern crate dg_utils;
 #[macro_use] extern crate lazy_static;
 extern crate regex;
@@ -27,13 +27,19 @@ mod gtp;
 use dg_utils::config::{self, Procedure};
 
 /// Returns the network weights, panics if it failed to load the weights.
-fn load_network() -> dg_nn::Network {
-    match dg_nn::Network::new() {
-        Some(network) => network,
-        None => {
-            println!("Could not load network weights!");
-            ::std::process::exit(1);
-        }
+fn get_graph_loader() -> dg_graph::GraphLoader {
+    use dg_graph::{GraphLoader, GraphLoaderError};
+
+    match GraphLoader::new() {
+        Ok(graph_loader) => graph_loader,
+        Err(GraphLoaderError::InvalidGraph(path, err)) => {
+            println!("Invalid graph from \"{}\" -- {}", path, err);
+            ::std::process::exit(-200);
+        },
+        Err(GraphLoaderError::NotFound) => {
+            println!("Could not find the inference graph. Try putting the \"dream_go.json\" in the same folder as the executable.");
+            ::std::process::exit(-100);
+        },
     }
 }
 
@@ -62,7 +68,7 @@ fn main() {
         },
 
         Procedure::SelfPlay(n) => {
-            let (receiver, _server) = dg_mcts::self_play(load_network(), n);
+            let (receiver, _server) = dg_mcts::self_play(get_graph_loader(), n);
 
             for result in receiver.iter() {
                 println!("{}", result);
@@ -70,7 +76,7 @@ fn main() {
         },
 
         Procedure::PolicyPlay(n, ex_it) => {
-            let (receiver, _server) = dg_mcts::policy_play(load_network(), n, ex_it);
+            let (receiver, _server) = dg_mcts::policy_play(get_graph_loader(), n, ex_it);
 
             for result in receiver.iter() {
                 println!("{}", result);

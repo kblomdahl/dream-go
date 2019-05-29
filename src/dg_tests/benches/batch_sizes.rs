@@ -14,7 +14,7 @@
 #![feature(test)]
 
 extern crate dg_go;
-extern crate dg_nn;
+extern crate dg_graph;
 extern crate dg_utils;
 extern crate test;
 extern crate rand;
@@ -23,11 +23,12 @@ use test::Bencher;
 use rand::{Rng, thread_rng};
 
 use dg_go::utils::features::FEATURE_SIZE;
-use dg_nn::*;
+use dg_graph::GraphLoader;
 use dg_utils::types::f16;
+use std::collections::HashMap;
 
 thread_local! {
-    static NETWORK: Network = Network::new().unwrap();
+    static GRAPH_LOADER: GraphLoader = GraphLoader::new().unwrap();
 }
 
 /// Benchmark the forward pass through the neural network for the given batch
@@ -39,26 +40,30 @@ thread_local! {
 /// * `batch_size` - the batch size to benchmark
 /// 
 fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
-    NETWORK.with(|network| {
-        let mut workspace = network.get_workspace(batch_size).expect("Failed to get workspace");
-        let features = (0..batch_size).flat_map(|_| {
-            let mut input = vec! [f16::from(0.0); FEATURE_SIZE];
+    let features = (0..batch_size).flat_map(|_| {
+        let mut input = vec! [f16::from(0.0); FEATURE_SIZE];
 
-            for b in input.iter_mut() {
-                *b = f16::from(if thread_rng().gen::<f32>() < 0.2 { 1.0 } else { 0.0 });
-            }
+        for b in input.iter_mut() {
+            *b = f16::from(if thread_rng().gen::<f32>() < 0.2 { 1.0 } else { 0.0 });
+        }
 
-            input.into_iter()
-        }).collect::<Vec<_>>();
+        input.into_iter()
+    }).collect::<Vec<_>>();
+
+    let mut inputs = HashMap::default();
+    inputs.insert("features".into(), &features[..]);
+
+    GRAPH_LOADER.with(|graph_loader| {
+        let mut session = graph_loader.create_session(
+            &vec! [
+                "policy".into(),
+                "value".into()
+            ],
+            batch_size
+        ).unwrap();
 
         b.iter(move || {
-            forward(
-                &mut workspace,
-                &features,
-                OutputSet::default()
-                    .with(Output::Policy)
-                    .with(Output::Value)
-            )
+            session.forward(&inputs, batch_size)
         });
     });
 }

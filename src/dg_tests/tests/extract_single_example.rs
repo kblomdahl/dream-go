@@ -13,7 +13,6 @@
 // limitations under the License.
 
 extern crate dg_go;
-extern crate dg_nn;
 
 use dg_go::utils::extract_example::*;
 

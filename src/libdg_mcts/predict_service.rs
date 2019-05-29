@@ -12,23 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crossbeam_channel::Sender;
+use std::collections::HashMap;
+use std::sync::{Mutex, MutexGuard, Arc};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard};
+
+use crossbeam_channel::Sender;
+use thread_local::ThreadLocal;
+
+use dg_cuda as cuda;
+use dg_go::utils::features::FEATURE_SIZE;
+use dg_graph::{GraphLoader, Session};
+use dg_utils::config;
+use dg_utils::types::f16;
 
 use super::parallel;
-use dg_go::utils::features::{FEATURE_SIZE};
 use super::predict::Predictor;
-use dg_nn::devices::{DEVICES, set_current_device};
-use dg_nn::{self as nn, Network, Output, OutputSet, Workspace};
-use dg_utils::types::f16;
-use dg_utils::config;
 
 pub type PredictGuard<'a> = parallel::ServiceGuard<'a, PredictState>;
 pub type PredictService = parallel::Service<PredictState>;
 
-pub fn service(network: Network) -> PredictService {
-    PredictService::new(None, PredictState::new(network))
+pub fn service(graph_loader: GraphLoader) -> PredictService {
+    PredictService::new(None, PredictState::new(graph_loader))
 }
 
 pub enum PredictRequest {
@@ -41,8 +45,11 @@ pub enum PredictRequest {
 }
 
 pub struct PredictState {
-    /// The neural network weights
-    network: Network,
+    /// The shared parts inference graph used to compute the predictions
+    graph_loader: GraphLoader,
+
+    /// The per-thread parts of the inference graph.
+    session: ThreadLocal<Arc<Mutex<Session>>>,
 
     /// The number of requests that are being processed by the GPU at
     /// this moment
@@ -60,19 +67,15 @@ pub struct PredictState {
 }
 
 impl PredictState {
-    pub fn new(network: Network) -> PredictState {
+    pub fn new(graph_loader: GraphLoader) -> PredictState {
         PredictState {
-            network: network,
+            graph_loader,
+            session: ThreadLocal::new(),
             running_count: AtomicUsize::new(0),
             features_list: vec! [],
             sender_list: vec! [],
             waiting_list: vec! []
         }
-    }
-
-    /// Returns the network used to perform the predictions.
-    pub fn get_network(&self) -> &Network {
-        &self.network
     }
 
     /// Run the `nn::forward` function for the given features and wrap the
@@ -82,18 +85,29 @@ impl PredictState {
     /// # Arguments
     /// 
     /// * `workspace` - 
-    /// * `features_list` - 
-    /// 
-    fn forward_once(workspace: &mut Workspace, features_list: &[f16]) -> Result<(Vec<f32>, Vec<Vec<f32>>), nn::Error> {
-        let mut outputs = nn::forward(
-            workspace,
-            features_list,
-            OutputSet::default().with(Output::Policy).with(Output::Value)
+    /// * `batch_size` -
+    /// * `features_list` -
+    ///
+    fn forward_once(
+        session: &mut Session,
+        batch_size: usize,
+        features_list: &[f16]
+    ) -> Result<(Vec<f32>, Vec<Vec<f32>>), cuda::Error>
+    {
+        let outputs = session.forward(
+            &{
+                let mut x = HashMap::default();
+                x.insert("features".into(), features_list);
+                x
+            },
+            batch_size
         )?;
 
-        let value_list = outputs.take(Output::Value);
-        let policy_list = outputs.take(Output::Policy).chunks(362)
-            .map(|p| p.to_vec())
+        let value_list = outputs["value"].chunks(2)
+            .map(|v| 1.0 * f32::from(v[0]) - 1.0 * f32::from(v[1]))
+            .collect();
+        let policy_list = outputs["policy"].chunks(362)
+            .map(|p| p.iter().map(|&x| f32::from(x)).collect())
             .collect();
 
         Ok((value_list, policy_list))
@@ -109,25 +123,27 @@ impl PredictState {
     /// * `batch_size` -
     /// * `features_list` -
     ///
-    fn forward(network: &Network, batch_size: usize, features_list: &[f16]) -> Result<(Vec<f32>, Vec<Vec<f32>>), ()> {
+    fn forward(session: &mut Session, batch_size: usize, features_list: &[f16]) -> Result<(Vec<f32>, Vec<Vec<f32>>), ()> {
         let mut count = 0;
 
         loop {
-            let result = network.get_workspace(batch_size).and_then(|mut workspace| {
-                PredictState::forward_once(&mut workspace, features_list)
-            });
+            let result = Self::forward_once(
+                session,
+                batch_size,
+                features_list
+            );
 
             match result {
                 Ok(content) => { return Ok(content) },
                 Err(reason) => {
-                    eprintln!("Encountered CUDA error, retrying {} more times -- {:?}", 2 - count, reason);
+                    eprintln!("Encountered a CUDA error, retrying {} more times -- {:?}", 2 - count, reason);
 
                     count += 1;
                     if count >= 3 {
                         return Err(())
                     }
 
-                    network.synchronize();
+                    //FIXME graph_loader.synchronize();
                 }
             }
         }
@@ -143,7 +159,14 @@ impl PredictState {
         let split_index = num_items - batch_size;
         let features_list = state_lock.features_list.split_off(split_index * FEATURE_SIZE);
         let sender_list = state_lock.sender_list.split_off(split_index);
-        let network = state_lock.network.clone();  // just a bunch of Arc<...> so cheap to clone
+        let session = state_lock.session.get_or_try(|| -> Result<Box<Arc<Mutex<Session>>>, cuda::Error> {
+            let session = state_lock.graph_loader.create_session(
+                &["policy".into(), "value".into()],
+                *config::BATCH_SIZE
+            )?;
+
+            Ok(Box::new(Arc::new(Mutex::new(session))))
+        }).expect("Failed to create session for worker thread").clone();
 
         // keep track of the number of running evaluations so that we avoid
         // running duplicate small evaluations instead of one large one
@@ -155,7 +178,7 @@ impl PredictState {
 
         // perform the neural network predictions and then inform all of
         // the receivers
-        if let Ok((value_list, policy_list)) = PredictState::forward(&network, batch_size, &features_list) {
+        if let Ok((value_list, policy_list)) = PredictState::forward(&mut session.lock().unwrap(), batch_size, &features_list) {
             // send out our predictions to all of the receivers
             let response_iter = value_list.into_iter().zip(policy_list.into_iter());
 
@@ -225,16 +248,20 @@ impl parallel::ServiceImpl for PredictState {
     type Response = Option<(f32, Vec<f32>)>;
 
     fn get_thread_count() -> usize {
-        let num_devices = DEVICES.len();
+        let num_devices = cuda::get_all_devices()
+            .expect("Failed to get the available CUDA devices")
+            .len();
         let num_busy = *config::NUM_THREADS / *config::BATCH_SIZE;
 
         ::std::cmp::max(2 * num_devices, num_busy)
     }
 
     fn setup_thread(index: usize) {
-        let device_id = DEVICES[index % DEVICES.len()];
+        let devices = cuda::get_all_devices()
+            .expect("Failed to get the available CUDA devices");
+        let device = devices[index % devices.len()];
 
-        set_current_device(device_id).expect("Failed to set the device for the current thread");
+        device.set_current().expect("Failed to set the device for the current thread");
     }
 
     fn check_sleep(state: MutexGuard<Self::State>) {

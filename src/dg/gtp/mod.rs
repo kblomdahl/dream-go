@@ -134,7 +134,7 @@ struct Gtp {
     komi: f32,
     time_settings: [Box<time_settings::TimeSettings>; 3],
     explain_last_move: String,
-    finished_board: Option<Result<Board, &'static str>>
+    finished_board: Option<Result<Board, String>>
 }
 
 impl Gtp {
@@ -417,7 +417,7 @@ impl Gtp {
         }
     }
 
-    fn greedy_playout(&mut self, board: &Board) -> Result<Board, &'static str> {
+    fn greedy_playout(&mut self, board: &Board) -> Result<Board, String> {
         let mut finished_board = self.finished_board.clone();
 
         if finished_board.as_ref().map(|f| f.is_err()).unwrap_or(false) {

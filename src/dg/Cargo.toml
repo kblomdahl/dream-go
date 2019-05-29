@@ -12,8 +12,8 @@ path = "main.rs"
 [dependencies]
 cpu-time = "0.1"
 dg_go = { path = "../libdg_go"}
+dg_graph = { path = "../libdg_graph"}
 dg_mcts = { path = "../libdg_mcts"}
-dg_nn = { path = "../libdg_nn"}
 dg_utils = { path = "../libdg_utils"}
 lazy_static = "1.3"
 libc = "0.2"

@@ -34,7 +34,6 @@ use utils::sgf::{CGoban, SgfCoordinate};
 
 #[repr(C)]
 pub struct Example {
-    pub features: [f16; FEATURE_SIZE],
     pub index: c_int,
     pub next_index: c_int,
     pub color: c_int,
@@ -43,13 +42,17 @@ pub struct Example {
     pub ownership: [f32; 361],
     pub winner: c_int,
     pub number: c_int,
-    pub komi: f32
+    pub komi: f32,
+
+    // this must be at the end since Python does not know its size, and we therefore allocate it
+    // dynamically
+    pub features: [f32; FEATURE_SIZE],
 }
 
 impl Default for Example {
     fn default() -> Example {
         Example {
-            features: [f16::from(0.0); FEATURE_SIZE],
+            features: [f32::from(0.0); FEATURE_SIZE],
             index: 0,
             next_index: 0,
             color: 0,
@@ -246,7 +249,7 @@ pub unsafe extern "C" fn extract_single_example(
 
         chosen_candidate.map(|&i| {
             let next_example = examples.get(i+1);
-            let features = examples[i].board.get_features::<HWC, f16>(
+            let features = examples[i].board.get_features::<HWC, f32>(
                 examples[i].color,
                 symmetry::Transform::Identity
             );

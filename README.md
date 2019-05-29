@@ -97,6 +97,14 @@ For the values provided in this example, which generate 200,000 examples for the
 * 1.0.0 - _Public Release_
 * 0.7.0 - _Acceptance_
   * First version with a network trained from self-play games
+* 0.6.4 - _Bargaining_ (**In Progress**)
+  * Complete re-write of the model architecture and CUDA implementation of said model:
+    * Global Average Pooling (for classification)
+    * Squeeze Excitation
+  * A more flexible weights / model format to allow for easier backward / forward compatibility.
+  * Add additional feature planes, representing the number of liberties of the opponent would have if they played
+    there.
+  * Improved scoring algorithm.
 * 0.6.3 - _Unravel_
   * The engines plays more enjoyable with `kgs-genmove_cleanup`
   * Bug fixes

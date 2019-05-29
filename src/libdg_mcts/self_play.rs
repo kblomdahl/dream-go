@@ -14,13 +14,13 @@
 
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color};
+use dg_graph::GraphLoader;
 use dg_utils::{b85, config};
 use super::greedy_score::greedy_score;
 use super::predict::Predictor;
 use super::time_control::RolloutLimit;
 use super::{GameResult, get_random_komi};
 use super::{predict_service, predict_aux, tree};
-use dg_nn::Network;
 
 use rand::{thread_rng, Rng};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -127,11 +127,11 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
 ///
 /// # Arguments
 ///
-/// * `network` - the neural network to use during evaluation
+/// * `graph_loader` - the graph to use during evaluation
 /// * `num_games` - the number of games to generate
 ///
-pub fn self_play(network: Network, num_games: usize) -> (Receiver<GameResult>, predict_service::PredictService) {
-    let server = predict_service::service(network);
+pub fn self_play(graph_loader: GraphLoader, num_games: usize) -> (Receiver<GameResult>, predict_service::PredictService) {
+    let server = predict_service::service(graph_loader);
     let (sender, receiver) = channel();
 
     // spawn the worker threads that generate the self-play games

@@ -21,6 +21,7 @@ use std::thread;
 
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color};
+use dg_graph::GraphLoader;
 use dg_utils::{b85, config, min};
 use super::asm::sum_finite_f32;
 use super::greedy_score::greedy_score;
@@ -28,7 +29,6 @@ use super::predict::Predictor;
 use super::time_control::RolloutLimit;
 use super::{dirichlet, tree, predict_service};
 use super::{GameResult, full_forward, get_random_komi, predict_aux};
-use dg_nn::Network;
 use options::StandardSearch;
 
 /// Returns the skewness of the given policy. A large return value says that
@@ -269,12 +269,12 @@ fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> Option<Ga
 ///
 /// # Arguments
 ///
-/// * `network` - the neural network to use during evaluation
+/// * `graph_loader` - the graph to use during evaluation
 /// * `num_games` -
 /// * `ex_it` - whether to emit one full policy per game
 ///
-pub fn policy_play(network: Network, num_games: usize, ex_it: bool) -> (Receiver<GameResult>, predict_service::PredictService) {
-    let server = predict_service::service(network);
+pub fn policy_play(graph_loader: GraphLoader, num_games: usize, ex_it: bool) -> (Receiver<GameResult>, predict_service::PredictService) {
+    let server = predict_service::service(graph_loader);
     let (sender, receiver) = channel();
 
     // spawn the worker threads that generate the self-play games
