@@ -18,15 +18,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
-
 from .conv2d import conv2d
 from .softmax import softmax
 from .named import named
 
 
 def conv2d_classifier(x, num_outputs, name=None):
-    conv_x = conv2d(x, num_outputs, [1, 1], activation='linear')
-    y = named(softmax(conv_x), name=name)
+    y = conv2d(x, num_outputs, [1, 1], activation='linear')
+    y = named(softmax(y), name=name)
 
     return y

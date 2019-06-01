@@ -18,63 +18,126 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from tensorflow.keras.layers import Input
-from tensorflow.keras.models import Model
+import tensorflow as tf
+import tensorflow.keras.backend as K
 
+from .optimizers.accum_grad_optimizer import AccumGradOptimizer
+from .layers.residual_block import residual_block
+from .hooks.dgraph_saver_hook import DGraphSaverHook
+from .hooks.increase_global_step import IncreaseGlobalStepHook
 from .layers.conv2d_batch_norm import conv2d_batch_norm
 from .layers.conv2d_classifier import conv2d_classifier
 from .layers.global_pooling_classifier import global_avg_pooling_classifier
-from .layers.residual_block import residual_block
-from .optimizer import AccumulatedNadam
+from .layers.mb_conv_block import mb_conv_block
+from .metrics.slope import avg_slope
+from .serializer import serialize_graph
 
 
-def model_fn(opts, inputs_shape):
-    # output heads
-    inputs = Input(shape=inputs_shape[1:])
-    x = conv2d_batch_norm(inputs, opts.num_channels, [1, 1], activation='relu')
+def model_fn(features, labels, mode, params, config):
+    with serialize_graph(mode == tf.estimator.ModeKeys.TRAIN):
+        x = conv2d_batch_norm(features, params.num_channels, [1, 1], activation='relu')
 
-    for _ in range(opts.num_blocks):
-        x = residual_block(x)
+        for _ in range(params.num_blocks):
+            #x = mb_conv_block(x)
+            x = residual_block(x)
 
-    model = Model(
-        inputs=inputs,
-        outputs=[
-            global_avg_pooling_classifier(x, 362, name='policy'),
-            global_avg_pooling_classifier(x, 362, name='policy_next'),
-            global_avg_pooling_classifier(x, 2, name='value'),
-            global_avg_pooling_classifier(x, 722, name='score'),
-            conv2d_classifier(x, 2, name='ownership')
-        ]
+        predictions = {
+            'policy': global_avg_pooling_classifier(x, 362, name='policy'),
+            'policy_next': global_avg_pooling_classifier(x, 362, name='policy_next'),
+            'value': global_avg_pooling_classifier(x, 2, name='value'),
+            'score': global_avg_pooling_classifier(x, 723, name='score'),
+            'ownership': conv2d_classifier(x, 2, name='ownership'),
+        }
+
+    losses = {
+        'policy': tf.keras.losses.categorical_crossentropy(labels['policy'], predictions['policy']),
+        'policy_next': tf.keras.losses.categorical_crossentropy(labels['policy_next'], predictions['policy_next']),
+        'value': tf.keras.losses.binary_crossentropy(labels['value'], predictions['value']),
+        'score': tf.keras.losses.categorical_crossentropy(labels['score'], predictions['score']),
+        'ownership': tf.keras.losses.binary_crossentropy(labels['ownership'], predictions['ownership']),
+    }
+
+    total_loss = \
+          2.72 * K.mean(losses['policy']) \
+        + 0.81 * K.mean(losses['policy_next']) \
+        + 7.88 * K.mean(losses['value']) \
+        + 1.10 * K.mean(losses['score']) \
+        + 7.88 * K.mean(losses['ownership'])
+
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    optimizer = tf.contrib.opt.NadamOptimizer(learning_rate=params.lr)
+    #optimizer = AccumGradOptimizer(optimizer, num_iters=params.batch_size // params.mini_batch_size)
+    with tf.control_dependencies(update_ops):
+        train_ops = optimizer.minimize(
+            total_loss,
+            global_step=tf.train.get_or_create_global_step()
+        )
+
+    # evaluation metrics & TensorBoard summaries
+    eval_metric_ops = {}
+    for key, prediction in predictions.items():
+        eval_metric_ops['accuracy/' + key] = categorical_accuracy(labels[key], prediction, mode)
+
+        if mode == tf.estimator.ModeKeys.EVAL:
+            eval_metric_ops['precision/' + key] = categorical_precision(labels[key], prediction, mode)
+            eval_metric_ops['recall/' + key] = categorical_recall(labels[key], prediction, mode)
+
+    for key, value in losses.items():
+        mean_value = K.mean(value)
+
+        tf.summary.scalar('loss/' + key, mean_value)
+        tf.summary.scalar('slope/loss/' + key, avg_slope(mean_value))
+
+    for key, (_value, update_op) in eval_metric_ops.items():
+        tf.summary.scalar(key, update_op)
+
+    training_chief_hooks = [
+        #IncreaseGlobalStepHook(),
+        DGraphSaverHook(config.model_dir + '/dream_go.json', features, predictions),
+    ]
+
+    return tf.estimator.EstimatorSpec(
+        mode=mode,
+        predictions=predictions,
+        loss=total_loss,
+        train_op=tf.group(train_ops),
+        eval_metric_ops=eval_metric_ops,
+        training_chief_hooks=training_chief_hooks if mode == tf.estimator.ModeKeys.TRAIN else []
     )
 
-    # losses and accuracy
-    model.compile(
-        optimizer=AccumulatedNadam(
-            update_freq=opts.batch_size // opts.mini_batch_size,
-            learning_rate=opts.lr
-        ),
-        loss={
-            'policy': 'categorical_crossentropy',
-            'policy_next': 'categorical_crossentropy',
-            'value': 'binary_crossentropy',
-            'score': 'categorical_crossentropy',
-            'ownership': 'binary_crossentropy',
-        },
-        loss_weights={
-            'policy': 2.72,  # 70%
-            'policy_next': 0.81,  # 30%
-            'value': 7.88,  # 90%
-            'score': 1.10,  # 40%
-            'ownership': 7.88,  # 90%
-        },
-        metrics={
-            'policy': 'categorical_accuracy',
-            'policy_next': 'categorical_accuracy',
-            'value': 'binary_accuracy',
-            'score': 'categorical_accuracy',
-            'ownership': 'binary_accuracy',
-        },
-        run_eagerly=opts.profile,
+
+def categorical_accuracy(labels, predictions, mode):
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        accuracy = K.mean(
+            K.cast(
+                K.equal(
+                    K.argmax(labels, axis=-1),
+                    K.argmax(predictions, axis=-1)
+                ),
+                'float32'
+            )
+        )
+
+        return accuracy, accuracy
+    else:
+        return tf.metrics.accuracy(
+            K.argmax(labels, axis=-1),
+            K.argmax(predictions, axis=-1),
+            name='eval/categorical_accuracy'
+        )
+
+
+def categorical_precision(labels, predictions, _mode):
+    return tf.metrics.precision(
+        K.argmax(labels, axis=-1),
+        K.argmax(predictions, axis=-1),
+        name='eval/categorical_precision'
     )
 
-    return model
+
+def categorical_recall(labels, predictions, _mode):
+    return tf.metrics.recall(
+        K.argmax(labels, axis=-1),
+        K.argmax(predictions, axis=-1),
+        name='eval/categorical_recall'
+    )

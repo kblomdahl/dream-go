@@ -60,10 +60,22 @@ cpdef parse_single_example(const unsigned char* line):
         ownership =  np.asarray(<np.float32_t[:361]> example.ownership)
         policy = np.array(<np.float32_t[:362]> example.policy)
         policy_next = np.array(<np.float32_t[:362]> example.policy_next)
+        score = np.zeros([723], 'f4')
+        ownership = np.stack([
+            ownership > 0.0,
+            ownership < 0.0
+        ]).reshape([19, 19, 2]).astype('f4')
 
         # fix any partial policies
         policy[example.index] += 1.0 - np.sum(policy)
         policy_next[example.index_next] += 1.0 - np.sum(policy_next)
+
+        # set the score
+        actual_score = 361 + np.sum(ownership > 0.0) - np.sum(ownership < 0.0)
+        score[actual_score] = 1.0
+
+        # fix any missing ownerships to `(50%, 50%)`
+        ownership += np.asarray([0.5, 0.5], 'f4') * (1.0 - np.sum(ownership, axis=-1, keepdims=True))
 
         return (
             np.array(<np.float32_t[:features_size]> example.features).reshape([19, 19, num_features]),
@@ -71,11 +83,8 @@ cpdef parse_single_example(const unsigned char* line):
                 'policy': policy,
                 'policy_next': policy_next,
                 'value': np.asarray([1.0, 0.0] if example.winner == example.color else [0.0, 1.0], 'f4'),
-                'score': np.zeros([722]),
-                'ownership': np.stack([
-                    ownership > 0.0,
-                    ownership < 0.0
-                ]).reshape([19, 19, 2])
+                'score': score,
+                'ownership': ownership
             }
         )
     finally:

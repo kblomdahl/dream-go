@@ -18,20 +18,28 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .conv2d import conv2d
-from .global_avg_pool import global_avg_pool
-from .named import named
-from .softmax import softmax
+import tensorflow as tf
 
 
-def global_avg_pooling_classifier(x, num_outputs, name=None):
-    """ Returns a head that outputs `num_outputs` classes, using a _Global
-    Average Pooling_ architecture [1].
+def avg_slope(x, buf_size=1000):
+    num_steps = tf.Variable(0, trainable=False)
+    steps = tf.Variable([0.0] * buf_size, trainable=False)
+    samples = tf.Variable([0.0] * buf_size, trainable=False)
 
-    [1] https://arxiv.org/pdf/1312.4400.pdf, _Network In Network_, Section 3.2
-    """
-    y = conv2d(x, num_outputs, [1, 1], activation='linear')
-    y = global_avg_pool(y)
-    y = softmax(y)
+    current_index = num_steps % buf_size
+    update_num_steps = tf.assign_add(num_steps, 1)
+    update_steps = tf.scatter_update(steps, current_index, tf.cast(update_num_steps, tf.float32))
+    update_samples = tf.scatter_update(samples, current_index, x)
 
-    return named(y, name=name)
+    a = tf.stack([
+        tf.constant([1.0] * buf_size, dtype=tf.float32),
+        update_steps
+    ])
+    results = tf.linalg.lstsq(
+        tf.transpose(a),
+        tf.reshape(update_samples, [-1, 1]),
+        fast=False
+    )
+    offset, slope = tf.split(results, 2)
+
+    return tf.reduce_mean(slope)

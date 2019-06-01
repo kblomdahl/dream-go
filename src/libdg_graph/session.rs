@@ -197,7 +197,9 @@ impl Session {
 
         // allocate the maximum workspace needed by any batch size, and the
         // registers.
-        out.workspace = cuda::Ptr::new(max_size_in_bytes)?;
+        if max_size_in_bytes > 0 {
+            out.workspace = cuda::Ptr::new(max_size_in_bytes)?;
+        }
         out.allocate_variables(&graph, max_batch_size)?;
 
         // for each batch size, record a graph stream of the inference

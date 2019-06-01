@@ -25,12 +25,14 @@ from .activation import activation
 
 
 def residual_block(x):
-    num_channels = x.shape[-1]
-    conv_x = conv2d_batch_norm(x, num_channels, [3, 3], activation='relu')
-    conv_x = conv2d_batch_norm(conv_x, num_channels, [3, 3], activation='linear')
+    num_channels = x.shape.as_list()[-1]
+    y = conv2d_batch_norm(x, num_channels, [3, 3], activation='relu')
+    y = conv2d_batch_norm(y, num_channels, [3, 3], activation='linear')
 
-    se_x = squeeze_excite(conv_x)
-    add_x = add([x, se_x])
-    y = activation(add_x, activation='relu')
-
-    return y
+    return activation(
+        add([
+            x,
+            squeeze_excite(y)
+        ]),
+        activation='relu'
+    )

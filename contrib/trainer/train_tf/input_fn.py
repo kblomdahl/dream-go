@@ -18,10 +18,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import itertools
+import shlex
 import tensorflow as tf
-import fileinput as fi
 
 from .ffi.libdg import parse_single_example, get_num_features
+
 
 def _generate_random_value():
     x = tf.random.categorical(tf.log([[1.0, 1.0]]), 1)
@@ -44,10 +46,10 @@ def _generate_random_policy():
 
 
 def _generate_random_score():
-    x = tf.random.categorical(tf.log([[1.0]*722]), 1)
-    x = tf.one_hot(x, 722)
+    x = tf.random.categorical(tf.log([[1.0]*723]), 1)
+    x = tf.one_hot(x, 723)
 
-    return tf.reshape(x, [722])
+    return tf.reshape(x, [723])
 
 
 def _generate_random_ownership():
@@ -60,7 +62,7 @@ def _generate_random_ownership():
 def random_input_fn(opts):
     data = tf.data.TextLineDataset(opts.files)
 
-    def _to_dummy(line):
+    def _to_dummy(_line):
         return (
             _generate_random_features(),
             {
@@ -73,6 +75,7 @@ def random_input_fn(opts):
         )
 
     return data \
+        .repeat() \
         .map(_to_dummy) \
         .batch(opts.mini_batch_size) \
         .prefetch(4)
@@ -83,28 +86,85 @@ def _parse_single_line(line):
     if an error is encountered. """
 
     try:
-        return parse_single_example(line.encode('utf-8'))
+        return parse_single_example(line)
     except ValueError:
         return None
     except KeyboardInterrupt:
         return None
 
 
-def _parse_files(files):
+def _get_num_lines(file):
+    """ Returns the number of lines in the given file """
+
+    with open(file, 'r') as f:
+        return len(f.readlines())
+
+
+def _yield_from_sh(command):
+    import subprocess
+
+    with subprocess.Popen(
+            command,
+            shell=True,
+            close_fds=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL
+    ) as proc:
+        for line in proc.stdout:
+            yield line
+
+
+def _head(file, n):
+    """ Returns the first `n` lines from the given file, if `n` is negative
+    then all except the last `-n` lines are generated. """
+
+    yield from _yield_from_sh(
+        "head -n {} {} | shuf".format(
+            int(n),
+            shlex.quote(file.decode())
+        )
+    )
+
+
+def _tail(file, n):
+    """ Returns the last `n` lines from the given file, if `n` is negative
+    then all except the first `-n` lines are generated. """
+
+    yield from _yield_from_sh(
+        "tail -n {} {}".format(
+            int(n),
+            shlex.quote(file.decode())
+        )
+    )
+
+
+def _parse_files(files, is_training):
     """ Generator for all examples contained inside of the give files. This function
     will spin-up a pool of worker processors to do most of the actual parsing. """
 
+    lines_per_file = {file: _get_num_lines(file) for file in files}
+    all_lines = [
+        _head(file, -num_lines // 20) if is_training else _tail(file, num_lines // 20)
+        for
+        file, num_lines in lines_per_file.items()
+    ]
+
+    # parse the SGF files and extract the features in a background worker pool to
+    # ensure they can be done in parallel with the main training loop
     from multiprocessing import cpu_count, Pool
 
     num_processes = max(4, cpu_count() - 8)
 
-    with fi.input(files=files) as f, Pool(num_processes) as p:
-        for example in p.imap_unordered(_parse_single_line, f):
+    with Pool(num_processes) as p:
+        lines = itertools.chain.from_iterable(all_lines)
+
+        for example in p.imap_unordered(_parse_single_line, lines):
             if example:
                 yield example
 
 
-def file_input_fn(opts):
+def file_input_fn(opts, is_training=True):
     num_features = get_num_features()
     data = tf.data.Dataset.from_generator(
         _parse_files,
@@ -124,14 +184,16 @@ def file_input_fn(opts):
                 'policy': tf.TensorShape([362]),
                 'policy_next': tf.TensorShape([362]),
                 'value': tf.TensorShape([2]),
-                'score': tf.TensorShape([722]),
+                'score': tf.TensorShape([723]),
                 'ownership': tf.TensorShape([19, 19, 2]),
             }
         ),
-        args=[opts.files]
+        args=[opts.files, is_training]
     )
 
+    if is_training:
+        data = data.repeat()
+
     return data \
-        .shuffle(262144) \
         .batch(opts.mini_batch_size) \
         .prefetch(4)

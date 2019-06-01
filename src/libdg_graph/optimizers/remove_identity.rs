@@ -29,7 +29,9 @@ impl RemoveRedundantIdentityLayers {
                 PluckResult::NotFound(g) => { return g; },
                 PluckResult::Found(mut g, layer_def) => {
                     for (input_def, output_def) in layer_def.map() {
-                        Self::replace_variable_with(&mut g, output_def.id, input_def.id);
+                        if output_def.id != input_def.id {
+                            Self::replace_variable_with(&mut g, output_def.id, input_def.id);
+                        }
                     }
 
                     g

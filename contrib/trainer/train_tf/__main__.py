@@ -23,21 +23,18 @@ import os
 import sys
 import tensorflow as tf
 
-from .callbacks.pretty_tensorboard import PrettyTensorBoard
-from .serializer import serialize_to
 from .input_fn import file_input_fn, random_input_fn
 from .model_fn import model_fn
-from .train_fn import fit
 
 # global average pooling:
-#   policy_accuracy: 0.42
-#   policy_next_accuracy: 0.07
-#   value_accuracy: 0.67
+#    policy_accuracy: 0.42
+#    policy_next_accuracy: 0.07
+#    value_accuracy: 0.67
 #
 # squeeze excitation:
-#   policy_accuracy: 0.43
-#   policy_next_accuracy: 0.07
-#   value_accuracy: 0.66
+#    policy_accuracy: 0.43
+#    policy_next_accuracy: 0.07
+#    value_accuracy: 0.66
 #
 
 def sgf_file(string):
@@ -103,10 +100,8 @@ def get_argument_parser():
                              help='the number of channels per residual block')
 
     other_group = parser.add_argument_group('other arguments')
-    other_group.add_argument('--deterministic', action='store_true',
-                             help='enable deterministic mode')
-    other_group.add_argument('--profile', action='store_true',
-                             help='enable profiling')
+    other_group.add_argument('--task-index', metavar='I', type=int,
+                             help='start as this ')
     other_group.add_argument('--model', metavar='M', type=model_directory,
                              help='the directory that contains the model')
     other_group.add_argument('--name', metavar='N', type=session_name,
@@ -156,50 +151,21 @@ def most_recent_weights_file(opts):
 
 def main(args):
     opts = get_argument_parser().parse_args(args)
-
     if not opts.model:
         opts.model = default_model_directory(opts)
-    os.makedirs(opts.model + '/models/', exist_ok=True)
-
-    #
-    if opts.profile:
-        tf.enable_eager_execution()
 
     # build the input pipeline and model
-    data_generator = file_input_fn(opts)  # random_input_fn(opts)
-    model = model_fn(opts, data_generator.output_shapes[0])
-
-    # restore the most recent training weights
-    try:
-        weights_file, initial_epoch = most_recent_weights_file(opts)
-
-        model.load_weights(weights_file, by_name=True)
-    except ValueError:
-        initial_epoch = 0
+    estimator = tf.estimator.Estimator(
+        model_fn,
+        opts.model,
+        params=opts
+    )
 
     if opts.mode in ['start', 'resume']:
-        def on_epoch_end(epoch, logs=None):
-            filename = opts.model + '/dream_go.json'
-
-            with open(filename, 'w') as fp:
-                serialize_to(
-                    {"features": model.input},
-                    {name: output for name, output in zip(model.output_names, model.outputs)},
-                    fp
-                )
-
-        model.fit(
-            data_generator,
-            initial_epoch=initial_epoch,
-            epochs=500,
-            shuffle=not opts.deterministic,
-            callbacks=[
-                tf.keras.callbacks.TerminateOnNaN(),
-                #tf.keras.callbacks.EarlyStopping('loss', patience=2, restore_best_weights=True),
-                tf.keras.callbacks.ModelCheckpoint(opts.model + '/models/model.{epoch:04d}.hdf5'),
-                tf.keras.callbacks.LambdaCallback(on_epoch_end=on_epoch_end),
-                PrettyTensorBoard(opts.model),
-            ]
+        tf.estimator.train_and_evaluate(
+            estimator,
+            tf.estimator.TrainSpec(input_fn=lambda: file_input_fn(opts, True)),  # random_input_fn
+            tf.estimator.EvalSpec(input_fn=lambda: file_input_fn(opts, False), steps=None, throttle_secs=300)
         )
 
 

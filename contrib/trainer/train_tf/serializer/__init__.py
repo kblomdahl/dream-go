@@ -22,6 +22,9 @@ import tensorflow.keras.backend as K
 import base64
 import json
 
+""" Whether we should be recording serialized layers / variables """
+IS_ENABLED = False
+
 """ All variables that are part of the cuDNN graph """
 VARIABLES = {}
 
@@ -29,12 +32,31 @@ VARIABLES = {}
 LAYERS = []
 
 
+def serialize_graph(enabled):
+    class EnableDisable:
+        def __enter__(self):
+            global IS_ENABLED
+
+            IS_ENABLED = enabled
+            if enabled:
+                VARIABLES.clear()
+                LAYERS.clear()
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            global IS_ENABLED
+
+            IS_ENABLED = False
+
+    return EnableDisable()
+
+
 def _add_layer(layer):
-    LAYERS.append(layer)
+    if IS_ENABLED:
+        LAYERS.append(layer)
 
 
 def _add_variable(variable):
-    shape = K.int_shape(variable)
+    shape = variable.shape.as_list()
 
     return VARIABLES.setdefault(variable.name, {
         "shape": [(s or -1) for s in shape],
@@ -42,30 +64,31 @@ def _add_variable(variable):
     })
 
 
-def _add_constant(constant):
-    value = K.eval(constant).astype('f2')
+def _add_constant(constant, shape=None):
+    value = constant.astype('f2')
     value = value.tobytes()
 
     return {
-        "shape": K.int_shape(constant),
+        "shape": shape or constant.shape,
         "value": base64.b85encode(value, True).decode('ascii')
     }
 
 
-def serialize_to(inputs, outputs, stream):
+def serialize_to(session, inputs, outputs, stream):
     def strip_dict(d):
         if isinstance(d, dict):
             return {name: strip_dict(value) for name, value in d.items() if value is not None}
         return d
 
-    return json.dump(
-        {
-            "input": {name: _add_variable(inp) for name, inp in inputs.items()},
-            "output": {name: _add_variable(outp) for name, outp in outputs.items()},
-            "layers": [strip_dict(layer()) for layer in LAYERS]
-        },
-        stream,
-        allow_nan=False,
-        separators=(',', ':'),
-        sort_keys=True
-    )
+    with session.as_default():
+        return json.dump(
+            {
+                "input": {name: _add_variable(inp) for name, inp in inputs.items()},
+                "output": {name: _add_variable(outp) for name, outp in outputs.items()},
+                "layers": [strip_dict(layer()) for layer in LAYERS]
+            },
+            stream,
+            allow_nan=False,
+            separators=(',', ':'),
+            sort_keys=True
+        )

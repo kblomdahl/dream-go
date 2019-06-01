@@ -18,20 +18,42 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .conv2d import conv2d
-from .global_avg_pool import global_avg_pool
-from .named import named
-from .softmax import softmax
+import tensorflow as tf
+
+from ..serializer.depthwise_conv2d import serialize_depthwise_conv2d
 
 
-def global_avg_pooling_classifier(x, num_outputs, name=None):
-    """ Returns a head that outputs `num_outputs` classes, using a _Global
-    Average Pooling_ architecture [1].
+def depthwise_conv2d_batch_norm(x, filter_size, activation='linear', training=None):
+    conv2d = tf.keras.layers.DepthwiseConv2D(
+        filter_size,
+        padding='same',
+        use_bias=False,
+        kernel_initializer='orthogonal'
+    )
+    batch_norm = tf.keras.layers.BatchNormalization(renorm=True)
 
-    [1] https://arxiv.org/pdf/1312.4400.pdf, _Network In Network_, Section 3.2
-    """
-    y = conv2d(x, num_outputs, [1, 1], activation='linear')
-    y = global_avg_pool(y)
-    y = softmax(y)
+    # forward pass
+    y = batch_norm(conv2d(x), training=training)
 
-    return named(y, name=name)
+    if activation != 'linear':
+        act = tf.keras.layers.Activation(activation)
+        y = act(y)
+
+    # serialize
+    serialize_depthwise_conv2d(
+        input=x,
+        output=y,
+
+        kernel=conv2d.depthwise_kernel,
+        bias=conv2d.bias if conv2d.use_bias else None,
+
+        gamma=batch_norm.gamma,
+        beta=batch_norm.beta,
+        epsilon=batch_norm.epsilon,
+        mean=batch_norm.moving_mean,
+        variance=batch_norm.moving_variance,
+
+        activation=None if activation == 'linear' else activation,
+    )
+
+    return y

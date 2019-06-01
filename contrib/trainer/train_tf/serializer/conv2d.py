@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow.keras.backend as K
+import numpy as np
 
 from . import _add_layer, _add_variable, _add_constant
 
@@ -38,7 +38,14 @@ def serialize_conv2d(
     assert bias is None or beta is None, 'Batch normalization cannot be used together with a bias'
 
     def _dump_conv2d():
+        kernel_ = kernel.eval()
+
         if beta is not None:
+            gamma_ = gamma.eval()
+            beta_ = beta.eval()
+            mean_ = mean.eval()
+            variance_ = variance.eval()
+
             # fold the batch normalization into the convolutional weights and one
             # additional bias term. By scaling the weights and the mean by the
             # term `scale / sqrt(variance + 0.001)`.
@@ -49,19 +56,18 @@ def serialize_conv2d(
             # The weights are scaled using broadcasting, where all input weights for
             # a given output feature are scaled by that features term.
             #
-            std_ = K.sqrt(variance + epsilon)
-            bias_ = beta - mean / std_
-            kernel_ = kernel * K.reshape(gamma / std_, [1, 1, 1, -1])
+            std_ = np.sqrt(variance_ + epsilon)
+            bias_ = beta_ - mean_ / std_
+            kernel_ = kernel_ * np.reshape(gamma_ / std_, [1, 1, 1, -1])
         else:
-            bias_ = bias
-            kernel_ = kernel
+            bias_ = bias.eval()
 
         # fix the weights so that they appear in the _correct_ order according
         # to cuDNN (for NHWC):
         #
         # tensorflow: [h, w, in, out]
         # cudnn:      [out, h, w, in]
-        kernel_ = K.permute_dimensions(kernel_, [3, 0, 1, 2])
+        kernel_ = np.transpose(kernel_, [3, 0, 1, 2])
 
         return {
             "type": "Conv2D",

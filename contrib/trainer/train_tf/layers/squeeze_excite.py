@@ -25,13 +25,13 @@ from .multiply import multiply
 from .reshape import reshape
 
 
-def squeeze_excite(x, ratio=8, training=None):
+def squeeze_excite(x, squeeze_ratio=8, training=None):
     """ Squeeze-and-Excitation Networks, https://arxiv.org/abs/1709.01507 """
 
     num_channels = x.shape[-1]
 
     y_1 = global_avg_pool(x)
-    y_1 = dense_batch_norm(y_1, num_channels // ratio, activation='relu', training=training)
+    y_1 = dense_batch_norm(y_1, num_channels // squeeze_ratio, activation='relu', training=training)
     y_1 = dense_batch_norm(y_1, num_channels, activation='sigmoid', training=training)
     gamma = reshape(y_1, [1, 1, num_channels])
     y = multiply([x, gamma])

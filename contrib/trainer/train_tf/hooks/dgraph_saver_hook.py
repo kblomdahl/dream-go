@@ -18,20 +18,33 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .conv2d import conv2d
-from .global_avg_pool import global_avg_pool
-from .named import named
-from .softmax import softmax
+import tensorflow as tf
+
+from ..serializer import serialize_to
 
 
-def global_avg_pooling_classifier(x, num_outputs, name=None):
-    """ Returns a head that outputs `num_outputs` classes, using a _Global
-    Average Pooling_ architecture [1].
+class DGraphSaverHook(tf.train.SessionRunHook):
+    def __init__(self, filename, features, outputs):
+        self.filename = filename
+        self.features = features
+        self.outputs = outputs
 
-    [1] https://arxiv.org/pdf/1312.4400.pdf, _Network In Network_, Section 3.2
-    """
-    y = conv2d(x, num_outputs, [1, 1], activation='linear')
-    y = global_avg_pool(y)
-    y = softmax(y)
+    def begin(self):
+        self.global_step = tf.train.get_or_create_global_step()
 
-    return named(y, name=name)
+    def before_run(self, run_context):
+        return tf.train.SessionRunArgs(
+            fetches=[self.global_step]
+        )
+
+    def after_run(self, run_context, run_values):
+        [global_step] = run_values.results
+
+        if global_step % 50 == 0:
+            with open(self.filename, 'w') as fp:
+                serialize_to(
+                    run_context.session,
+                    {"features": self.features},
+                    {name: output for name, output in self.outputs.items()},
+                    fp
+                )

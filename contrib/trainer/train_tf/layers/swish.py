@@ -18,20 +18,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .conv2d import conv2d
-from .global_avg_pool import global_avg_pool
-from .named import named
-from .softmax import softmax
+from .activation import activation
+from .multiply import multiply
 
+def swish(x):
+    """ The Swish activation function, https://arxiv.org/pdf/1710.05941.pdf """
 
-def global_avg_pooling_classifier(x, num_outputs, name=None):
-    """ Returns a head that outputs `num_outputs` classes, using a _Global
-    Average Pooling_ architecture [1].
-
-    [1] https://arxiv.org/pdf/1312.4400.pdf, _Network In Network_, Section 3.2
-    """
-    y = conv2d(x, num_outputs, [1, 1], activation='linear')
-    y = global_avg_pool(y)
-    y = softmax(y)
-
-    return named(y, name=name)
+    return multiply([
+        x,
+        activation(x, activation='sigmoid')
+    ])

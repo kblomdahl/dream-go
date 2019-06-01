@@ -18,20 +18,28 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .conv2d import conv2d
-from .global_avg_pool import global_avg_pool
-from .named import named
-from .softmax import softmax
+import tensorflow as tf
+
+from .add import add
+from .conv2d_batch_norm import conv2d_batch_norm
+from .depthwise_conv2d_batch_norm import depthwise_conv2d_batch_norm
+from .squeeze_excite import squeeze_excite
 
 
-def global_avg_pooling_classifier(x, num_outputs, name=None):
-    """ Returns a head that outputs `num_outputs` classes, using a _Global
-    Average Pooling_ architecture [1].
+def mb_conv_block(x, expand_ratio=6, training=None):
+    """ Mobile Inverted Residual Bottleneck, https://arxiv.org/pdf/1905.11946.pdf """
 
-    [1] https://arxiv.org/pdf/1312.4400.pdf, _Network In Network_, Section 3.2
-    """
-    y = conv2d(x, num_outputs, [1, 1], activation='linear')
-    y = global_avg_pool(y)
-    y = softmax(y)
+    num_channels = x.shape.as_list()[-1]
+    num_expanded = expand_ratio * num_channels
 
-    return named(y, name=name)
+    # expand
+    y = conv2d_batch_norm(x, num_expanded, [1, 1], activation='relu', training=training)
+
+    # mix
+    y = depthwise_conv2d_batch_norm(y, [3, 3], activation='relu', training=training)
+    y = squeeze_excite(y, training=training)
+
+    # project
+    y = conv2d_batch_norm(y, num_channels, [1, 1], activation='linear', training=training)
+
+    return add([x, y])

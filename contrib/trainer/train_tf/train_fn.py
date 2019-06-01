@@ -19,22 +19,31 @@
 # SOFTWARE.
 
 import tensorflow as tf
-import tensorflow.keras.backend as K
 
-def fit(model, data, opts, callbacks=None):
-    if callbacks is None:
-        callbacks = []
+def train_fn(
+        model_fn,
+        train_input_fn,
+        eval_input_fn
+):
+    train_op, train_graph = create_train_graph(model_fn, train_input_fn)
+    eval_op, eval_graph = create_eval_graph(model_fn, eval_input_fn)
 
-    session = K.get_session()
-    optimizer = model.optimizer
+    while True:
+        with train_graph.as_default():
+            train_loop(train_op)
 
-    print(model.input)
-    print(model.total_loss)
-    print(model._feed_targets)
+        with eval_graph.as_default():
+            pass
 
-    gradients = optimizer.get_gradients(model.total_loss, {
-        model.input: inputs
-    })
 
-    for inputs, labels in data:
+def train_loop(train_op):
+    session = None
+    global_step_op = tf.train.get_or_create_global_step()
+
+    try:
+        session.run([init_iterator_op])
+
+        while True:
+            [_, global_step] = session.run([train_op, global_step_op])
+    except:
         pass
