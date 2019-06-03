@@ -68,3 +68,43 @@ impl Identity {
         Ok(Identity)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use graph_def::{LayerTypeDef, LayerArgumentsDef, VariableDef, ActivationTypeDef};
+    use layers::tests::{run_layer, assert_approx_eq};
+    use dg_cuda::cudnn::cudnnDataType_t;
+
+    #[test]
+    fn identity() {
+        let layer_def = LayerDef {
+            type_of: LayerTypeDef::Identity,
+            input: vec! [
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 16] }
+            ],
+            output: vec! [
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 16] }
+            ],
+            arguments: Some(LayerArgumentsDef {
+                kernel: None,
+                bias: None,
+                alpha: None,
+                group_count: 0,
+                activation: ActivationTypeDef::Linear
+            })
+        };
+        let layer = Identity::new(&layer_def)
+            .expect("Could not create identity layer");
+
+        let (inputs, outputs) = run_layer::<f32, _>(
+            &layer_def,
+            &layer,
+            cudnnDataType_t::Float
+        );
+
+        for (&inp, &outp) in inputs[0].iter().zip(outputs[0].iter()) {
+            assert_approx_eq(outp, inp);
+        }
+    }
+}

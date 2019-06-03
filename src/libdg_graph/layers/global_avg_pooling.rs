@@ -79,3 +79,49 @@ impl GlobalAveragePooling {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use graph_def::{LayerTypeDef, LayerArgumentsDef, VariableDef, ActivationTypeDef};
+    use layers::tests::{run_layer, assert_approx_eq};
+    use dg_cuda::cudnn::cudnnDataType_t;
+
+    #[test]
+    fn global_avg_pool() {
+        let layer_def = LayerDef {
+            type_of: LayerTypeDef::GlobalAveragePooling,
+            input: vec! [
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 16] }
+            ],
+            output: vec! [
+                VariableDef { id: 0, shape: vec! [1, 1, 1, 16] }
+            ],
+            arguments: Some(LayerArgumentsDef {
+                kernel: None,
+                bias: None,
+                alpha: None,
+                group_count: 0,
+                activation: ActivationTypeDef::Linear
+            })
+        };
+        let layer = GlobalAveragePooling::new(&layer_def)
+            .expect("Could not create global average pool layer");
+
+        let (inputs, outputs) = run_layer::<f32, _>(
+            &layer_def,
+            &layer,
+            cudnnDataType_t::Float
+        );
+
+        for i in 0..16 {
+            let mut expected_output: f32 = 0.0f32;
+
+            for j in 0..361 {
+                expected_output += inputs[0][i + 16*j];
+            }
+
+            assert_approx_eq(outputs[0][i], expected_output / 361.0);
+        }
+    }
+}

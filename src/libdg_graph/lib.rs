@@ -18,6 +18,7 @@ extern crate dg_utils;
 extern crate fnv;
 #[macro_use] extern crate lazy_static;
 extern crate libc;
+#[cfg(test)] extern crate rand;
 extern crate serde;
 extern crate serde_json;
 extern crate test;

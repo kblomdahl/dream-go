@@ -150,3 +150,158 @@ impl Conv2D {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use dg_cuda::cudnn::cudnnDataType_t;
+    use dg_utils::types::f16;
+    use graph_def::{ActivationTypeDef, ConstantDef, ConstantValueDef, LayerArgumentsDef, LayerTypeDef, VariableDef};
+    use layers::tests::{assert_approx_eq_prec, run_layer};
+
+    use super::*;
+    use rand::{thread_rng, Rng};
+    use std::f32::consts::E;
+
+    fn conv2d(
+        inp: &[f32],
+        weights: &[f32],
+        bias: &[f32],
+        batch_size: usize,
+        image_height: usize,
+        image_width: usize,
+        output_channels: usize,
+        filter_height: usize,
+        filter_width: usize,
+        input_channels: usize
+    ) -> Vec<f32>
+    {
+        let mut out = vec! [
+            0.0f32;
+            batch_size*image_height*image_width*output_channels
+        ];
+
+        for n in 0..batch_size {
+            for p in 0..image_height {
+                for q in 0..image_width {
+                    for k in 0..output_channels {
+                        let mut y_ = bias[k];
+
+                        for r in 0..filter_height {
+                            for s in 0..filter_width {
+                                for c in 0..input_channels {
+                                    if (p as isize + r as isize - 1) < 0 {
+                                        continue;
+                                    } else if (p as isize + r as isize - 1) >= image_height as isize {
+                                        continue;
+                                    } else if (q as isize + s as isize - 1) < 0 {
+                                        continue;
+                                    } else if (q as isize + s as isize - 1) >= image_width as isize {
+                                        continue;
+                                    }
+
+                                    let x_ = inp[
+                                        input_channels * image_width * image_height * n
+                                        + input_channels * image_width * (p+r-1)
+                                        + input_channels * (q+s-1)
+                                        + c
+                                    ];
+                                    let w_ = weights[
+                                        input_channels * filter_width * filter_height * k
+                                        + input_channels * filter_width * r
+                                        + input_channels * s
+                                        + c
+                                    ];
+
+                                    y_ += w_ * x_;
+                                }
+                            }
+                        }
+
+                        out[
+                            image_height*image_width*output_channels * n
+                            + image_width*output_channels * p
+                            + output_channels * q
+                            + k
+                        ] = y_;
+                    }
+                }
+            }
+        }
+
+        out
+    }
+
+    fn with_activation<F: Fn(f32) -> f32>(activation: ActivationTypeDef, act: F) {
+        let kernel: Vec<_> = (0..(32*3*3*64))
+            .map(|_i| 1.0 - 2.0 * thread_rng().gen::<f32>())
+            .collect();
+        let bias: Vec<_> = (0..32)
+            .map(|_i| 5.0 - 10.0 * thread_rng().gen::<f32>())
+            .collect();
+
+        let layer_def = LayerDef {
+            type_of: LayerTypeDef::Conv2D,
+            input: vec! [
+                VariableDef { id: 0, shape: vec! [2, 19, 19, 64] }
+            ],
+            output: vec! [
+                VariableDef { id: 0, shape: vec! [2, 19, 19, 32] }
+            ],
+            arguments: Some(LayerArgumentsDef {
+                kernel: Some(ConstantDef {
+                    shape: vec! [32, 3, 3, 64],
+                    value: ConstantValueDef {
+                        inner: Arc::new(kernel.iter().map(|&x| f16::from(x)).collect())
+                    }
+                }),
+                bias: Some(ConstantDef {
+                    shape: vec! [32],
+                    value: ConstantValueDef {
+                        inner: Arc::new(bias.iter().map(|&x| f16::from(x)).collect())
+                    }
+                }),
+                alpha: None,
+                group_count: 1,
+                activation
+            })
+        };
+        let layer = Conv2D::new(&layer_def)
+            .expect("Could not create conv2d layer");
+
+        let (inputs, outputs) = run_layer::<f16, _>(
+            &layer_def,
+            &layer,
+            cudnnDataType_t::Half
+        );
+
+        let input: Vec<f32> = inputs[0].iter().map(|&x| f32::from(x)).collect();
+        let expected_output = conv2d(
+            &input,
+            &kernel,
+            &bias,
+            2, 19, 19, 32, 3, 3, 64
+        );
+
+        for (expected_outp, &outp) in expected_output.into_iter().zip(outputs[0].iter()) {
+            let expected_outp = act(expected_outp);
+
+            assert_approx_eq_prec(f32::from(outp), expected_outp, 0.02);
+        }
+    }
+
+    #[test]
+    fn conv2d_relu() {
+        with_activation(
+            ActivationTypeDef::ReLU,
+            |x| if x > 0.0 { x } else { 0.0 }
+        )
+    }
+
+    #[test]
+    fn conv2d_linear() {
+        with_activation(
+            ActivationTypeDef::Linear,
+            |x| x
+        )
+    }
+}

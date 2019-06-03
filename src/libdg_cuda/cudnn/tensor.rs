@@ -162,6 +162,12 @@ impl Tensor {
         }
     }
 
+    pub fn len(&self) -> Result<usize, Error> {
+        let (_data_type, (n, c, h, w), _strides) = self.info()?;
+
+        Ok(n * c * h * w)
+    }
+
     pub fn size_in_bytes(&self) -> Result<usize, Error> {
         let (data_type, (n, c, h, w), _strides) = self.info()?;
 

@@ -104,10 +104,27 @@ impl PredictState {
         )?;
 
         let value_list = outputs["value"].chunks(2)
-            .map(|v| 1.0 * f32::from(v[0]) - 1.0 * f32::from(v[1]))
+            .map(|v| {
+                let v_0 = f32::from(v[0]);
+                let v_1 = f32::from(v[1]);
+
+                debug_assert!(v_0 >= 0.0 && v_1 >= 0.0, "v = [{}, {}]", v_0, v_1);
+                debug_assert!(v_0 + v_1 >= 1.0 - 1e-3, "v = [{}, {}]", v_0, v_1);
+                debug_assert!(v_0 + v_1 <= 1.0 + 1e-3, "v = [{}, {}]", v_0, v_1);
+
+                1.0 * v_0 - 1.0 * v_1
+            })
             .collect();
         let policy_list = outputs["policy"].chunks(362)
-            .map(|p| p.iter().map(|&x| f32::from(x)).collect())
+            .map(|p| {
+                let p_: Vec<f32> = p.iter().map(|&x| f32::from(x)).collect();
+
+                debug_assert!(p_.iter().all(|&x| x >= 0.0), "p = {:?}", p_);
+                debug_assert!(p_.iter().sum::<f32>() >= 1.0 - 1e-3, "p = {:?}", p_);
+                debug_assert!(p_.iter().sum::<f32>() <= 1.0 + 1e-3, "p = {:?}", p_);
+
+                p_
+            })
             .collect();
 
         Ok((value_list, policy_list))

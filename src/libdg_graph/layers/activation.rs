@@ -82,7 +82,7 @@ impl Activation {
         Self::with_mode(&mode)
     }
 
-    pub fn with_mode(mode: &str) -> Result<Activation, cuda::Error> {
+    fn with_mode(mode: &str) -> Result<Activation, cuda::Error> {
         let mode = match mode {
             "relu" => cudnn::cudnnActivationMode_t::ReLU,
             "sigmoid" => cudnn::cudnnActivationMode_t::Sigmoid,
@@ -96,5 +96,60 @@ impl Activation {
                 cudnn::cudnnNanPropagation_t::NotPropagateNaN,
             )?
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use layers::tests::{run_layer, assert_approx_eq};
+    use dg_cuda::cudnn::cudnnDataType_t;
+    use graph_def::{LayerTypeDef, LayerArgumentsDef, VariableDef};
+    use std::f32::consts::E;
+
+    fn check_activation<F: Fn(f32) -> f32>(activation_type: ActivationTypeDef, activation: F) {
+        let layer_def = LayerDef {
+            type_of: LayerTypeDef::Activation,
+            input: vec! [
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 16] }
+            ],
+            output: vec! [
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 16] }
+            ],
+            arguments: Some(LayerArgumentsDef {
+                kernel: None,
+                bias: None,
+                alpha: None,
+                group_count: 0,
+                activation: activation_type
+            })
+        };
+        let layer = Activation::new(&layer_def).expect("Could not create activation layer");
+
+        let (inputs, outputs) = run_layer::<f32, _>(
+            &layer_def,
+            &layer,
+            cudnnDataType_t::Float
+        );
+
+        for (&inp, &outp) in inputs[0].iter().zip(outputs[0].iter()) {
+            assert_approx_eq(outp, activation(inp));
+        }
+    }
+
+    #[test]
+    fn relu() {
+        check_activation(
+            ActivationTypeDef::ReLU,
+            |x| if x > 0.0 { x } else { 0.0 }
+        );
+    }
+
+    #[test]
+    fn sigmoid() {
+        check_activation(
+            ActivationTypeDef::Sigmoid,
+            |x| 1.0 / (1.0 + E.powf(-x))
+        );
     }
 }

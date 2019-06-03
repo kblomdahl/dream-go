@@ -118,7 +118,7 @@ impl PreparedSession {
                 .map(|variable_def| {
                     let id = variable_def.id;
 
-                    (self.tensors[&id].as_ref(), variables[&id].as_ptr())
+                    (self.tensors[&id].as_ref(), variables[&id].as_mut_ptr())
                 })
                 .collect();
 
@@ -126,7 +126,7 @@ impl PreparedSession {
                 handle,
                 &inputs,
                 &outputs,
-                workspace.as_ptr()
+                workspace.as_mut_ptr()
             )?;
         }
 

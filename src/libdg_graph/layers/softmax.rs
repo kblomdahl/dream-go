@@ -15,7 +15,7 @@
 use libc::c_void;
 
 use ::graph_def::LayerDef;
-use ::layer::{PreparedLayer, Layer};
+use ::layer::{Layer, PreparedLayer};
 use dg_cuda as cuda;
 use dg_cuda::cudnn;
 
@@ -65,5 +65,65 @@ impl PreparedLayer for Softmax {
 impl Softmax {
     pub fn new(_layer_def: &LayerDef) -> Result<Softmax, cuda::Error> {
         Ok(Softmax)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dg_cuda::cudnn::cudnnDataType_t;
+    use graph_def::{ActivationTypeDef, LayerArgumentsDef, LayerTypeDef, VariableDef};
+    use layers::tests::{assert_approx_eq, run_layer};
+
+    use super::*;
+
+    #[test]
+    fn softmax() {
+        let layer_def = LayerDef {
+            type_of: LayerTypeDef::Softmax,
+            input: vec! [
+                VariableDef { id: 0, shape: vec! [4, 1, 1, 362] }
+            ],
+            output: vec! [
+                VariableDef { id: 0, shape: vec! [4, 1, 1, 362] }
+            ],
+            arguments: Some(LayerArgumentsDef {
+                kernel: None,
+                bias: None,
+                alpha: None,
+                group_count: 0,
+                activation: ActivationTypeDef::Linear
+            })
+        };
+        let layer = Softmax::new(&layer_def)
+            .expect("Could not create softmax layer");
+
+        let (inputs, outputs) = run_layer::<f32, _>(
+            &layer_def,
+            &layer,
+            cudnnDataType_t::Float
+        );
+
+        for i in 0..4 {
+            let mut expected = vec! [0.0f32; 362];
+            let mut max = ::std::f32::MIN;
+            let mut sum = 0.0;
+
+            for j in 0..362 {
+                if inputs[0][362*i+j] > max {
+                    max = inputs[0][362*i+j];
+                }
+            }
+
+            for j in 0..362 {
+                let exp_x = (inputs[0][362*i+j] - max).exp();
+
+                expected[j] = exp_x;
+                sum += exp_x;
+            }
+
+            for j in 0..362 {
+                assert_approx_eq(outputs[0][362*i+j], expected[j] / sum);
+            }
+        }
     }
 }

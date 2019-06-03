@@ -20,6 +20,7 @@ mod identity;
 mod scale;
 mod softmax;
 mod op_tensor;
+#[cfg(test)] mod tests;
 
 pub use self::scale::Scale;
 pub use self::softmax::Softmax;

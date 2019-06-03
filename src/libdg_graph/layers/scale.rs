@@ -78,3 +78,64 @@ impl Scale {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use graph_def::{LayerTypeDef, LayerArgumentsDef, VariableDef, ActivationTypeDef, ConstantDef, ConstantValueDef};
+    use layers::tests::{run_layer, assert_approx_eq};
+    use dg_cuda::cudnn::cudnnDataType_t;
+    use std::sync::Arc;
+    use dg_utils::types::f16;
+
+    fn check_scale_by(alpha: f32) {
+        let layer_def = LayerDef {
+            type_of: LayerTypeDef::Scale,
+            input: vec! [
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 64] }
+            ],
+            output: vec! [
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 64] }
+            ],
+            arguments: Some(LayerArgumentsDef {
+                kernel: None,
+                bias: None,
+                alpha: Some(ConstantDef {
+                    shape: vec! [ 1 ],
+                    value: ConstantValueDef {
+                        inner: Arc::new(vec! [ f16::from(alpha) ])
+                    }
+                }),
+                group_count: 0,
+                activation: ActivationTypeDef::Linear
+            })
+        };
+        let layer = Scale::new(&layer_def)
+            .expect("Could not create scale layer");
+
+        let (inputs, outputs) = run_layer::<f32, _>(
+            &layer_def,
+            &layer,
+            cudnnDataType_t::Float
+        );
+
+        for (&inp, &outp) in inputs[0].iter().zip(outputs[0].iter()) {
+            assert_approx_eq(outp, inp * alpha);
+        }
+    }
+
+    #[test]
+    fn scale_neg() {
+        check_scale_by(-1.0);
+        check_scale_by(-0.5);
+        check_scale_by(-1.0 / 3.0);
+        check_scale_by(-0.95);
+    }
+
+    #[test]
+    fn scale_pos() {
+        check_scale_by(2.0);
+        check_scale_by(0.95);
+        check_scale_by(1.0 / 3.0);
+    }
+}

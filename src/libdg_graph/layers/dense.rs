@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use libc::c_void;
 
-use ::graph_def::{LayerDef, ActivationTypeDef};
+use ::graph_def::{ActivationTypeDef, LayerDef};
 use ::layer::{Layer, PreparedLayer};
 use dg_cuda as cuda;
 use dg_cuda::cudnn;
-use factories::{activation_factory, tensor_factory, filter_factory, convolution_factory};
-use std::sync::Arc;
+use factories::{activation_factory, convolution_factory, filter_factory, tensor_factory};
 
 #[derive(Debug)]
 pub struct Dense {
@@ -181,5 +182,114 @@ impl Dense {
             },
             convolution
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dg_cuda::cudnn::cudnnDataType_t;
+    use dg_utils::types::f16;
+    use graph_def::{ActivationTypeDef, ConstantDef, ConstantValueDef, LayerArgumentsDef, LayerTypeDef, VariableDef};
+    use layers::tests::{assert_approx_eq_prec, run_layer};
+
+    use super::*;
+    use rand::{thread_rng, Rng};
+    use std::f32::consts::E;
+
+    fn matmul(a: &[f32], b: &[f32], bias: &[f32], n: usize, m: usize, p: usize) -> Vec<f32> {
+        let mut out = vec! [0.0f32; n*p];
+
+        for i in 0..n {
+            for j in 0..m {
+                for k in 0..p {
+                    out[i*p+k] += a[i*m+j] * b[k*m+j];
+                }
+            }
+        }
+
+        for i in 0..n {
+            for k in 0..p {
+                out[i*p+k] += bias[k];
+            }
+        }
+
+        out
+    }
+
+    fn with_activation<F: Fn(f32) -> f32>(activation: ActivationTypeDef, act: F) {
+        let kernel: Vec<_> = (0..(362*16))
+            .map(|_i| 1.0 - 2.0 * thread_rng().gen::<f32>())
+            .collect();
+        let bias: Vec<_> = (0..16)
+            .map(|_i| 5.0 - 10.0 * thread_rng().gen::<f32>())
+            .collect();
+
+        let layer_def = LayerDef {
+            type_of: LayerTypeDef::Dense,
+            input: vec! [
+                VariableDef { id: 0, shape: vec! [4, 1, 1, 362] }
+            ],
+            output: vec! [
+                VariableDef { id: 1, shape: vec! [4, 1, 1, 16] }
+            ],
+            arguments: Some(LayerArgumentsDef {
+                kernel: Some(ConstantDef {
+                    shape: vec! [16, 362],
+                    value: ConstantValueDef {
+                        inner: Arc::new(kernel.iter().map(|&x| f16::from(x)).collect())
+                    }
+                }),
+                bias: Some(ConstantDef {
+                    shape: vec! [16],
+                    value: ConstantValueDef {
+                        inner: Arc::new(bias.iter().map(|&x| f16::from(x)).collect())
+                    }
+                }),
+                alpha: None,
+                group_count: 1,
+                activation
+            })
+        };
+        let layer = Dense::new(&layer_def)
+            .expect("Could not create dense layer");
+
+        let (inputs, outputs) = run_layer::<f16, _>(
+            &layer_def,
+            &layer,
+            cudnnDataType_t::Half
+        );
+
+        let input: Vec<f32> = inputs[0].iter().map(|&x| f32::from(x)).collect();
+        let expected_output = matmul(&input, &kernel, &bias, 4, 362, 16);
+
+        for (expected_outp, &outp) in expected_output.into_iter().zip(outputs[0].iter()) {
+            let expected_outp = act(expected_outp);
+
+            assert_approx_eq_prec(f32::from(outp), expected_outp, 0.01);
+        }
+    }
+
+    #[test]
+    fn dense_relu() {
+        with_activation(
+            ActivationTypeDef::ReLU,
+            |x| if x > 0.0 { x } else { 0.0 }
+        )
+    }
+
+    #[test]
+    fn dense_sigmoid() {
+        with_activation(
+            ActivationTypeDef::Sigmoid,
+            |x| 1.0 / (1.0 + E.powf(-x))
+        )
+    }
+
+    #[test]
+    fn dense_linear() {
+        with_activation(
+            ActivationTypeDef::Linear,
+            |x| x
+        )
     }
 }
