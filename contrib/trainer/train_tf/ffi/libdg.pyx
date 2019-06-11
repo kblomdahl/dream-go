@@ -57,7 +57,7 @@ cpdef parse_single_example(const unsigned char* line):
         if result != 0:
             raise ValueError('Could not extract example from line -- ' + str(result))
 
-        ownership =  np.asarray(<np.float32_t[:361]> example.ownership)
+        ownership = np.asarray(<np.float32_t[:361]> example.ownership)
         policy = np.array(<np.float32_t[:362]> example.policy)
         policy_next = np.array(<np.float32_t[:362]> example.policy_next)
         score = np.zeros([723], 'f4')

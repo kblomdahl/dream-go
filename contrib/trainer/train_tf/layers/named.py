@@ -19,12 +19,13 @@
 # SOFTWARE.
 
 import tensorflow as tf
+import tensorflow.keras.backend as K
 
 from ..serializer.reshape import serialize_reshape
 
 
 def named(x, name=None):
-    y = tf.keras.layers.Lambda(lambda z: z, name=name)(x)
+    y = tf.keras.layers.Reshape(K.int_shape(x)[1:], name=name)(x)
     serialize_reshape(input=x, output=y)
 
     return y

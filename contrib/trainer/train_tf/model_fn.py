@@ -24,22 +24,22 @@ import tensorflow.keras.backend as K
 from .optimizers.accum_grad_optimizer import AccumGradOptimizer
 from .layers.residual_block import residual_block
 from .hooks.dgraph_saver_hook import DGraphSaverHook
-from .hooks.increase_global_step import IncreaseGlobalStepHook
 from .layers.conv2d_batch_norm import conv2d_batch_norm
 from .layers.conv2d_classifier import conv2d_classifier
 from .layers.global_pooling_classifier import global_avg_pooling_classifier
 from .layers.mb_conv_block import mb_conv_block
-from .metrics.slope import avg_slope
-from .serializer import serialize_graph
+from .serializer import serialize_scope
 
 
 def model_fn(features, labels, mode, params, config):
-    with serialize_graph(mode == tf.estimator.ModeKeys.TRAIN):
+    K.set_image_data_format('channels_last')  # NHWC
+
+    with serialize_scope(mode == tf.estimator.ModeKeys.TRAIN):
         x = conv2d_batch_norm(features, params.num_channels, [1, 1], activation='relu')
 
         for _ in range(params.num_blocks):
-            #x = mb_conv_block(x)
-            x = residual_block(x)
+            x = mb_conv_block(x, use_se=False)
+            #x = residual_block(x)
 
         predictions = {
             'policy': global_avg_pooling_classifier(x, 362, name='policy'),
@@ -54,7 +54,7 @@ def model_fn(features, labels, mode, params, config):
         'policy_next': tf.keras.losses.categorical_crossentropy(labels['policy_next'], predictions['policy_next']),
         'value': tf.keras.losses.binary_crossentropy(labels['value'], predictions['value']),
         'score': tf.keras.losses.categorical_crossentropy(labels['score'], predictions['score']),
-        'ownership': tf.keras.losses.binary_crossentropy(labels['ownership'], predictions['ownership']),
+        'ownership': binary_crossentropy_flatten(labels['ownership'], predictions['ownership']),
     }
 
     total_loss = \
@@ -86,7 +86,7 @@ def model_fn(features, labels, mode, params, config):
         mean_value = K.mean(value)
 
         tf.summary.scalar('loss/' + key, mean_value)
-        tf.summary.scalar('slope/loss/' + key, avg_slope(mean_value))
+        #tf.summary.scalar('slope/loss/' + key, avg_slope(mean_value))
 
     for key, (_value, update_op) in eval_metric_ops.items():
         tf.summary.scalar(key, update_op)
@@ -125,6 +125,13 @@ def categorical_accuracy(labels, predictions, mode):
             K.argmax(predictions, axis=-1),
             name='eval/categorical_accuracy'
         )
+
+
+def binary_crossentropy_flatten(y_true, y_pred):
+    return tf.keras.losses.binary_crossentropy(
+        K.reshape(y_true, [-1, 2]),
+        K.reshape(y_pred, [-1, 2])
+    )
 
 
 def categorical_precision(labels, predictions, _mode):

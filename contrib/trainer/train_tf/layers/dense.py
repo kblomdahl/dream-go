@@ -20,13 +20,42 @@
 
 import tensorflow as tf
 
+from ..serializer.dense import serialize_dense
+from .swish import swish
 
-class IncreaseGlobalStepHook(tf.train.SessionRunHook):
-    def begin(self):
-        self.global_step = tf.train.get_or_create_global_step()
-        self.update_global_step = tf.assign_add(self.global_step, 1)
 
-    def before_run(self, run_context):
-        return tf.train.SessionRunArgs(
-            fetches=[self.update_global_step]
-        )
+def dense(x, num_outputs, activation='linear', training=None):
+    if activation == 'swish':
+        activation = 'linear'
+        use_swish = True
+    else:
+        use_swish = False
+
+    dense = tf.keras.layers.Dense(
+        num_outputs,
+        activation=None,
+        use_bias=True,
+        kernel_initializer='orthogonal'
+    )
+
+    # forward pass
+    y = dense(x)
+
+    if activation != 'linear':
+        act = tf.keras.layers.Activation(activation)
+        y = act(y)
+
+    z = swish(y) if use_swish else y
+
+    # serialize
+    serialize_dense(
+        input=x,
+        output=y,
+
+        kernel=dense.kernel,
+        bias=dense.bias,
+
+        activation=None if activation == 'linear' else activation,
+    )
+
+    return z

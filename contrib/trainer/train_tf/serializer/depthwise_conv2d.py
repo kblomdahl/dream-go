@@ -42,7 +42,7 @@ def serialize_depthwise_conv2d(
         kernel_ = kernel.eval()
 
         if beta is not None:
-            gamma_ = gamma.eval()
+            gamma_ = gamma.eval() if gamma is not None else 1.0
             beta_ = beta.eval()
             mean_ = mean.eval()
             variance_ = variance.eval()
@@ -59,9 +59,12 @@ def serialize_depthwise_conv2d(
             #
             std_ = np.sqrt(variance_ + epsilon)
             bias_ = beta_ - mean_ / std_
-            kernel_ = kernel_ * np.reshape(gamma_ / std_, [1, 1, -1, 1])
+            kernel_ = np.multiply(
+                kernel_,
+                np.reshape(gamma_ / std_, [1, 1, -1, 1])
+            )
         else:
-            bias_ = bias
+            bias_ = bias.eval()
 
         # fix the weights so that they appear in the _correct_ order according
         # to cuDNN (for NHWC):

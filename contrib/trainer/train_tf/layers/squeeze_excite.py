@@ -18,22 +18,20 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .add import add
-from .dense_batch_norm import dense_batch_norm
+from .conv2d import conv2d
 from .global_avg_pool import global_avg_pool
 from .multiply import multiply
 from .reshape import reshape
 
 
-def squeeze_excite(x, squeeze_ratio=8, training=None):
+def squeeze_excite(x, ratio=8):
     """ Squeeze-and-Excitation Networks, https://arxiv.org/abs/1709.01507 """
 
-    num_channels = x.shape[-1]
+    num_channels = x.shape.as_list()[-1]
 
-    y_1 = global_avg_pool(x)
-    y_1 = dense_batch_norm(y_1, num_channels // squeeze_ratio, activation='relu', training=training)
-    y_1 = dense_batch_norm(y_1, num_channels, activation='sigmoid', training=training)
-    gamma = reshape(y_1, [1, 1, num_channels])
-    y = multiply([x, gamma])
+    y = global_avg_pool(x)
+    y = reshape(y, [1, 1, num_channels])
+    y = conv2d(y, num_channels // ratio, [1, 1], activation='relu', kernel_initializer='lecun_normal')
+    y = conv2d(y, num_channels, [1, 1], activation='sigmoid', kernel_initializer='lecun_normal')
 
-    return y
+    return multiply([x, y])

@@ -21,10 +21,16 @@
 import tensorflow as tf
 
 from ..serializer.activation import serialize_activation
+from .swish import swish
 
 
 def activation(x, activation='linear'):
-    y = tf.keras.layers.Activation(activation=activation)(x)
-    serialize_activation(input=x, output=y, activation=activation)
+    if activation == 'swish':
+        return swish(x)
+    elif activation != 'linear':
+        y = tf.keras.layers.Activation(activation=activation)(x)
+        serialize_activation(input=x, output=y, activation=activation)
 
-    return y
+        return y
+    else:
+        return x

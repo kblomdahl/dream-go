@@ -24,15 +24,15 @@ from .squeeze_excite import squeeze_excite
 from .activation import activation
 
 
-def residual_block(x):
+def residual_block(x, use_se=True):
     num_channels = x.shape.as_list()[-1]
     y = conv2d_batch_norm(x, num_channels, [3, 3], activation='relu')
     y = conv2d_batch_norm(y, num_channels, [3, 3], activation='linear')
 
+    if use_se:
+        y = squeeze_excite(y)
+
     return activation(
-        add([
-            x,
-            squeeze_excite(y)
-        ]),
+        add([x, y]),
         activation='relu'
     )

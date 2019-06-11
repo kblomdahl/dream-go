@@ -152,14 +152,15 @@ def _parse_files(files, is_training):
 
     # parse the SGF files and extract the features in a background worker pool to
     # ensure they can be done in parallel with the main training loop
-    from multiprocessing import cpu_count, Pool
+    from concurrent.futures import ThreadPoolExecutor
+    from multiprocessing import cpu_count
 
     num_processes = max(4, cpu_count() - 8)
 
-    with Pool(num_processes) as p:
+    with ThreadPoolExecutor(max_workers=num_processes) as p:
         lines = itertools.chain.from_iterable(all_lines)
 
-        for example in p.imap_unordered(_parse_single_line, lines):
+        for example in p.map(_parse_single_line, lines):
             if example:
                 yield example
 

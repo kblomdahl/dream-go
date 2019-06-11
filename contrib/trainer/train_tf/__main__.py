@@ -25,6 +25,7 @@ import tensorflow as tf
 
 from .input_fn import file_input_fn, random_input_fn
 from .model_fn import model_fn
+from tensorflow.python import debug as tf_debug
 
 # global average pooling:
 #    policy_accuracy: 0.42
@@ -36,6 +37,7 @@ from .model_fn import model_fn
 #    policy_next_accuracy: 0.07
 #    value_accuracy: 0.66
 #
+
 
 def sgf_file(string):
     """ Returns the given string if it is a readable file of game records. """
@@ -100,8 +102,14 @@ def get_argument_parser():
                              help='the number of channels per residual block')
 
     other_group = parser.add_argument_group('other arguments')
-    other_group.add_argument('--task-index', metavar='I', type=int,
-                             help='start as this ')
+    other_group.add_argument('--deterministic', action='store_true',
+                             help='enable deterministic mode')
+    other_group.add_argument('--profile', action='store_true',
+                             help='enable profiling')
+    other_group.add_argument('--debug-cli', action='store_true',
+                             help='enable CLI debugging')
+    other_group.add_argument('--debug-tensorboard', metavar='A', type=str,
+                             help='enable TensorBoard debugging')
     other_group.add_argument('--model', metavar='M', type=model_directory,
                              help='the directory that contains the model')
     other_group.add_argument('--name', metavar='N', type=session_name,
@@ -154,6 +162,19 @@ def main(args):
     if not opts.model:
         opts.model = default_model_directory(opts)
 
+    opts.mini_batch_size = min(opts.mini_batch_size, opts.batch_size)
+
+    if opts.debug_tensorboard:
+        hooks = [
+            tf_debug.TensorBoardDebugHook(opts.debug_tensorboard, send_traceback_and_source_code=False)
+        ]
+    elif opts.debug_cli:
+        hooks = [
+            tf_debug.LocalCLIDebugHook()
+        ]
+    else:
+        hooks = []
+
     # build the input pipeline and model
     estimator = tf.estimator.Estimator(
         model_fn,
@@ -164,8 +185,14 @@ def main(args):
     if opts.mode in ['start', 'resume']:
         tf.estimator.train_and_evaluate(
             estimator,
-            tf.estimator.TrainSpec(input_fn=lambda: file_input_fn(opts, True)),  # random_input_fn
+            tf.estimator.TrainSpec(input_fn=lambda: file_input_fn(opts, True), hooks=hooks),  # random_input_fn
             tf.estimator.EvalSpec(input_fn=lambda: file_input_fn(opts, False), steps=None, throttle_secs=300)
+        )
+    elif opts.mode in ['test']:
+        estimator.evaluate(
+            lambda: file_input_fn(opts, False),
+            steps=1000,
+            hooks=hooks
         )
 
 

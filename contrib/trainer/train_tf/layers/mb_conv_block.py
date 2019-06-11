@@ -26,20 +26,22 @@ from .depthwise_conv2d_batch_norm import depthwise_conv2d_batch_norm
 from .squeeze_excite import squeeze_excite
 
 
-def mb_conv_block(x, expand_ratio=6, training=None):
+def mb_conv_block(x, expand_ratio=6, use_se=True):
     """ Mobile Inverted Residual Bottleneck, https://arxiv.org/pdf/1905.11946.pdf """
 
     num_channels = x.shape.as_list()[-1]
     num_expanded = expand_ratio * num_channels
 
     # expand
-    y = conv2d_batch_norm(x, num_expanded, [1, 1], activation='relu', training=training)
+    y = conv2d_batch_norm(x, num_expanded, [1, 1], activation='swish')
 
     # mix
-    y = depthwise_conv2d_batch_norm(y, [3, 3], activation='relu', training=training)
-    y = squeeze_excite(y, training=training)
+    y = depthwise_conv2d_batch_norm(y, [3, 3], activation='swish')
+
+    if use_se:
+        y = squeeze_excite(y)
 
     # project
-    y = conv2d_batch_norm(y, num_channels, [1, 1], activation='linear', training=training)
+    y = conv2d_batch_norm(y, num_channels, [1, 1], activation='linear')
 
     return add([x, y])

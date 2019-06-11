@@ -21,16 +21,23 @@
 import tensorflow as tf
 
 from ..serializer.depthwise_conv2d import serialize_depthwise_conv2d
+from .swish import swish
 
 
 def depthwise_conv2d_batch_norm(x, filter_size, activation='linear', training=None):
+    if activation == 'swish':
+        activation = 'linear'
+        use_swish = True
+    else:
+        use_swish = False
+
     conv2d = tf.keras.layers.DepthwiseConv2D(
         filter_size,
         padding='same',
         use_bias=False,
         kernel_initializer='orthogonal'
     )
-    batch_norm = tf.keras.layers.BatchNormalization(renorm=True)
+    batch_norm = tf.keras.layers.BatchNormalization(renorm=True, scale=False)
 
     # forward pass
     y = batch_norm(conv2d(x), training=training)
@@ -38,6 +45,8 @@ def depthwise_conv2d_batch_norm(x, filter_size, activation='linear', training=No
     if activation != 'linear':
         act = tf.keras.layers.Activation(activation)
         y = act(y)
+
+    z = swish(y) if use_swish else y
 
     # serialize
     serialize_depthwise_conv2d(
@@ -56,4 +65,4 @@ def depthwise_conv2d_batch_norm(x, filter_size, activation='linear', training=No
         activation=None if activation == 'linear' else activation,
     )
 
-    return y
+    return z

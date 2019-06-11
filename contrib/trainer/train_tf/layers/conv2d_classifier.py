@@ -25,6 +25,6 @@ from .named import named
 
 def conv2d_classifier(x, num_outputs, name=None):
     y = conv2d(x, num_outputs, [1, 1], activation='linear')
-    y = named(softmax(y), name=name)
+    y = softmax(y)
 
-    return y
+    return named(y, name=name)

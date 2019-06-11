@@ -18,59 +18,64 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import numpy as np
 import tensorflow.keras.backend as K
 import base64
 import json
 
-""" Whether we should be recording serialized layers / variables """
-IS_ENABLED = False
-
 """ All variables that are part of the cuDNN graph """
-VARIABLES = {}
+_VARIABLES = {}
 
 """ All computations in the cuDNN graph """
-LAYERS = []
+_LAYERS = []
+
+""" Whether to record the graph. """
+_ENABLED = False
 
 
-def serialize_graph(enabled):
-    class EnableDisable:
+def serialize_scope(is_training):
+    class SerializeScope:
+        def __init__(self, enable):
+            self.enable = enable
+
         def __enter__(self):
-            global IS_ENABLED
+            global _ENABLED
 
-            IS_ENABLED = enabled
-            if enabled:
-                VARIABLES.clear()
-                LAYERS.clear()
+            _ENABLED = self.enable
+
+            if _ENABLED:
+                _LAYERS.clear()
+                _VARIABLES.clear()
 
         def __exit__(self, exc_type, exc_val, exc_tb):
-            global IS_ENABLED
+            pass
 
-            IS_ENABLED = False
-
-    return EnableDisable()
+    return SerializeScope(is_training)
 
 
 def _add_layer(layer):
-    if IS_ENABLED:
-        LAYERS.append(layer)
+    if _ENABLED:
+        _LAYERS.append(layer)
 
 
 def _add_variable(variable):
     shape = variable.shape.as_list()
 
-    return VARIABLES.setdefault(variable.name, {
+    return _VARIABLES.setdefault(variable.name, {
         "shape": [(s or -1) for s in shape],
-        "id": len(VARIABLES)
+        "id": len(_VARIABLES)
     })
 
 
-def _add_constant(constant, shape=None):
-    value = constant.astype('f2')
-    value = value.tobytes()
+def _add_constant(value, shape=None):
+    half_value = value.astype('f2')
+    byte_value = half_value.tobytes()
 
     return {
-        "shape": shape or constant.shape,
-        "value": base64.b85encode(value, True).decode('ascii')
+        "shape": shape or value.shape,
+        "value": base64.b85encode(byte_value, True).decode('ascii'),
+        "mean": float(np.mean(half_value, dtype='f4')),
+        "std": float(np.std(half_value, dtype='f4')),
     }
 
 
@@ -85,7 +90,7 @@ def serialize_to(session, inputs, outputs, stream):
             {
                 "input": {name: _add_variable(inp) for name, inp in inputs.items()},
                 "output": {name: _add_variable(outp) for name, outp in outputs.items()},
-                "layers": [strip_dict(layer()) for layer in LAYERS]
+                "layers": list([strip_dict(layer()) for layer in _LAYERS]),
             },
             stream,
             allow_nan=False,

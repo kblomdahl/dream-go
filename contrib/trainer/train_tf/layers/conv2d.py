@@ -21,20 +21,28 @@
 import tensorflow as tf
 
 from ..serializer.conv2d import serialize_conv2d
+from .swish import swish
 
 
-def conv2d(x, num_channels, filter_size, use_bias=True, activation='linear', training=None):
+def conv2d(x, num_channels, filter_size, use_bias=True, activation='linear', kernel_initializer='orthogonal'):
+    if activation == 'swish':
+        activation = 'linear'
+        use_swish = True
+    else:
+        use_swish = False
+
     conv = tf.keras.layers.Conv2D(
         num_channels,
         filter_size,
         padding='same',
         use_bias=use_bias,
-        kernel_initializer='orthogonal',
+        kernel_initializer=kernel_initializer,
         activation=activation
     )
 
     # forward pass
     y = conv(x)
+    z = swish(y) if use_swish else y
 
     # serialize
     serialize_conv2d(
@@ -47,4 +55,4 @@ def conv2d(x, num_channels, filter_size, use_bias=True, activation='linear', tra
         activation=None if activation == 'linear' else activation,
     )
 
-    return y
+    return z

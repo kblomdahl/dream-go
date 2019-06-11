@@ -21,9 +21,16 @@
 import tensorflow as tf
 
 from ..serializer.conv2d import serialize_conv2d
+from .swish import swish
 
 
-def conv2d_batch_norm(x, num_channels, filter_size, activation='linear', training=None):
+def conv2d_batch_norm(x, num_channels, filter_size, activation='linear'):
+    if activation == 'swish':
+        activation = 'linear'
+        use_swish = True
+    else:
+        use_swish = False
+
     conv2d = tf.keras.layers.Conv2D(
         num_channels,
         filter_size,
@@ -31,14 +38,16 @@ def conv2d_batch_norm(x, num_channels, filter_size, activation='linear', trainin
         use_bias=False,
         kernel_initializer='orthogonal'
     )
-    batch_norm = tf.keras.layers.BatchNormalization(renorm=True)
+    batch_norm = tf.keras.layers.BatchNormalization(renorm=True, scale=False)
 
     # forward pass
-    y = batch_norm(conv2d(x), training=training)
+    y = batch_norm(conv2d(x))
 
     if activation != 'linear':
         act = tf.keras.layers.Activation(activation)
         y = act(y)
+
+    z = swish(y) if use_swish else y
 
     # serialize
     serialize_conv2d(
@@ -57,4 +66,4 @@ def conv2d_batch_norm(x, num_channels, filter_size, activation='linear', trainin
         activation=None if activation == 'linear' else activation,
     )
 
-    return y
+    return z

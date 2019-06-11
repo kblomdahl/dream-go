@@ -18,13 +18,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .activation import activation
+import tensorflow as tf
+
+from ..serializer.activation import serialize_activation
 from .multiply import multiply
+
 
 def swish(x):
     """ The Swish activation function, https://arxiv.org/pdf/1710.05941.pdf """
 
-    return multiply([
-        x,
-        activation(x, activation='sigmoid')
-    ])
+    y = tf.keras.layers.Activation(activation='sigmoid')(x)
+    z = multiply([x, y])
+
+    serialize_activation(input=x, output=y, activation='sigmoid')
+
+    return z

@@ -21,24 +21,36 @@
 import tensorflow as tf
 
 from ..serializer.dense import serialize_dense
+from .swish import swish
 
 
-def dense_batch_norm(x, num_outputs, activation='linear', training=None):
+def dense_batch_norm(x, num_outputs, activation='linear', kernel_initializer='orthogonal'):
+    if activation == 'swish':
+        activation = 'linear'
+        use_swish = True
+    else:
+        use_swish = False
+
     dense = tf.keras.layers.Dense(
         num_outputs,
         activation=None,
         use_bias=False,
-        kernel_initializer='orthogonal'
+        kernel_initializer=kernel_initializer
     )
-    batch_norm = tf.keras.layers.BatchNormalization(renorm=True)
+    batch_norm = tf.keras.layers.BatchNormalization(
+        renorm=True,
+        scale=False,
+        axis=3
+    )
 
     # forward pass
-    y = batch_norm(dense(x), training=training)
+    y = batch_norm(dense(x))
 
     if activation != 'linear':
         act = tf.keras.layers.Activation(activation)
-
         y = act(y)
+
+    z = swish(y) if use_swish else y
 
     # serialize
     serialize_dense(
@@ -46,7 +58,7 @@ def dense_batch_norm(x, num_outputs, activation='linear', training=None):
         output=y,
 
         kernel=dense.kernel,
-        bias=None,
+        bias=dense.bias if dense.use_bias else None,
 
         gamma=batch_norm.gamma,
         beta=batch_norm.beta,
@@ -57,4 +69,4 @@ def dense_batch_norm(x, num_outputs, activation='linear', training=None):
         activation=None if activation == 'linear' else activation,
     )
 
-    return y
+    return z
