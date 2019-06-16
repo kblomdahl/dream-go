@@ -103,18 +103,17 @@ impl Activation {
 mod tests {
     use super::*;
     use layers::tests::{run_layer, assert_approx_eq};
-    use dg_cuda::cudnn::cudnnDataType_t;
-    use graph_def::{LayerTypeDef, LayerArgumentsDef, VariableDef};
+    use graph_def::{LayerTypeDef, LayerArgumentsDef, VariableDef, DataTypeDef};
     use std::f32::consts::E;
 
     fn check_activation<F: Fn(f32) -> f32>(activation_type: ActivationTypeDef, activation: F) {
         let layer_def = LayerDef {
             type_of: LayerTypeDef::Activation,
             input: vec! [
-                VariableDef { id: 0, shape: vec! [1, 19, 19, 16] }
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 16], data_type: DataTypeDef::Float }
             ],
             output: vec! [
-                VariableDef { id: 0, shape: vec! [1, 19, 19, 16] }
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 16], data_type: DataTypeDef::Float }
             ],
             arguments: Some(LayerArgumentsDef {
                 kernel: None,
@@ -126,10 +125,9 @@ mod tests {
         };
         let layer = Activation::new(&layer_def).expect("Could not create activation layer");
 
-        let (inputs, outputs) = run_layer::<f32, _>(
+        let (inputs, outputs) = run_layer::<f32, f32, _>(
             &layer_def,
-            &layer,
-            cudnnDataType_t::Float
+            &layer
         );
 
         for (&inp, &outp) in inputs[0].iter().zip(outputs[0].iter()) {

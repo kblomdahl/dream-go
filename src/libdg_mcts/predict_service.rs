@@ -117,13 +117,11 @@ impl PredictState {
             .collect();
         let policy_list = outputs["policy"].chunks(362)
             .map(|p| {
-                let p_: Vec<f32> = p.iter().map(|&x| f32::from(x)).collect();
+                debug_assert!(p.iter().all(|&x| x >= 0.0), "p = {:?}", p);
+                debug_assert!(p.iter().sum::<f32>() >= 1.0 - 1e-3, "p = {:?}", p);
+                debug_assert!(p.iter().sum::<f32>() <= 1.0 + 1e-3, "p = {:?}", p);
 
-                debug_assert!(p_.iter().all(|&x| x >= 0.0), "p = {:?}", p_);
-                debug_assert!(p_.iter().sum::<f32>() >= 1.0 - 1e-3, "p = {:?}", p_);
-                debug_assert!(p_.iter().sum::<f32>() <= 1.0 + 1e-3, "p = {:?}", p_);
-
-                p_
+                p.to_vec()
             })
             .collect();
 

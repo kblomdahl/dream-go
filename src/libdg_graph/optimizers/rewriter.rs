@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use graph_def::{GraphDef, LayerDef, VariableDef};
+use graph_def::{GraphDef, LayerDef, VariableDef, DataTypeDef};
 use fnv::FnvHashSet;
 
 pub enum PluckResult {
@@ -36,7 +36,7 @@ pub trait GraphDefRewriter {
         }
     }
 
-    fn create_variable(g: &GraphDef, shape: Vec<isize>) -> VariableDef {
+    fn create_variable(g: &GraphDef, data_type: DataTypeDef, shape: Vec<isize>) -> VariableDef {
         let mut unique_ids = FnvHashSet::default();
 
         for layer_def in &g.layers {
@@ -50,6 +50,7 @@ pub trait GraphDefRewriter {
                 .rev()
                 .filter(|id| !unique_ids.contains(id))
                 .next().unwrap(),
+            data_type,
             shape
         }
     }

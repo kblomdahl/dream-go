@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use dg_utils::types::f16;
 use graph_def::*;
 use optimizers::rewriter::{GraphDefRewriter, PluckResult};
 
@@ -45,7 +44,7 @@ impl ScaleBeforeSoftmax {
     }
 
     fn add_scale_layer(g: &mut GraphDef, alpha: f32, x: &VariableDef) -> VariableDef {
-        let y = Self::create_variable(g, x.shape.clone());
+        let y = Self::create_variable(g, x.data_type, x.shape.clone());
 
         g.layers.push(LayerDef {
             type_of: LayerTypeDef::Scale,
@@ -58,7 +57,7 @@ impl ScaleBeforeSoftmax {
                 alpha: Some(ConstantDef {
                     shape: vec! [1],
                     value: ConstantValueDef {
-                        inner: Arc::new(vec! [f16::from(alpha)])
+                        inner: Arc::new(vec! [alpha])
                     }
                 }),
                 activation: ActivationTypeDef::Linear

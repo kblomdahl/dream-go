@@ -109,7 +109,7 @@ impl Convolution {
             return Err(Error::CudnnError(success));
         }
 
-        let (_k, _c, h, w) = filter.dims()?;
+        let ((_k, _c, h, w), _, _) = filter.info()?;
 
         let success = unsafe {
             cudnnSetConvolution2dDescriptor(
@@ -140,7 +140,7 @@ impl Convolution {
         let success = unsafe {
             cudnnSetConvolutionMathType(
                 conv_desc,
-                cudnnMathType_t::TensorOpMathAllowConversion
+                cudnnMathType_t::TensorOpMath
             )
         };
 

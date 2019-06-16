@@ -20,9 +20,9 @@ use dg_cuda as cuda;
 use dg_cuda::cudnn;
 
 #[derive(Clone, Debug)]
-pub struct Softmax;
+pub struct Transform;
 
-impl Layer for Softmax {
+impl Layer for Transform {
     fn prepare(
         &self,
         _handle: &cudnn::Handle,
@@ -34,7 +34,7 @@ impl Layer for Softmax {
     }
 }
 
-impl PreparedLayer for Softmax {
+impl PreparedLayer for Transform {
     fn size_in_bytes(&self) -> usize {
         0
     }
@@ -50,9 +50,9 @@ impl PreparedLayer for Softmax {
         assert_eq!(inputs.len(), 1);
         assert_eq!(outputs.len(), 1);
 
-        let softmax = cudnn::Softmax::new()?;
+        let transform = cudnn::Transform::new()?;
 
-        softmax.forward(
+        transform.forward(
             handle,
             inputs[0].0,
             inputs[0].1,
@@ -62,66 +62,65 @@ impl PreparedLayer for Softmax {
     }
 }
 
-impl Softmax {
-    pub fn new(_layer_def: &LayerDef) -> Result<Softmax, cuda::Error> {
-        Ok(Softmax)
+impl Transform {
+    pub fn new(_layer_def: &LayerDef) -> Result<Transform, cuda::Error> {
+        Ok(Transform)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use graph_def::{ActivationTypeDef, LayerArgumentsDef, LayerTypeDef, VariableDef, DataTypeDef};
+    use dg_utils::types::f16;
+    use graph_def::{DataTypeDef, LayerDef, LayerTypeDef, VariableDef};
     use layers::tests::{assert_approx_eq, run_layer};
+    use layers::Transform;
 
-    use super::*;
-
-    #[test]
-    fn softmax() {
+    fn check_transform<I, O>(input_type: DataTypeDef, output_type: DataTypeDef)
+    where I: From<f32> + Clone + Copy + Default,
+          O: From<f32> + Clone + Copy + Default,
+          f32: From<I>,
+          f32: From<O>
+    {
         let layer_def = LayerDef {
-            type_of: LayerTypeDef::Softmax,
+            type_of: LayerTypeDef::Scale,
             input: vec! [
-                VariableDef { id: 0, shape: vec! [4, 1, 1, 362], data_type: DataTypeDef::Float }
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 64], data_type: input_type }
             ],
             output: vec! [
-                VariableDef { id: 0, shape: vec! [4, 1, 1, 362], data_type: DataTypeDef::Float }
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 64], data_type: output_type }
             ],
-            arguments: Some(LayerArgumentsDef {
-                kernel: None,
-                bias: None,
-                alpha: None,
-                group_count: 0,
-                activation: ActivationTypeDef::Linear
-            })
+            arguments: None
         };
-        let layer = Softmax::new(&layer_def)
-            .expect("Could not create softmax layer");
+        let layer = Transform::new(&layer_def)
+            .expect("Could not create scale layer");
 
-        let (inputs, outputs) = run_layer::<f32, f32, _>(
+        let (inputs, outputs) = run_layer::<I, O, _>(
             &layer_def,
             &layer
         );
 
-        for i in 0..4 {
-            let mut expected = vec! [0.0f32; 362];
-            let mut max = ::std::f32::MIN;
-            let mut sum = 0.0;
-
-            for j in 0..362 {
-                if inputs[0][362*i+j] > max {
-                    max = inputs[0][362*i+j];
-                }
-            }
-
-            for j in 0..362 {
-                let exp_x = (inputs[0][362*i+j] - max).exp();
-
-                expected[j] = exp_x;
-                sum += exp_x;
-            }
-
-            for j in 0..362 {
-                assert_approx_eq(outputs[0][362*i+j], expected[j] / sum);
-            }
+        for (&inp, &outp) in inputs[0].iter().zip(outputs[0].iter()) {
+            assert_approx_eq(f32::from(inp), f32::from(outp));
         }
+    }
+
+    #[test]
+    fn half_to_float() {
+        check_transform::<f16, f32>(DataTypeDef::Half, DataTypeDef::Float);
+    }
+
+    #[test]
+    fn half_to_half() {
+        check_transform::<f16, f16>(DataTypeDef::Half, DataTypeDef::Half);
+    }
+
+    #[test]
+    fn float_to_half() {
+        check_transform::<f32, f16>(DataTypeDef::Float, DataTypeDef::Half);
+    }
+
+    #[test]
+    fn float_to_float() {
+        check_transform::<f32, f32>(DataTypeDef::Float, DataTypeDef::Float);
     }
 }

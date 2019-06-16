@@ -115,15 +115,6 @@ pub fn copy_nonoverlapping<T: Sized>(
     stream: &Stream
 ) -> Result<(), Error>
 {
-    /*
-    eprintln!("cudaMemcpyAsync");
-    eprintln!("  dst {:?}", dst as *mut c_void);
-    eprintln!("  src {:?}", src as *const c_void);
-    eprintln!("  count {:?}", count * size_of::<T>());
-    eprintln!("  kind {:?}", kind);
-    eprintln!("  stream {:?}", stream.as_ptr());
-    */
-
     let success = unsafe {
         cudaMemcpyAsync(
             dst as *mut c_void,

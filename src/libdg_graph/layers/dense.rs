@@ -144,6 +144,11 @@ impl Dense {
         let arguments = layer_def.arguments.as_ref().unwrap();
         let arg_kernel = arguments.kernel.as_ref().unwrap();
         let arg_bias = arguments.bias.as_ref().unwrap();
+        let data_type = if layer_def.is_input_half() {
+            cudnn::cudnnDataType_t::Half
+        } else {
+            cudnn::cudnnDataType_t::Float
+        };
 
         // use cuDNN to perform the matrix multiplication, by modelling our
         // matrix multiplication as a 1x1 convolution (*). This allows us to
@@ -153,23 +158,26 @@ impl Dense {
         //     matrix multiplication.
         //
         let filter = filter_factory::get_or_create(
-            cudnn::cudnnDataType_t::Half,
+            data_type,
             cudnn::cudnnTensorFormat_t::NCHW,
             &vec! [arg_kernel.shape[0] as usize, arg_kernel.shape[1] as usize, 1, 1]
         )?;
+        let filter_data = filter.convert_to_ptr(&arg_kernel.value)?;
+
         let convolution = convolution_factory::get_or_create(&filter, 1)?;
         let bias_size = arg_bias.shape[0] as usize;
         let bias = tensor_factory::get_or_create(
-            cudnn::cudnnDataType_t::Half,
+            data_type,
             cudnn::cudnnTensorFormat_t::NCHW,
             &[1, bias_size, 1, 1]
         )?;
+        let bias_data = bias.convert_to_ptr(&arg_bias.value)?;
 
         Ok(Dense {
             bias,
-            bias_data: Arc::new(cuda::Ptr::from_vec(&arg_bias.value, &cuda::Stream::default())?),
+            bias_data: Arc::new(bias_data),
             filter,
-            filter_data: Arc::new(cuda::Ptr::from_vec(&arg_kernel.value, &cuda::Stream::default())?),
+            filter_data: Arc::new(filter_data),
             activation_1,
             activation_2: match activation_type {
                 ActivationTypeDef::ReLU | ActivationTypeDef::Linear => None,
@@ -187,10 +195,9 @@ impl Dense {
 
 #[cfg(test)]
 mod tests {
-    use dg_cuda::cudnn::cudnnDataType_t;
     use dg_utils::types::f16;
-    use graph_def::{ActivationTypeDef, ConstantDef, ConstantValueDef, LayerArgumentsDef, LayerTypeDef, VariableDef};
-    use layers::tests::{assert_approx_eq_prec, run_layer};
+    use graph_def::{ActivationTypeDef, ConstantDef, ConstantValueDef, LayerArgumentsDef, LayerTypeDef, VariableDef, DataTypeDef};
+    use layers::tests::{assert_approx_eq_prec, run_layer, run_layer_with_input};
 
     use super::*;
     use rand::{thread_rng, Rng};
@@ -227,22 +234,22 @@ mod tests {
         let layer_def = LayerDef {
             type_of: LayerTypeDef::Dense,
             input: vec! [
-                VariableDef { id: 0, shape: vec! [4, 1, 1, 362] }
+                VariableDef { id: 0, shape: vec! [4, 1, 1, 362], data_type: DataTypeDef::Half }
             ],
             output: vec! [
-                VariableDef { id: 1, shape: vec! [4, 1, 1, 16] }
+                VariableDef { id: 1, shape: vec! [4, 1, 1, 16], data_type: DataTypeDef::Half }
             ],
             arguments: Some(LayerArgumentsDef {
                 kernel: Some(ConstantDef {
                     shape: vec! [16, 362],
                     value: ConstantValueDef {
-                        inner: Arc::new(kernel.iter().map(|&x| f16::from(x)).collect())
+                        inner: Arc::new(kernel.clone())
                     }
                 }),
                 bias: Some(ConstantDef {
                     shape: vec! [16],
                     value: ConstantValueDef {
-                        inner: Arc::new(bias.iter().map(|&x| f16::from(x)).collect())
+                        inner: Arc::new(bias.clone())
                     }
                 }),
                 alpha: None,
@@ -253,10 +260,9 @@ mod tests {
         let layer = Dense::new(&layer_def)
             .expect("Could not create dense layer");
 
-        let (inputs, outputs) = run_layer::<f16, _>(
+        let (inputs, outputs) = run_layer::<f16, f16, _>(
             &layer_def,
-            &layer,
-            cudnnDataType_t::Half
+            &layer
         );
 
         let input: Vec<f32> = inputs[0].iter().map(|&x| f32::from(x)).collect();
@@ -291,5 +297,75 @@ mod tests {
             ActivationTypeDef::Linear,
             |x| x
         )
+    }
+
+    #[test]
+    fn manual_check() {
+        let inputs: Vec<f16> = vec! [
+            f16::from(1.0),
+            f16::from(2.0),
+            f16::from(3.0),
+            f16::from(4.0)
+        ];
+        let expected_output: Vec<f32> = vec! [
+            4.973915,
+            1.3262789,
+            -0.02854711,
+            3.8450215,
+            2.69428,
+            -4.317896,
+            -0.7265241,
+            -0.57283795
+        ];
+        let kernel: Vec<f32> = vec! [
+            0.50254387,  0.48262984,  0.6585986 ,  0.38257903,
+            -0.47954717, -0.22590104,  0.5119099 ,  0.18047464,
+            -0.22907943, -0.31100363,  0.4734915 , -0.14948374,
+            0.2919281 , -0.52225155,  0.6126892 ,  0.6898822,
+            0.12224323, -0.49506918,  0.34403735,  0.6325157,
+            0.5447752 , -0.44011223, -0.63662744, -0.51814103,
+            -0.16964561, -0.6199068 , -0.3140488 ,  0.40627033,
+            0.6384558 , -0.3716273 , -0.44681442,  0.21810102
+        ];
+        let bias: Vec<f32> = vec! [0.0; 8];
+
+        let layer_def = LayerDef {
+            type_of: LayerTypeDef::Dense,
+            input: vec! [
+                VariableDef { id: 0, shape: vec! [1, 1, 1, 4], data_type: DataTypeDef::Half }
+            ],
+            output: vec! [
+                VariableDef { id: 1, shape: vec! [1, 1, 1, 8], data_type: DataTypeDef::Half }
+            ],
+            arguments: Some(LayerArgumentsDef {
+                kernel: Some(ConstantDef {
+                    shape: vec! [8, 4],
+                    value: ConstantValueDef {
+                        inner: Arc::new(kernel)
+                    }
+                }),
+                bias: Some(ConstantDef {
+                    shape: vec! [8],
+                    value: ConstantValueDef {
+                        inner: Arc::new(bias)
+                    }
+                }),
+                alpha: None,
+                group_count: 1,
+                activation: ActivationTypeDef::Linear
+            })
+        };
+        let layer = Dense::new(&layer_def)
+            .expect("Could not create dense layer");
+
+        let (_inputs, outputs) = run_layer_with_input::<f16, f16, _>(
+            &layer_def,
+            &layer,
+            vec! [inputs],
+        );
+
+        for (expected_outp, &outp) in expected_output.into_iter().zip(outputs[0].iter()) {
+            assert_approx_eq_prec(f32::from(outp), expected_outp, 0.01);
+        }
     }
 }

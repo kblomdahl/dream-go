@@ -24,7 +24,7 @@ use dg_cuda::Device;
 use dg_utils::config;
 use graph::Graph;
 use graph_def::GraphDef;
-use optimizers::{RemoveRedundantIdentityLayers, ScaleBeforeSoftmax};
+use optimizers::{RemoveRedundantIdentityLayers, ScaleBeforeSoftmax, TransformInputOutput};
 use Session;
 use std::sync::{Arc, Mutex};
 
@@ -129,6 +129,7 @@ fn optimize(g: GraphDef) -> GraphDef {
         g
     };
 
+    let g = TransformInputOutput::apply(g);
     let g = RemoveRedundantIdentityLayers::apply(g);
 
     g

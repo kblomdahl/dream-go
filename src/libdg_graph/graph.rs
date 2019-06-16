@@ -70,6 +70,7 @@ impl Graph {
                 LayerTypeDef::Multiply => Box::new(OpTensor::new(layer_def)?),
                 LayerTypeDef::Softmax => Box::new(Softmax::new(layer_def)?),
                 LayerTypeDef::Scale => Box::new(Scale::new(layer_def)?),
+                LayerTypeDef::Transform => Box::new(Transform::new(layer_def)?),
             };
 
             out.layers.push((layer, layer_def.clone()));
@@ -83,6 +84,7 @@ impl Graph {
             .or_insert(variable_def.clone());
 
         assert_eq!(other.id, variable_def.id);
+        assert_eq!(other.data_type, variable_def.data_type);
         assert_eq!(other.shape, variable_def.shape);
     }
 

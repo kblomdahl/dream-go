@@ -26,6 +26,7 @@ use serde_json;
 
 use dg_utils::b85;
 use dg_utils::types::f16;
+use std::mem::size_of;
 
 #[derive(Deserialize, Debug)]
 pub struct GraphDef {
@@ -49,7 +50,8 @@ pub enum LayerTypeDef {
     Identity,
     Multiply,
     Softmax,
-    Scale
+    Scale,
+    Transform
 }
 
 #[derive(Clone, Copy, Deserialize, Debug, PartialEq)]
@@ -94,6 +96,10 @@ impl LayerDef {
     pub fn map(&self) -> Zip<Iter<VariableDef>, Iter<VariableDef>> {
         self.input.iter().zip(self.output.iter())
     }
+
+    pub fn is_input_half(&self) -> bool {
+        self.input.iter().all(|i| i.data_type == DataTypeDef::Half)
+    }
 }
 
 #[derive(Clone, Deserialize, Debug, PartialEq)]
@@ -118,9 +124,31 @@ pub fn default_group_count() -> usize {
     1
 }
 
+#[derive(Clone, Copy, Deserialize, Debug, Eq, PartialEq, Hash)]
+pub enum DataTypeDef  {
+    Float,
+    Half
+}
+
+impl DataTypeDef {
+    pub fn size_of(self) -> usize {
+        match self {
+            DataTypeDef::Float => size_of::<f32>(),
+            DataTypeDef::Half => size_of::<f16>(),
+        }
+    }
+}
+
+fn default_data_type() -> DataTypeDef {
+    DataTypeDef::Float
+}
+
 #[derive(Clone, Deserialize, Debug, PartialEq)]
 pub struct VariableDef {
     pub id: usize,
+
+    #[serde(default = "default_data_type")]
+    pub data_type: DataTypeDef,
     pub shape: Vec<isize>
 }
 
@@ -133,18 +161,67 @@ impl VariableDef {
 }
 
 #[derive(Clone, Deserialize, Debug, PartialEq)]
+#[serde(from = "ValidateConstantDef")]
 pub struct ConstantDef {
     pub shape: Vec<isize>,
-    pub value: ConstantValueDef
+    pub value: ConstantValueDef,
+}
+
+#[derive(Deserialize)]
+struct ValidateConstantDef {
+    shape: Vec<isize>,
+    value: ConstantValueDef,
+
+    #[serde(default)]
+    mean: Option<f32>,
+
+    #[serde(default)]
+    std: Option<f32>
+}
+
+impl From<ValidateConstantDef> for ConstantDef {
+    fn from(other: ValidateConstantDef) -> Self {
+        let out = ConstantDef {
+            shape: other.shape.clone(),
+            value: other.value.clone()
+        };
+
+        // verify the `mean`
+        if let Some(other_mean) = other.mean {
+            let num_elements: isize = other.shape.iter()
+                .product();
+            let total_sum: f32 = other.value.inner.iter()
+                .map(|&x| f32::from(x))
+                .sum();
+            let average = total_sum / num_elements as f32;
+
+            assert!(other_mean > average - 1e-2, "Actual: {}, Expected: {}", average, other_mean);
+            assert!(other_mean < average + 1e-2, "Actual: {}, Expected: {}", average, other_mean);
+
+            // verify the `std`
+            if let Some(other_std) = other.std {
+                let total_diff: f32 = other.value.inner.iter()
+                    .map(|&x| (f32::from(x) - average).abs())
+                    .map(|x| x * x)
+                    .sum();
+                let std = (total_diff / num_elements as f32).sqrt();
+
+                assert!(other_std > std - 1e-2, "Actual: {}, Expected: {}", std, other_std);
+                assert!(other_std < std + 1e-2, "Actual: {}, Expected: {}", std, other_std);
+            }
+        }
+
+        out
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConstantValueDef {
-    pub inner: Arc<Vec<f16>>
+    pub inner: Arc<Vec<f32>>
 }
 
 impl Deref for ConstantValueDef {
-    type Target = Vec<f16>;
+    type Target = Vec<f32>;
 
     fn deref(&self) -> &Self::Target {
         self.inner.as_ref()
@@ -163,7 +240,7 @@ impl<'de> Visitor<'de> for ConstantValueDefVisitor {
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
         where E: serde::de::Error,
     {
-        match b85::decode::<f16, f16>(v.as_bytes()) {
+        match b85::decode::<f32, f32>(v.as_bytes()) {
             None => Err(serde::de::Error::invalid_value(serde::de::Unexpected::Str(v), &self)),
             Some(vec) => Ok(ConstantValueDef { inner: Arc::new(vec) })
         }
@@ -223,17 +300,20 @@ mod tests {
   "input": {
     "features": {
       "id": 0,
-      "shape": [-1, 19, 19, 40]
+      "shape": [-1, 19, 19, 40],
+      "data_type": "Float"
     }
   },
   "output": {
     "policy": {
       "id": 2,
-      "shape": [-1, 362]
+      "shape": [-1, 362],
+      "data_type": "Float"
     },
     "value": {
       "id": 4,
-      "shape": [-1, 2]
+      "shape": [-1, 2],
+      "data_type": "Float"
     }
   },
   "layers": []
@@ -245,19 +325,22 @@ mod tests {
         assert!(g.input.contains_key("features"));
         assert_eq!(g.input["features"], VariableDef {
             id: 0,
-            shape: vec! [-1, 19, 19, 40]
+            shape: vec! [-1, 19, 19, 40],
+            data_type: DataTypeDef::Float
         });
 
         assert_eq!(g.output.len(), 2);
         assert!(g.output.contains_key("policy"));
         assert_eq!(g.output["policy"], VariableDef {
             id: 2,
-            shape: vec! [-1, 362]
+            shape: vec! [-1, 362],
+            data_type: DataTypeDef::Float
         });
         assert!(g.output.contains_key("value"));
         assert_eq!(g.output["value"], VariableDef {
             id: 4,
-            shape: vec! [-1, 2]
+            shape: vec! [-1, 2],
+            data_type: DataTypeDef::Float
         });
 
         assert!(g.layers.is_empty());
@@ -268,89 +351,17 @@ mod tests {
         let content = r#"
 {
   "type": "Softmax",
-  "in": [{"id": 66, "shape": [-1, 2]}],
-  "output": [{"id": 4, "shape": [-1, 2]}]
+  "in": [{"id": 66, "shape": [-1, 2], "data_type": "Half"}],
+  "output": [{"id": 4, "shape": [-1, 2], "data_type": "Half"}]
 }
 "#;
         let l: LayerDef = serde_json::from_reader(Cursor::new(content)).unwrap();
 
         assert_eq!(l.type_of, LayerTypeDef::Softmax);
         assert_eq!(l.input.len(), 1);
-        assert_eq!(l.input[0], VariableDef { id: 66, shape: vec![-1, 2]});
+        assert_eq!(l.input[0], VariableDef { id: 66, shape: vec![-1, 2], data_type: DataTypeDef::Half});
         assert_eq!(l.output.len(), 1);
-        assert_eq!(l.output[0], VariableDef { id: 4, shape: vec![-1, 2]});
+        assert_eq!(l.output[0], VariableDef { id: 4, shape: vec![-1, 2], data_type: DataTypeDef::Half});
         assert_eq!(l.arguments, None);
-    }
-
-    #[test]
-    fn test_conv2d() {
-        let content = r#"
-{
-  "type": "Conv2D",
-  "in": [{"id": 60, "shape": [-1, 19, 19, 64]}],
-  "output": [{"id": 65, "shape": [-1, 19, 19, 2]}],
-  "arguments": {
-    "bias": {
-      "shape": [2],
-      "value": "yREt{"
-    },
-    "kernel": {
-      "shape": [2, 1, 1, 64],
-      "value": "P_rYjFsKkO?54M$FRNoF<E`ABA1+F+e=voVAG1*|e5eK?o-F{eX)W%iJ*fO7qp6y#1uYt=&#Ja8&8aac13!qYH@=^zGqHcKu&vRoDlulQ1gs!06(^u7Vx)#LZ6!~s-mDv}*RG(h@UUc<VyWD!=A?Tg7pj#k^Rc+3p|TCIB&r%PeW}i;RISLMWU7@Y5-$s^F)@^&1G2&?NvYx{3N6gBf-5|vE~gBo@v8l;JS#<~sjBxZW2VO`biQG%_&x`wJF&X2@vbqfZ!kZuo2*zae<;@}j;QM}WhJSo7pxztXRh0<e6U>&!K7-c$f#8vy{xw?j<KDc"
-    }
-  }
-}
-"#;
-        let l: LayerDef = serde_json::from_reader(Cursor::new(content)).unwrap();
-        let bias_value = vec! [-0.089538574, 0.08947754]
-            .into_iter()
-            .map(|x| f16::from(x))
-            .collect();
-        let kernel_value = vec![
-            -0.22851563, -0.12927246, -0.032714844, 0.11035156, -0.027038574, -0.007534027,
-            -0.056121826, 0.02494812, -0.09197998, -0.0047454834, 0.09564209, -0.0982666,
-             0.14050293, -0.0011034012, -0.22253418, 0.09869385, -0.03503418, 0.009811401,
-             0.087768555, -0.15625, 0.08453369, -0.027069092, -0.033111572, 0.019470215,
-            -0.044036865, -0.071899414, 0.078430176, -0.032043457, -0.05319214, 0.0736084,
-            -0.045318604, 0.03274536, 1.7529297, -0.07080078, -1.5537109, -0.029769897,
-            -0.16247559, -0.117126465, -0.08886719, -0.07525635, 0.16137695, -0.084350586,
-            -0.06274414, 0.111328125, 0.027664185, 0.051757813, -0.017120361, 0.20385742,
-             0.021194458, -0.04147339, -0.076049805, -0.06414795, -0.10687256, -0.103515625,
-            -0.15429688, -0.0021438599, -0.042053223, -0.053588867, -0.019134521, 0.0146102905,
-            -0.047576904, 0.07159424, -0.18591309, -0.018432617, -0.20715332, -0.12658691,
-            -0.047973633, 0.12817383, -0.042877197, -0.03048706, -0.08325195, -0.009338379,
-            -0.049926758, 0.03579712, 0.11047363, -0.06317139, 0.16223145, -0.00894165,
-            -0.18786621, 0.04498291, -0.041290283, 0.026885986, 0.07873535, -0.18115234,
-             0.058654785, -0.016540527, -0.028045654, -0.019714355, -0.054229736, -0.093566895,
-             0.056518555, -0.028396606, -0.05203247, 0.07757568, -0.02494812, 0.045135498,
-            -1.6132813, -0.06842041, 1.7421875, -0.023544312, -0.16345215, -0.12072754,
-            -0.10845947, -0.06549072, 0.1385498, -0.097595215, -0.07196045, 0.099121094,
-             0.035125732, 0.04562378, -0.035583496, 0.15368652, 0.021072388, -0.03640747,
-            -0.06390381, -0.040008545, -0.10003662, -0.0758667, -0.14013672, 0.0003273487,
-            -0.018569946, -0.050109863, -0.037353516, 0.005207062, -0.074035645, 0.052459717,
-            -0.17358398, -0.00548172
-        ]
-            .into_iter()
-            .map(|x| f16::from(x))
-            .collect();
-
-        assert_eq!(l, LayerDef {
-            type_of: LayerTypeDef::Conv2D,
-            input: vec! [VariableDef { id: 60, shape: vec![-1, 19, 19, 64]}],
-            output: vec! [VariableDef { id: 65, shape: vec![-1, 19, 19, 2]}],
-            arguments: Some(LayerArgumentsDef {
-                kernel: Some(ConstantDef {
-                    shape: vec! [2, 1, 1, 64],
-                    value: ConstantValueDef { inner: Arc::new(kernel_value) }
-                }),
-                bias: Some(ConstantDef {
-                    shape: vec! [2],
-                    value: ConstantValueDef { inner: Arc::new(bias_value) }
-                }),
-                group_count: 1,
-                activation: ActivationTypeDef::Linear,
-                alpha: None
-            })
-        });
     }
 }

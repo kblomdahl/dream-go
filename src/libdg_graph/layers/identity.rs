@@ -49,6 +49,7 @@ impl PreparedLayer for Identity {
     {
         assert_eq!(inputs.len(), 1);
         assert_eq!(outputs.len(), 1);
+        assert_eq!(inputs[0].0.size_in_bytes()?, outputs[0].0.size_in_bytes()?);
 
         let stream = handle.get_stream()?;
         let size_in_bytes = inputs[0].0.size_in_bytes()?;
@@ -72,19 +73,18 @@ impl Identity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use graph_def::{LayerTypeDef, LayerArgumentsDef, VariableDef, ActivationTypeDef};
+    use graph_def::{LayerTypeDef, LayerArgumentsDef, VariableDef, ActivationTypeDef, DataTypeDef};
     use layers::tests::{run_layer, assert_approx_eq};
-    use dg_cuda::cudnn::cudnnDataType_t;
 
     #[test]
     fn identity() {
         let layer_def = LayerDef {
             type_of: LayerTypeDef::Identity,
             input: vec! [
-                VariableDef { id: 0, shape: vec! [1, 19, 19, 16] }
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 16], data_type: DataTypeDef::Float }
             ],
             output: vec! [
-                VariableDef { id: 0, shape: vec! [1, 19, 19, 16] }
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 16], data_type: DataTypeDef::Float }
             ],
             arguments: Some(LayerArgumentsDef {
                 kernel: None,
@@ -97,10 +97,9 @@ mod tests {
         let layer = Identity::new(&layer_def)
             .expect("Could not create identity layer");
 
-        let (inputs, outputs) = run_layer::<f32, _>(
+        let (inputs, outputs) = run_layer::<f32, f32, _>(
             &layer_def,
-            &layer,
-            cudnnDataType_t::Float
+            &layer
         );
 
         for (&inp, &outp) in inputs[0].iter().zip(outputs[0].iter()) {

@@ -13,10 +13,13 @@
 // limitations under the License.
 
 use super::*;
-use Error;
+use ::{Error, copy_nonoverlapping};
 
 use libc::{c_void, c_int};
 use std::ptr::{Unique, null_mut};
+use ::{cudaMemcpyKind_t, Stream};
+use Ptr;
+use dg_utils::types::f16;
 
 #[link(name = "cudnn")]
 extern {
@@ -172,6 +175,36 @@ impl Tensor {
         let (data_type, (n, c, h, w), _strides) = self.info()?;
 
         Ok(data_type.size_in_bytes() * n * c * h * w)
+    }
+
+    pub fn convert_to_ptr(&self, data: &Vec<f32>) -> Result<Ptr, Error> {
+        let (data_type, _dims, _strides) = self.info()?;
+
+        if data_type == cudnnDataType_t::Float {
+            Ptr::from_vec(data, &Stream::default())
+        } else if data_type == cudnnDataType_t::Half {
+            let f16_data = data.iter()
+                .map(|&x| f16::from(x))
+                .collect();
+
+            Ptr::from_vec(&f16_data, &Stream::default())
+        } else {
+            unreachable!();
+        }
+    }
+
+    pub fn copy_to_host<T: Clone + Sized + Default>(&self, device_ptr: *const T, stream: &Stream) -> Result<Vec<T>, Error> {
+        let mut host = vec! [T::default(); self.len()?];
+
+        copy_nonoverlapping(
+            device_ptr,
+            host.as_mut_ptr(),
+            host.len(),
+            cudaMemcpyKind_t::DeviceToHost,
+            stream
+        )?;
+
+        Ok(host)
     }
 }
 

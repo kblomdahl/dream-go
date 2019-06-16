@@ -16,7 +16,9 @@ use super::*;
 
 use libc::{c_int, c_void};
 use std::ptr::{Unique, null_mut};
-use Error;
+use ::{Error, Ptr};
+use Stream;
+use dg_utils::types::f16;
 
 #[link(name = "cudnn")]
 extern {
@@ -85,7 +87,7 @@ impl Filter {
         Ok(Filter(Unique::new(filter_desc).unwrap()))
     }
 
-    pub fn dims(&self) -> Result<(usize, usize, usize, usize), Error> {
+    pub fn info(&self) -> Result<((usize, usize, usize, usize), cudnnDataType_t, cudnnTensorFormat_t), Error> {
         let (mut k, mut c, mut h, mut w) = (0, 0, 0, 0);
         let mut data_type = cudnnDataType_t::Float;
         let mut format = cudnnTensorFormat_t::NCHW;
@@ -104,11 +106,28 @@ impl Filter {
         if success != 0 {
             Err(Error::CudnnError(success))
         } else {
-            Ok((k as usize, c as usize, h as usize, w as usize))
+            Ok(((k as usize, c as usize, h as usize, w as usize), data_type, format))
         }
     }
 
     pub(super) fn as_ptr(&self) -> cudnnFilterDescriptor_t {
         self.0.as_ptr()
+    }
+
+
+    pub fn convert_to_ptr(&self, data: &Vec<f32>) -> Result<Ptr, Error> {
+        let (_dims, data_type, _strides) = self.info()?;
+
+        if data_type == cudnnDataType_t::Float {
+            Ptr::from_vec(data, &Stream::default())
+        } else if data_type == cudnnDataType_t::Half {
+            let f16_data = data.iter()
+                .map(|&x| f16::from(x))
+                .collect();
+
+            Ptr::from_vec(&f16_data, &Stream::default())
+        } else {
+            unreachable!();
+        }
     }
 }

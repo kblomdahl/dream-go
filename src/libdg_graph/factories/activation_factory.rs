@@ -43,7 +43,7 @@ pub fn get_or_create(
 
     if !activations.contains_key(&key) {
         activations.insert(key.clone(), Arc::new(
-            cudnn::Activation::new(mode, relu_nan_opt, 0.0)?
+            cudnn::Activation::new(mode, relu_nan_opt, 1.0)?
         ));
     }
 

@@ -16,23 +16,37 @@ use dg_cuda::cudnn::{cudnnDataType_t, Handle, Tensor};
 use dg_cuda::{Stream, Ptr, copy_nonoverlapping, cudaMemcpyKind_t};
 use rand::{thread_rng, Rng};
 use layer::Layer;
-use graph_def::{LayerDef, VariableDef};
+use graph_def::{LayerDef, VariableDef, DataTypeDef};
 use std::fmt::Display;
 
 #[cfg(test)]
 pub fn allocate_tensor<T: From<f32>>(
     var_def: &VariableDef,
-    data_type: cudnnDataType_t,
+    stream: &Stream
+) -> (Tensor, Vec<T>, Ptr)
+{
+    let host = (0..var_def.size())
+        .map(|_i| T::from(1.0 - 2.0 * thread_rng().gen::<f32>()))
+        .collect();
+
+    allocate_from_vec(var_def, host, stream)
+}
+
+#[cfg(test)]
+pub fn allocate_from_vec<T: From<f32>>(
+    var_def: &VariableDef,
+    host: Vec<T>,
     stream: &Stream
 ) -> (Tensor, Vec<T>, Ptr)
 {
     let shape: Vec<usize> = var_def.shape.iter().map(|&x| x as usize).collect();
+    let data_type = match var_def.data_type {
+        DataTypeDef::Float => cudnnDataType_t::Float,
+        DataTypeDef::Half => cudnnDataType_t::Half
+    };
     let tensor = Tensor::from_nhwc(data_type, &shape)
         .expect("Could not create input Tensor");
 
-    let host = (0..tensor.len().expect("Could not get length of input tensor"))
-        .map(|_i| T::from(1.0 - 2.0 * thread_rng().gen::<f32>()))
-        .collect();
     let device = Ptr::from_vec(
         &host,
         &stream
@@ -42,23 +56,87 @@ pub fn allocate_tensor<T: From<f32>>(
 }
 
 #[cfg(test)]
-pub fn run_layer<T: Sized + Copy + Default + From<f32>, L: Layer>(
+pub fn run_layer<I, O, L: Layer>(
     layer_def: &LayerDef,
     layer: &L,
-    data_type: cudnnDataType_t
-) -> (Vec<Vec<T>>, Vec<Vec<T>>)
+) -> (Vec<Vec<I>>, Vec<Vec<O>>)
+    where I: Sized + Copy + Default + From<f32>,
+          O: Sized + Copy + Default + From<f32>
+{
+    let stream = Stream::new().expect("Could not create stream");
+    let mut handle = Handle::new().expect("Could not create handle");
+    handle.set_stream(&stream).expect("Could not set cuDNN stream");
+
+    // allocate the I/O buffers that will hold both the input and output
+    let inputs: Vec<_> = layer_def.input.iter().map(|input_def| {
+        allocate_tensor::<I>(input_def, &stream)
+    }).collect();
+
+    let mut outputs: Vec<_> = layer_def.output.iter().map(|output_def| {
+        allocate_tensor::<O>(output_def, &stream)
+    }).collect();
+
+    let prepared_layer = layer.prepare(
+        &handle,
+        &inputs.iter().map(|(a, _b, _c)| a).collect::<Vec<_>>(),
+        &outputs.iter().map(|(a, _b, _c)| a).collect::<Vec<_>>(),
+    ).expect("Could not prepare layer for execution");
+
+    // execute the actual layer with the desired workspace (or null)
+    let workspace = if prepared_layer.size_in_bytes() > 0 {
+        Ptr::new(
+            prepared_layer.size_in_bytes()
+        ).expect("Could not allocate workspace")
+    } else {
+        Ptr::null()
+    };
+
+    prepared_layer.forward(
+        &handle,
+        &inputs.iter().map(|(a, _b, c)| (a, c.as_ptr())).collect::<Vec<_>>(),
+        &outputs.iter().map(|(a, _b, c)| (a, c.as_mut_ptr())).collect::<Vec<_>>(),
+        workspace.as_mut_ptr()
+    ).expect("Could not execute forward phase");
+
+    // copy the output to the host so that we can compare the result with the expect result
+    // on the CPU
+    for (_output, output_host, output_device) in outputs.iter_mut() {
+        copy_nonoverlapping(
+            output_device.as_ptr() as *const _,
+            output_host.as_mut_ptr(),
+            output_host.len(),
+            cudaMemcpyKind_t::DeviceToHost,
+            &stream
+        ).expect("Could not copy output to the host buffer");
+    }
+    stream.synchronize().expect("Could not synchronize stream");
+
+    (
+        inputs.into_iter().map(|(_a, b, _c)| b).collect(),
+        outputs.into_iter().map(|(_a, b, _c)| b).collect(),
+    )
+}
+
+#[cfg(test)]
+pub fn run_layer_with_input<I, O, L: Layer>(
+    layer_def: &LayerDef,
+    layer: &L,
+    inputs: Vec<Vec<I>>
+) -> (Vec<Vec<I>>, Vec<Vec<O>>)
+    where I: Sized + Copy + Default + From<f32>,
+          O: Sized + Copy + Default + From<f32>
 {
     let mut handle = Handle::new().expect("Could not create handle");
     let stream = Stream::new().expect("Could not create stream");
     handle.set_stream(&stream).expect("Could not set cuDNN stream");
 
     // allocate the I/O buffers that will hold both the input and output
-    let inputs: Vec<_> = layer_def.input.iter().map(|input_def| {
-        allocate_tensor::<T>(input_def, data_type, &stream)
+    let inputs: Vec<_> = layer_def.input.iter().enumerate().map(|(i, input_def)| {
+        allocate_from_vec::<I>(input_def, inputs[i].clone(), &stream)
     }).collect();
 
     let mut outputs: Vec<_> = layer_def.output.iter().map(|output_def| {
-        allocate_tensor::<T>(output_def, data_type, &stream)
+        allocate_tensor::<O>(output_def, &stream)
     }).collect();
 
     let prepared_layer = layer.prepare(

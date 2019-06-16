@@ -87,8 +87,7 @@ impl OpTensor {
 
 #[cfg(test)]
 mod tests {
-    use dg_cuda::cudnn::cudnnDataType_t;
-    use graph_def::{ActivationTypeDef, LayerArgumentsDef, LayerTypeDef, VariableDef};
+    use graph_def::{ActivationTypeDef, LayerArgumentsDef, LayerTypeDef, VariableDef, DataTypeDef};
     use layers::tests::{assert_approx_eq, run_layer};
 
     use super::*;
@@ -97,11 +96,11 @@ mod tests {
         let layer_def = LayerDef {
             type_of: layer_type_def,
             input: vec! [
-                VariableDef { id: 0, shape: vec! [2, 19, 19, 16] },
-                VariableDef { id: 0, shape: input_2 },
+                VariableDef { id: 0, shape: vec! [2, 19, 19, 16], data_type: DataTypeDef::Float },
+                VariableDef { id: 0, shape: input_2, data_type: DataTypeDef::Float },
             ],
             output: vec! [
-                VariableDef { id: 0, shape: vec! [2, 19, 19, 16] }
+                VariableDef { id: 0, shape: vec! [2, 19, 19, 16], data_type: DataTypeDef::Float }
             ],
             arguments: Some(LayerArgumentsDef {
                 kernel: None,
@@ -114,10 +113,9 @@ mod tests {
         let layer = OpTensor::new(&layer_def)
             .expect("Could not create op tensor layer");
 
-        run_layer::<f32, _>(
+        run_layer::<f32, f32, _>(
             &layer_def,
-            &layer,
-            cudnnDataType_t::Float
+            &layer
         )
     }
 

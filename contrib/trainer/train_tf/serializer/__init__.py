@@ -68,7 +68,7 @@ def _add_variable(variable):
 
 
 def _add_constant(value, shape=None):
-    half_value = value.astype('f2')
+    half_value = value.astype('f4')
     byte_value = half_value.tobytes()
 
     return {

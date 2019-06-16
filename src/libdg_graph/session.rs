@@ -23,7 +23,7 @@ use dg_cuda::{cudnn, StreamGraph};
 use dg_utils::types::f16;
 use factories::tensor_factory;
 use graph::Graph;
-use graph_def::{LayerDef, VariableDef};
+use graph_def::{LayerDef, VariableDef, DataTypeDef};
 use layer::PreparedLayer;
 
 pub struct Session {
@@ -52,7 +52,7 @@ impl PreparedSession {
     ) -> Result<PreparedSession, cuda::Error>
     {
         let num_layers = graph.layers().len();
-        let mut tensor_by_shape = FnvHashMap::default();
+        let mut tensor_by_key = FnvHashMap::default();
         let mut prepared_session = PreparedSession {
             tensors: FnvHashMap::default(),
             layers: Vec::with_capacity(num_layers),
@@ -70,16 +70,20 @@ impl PreparedSession {
                 4 => shape,
                 _ => { unreachable!() }
             };
+            let key = (variable_def.data_type, shape.clone());
 
-            if !tensor_by_shape.contains_key(&shape) {
-                tensor_by_shape.insert(shape.clone(), tensor_factory::get_or_create(
-                    cudnn::cudnnDataType_t::Half,
+            if !tensor_by_key.contains_key(&key) {
+                tensor_by_key.insert(key.clone(), tensor_factory::get_or_create(
+                    match variable_def.data_type {
+                        DataTypeDef::Float => cudnn::cudnnDataType_t::Float,
+                        DataTypeDef::Half => cudnn::cudnnDataType_t::Half
+                    },
                     cudnn::cudnnTensorFormat_t::NHWC,
                     &shape
                 )?);
             }
 
-            prepared_session.tensors.insert(variable_def.id, tensor_by_shape[&shape].clone());
+            prepared_session.tensors.insert(variable_def.id, tensor_by_key[&key].clone());
         }
 
         for (layer, layer_def) in graph.layers() {
@@ -95,17 +99,17 @@ impl PreparedSession {
         Ok(prepared_session)
     }
 
-    fn compile(
+    fn forward_internal(
         &mut self,
         handle: &mut cudnn::Handle,
+        stream: &cuda::Stream,
         variables: &FnvHashMap<usize, Arc<cuda::Ptr>>,
-        workspace: &cuda::Ptr
+        workspace: &cuda::Ptr,
+        debug: bool
     ) -> Result<(), cuda::Error>
     {
-        let stream = cuda::Stream::new()?;
-        let stream_capture = stream.begin_capture()?;
-
         handle.set_stream(&stream)?;
+
         for (layer, layer_def) in &self.layers {
             let inputs: Vec<(&cudnn::Tensor, *const c_void)> = layer_def.input.iter()
                 .map(|variable_def| {
@@ -128,7 +132,45 @@ impl PreparedSession {
                 &outputs,
                 workspace.as_mut_ptr()
             )?;
+
+            // copy all outputs to the host and check for NaN results
+            if debug {
+                stream.synchronize()?;
+
+                for &(output_tensor, output_ptr) in &outputs {
+                    let host = output_tensor.copy_to_host::<f16>(
+                        output_ptr as *const _,
+                        stream
+                    )?;
+                    stream.synchronize()?;
+
+                    for element in host.into_iter() {
+                        assert!(f32::from(element).is_finite(), "{:?}", element);
+                    }
+                }
+            }
         }
+
+        Ok(())
+    }
+
+    fn compile(
+        &mut self,
+        handle: &mut cudnn::Handle,
+        variables: &FnvHashMap<usize, Arc<cuda::Ptr>>,
+        workspace: &cuda::Ptr
+    ) -> Result<(), cuda::Error>
+    {
+        let stream = cuda::Stream::new()?;
+        let stream_capture = stream.begin_capture()?;
+
+        self.forward_internal(
+            handle,
+            &stream,
+            variables,
+            workspace,
+            false
+        )?;
 
         let graph = stream_capture.end_capture()?;
         let graph_exec = graph.as_graph_exec()?;
@@ -141,13 +183,12 @@ impl PreparedSession {
 
     fn forward(
         &mut self,
-        handle: &cudnn::Handle
+        stream: &cuda::Stream
     ) -> Result<(), cuda::Error>
     {
         let graph_exec = self.graph_exec.as_ref().unwrap();
-        let stream = handle.get_stream()?;
 
-        graph_exec.launch(&stream)
+        graph_exec.launch(stream)
     }
 
     fn size_in_bytes(&self) -> usize {
@@ -260,12 +301,31 @@ impl Session {
                 .insert(variable_def.id);
         }
 
+        /*
+        for (i, actives) in active_variables.iter().enumerate() {
+            let layer_def = &graph.layers()[i].1;
+
+            eprintln!(
+                "{} {:?} in={:?} out={:?} all={:?}",
+                i,
+                layer_def.type_of,
+                layer_def.input.iter().map(|i| colored[&i.id]).collect::<Vec<_>>(),
+                layer_def.output.iter().map(|o| colored[&o.id]).collect::<Vec<_>>(),
+                actives.iter().map(|v| colored[v]).collect::<Vec<_>>()
+            );
+        }
+        */
+
         for (_color, variable_ids) in by_color.into_iter() {
             let max_size = variable_ids.iter()
-                .map(|id| graph.variables()[id].size())
+                .map(|id| {
+                    let var = &graph.variables()[id];
+
+                    var.size() * var.data_type.size_of()
+                })
                 .max()
                 .unwrap_or(0);
-            let size_in_bytes = max_batch_size * max_size * cudnn::cudnnDataType_t::Half.size_in_bytes();
+            let size_in_bytes = max_batch_size * max_size;
             let ptr = Arc::new(cuda::Ptr::new(size_in_bytes)?);
 
             for variable_id in variable_ids {
@@ -273,7 +333,7 @@ impl Session {
             }
         }
 
-        // check that all
+        // check that all variables were allocated to some slab
         for variable_def in graph.variables().values() {
             assert!(self.variables.contains_key(&variable_def.id));
         }
@@ -285,7 +345,7 @@ impl Session {
         &mut self,
         inputs: &HashMap<String, &[f16]>,
         batch_size: usize
-    ) -> Result<HashMap<String, Vec<f16>>, cuda::Error>
+    ) -> Result<HashMap<String, Vec<f32>>, cuda::Error>
     {
         debug_assert!(batch_size > 0);
 
@@ -306,17 +366,24 @@ impl Session {
         }
 
         // execute all of the stored procedures
-        self.by_batch_size[batch_size - 1].forward(&self.handle)?;
+        //self.by_batch_size[batch_size - 1].forward(&self.stream)?;
+        self.by_batch_size[batch_size - 1].forward_internal(
+            &mut self.handle,
+            &self.stream,
+            &self.variables,
+            &self.workspace,
+            true
+        )?;
 
         // copy all results back to the host, and return them
         let mut outputs = HashMap::default();
 
         for (name, output_def) in self.graph.outputs() {
-            let mut output_data = vec! [f16::from(0.0); batch_size * output_def.size()];
+            let mut output_data = vec! [0.0f32; batch_size * output_def.size()];
             let ptr = &self.variables[&output_def.id];
 
             cuda::copy_nonoverlapping(
-                ptr.as_ptr() as *const f16,
+                ptr.as_ptr() as *const f32,
                 output_data.as_mut_ptr(),
                 output_data.len(),
                 cuda::cudaMemcpyKind_t::DeviceToHost,

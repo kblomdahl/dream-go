@@ -83,19 +83,21 @@ impl GlobalAveragePooling {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use graph_def::{LayerTypeDef, LayerArgumentsDef, VariableDef, ActivationTypeDef};
+    use graph_def::{LayerTypeDef, LayerArgumentsDef, VariableDef, ActivationTypeDef, DataTypeDef};
     use layers::tests::{run_layer, assert_approx_eq};
-    use dg_cuda::cudnn::cudnnDataType_t;
+    use dg_utils::types::f16;
 
-    #[test]
-    fn global_avg_pool() {
+    fn global_avg_pool<T>(data_type: DataTypeDef)
+        where T: Copy + Default + From<f32>,
+              f32: From<T>
+    {
         let layer_def = LayerDef {
             type_of: LayerTypeDef::GlobalAveragePooling,
             input: vec! [
-                VariableDef { id: 0, shape: vec! [1, 19, 19, 16] }
+                VariableDef { id: 0, shape: vec! [1, 19, 19, 16], data_type }
             ],
             output: vec! [
-                VariableDef { id: 0, shape: vec! [1, 1, 1, 16] }
+                VariableDef { id: 0, shape: vec! [1, 1, 1, 16], data_type }
             ],
             arguments: Some(LayerArgumentsDef {
                 kernel: None,
@@ -108,20 +110,29 @@ mod tests {
         let layer = GlobalAveragePooling::new(&layer_def)
             .expect("Could not create global average pool layer");
 
-        let (inputs, outputs) = run_layer::<f32, _>(
+        let (inputs, outputs) = run_layer::<T, T, _>(
             &layer_def,
-            &layer,
-            cudnnDataType_t::Float
+            &layer
         );
 
         for i in 0..16 {
             let mut expected_output: f32 = 0.0f32;
 
             for j in 0..361 {
-                expected_output += inputs[0][i + 16*j];
+                expected_output += f32::from(inputs[0][i + 16*j]);
             }
 
-            assert_approx_eq(outputs[0][i], expected_output / 361.0);
+            assert_approx_eq::<f32>(f32::from(outputs[0][i]), expected_output / 361.0);
         }
+    }
+
+    #[test]
+    fn global_avg_pool_float() {
+        global_avg_pool::<f32>(DataTypeDef::Float)
+    }
+
+    #[test]
+    fn global_avg_pool_half() {
+        global_avg_pool::<f16 >(DataTypeDef::Half)
     }
 }

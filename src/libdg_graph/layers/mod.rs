@@ -20,6 +20,7 @@ mod identity;
 mod scale;
 mod softmax;
 mod op_tensor;
+mod transform;
 #[cfg(test)] mod tests;
 
 pub use self::scale::Scale;
@@ -30,3 +31,4 @@ pub use self::activation::Activation;
 pub use self::conv2d::Conv2D;
 pub use self::dense::Dense;
 pub use self::global_avg_pooling::GlobalAveragePooling;
+pub use self::transform::Transform;

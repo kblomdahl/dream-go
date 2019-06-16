@@ -15,6 +15,8 @@
 mod rewriter;
 mod scale_softmax;
 mod remove_identity;
+mod transform_input_output;
 
 pub use self::scale_softmax::ScaleBeforeSoftmax;
 pub use self::remove_identity::RemoveRedundantIdentityLayers;
+pub use self::transform_input_output::TransformInputOutput;

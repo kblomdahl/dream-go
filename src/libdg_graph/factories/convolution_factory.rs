@@ -22,6 +22,8 @@ use dg_cuda::cudnn;
 pub struct ConvolutionKey {
     device: cuda::Device,
     filter_dims: Vec<usize>,
+    data_type: cudnn::cudnnDataType_t,
+    format: cudnn::cudnnTensorFormat_t,
     group_count: usize
 }
 
@@ -34,11 +36,13 @@ pub fn get_or_create(
     group_count: usize
 ) -> Result<Arc<cudnn::Convolution>, cuda::Error>
 {
-    let (k, c, h, w) = filter.dims()?;
+    let ((k, c, h, w), data_type, format) = filter.info()?;
     let mut convolutions = CONVOLUTIONS.lock().unwrap();
     let key = ConvolutionKey {
         device: cuda::Device::current()?,
         filter_dims: vec! [k, c, h, w],
+        data_type,
+        format,
         group_count
     };
 

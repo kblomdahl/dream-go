@@ -155,6 +155,7 @@ mod pooling;
 mod scale;
 mod softmax;
 mod op_tensor;
+mod transform;
 
 pub use self::handle::Handle;
 pub use self::activation::Activation;
@@ -165,3 +166,4 @@ pub use self::softmax::Softmax;
 pub use self::filter::Filter;
 pub use self::tensor::Tensor;
 pub use self::op_tensor::OpTensor;
+pub use self::transform::Transform;
