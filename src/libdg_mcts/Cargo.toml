@@ -14,12 +14,13 @@ crate-type = ["lib"]
 trace-mcts = []  # dump all finished search tree's to stderr
 
 [dependencies]
-crossbeam-channel = "0.3"
-crossbeam-utils = "0.6"
+crossbeam-channel = "0.4"
+crossbeam-utils = "0.7"
 dg_go = { path = "../libdg_go" }
 dg_nn = { path = "../libdg_nn" }
 dg_utils = { path = "../libdg_utils" }
-lazy_static = {version = "1.2", features = ["nightly"]}
+lazy_static = "1.4"
 ordered-float = "1.0"
-rand = "0.6"
+rand = { version = "0.7", features = ["small_rng"] }
+rand_distr = "0.2"
 time = "0.1"

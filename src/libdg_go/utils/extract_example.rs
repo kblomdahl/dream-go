@@ -26,7 +26,7 @@ use dg_utils::b85;
 use libc::{c_char, c_int};
 use rand::prelude::SliceRandom;
 use rand::rngs::StdRng;
-use rand::{FromEntropy, SeedableRng};
+use rand::SeedableRng;
 use regex::{Regex, Captures};
 use std::ffi::CStr;
 use std::sync::Mutex;

@@ -23,6 +23,7 @@ extern crate dg_utils;
 #[macro_use] extern crate lazy_static;
 extern crate ordered_float;
 extern crate rand;
+extern crate rand_distr;
 #[cfg(test)] extern crate test;
 extern crate time;
 

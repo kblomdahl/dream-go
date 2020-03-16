@@ -11,5 +11,5 @@ name = "dg_utils"
 crate-type = ["lib"]
 
 [dependencies]
-lazy_static = {version = "1.2", features = ["nightly"]}
-regex = {version = "1.1", features = ["unstable"]}
+lazy_static = "1.4"
+regex = "1.3"

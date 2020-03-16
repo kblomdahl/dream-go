@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::distributions::{Distribution, Gamma};
+use rand_distr::{Distribution, Gamma};
 use rand::thread_rng;
 
 use dg_utils::config;
@@ -44,7 +44,7 @@ pub fn add_ex(x: &mut [f32], shape: f32, beta: f32) {
     let mut g = vec! [0.0; x.len()];
 
     loop {
-        let gamma = Gamma::new(shape as f64, 1.0);
+        let gamma = Gamma::new(shape as f64, 1.0).unwrap();
         let mut count = 0;
 
         g_sum = 0.0;

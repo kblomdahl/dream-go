@@ -10,11 +10,11 @@ name = "dream_go"
 path = "main.rs"
 
 [dependencies]
-cpu-time = "0.1"
+cpu-time = "1.0"
 dg_go = { path = "../libdg_go"}
 dg_mcts = { path = "../libdg_mcts"}
 dg_nn = { path = "../libdg_nn"}
 dg_utils = { path = "../libdg_utils"}
-lazy_static = {version = "1.2", features = ["nightly"]}
+lazy_static = "1.4"
 libc = "0.2"
-regex = {version = "1.1", features = ["unstable"]}
+regex = "1.3"
