@@ -132,7 +132,7 @@ struct Gtp {
     ponder: PonderService,
     history: Vec<Board>,
     komi: f32,
-    time_settings: [Box<time_settings::TimeSettings>; 3],
+    time_settings: [Box<dyn time_settings::TimeSettings>; 3],
     explain_last_move: String,
     finished_board: Option<Result<Board, &'static str>>
 }

@@ -25,7 +25,7 @@ use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
 use std::fmt;
 use std::mem::ManuallyDrop;
-use std::intrinsics::{atomic_xadd, atomic_xsub, atomic_cxchg, fmul_fast};
+use std::intrinsics::{atomic_xadd, atomic_xsub, atomic_cxchg};
 use std::ptr;
 
 lazy_static! {
@@ -112,7 +112,7 @@ impl PUCT {
     ///
     #[inline]
     unsafe fn update<O: SearchOptions>(trace: &NodeTrace<O>, color: Color, value: f32) {
-        use std::intrinsics::{fadd_fast, fsub_fast, fdiv_fast};
+        use std::intrinsics::{fadd_fast, fsub_fast, fdiv_fast, fmul_fast};
 
         for &(node, _, index) in trace.iter() {
             let value_ = if color == (*node).to_move { value } else { 1.0 - value };
