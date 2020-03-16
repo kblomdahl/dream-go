@@ -28,7 +28,7 @@ import tensorflow as tf
 DUMP_OPS = 'DumpOps'
 
 
-class DumpHook(tf.train.SessionRunHook):
+class DumpHook(tf.estimator.SessionRunHook):
     """ A hook that prints all tensors registered in the `DUMP_OPS` graph
     collection to standard output at the end of the session. """
 

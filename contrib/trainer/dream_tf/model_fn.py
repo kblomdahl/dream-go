@@ -34,24 +34,24 @@ def model_fn(features, labels, mode, params):
         # - Value head
         # - Policy head (2x)
         #
-        loss_value = tf.reshape(tf.squared_difference(
-            tf.check_numerics(tf.stop_gradient(labels['value']), 'value_labels'),
-            tf.check_numerics(value_hat, 'value_hat')
+        loss_value = tf.reshape(tf.math.squared_difference(
+            check_numerics(tf.stop_gradient(labels['value']), 'value_labels'),
+            check_numerics(value_hat, 'value_hat')
         ), (-1, 1))
 
         loss_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=tf.check_numerics(tf.stop_gradient(labels['policy']), 'policy_labels'),
-            logits=tf.check_numerics(policy_hat, 'policy_hat')
+            labels=check_numerics(tf.stop_gradient(labels['policy']), 'policy_labels'),
+            logits=check_numerics(policy_hat, 'policy_hat')
         ), (-1, 1))
 
         loss_next_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=tf.check_numerics(tf.stop_gradient(labels['next_policy']), 'next_policy_labels'),
-            logits=tf.check_numerics(next_policy_hat, 'next_policy_hat')
+            labels=check_numerics(tf.stop_gradient(labels['next_policy']), 'next_policy_labels'),
+            logits=check_numerics(next_policy_hat, 'next_policy_hat')
         ), (-1, 1))
 
-        loss_unboosted = 1.00 * tf.check_numerics(loss_policy, 'loss_policy') \
-                         + 0.25 * tf.check_numerics(loss_next_policy, 'loss_next_policy') \
-                         + 1.50 * tf.check_numerics(loss_value, 'loss_value') \
+        loss_unboosted = 1.00 * check_numerics(loss_policy, 'loss_policy') \
+                         + 0.25 * check_numerics(loss_next_policy, 'loss_next_policy') \
+                         + 1.50 * check_numerics(loss_value, 'loss_value') \
 
         loss = tf.reduce_mean(tf.stop_gradient(labels['boost']) * loss_unboosted)
         tf.add_to_collection(LOSS, loss_unboosted)
@@ -161,3 +161,6 @@ def model_fn(features, labels, mode, params):
         train_op,
         eval_metric_ops
     )
+
+def check_numerics(tensor, message, name=None):
+    return tf.debugging.check_numerics(tensor, message, name)

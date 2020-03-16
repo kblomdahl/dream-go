@@ -31,7 +31,7 @@ LEARNING_RATE = 'LearningRate'
 LOSS = 'Loss'
 
 
-class LearningRateScheduler(tf.train.SessionRunHook):
+class LearningRateScheduler(tf.estimator.SessionRunHook):
     """
     An automatic learning rate scheduler [1] that decrease the learning rate
     by a factor of 3.0 when the loss reach a plateau.
@@ -83,7 +83,7 @@ class LearningRateScheduler(tf.train.SessionRunHook):
         self.learning_rate_op = self.learning_rate.assign(self.learning_rate_ph)
 
     def before_run(self, run_context):
-        return tf.train.SessionRunArgs(fetches=[
+        return tf.estimator.SessionRunArgs(fetches=[
             self.global_step,
             self.learning_rate,
             self.loss,

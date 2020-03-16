@@ -193,7 +193,8 @@ def get_dataset(files, is_training=True, is_deterministic=False):
         dataset = dataset.map(_parse(is_deterministic), num_parallel_calls=num_parallel_calls)
         dataset = dataset.filter(_illegal_policy)
         if is_training:
-            dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(262144))
+            dataset = dataset.shuffle(262144)
+            dataset = dataset.repeat()
             dataset = dataset.map(_augment, num_parallel_calls=4)
             dataset = dataset.map(_fix_history, num_parallel_calls=4)
 
