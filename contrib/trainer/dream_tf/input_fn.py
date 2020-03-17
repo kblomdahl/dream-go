@@ -35,7 +35,7 @@ def _parse(is_deterministic):
             features = np.zeros((19, 19, NUM_FEATURES), 'f2')
 
             boost = np.zeros((), 'f4')
-            value = np.zeros((), 'f4')
+            value = np.zeros((1,), 'f4')
             policy = np.zeros((362,), 'f4')
             next_policy = np.zeros((362,), 'f4')
             ownership = np.zeros((361,), 'f4')
@@ -43,7 +43,7 @@ def _parse(is_deterministic):
         else:
             features = np.frombuffer(example['features'], 'f2').copy()
 
-            value = np.asarray(1.0 if example['color'] == example['winner'] else -1.0, 'f4')
+            value = np.asarray([1.0] if example['color'] == example['winner'] else [-1.0], 'f4')
             policy = np.frombuffer(example['policy'], 'f4').copy()
             next_policy = np.frombuffer(example['next_policy'], 'f4').copy()
             ownership = np.frombuffer(example['ownership'], 'f4').copy()
@@ -141,7 +141,7 @@ def _augment(features, labels):
     symmetry_index = tf.random_uniform((), 0, 8, tf.int32)
     features = _apply_symmetry(symmetry_index, features)
 
-    # transforming the policy is _harder_ since it has that extra pass
+    # transforming the policy is _harder_ since it has an extra pass
     # element at the end, so we temporarily remove it while the tensor gets
     # a random transformation applied
     policy, policy_pass = tf.split(labels['policy'], (361, 1))

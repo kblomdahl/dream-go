@@ -49,9 +49,9 @@ def model_fn(features, labels, mode, params):
             logits=check_numerics(next_policy_hat, 'next_policy_hat')
         ), (-1, 1))
 
-        loss_unboosted = 1.00 * check_numerics(loss_policy, 'loss_policy') \
-                         + 0.25 * check_numerics(loss_next_policy, 'loss_next_policy') \
-                         + 1.50 * check_numerics(loss_value, 'loss_value') \
+        loss_unboosted = 0.17 * check_numerics(loss_policy, 'loss_policy') \
+                         + 0.04 * check_numerics(loss_next_policy, 'loss_next_policy') \
+                         + 1.00 * check_numerics(loss_value, 'loss_value')
 
         loss = tf.reduce_mean(tf.stop_gradient(labels['boost']) * loss_unboosted)
         tf.add_to_collection(LOSS, loss_unboosted)
@@ -102,6 +102,7 @@ def model_fn(features, labels, mode, params):
         # evaluation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look
         # at the accuracy instead of the loss.
+        value_hot = tf.argmax(labels['value'], axis=1)
         policy_hot = tf.argmax(labels['policy'], axis=1)
         next_policy_hot = tf.argmax(labels['next_policy'], axis=1)
         policy_1 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 1), tf.float32)
@@ -110,7 +111,7 @@ def model_fn(features, labels, mode, params):
         next_policy_1 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 1), tf.float32)
         next_policy_3 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 3), tf.float32)
         next_policy_5 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 5), tf.float32)
-        value_1 = tf.cast(tf.equal(tf.sign(labels['value']), tf.sign(value_hat)), tf.float32)
+        value_1 = tf.cast(tf.nn.in_top_k(value_hat, value_hot, 1), tf.float32)
 
         tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_1))
         tf.summary.scalar('accuracy/policy_3', tf.reduce_mean(policy_3))
