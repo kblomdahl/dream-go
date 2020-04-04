@@ -102,7 +102,6 @@ def model_fn(features, labels, mode, params):
         # evaluation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look
         # at the accuracy instead of the loss.
-        value_hot = tf.argmax(labels['value'], axis=1)
         policy_hot = tf.argmax(labels['policy'], axis=1)
         next_policy_hot = tf.argmax(labels['next_policy'], axis=1)
         policy_1 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 1), tf.float32)
@@ -111,7 +110,7 @@ def model_fn(features, labels, mode, params):
         next_policy_1 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 1), tf.float32)
         next_policy_3 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 3), tf.float32)
         next_policy_5 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 5), tf.float32)
-        value_1 = tf.cast(tf.nn.in_top_k(value_hat, value_hot, 1), tf.float32)
+        value_1 = tf.cast(tf.equal(tf.sign(value_hat), tf.sign(labels['value'])), tf.float32)
 
         tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_1))
         tf.summary.scalar('accuracy/policy_3', tf.reduce_mean(policy_3))
