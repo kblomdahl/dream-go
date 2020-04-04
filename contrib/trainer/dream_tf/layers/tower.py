@@ -20,7 +20,7 @@
 
 import tensorflow as tf
 
-from . import conv2d, normalize_constraint, cast_to_compute_type, NUM_FEATURES
+from . import conv2d, normalize_constraint, l2_regularizer, cast_to_compute_type, NUM_FEATURES
 from ..hooks.dump import DUMP_OPS
 from .batch_norm import batch_norm
 from .orthogonal_initializer import orthogonal_initializer
@@ -48,7 +48,7 @@ def tower(x, mode, params):
     tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, num_channels_)
 
     with tf.variable_scope('01_upsample', reuse=tf.AUTO_REUSE):
-        conv_1 = tf.get_variable('conv_1', (3, 3, num_inputs, num_channels), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
+        conv_1 = tf.get_variable('conv_1', (3, 3, num_inputs, num_channels), tf.float32, init_op, constraint=normalize_constraint, regularizer=l2_regularizer, use_resource=True)
 
         y = cast_to_compute_type(x)
         y = batch_norm(conv2d(y, conv_1), conv_1, mode, params)

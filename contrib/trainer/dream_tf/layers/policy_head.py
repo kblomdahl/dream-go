@@ -20,7 +20,7 @@
 
 import tensorflow as tf
 
-from . import conv2d, normalize_constraint, cast_to_compute_type
+from . import conv2d, normalize_constraint, l2_regularizer, cast_to_compute_type
 from ..hooks.dump import DUMP_OPS
 from .batch_norm import batch_norm
 from .recompute_grad import recompute_grad
@@ -42,8 +42,8 @@ def policy_head(x, mode, params):
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 4), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
-    linear_1 = tf.get_variable('linear_1', (1444, 362), tf.float32, init_op, use_resource=True)
+    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 4), tf.float32, init_op, constraint=normalize_constraint, regularizer=l2_regularizer, use_resource=True)
+    linear_1 = tf.get_variable('linear_1', (1444, 362), tf.float32, init_op, regularizer=l2_regularizer, use_resource=True)
     offset_1 = tf.get_variable('linear_1/offset', (362,), tf.float32, zeros_op, use_resource=True)
 
     tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f2'])

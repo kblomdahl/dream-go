@@ -49,11 +49,15 @@ def model_fn(features, labels, mode, params):
             logits=check_numerics(next_policy_hat, 'next_policy_hat')
         ), (-1, 1))
 
+        loss_reg = tf.math.accumulate_n(
+            inputs=tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        )
+
         loss_unboosted = 0.17 * check_numerics(loss_policy, 'loss_policy') \
                          + 0.04 * check_numerics(loss_next_policy, 'loss_next_policy') \
                          + 1.00 * check_numerics(loss_value, 'loss_value')
 
-        loss = tf.reduce_mean(tf.stop_gradient(labels['boost']) * loss_unboosted)
+        loss = tf.reduce_mean(tf.stop_gradient(labels['boost']) * loss_unboosted) + 1e-4 * loss_reg
         tf.add_to_collection(LOSS, loss_unboosted)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
@@ -98,6 +102,7 @@ def model_fn(features, labels, mode, params):
         tf.summary.scalar('loss/policy', tf.reduce_mean(loss_policy))
         tf.summary.scalar('loss/next_policy', tf.reduce_mean(loss_next_policy))
         tf.summary.scalar('loss/value', tf.reduce_mean(loss_value))
+        tf.summary.scalar('loss/l2', tf.reduce_mean(loss_reg))
 
         # evaluation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look

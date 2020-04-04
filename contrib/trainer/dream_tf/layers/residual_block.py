@@ -20,7 +20,7 @@
 
 import tensorflow as tf
 
-from . import conv2d, normalize_constraint, unit_constraint, cast_to_compute_type
+from . import conv2d, normalize_constraint, unit_constraint, l2_regularizer, cast_to_compute_type
 from ..hooks.dump import DUMP_OPS
 from .batch_norm import batch_norm
 from .orthogonal_initializer import orthogonal_initializer
@@ -43,8 +43,8 @@ def residual_block(x, mode, params):
     half_op = tf.constant_initializer(0.5)
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
-    conv_2 = tf.get_variable('conv_2', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint, use_resource=True)
+    conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint, regularizer=l2_regularizer, use_resource=True)
+    conv_2 = tf.get_variable('conv_2', (3, 3, num_channels, num_channels), tf.float32, init_op, constraint=normalize_constraint, regularizer=l2_regularizer, use_resource=True)
     alpha = tf.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=True, use_resource=True)
 
     tf.add_to_collection(DUMP_OPS, [alpha, alpha, 'f4'])

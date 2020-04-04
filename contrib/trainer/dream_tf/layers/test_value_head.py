@@ -68,8 +68,11 @@ class ValueHeadTest(unittest.TestCase, TestUtils):
             )
 
             for i, step in enumerate(steps):
-                if i > 0 and steps[i-1]['loss'] > 1e-5:
-                    self.assertLess(step['loss'], steps[i-1]['loss'])
+                if i > 0:
+                    if steps[i-1]['loss'] < 1e-4:
+                        self.assertLessEqual(step['loss'], steps[i-1]['loss'])
+                    else:
+                        self.assertLess(step['loss'], steps[i-1]['loss'])
 
 if __name__ == '__main__':
     unittest.main()

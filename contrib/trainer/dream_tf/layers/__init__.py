@@ -44,6 +44,10 @@ def unit_constraint(x):
     return tf.clip_by_value(x, 0.0, 1.0)
 
 
+def l2_regularizer(x):
+    """ Return the L2 loss of `x` """
+    return tf.nn.l2_loss(x)
+
 def conv2d(x, weights):
     """ Shortcut for `tf.nn.conv2d` """
     return tf.nn.conv2d(x, cast_to_compute_type(weights), (1, 1, 1, 1), 'SAME', True, 'NHWC')
