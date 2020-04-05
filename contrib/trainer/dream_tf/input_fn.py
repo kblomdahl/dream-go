@@ -174,11 +174,11 @@ def _fix_history(features, labels):
     return features, labels
 
 
-def get_dataset(files, is_training=True, is_deterministic=False):
+def get_dataset(files, is_deterministic=False):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
     with tf.device('cpu:0'):
-        num_parallel_calls = max(os.cpu_count() - 8, 4) if (is_training and not is_deterministic) else 1
+        num_parallel_calls = max(os.cpu_count() - 8, 4) if not is_deterministic else 1
 
         if len(files) > 1:
             file_names = tf.data.Dataset.from_tensor_slices(files)
@@ -192,17 +192,12 @@ def get_dataset(files, is_training=True, is_deterministic=False):
             dataset = tf.data.TextLineDataset(files)
         dataset = dataset.map(_parse(is_deterministic), num_parallel_calls=num_parallel_calls)
         dataset = dataset.filter(_illegal_policy)
-        if is_training:
-            dataset = dataset.shuffle(262144)
-            dataset = dataset.repeat()
-            dataset = dataset.map(_augment, num_parallel_calls=4)
-            dataset = dataset.map(_fix_history, num_parallel_calls=4)
 
         return dataset
 
 
-def input_fn(files, batch_size, features_mask, is_training, is_deterministic=False):
-    dataset = get_dataset(files, is_training, is_deterministic)
+def input_fn(files, batch_size, features_mask, is_training, num_test_batches=10, is_deterministic=False):
+    dataset = get_dataset(files, is_deterministic)
 
     if features_mask is not None:
         features_mask = tf.constant(features_mask, tf.float16, (1, 1, NUM_FEATURES))
@@ -211,6 +206,15 @@ def input_fn(files, batch_size, features_mask, is_training, is_deterministic=Fal
             return features * features_mask, labels
 
         dataset = dataset.map(_mask_features)
+
+    if is_training:
+        dataset = dataset.skip(num_test_batches * batch_size)
+        dataset = dataset.shuffle(262144)
+        dataset = dataset.repeat()
+        dataset = dataset.map(_augment, num_parallel_calls=4)
+        dataset = dataset.map(_fix_history, num_parallel_calls=4)
+    else:
+        dataset = dataset.take(num_test_batches * batch_size)
 
     dataset = dataset.batch(batch_size)
     dataset = dataset.prefetch(2)

@@ -53,6 +53,7 @@ def parse_args():
 
     opt_group = parser.add_argument_group(title='optional configuration')
     opt_group.add_argument('--batch-size', nargs=1, type=int, metavar='N', help='the number of examples per mini-batch')
+    opt_group.add_argument('--test-batches', nargs=1, type=int, metavar='N', help='the number of mini-batches to reserve for evaluation')
     opt_group.add_argument('--warm-start', nargs=1, metavar='M', help='initialize weights from the given model')
     opt_group.add_argument('--steps', nargs=1, type=int, metavar='N', help='the total number of examples to train over')
     opt_group.add_argument('--model', nargs=1, help='the directory that contains the model')
@@ -132,6 +133,7 @@ def main():
         'steps': args.steps[0] if args.steps else MAX_STEPS,
         'batch_size': args.batch_size[0] if args.batch_size else BATCH_SIZE,
         'learning_rate': 1e-4 if args.warm_start else 3e-4,
+        'test_batches': args.test_batches if args.test_batches else 10,
 
         'num_channels': get_num_channels(args, model_dir) or 128,
         'num_blocks': get_num_blocks(args, model_dir) or 9
@@ -183,17 +185,24 @@ def main():
     )
 
     if args.start or args.resume:
-        nn.train(
-            hooks=hooks + [LearningRateScheduler(steps_to_skip)],
-            input_fn=lambda: input_fn(args.files, params['batch_size'], features_mask, True, args.deterministic),
-            steps=params['steps'] // params['batch_size']
+        tf.estimator.train_and_evaluate(
+            nn,
+            tf.estimator.TrainSpec(
+                hooks=hooks + [LearningRateScheduler(steps_to_skip)],
+                input_fn=lambda: input_fn(args.files, params['batch_size'], features_mask, True, num_test_batches=params['test_batches'], is_deterministic=args.deterministic),
+                max_steps=params['steps'] // params['batch_size']
+            ),
+            tf.estimator.EvalSpec(
+                input_fn=lambda: input_fn(args.files, params['batch_size'], features_mask, False, num_test_batches=params['test_batches'], is_deterministic=args.deterministic),
+                start_delay_secs=600
+            )
         )
     elif args.verify:
         # iterate over the entire dataset and collect the metric, which we will
         # then pretty-print as a JSON object to standard output
         results = nn.evaluate(
             hooks=hooks,
-            input_fn=lambda: input_fn(args.files, params['batch_size'], features_mask, False, args.deterministic),
+            input_fn=lambda: input_fn(args.files, params['batch_size'], features_mask, False, num_test_batches=params['steps'], is_deterministic=args.deterministic),
             steps=params['steps'] // params['batch_size']
         )
 
@@ -214,7 +223,7 @@ def main():
             pass
     elif args.features_map > 0:
         predictor = nn.predict(
-            input_fn=lambda: input_fn(args.files, 1, features_mask, False, args.deterministic)
+            input_fn=lambda: input_fn(args.files, 1, features_mask, False, num_test_batches=20, is_deterministic=args.deterministic)
         )
         count = 0
 
