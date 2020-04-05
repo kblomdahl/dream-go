@@ -60,6 +60,7 @@ def parse_args():
     opt_group.add_argument('--name', nargs=1, help='the name of this session')
     opt_group.add_argument('--debug', action='store_true', help='enable command-line debugging')
     opt_group.add_argument('--deterministic', action='store_true', help='enable deterministic mode')
+    opt_group.add_argument('--profile', action='store_true', help='enable profiling')
 
     opt_group = parser.add_argument_group(title='model configuration')
     opt_group.add_argument('--num-channels', nargs=1, type=int, metavar='N', help='the number of channels per residual block')
@@ -175,7 +176,12 @@ def main():
     else:
         features_mask = None
 
-    hooks = [tf_debug.LocalCLIDebugHook()] if args.debug else []
+    hooks = []
+    if args.debug:
+        hooks += [tf_debug.LocalCLIDebugHook()]
+    if args.profile:
+        hooks += [tf.estimator.ProfilerHook(save_steps=100, output_dir=model_dir)]
+
     nn = tf.estimator.Estimator(
         config=config,
         model_fn=model_fn,
