@@ -38,6 +38,7 @@ def load_shared_library(ffi):
 SIMPLE_FFI = FFI()
 SIMPLE_FFI.cdef("""
     int get_num_features();
+    void set_seed(int seed);
 """)
 
 SIMPLE_LIB = load_shared_library(SIMPLE_FFI)
@@ -48,59 +49,6 @@ def get_num_features():
     return SIMPLE_LIB.get_num_features()
 
 
-# -------- Complex FFI (depends on the number of features) --------
-
-
-COMPLEX_FFI = FFI()
-COMPLEX_FFI.cdef("""
-    typedef struct {
-        short features[""" + str(361 * get_num_features()) + """];
-        int index;
-        int next_index;
-        int color;
-        float policy[362];
-        float next_policy[362];
-        float ownership[361];
-        int winner;
-        int number;
-        float komi;
-    } Example;
-
-    void set_seed(int seed);
-    int extract_single_example(const char*, Example*);
-""")
-
-COMPLEX_LIB = load_shared_library(COMPLEX_FFI)
-FEATURE_SIZE = get_num_features() * 361 * COMPLEX_FFI.sizeof('short')
-POLICY_SIZE = 362 * COMPLEX_FFI.sizeof('float')
-OWNERSHIP_SIZE = 361 * COMPLEX_FFI.sizeof('float')
-
-
 def set_seed(seed):
     """ Sets the seed of the extraction """
-    COMPLEX_LIB.set_seed(seed)
-
-
-def get_single_example(line):
-    """ Returns a single example, from the given SGF file. """
-    raw_example = COMPLEX_FFI.new('Example[]', 1)
-    result = COMPLEX_LIB.extract_single_example(line, raw_example)
-
-    if result == 0:
-        example = {
-            '_raw_example': raw_example,  # prevent it from being garbage collected
-            'features': COMPLEX_FFI.buffer(raw_example[0].features, FEATURE_SIZE),
-            'color': raw_example[0].color,
-            'index': raw_example[0].index,
-            'next_index': raw_example[0].next_index,
-            'policy': COMPLEX_FFI.buffer(raw_example[0].policy, POLICY_SIZE),
-            'next_policy': COMPLEX_FFI.buffer(raw_example[0].next_policy, POLICY_SIZE),
-            'ownership': COMPLEX_FFI.buffer(raw_example[0].ownership, OWNERSHIP_SIZE),
-            'winner': raw_example[0].winner,
-            'number': raw_example[0].number,
-            'komi': raw_example[0].komi
-        }
-    else:
-        example = None
-
-    return result, example
+    return SIMPLE_LIB.set_seed(seed)

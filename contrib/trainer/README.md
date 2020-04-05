@@ -5,6 +5,7 @@ This folder contains the Tensorflow script that is used to train the neural netw
 ## Running
 
 ```bash
+make
 ./start_dev_container.sh
 python -m dream_tf --start [files]
 python -m dream_tf --dump > dream_go.json

@@ -34,7 +34,6 @@ use utils::sgf::{CGoban, SgfCoordinate};
 
 #[repr(C)]
 pub struct Example {
-    pub features: [f16; FEATURE_SIZE],
     pub index: c_int,
     pub next_index: c_int,
     pub color: c_int,
@@ -43,13 +42,13 @@ pub struct Example {
     pub ownership: [f32; 361],
     pub winner: c_int,
     pub number: c_int,
-    pub komi: f32
+    pub komi: f32,
+    pub features: [f16; FEATURE_SIZE],
 }
 
 impl Default for Example {
     fn default() -> Example {
         Example {
-            features: [f16::from(0.0); FEATURE_SIZE],
             index: 0,
             next_index: 0,
             color: 0,
@@ -58,7 +57,8 @@ impl Default for Example {
             ownership: [f32::from(0.0); 361],
             winner: 0,
             number: 0,
-            komi: DEFAULT_KOMI
+            komi: DEFAULT_KOMI,
+            features: [f16::from(0.0); FEATURE_SIZE],
         }
     }
 }

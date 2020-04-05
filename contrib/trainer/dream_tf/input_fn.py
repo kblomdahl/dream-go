@@ -22,54 +22,15 @@ import numpy as np
 import os
 import tensorflow as tf
 
-from .constants.boost_table import BOOST_PER_MOVE_NUMBER
-from .ffi.libdg_go import get_single_example, set_seed
+from .ffi.libdg_go import set_seed
 from .layers import NUM_FEATURES
 
+dream_go_module = tf.load_op_library('libdg_tf.so')
 
 def _parse(is_deterministic):
-    def __parse(raw_example):
-        result, example = get_single_example(raw_example)
-
-        if result != 0:
-            features = np.zeros((19, 19, NUM_FEATURES), 'f2')
-
-            boost = np.zeros((), 'f4')
-            value = np.zeros((1,), 'f4')
-            policy = np.zeros((362,), 'f4')
-            next_policy = np.zeros((362,), 'f4')
-            ownership = np.zeros((361,), 'f4')
-            komi = np.zeros((), 'f4')
-        else:
-            features = np.frombuffer(example['features'], 'f2').copy()
-
-            value = np.asarray([1.0] if example['color'] == example['winner'] else [-1.0], 'f4')
-            policy = np.frombuffer(example['policy'], 'f4').copy()
-            next_policy = np.frombuffer(example['next_policy'], 'f4').copy()
-            ownership = np.frombuffer(example['ownership'], 'f4').copy()
-            komi = np.asarray(example['komi'], 'f4')
-            if example['color'] == 1:  # is black
-                komi = -komi
-
-            if example['number'] <= len(BOOST_PER_MOVE_NUMBER):
-                boost = np.asarray(BOOST_PER_MOVE_NUMBER[example['number'] - 1], 'f4')
-            else:
-                boost = np.asarray(1.0, 'f4')
-
-            # fix any partial policy
-            policy[example['index']] += 1.0 - np.sum(policy)
-            next_policy[example['next_index']] += 1.0 - np.sum(next_policy)
-
-        return features, boost, value, policy, next_policy, ownership, komi
-
     def __do_parse(line):
-        features, boost, value, policy, next_policy, ownership, komi = tuple(tf.py_func(
-            __parse,
-            [line],
-            [tf.float16, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32]
-        ))
+        features, policy, next_policy, value, ownership, komi, boost = dream_go_module.sgf_to_features(line)
 
-        features = tf.reshape(features, [19, 19, NUM_FEATURES])
         labels = {
             'boost': tf.reshape(boost, [1]),
             'value': tf.reshape(value, [1]),
