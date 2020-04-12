@@ -22,7 +22,7 @@ import tensorflow as tf
 import numpy as np
 import unittest
 
-from .policy_head import policy_head
+from .policy_head import policy_head, policy_offset_op
 from .test_common import TestUtils
 
 class PolicyHeadTest(unittest.TestCase, TestUtils):
@@ -41,6 +41,12 @@ class PolicyHeadTest(unittest.TestCase, TestUtils):
         return {
             "num_channels": self.num_channels
         }
+
+    def test_initializer(self):
+        self.assertEqual(
+            policy_offset_op([362]).shape,
+            (362,)
+        )
 
     def test_shape(self):
         self.assertEqual(
