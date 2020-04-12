@@ -27,6 +27,7 @@ from .orthogonal_initializer import orthogonal_initializer
 from .policy_head import policy_head
 from .residual_block import residual_block
 from .value_head import value_head
+from .ownership_head import ownership_head
 
 
 def tower(x, mode, params):
@@ -70,4 +71,8 @@ def tower(x, mode, params):
     with tf.variable_scope('{:02d}v_value'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
         v = value_head(y, mode, params)
 
-    return v, p, pn, y
+    # ownership head
+    with tf.variable_scope('{:02d}o_ownership'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
+        o = ownership_head(y, mode, params)
+
+    return v, p, pn, o, y

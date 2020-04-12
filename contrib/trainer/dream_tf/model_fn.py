@@ -23,10 +23,12 @@ import tensorflow as tf
 from .hooks.dump import DUMP_OPS
 from .hooks.learning_rate import LEARNING_RATE, LOSS
 from .layers.tower import tower
+from .layers.ownership_head import ownership_loss
 
+dream_go_module = tf.load_op_library('libdg_tf.so')
 
 def model_fn(features, labels, mode, params):
-    value_hat, policy_hat, next_policy_hat, tower_hat = tower(features, mode, params)
+    value_hat, policy_hat, next_policy_hat, ownership_hat, tower_hat = tower(features, mode, params)
 
     if labels:
         # determine the loss for each of the components:
@@ -49,13 +51,19 @@ def model_fn(features, labels, mode, params):
             logits=check_numerics(next_policy_hat, 'next_policy_hat')
         ), (-1, 1))
 
+        loss_ownership = tf.reshape(ownership_loss(
+            labels=check_numerics(labels['ownership'], 'ownership_labels'),
+            logits=check_numerics(ownership_hat, 'ownership_hat')
+        ), (-1, 1))
+
         loss_reg = tf.math.accumulate_n(
             inputs=tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         )
 
         loss_unboosted = 0.25 * check_numerics(loss_policy, 'loss_policy') \
                          + 0.25 * check_numerics(loss_next_policy, 'loss_next_policy') \
-                         + 1.00 * check_numerics(loss_value, 'loss_value') * labels['boost']
+                         + 1.00 * check_numerics(loss_value, 'loss_value') * labels['boost'] \
+                         + 1.00 * check_numerics(loss_ownership, 'loss_ownership')
 
         loss = tf.reduce_mean(loss_unboosted) + 1e-4 * loss_reg
         tf.add_to_collection(LOSS, loss_unboosted)
@@ -102,7 +110,23 @@ def model_fn(features, labels, mode, params):
         tf.summary.scalar('loss/policy', tf.reduce_mean(loss_policy))
         tf.summary.scalar('loss/next_policy', tf.reduce_mean(loss_next_policy))
         tf.summary.scalar('loss/value', tf.reduce_mean(loss_value))
+        tf.summary.scalar('loss/ownership', tf.reduce_mean(loss_ownership))
         tf.summary.scalar('loss/l2', tf.reduce_mean(loss_reg))
+
+        # image metrics
+        def to_heat_image(heat):
+            return dream_go_module.tensor_to_heat_image(
+                features[0, :, :, 5],
+                features[0, :, :, 21],
+                heat
+            )
+
+        tf.summary.image('value/predictions', to_heat_image(tf.ones([19, 19]) * value_hat[0, 0]))
+        tf.summary.image('value/labels', to_heat_image(tf.ones([19, 19]) * labels['value'][0, 0]))
+        tf.summary.image('ownership/predictions', to_heat_image(tf.reshape(ownership_hat[0, :], [19, 19])))
+        tf.summary.image('ownership/labels', to_heat_image(tf.reshape(labels['ownership'][0, :], [19, 19])))
+        tf.summary.image('policy/predictions', to_heat_image(tf.reshape(tf.nn.softmax(policy_hat[0, :361]), [19, 19])))
+        tf.summary.image('policy/labels', to_heat_image(tf.reshape(labels['policy'][0, :361], [19, 19])))
 
         # evaluation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look
@@ -116,6 +140,7 @@ def model_fn(features, labels, mode, params):
         next_policy_3 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 3), tf.float32)
         next_policy_5 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 5), tf.float32)
         value_1 = tf.cast(tf.equal(tf.sign(value_hat), tf.sign(labels['value'])), tf.float32)
+        ownership_1 = tf.cast(tf.equal(tf.sign(ownership_hat), tf.sign(labels['ownership'])), tf.float32)
 
         tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_1))
         tf.summary.scalar('accuracy/policy_3', tf.reduce_mean(policy_3))
@@ -124,6 +149,7 @@ def model_fn(features, labels, mode, params):
         tf.summary.scalar('accuracy/next_policy_3', tf.reduce_mean(next_policy_3))
         tf.summary.scalar('accuracy/next_policy_5', tf.reduce_mean(next_policy_5))
         tf.summary.scalar('accuracy/value', tf.reduce_mean(value_1))
+        tf.summary.scalar('accuracy/ownership', tf.reduce_mean(ownership_1))
 
         eval_metric_ops = {
             'accuracy/policy_1': tf.metrics.mean(policy_1),
@@ -133,9 +159,11 @@ def model_fn(features, labels, mode, params):
             'accuracy/next_policy_3': tf.metrics.mean(next_policy_3),
             'accuracy/next_policy_5': tf.metrics.mean(next_policy_5),
             'accuracy/value': tf.metrics.mean(value_1),
+            'accuracy/ownership': tf.metrics.mean(ownership_1),
             'loss/policy': tf.metrics.mean(loss_policy),
             'loss/next_policy': tf.metrics.mean(loss_next_policy),
-            'loss/value': tf.metrics.mean(loss_value)
+            'loss/value': tf.metrics.mean(loss_value),
+            'loss/ownership': tf.metrics.mean(loss_ownership)
         }
     else:
         loss = None
@@ -147,6 +175,7 @@ def model_fn(features, labels, mode, params):
     predictions = {
         'features': features,
         'value': value_hat,
+        'ownership': ownership_hat,
         'policy': tf.nn.softmax(policy_hat),
         'next_policy': tf.nn.softmax(next_policy_hat),
         'tower': tower_hat

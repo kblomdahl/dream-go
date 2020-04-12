@@ -5,13 +5,13 @@ TF_LDFLAGS=$(shell $(TF_RUN) python -c 'import tensorflow as tf; print(" ".join(
 
 all: libdg_tf.so
 
-libdg_tf.so: libdg_tf.cc libdg_go.so
+libdg_tf.so: sgf_to_features.cc tensor_to_image.cc libdg_go.so
 	docker run \
 		--rm \
 		-u 1000:1000 \
 		-v "$(shell pwd):/workspace" \
 		$(IMAGE) \
-		g++ -std=c++11 -shared "$<" -o "$@" -fPIC -O2 -g \
+		g++ -std=c++11 -shared $(filter-out libdg_go.so, $+) -o "$@" -fPIC -O2 -g \
 		$(TF_CFLAGS) $(TF_LDFLAGS) \
 		-L. -ldg_go
 

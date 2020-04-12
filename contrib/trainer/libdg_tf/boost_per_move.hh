@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-const float BOOST_PER_MOVE_NUMBER[] = {
+static const float BOOST_PER_MOVE_NUMBER[] = {
     4.07725e-06, 2.67627e-05, 8.36909e-05, 1.76180e-04, 3.66401e-04, 7.75842e-04,
     1.54273e-03, 2.71048e-03, 4.28120e-03, 6.24129e-03, 8.58123e-03, 1.12654e-02,
     1.42836e-02, 1.76005e-02, 2.12017e-02, 2.50504e-02, 2.91246e-02, 3.34139e-02,
@@ -95,7 +95,7 @@ const float BOOST_PER_MOVE_NUMBER[] = {
     9.99999e-01, 9.99999e-01, 9.99999e-01, 9.99999e-01, 1.00000e+00, 1.00000e+00,
 };
 
-float boost_for_move_number(int number) {
+static float boost_for_move_number(int number) {
     const auto num_moves_with_boost = sizeof(BOOST_PER_MOVE_NUMBER) / sizeof(BOOST_PER_MOVE_NUMBER[0]);
 
     if (number <= num_moves_with_boost) {

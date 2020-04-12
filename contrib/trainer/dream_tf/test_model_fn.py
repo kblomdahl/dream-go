@@ -32,7 +32,8 @@ class ModelFnTest(unittest.TestCase):
             'value': tf.placeholder(tf.float32, [self.batch_size, 1]),
             'policy': tf.placeholder(tf.float32, [self.batch_size, 362]),
             'next_policy': tf.placeholder(tf.float32, [self.batch_size, 362]),
-            'boost': tf.placeholder(tf.float32, [self.batch_size, 1])
+            'boost': tf.placeholder(tf.float32, [self.batch_size, 1]),
+            'ownership': tf.placeholder(tf.float32, [self.batch_size, 361]),
         }
         self.spec = model_fn(self.features, self.labels, self.mode, self.params)
 

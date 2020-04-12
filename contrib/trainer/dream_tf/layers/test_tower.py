@@ -42,10 +42,11 @@ class ResidualBlockTest(unittest.TestCase):
         }
 
     def test_shape(self):
-        v, p, pn, y = tower(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+        v, p, pn, o, y = tower(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
         self.assertEqual(v.shape, [self.batch_size, 1])
         self.assertEqual(p.shape, [self.batch_size, 362])
         self.assertEqual(pn.shape, [self.batch_size, 362])
+        self.assertEqual(o.shape, [self.batch_size, 361])
         self.assertEqual(y.shape, [self.batch_size, 19, 19, self.num_channels])
 
 
