@@ -35,17 +35,17 @@ def model_fn(features, labels, mode, params):
         # - Policy head (2x)
         #
         loss_value = tf.reshape(tf.math.squared_difference(
-            check_numerics(tf.stop_gradient(labels['value']), 'value_labels'),
+            check_numerics(labels['value'], 'value_labels'),
             check_numerics(value_hat, 'value_hat')
         ), (-1, 1))
 
         loss_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=check_numerics(tf.stop_gradient(labels['policy']), 'policy_labels'),
+            labels=check_numerics(labels['policy'], 'policy_labels'),
             logits=check_numerics(policy_hat, 'policy_hat')
         ), (-1, 1))
 
         loss_next_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=check_numerics(tf.stop_gradient(labels['next_policy']), 'next_policy_labels'),
+            labels=check_numerics(labels['next_policy'], 'next_policy_labels'),
             logits=check_numerics(next_policy_hat, 'next_policy_hat')
         ), (-1, 1))
 
@@ -54,10 +54,10 @@ def model_fn(features, labels, mode, params):
         )
 
         loss_unboosted = 0.17 * check_numerics(loss_policy, 'loss_policy') \
-                         + 0.04 * check_numerics(loss_next_policy, 'loss_next_policy') \
-                         + 1.00 * check_numerics(loss_value, 'loss_value')
+                         + 0.17 * check_numerics(loss_next_policy, 'loss_next_policy') \
+                         + 1.00 * check_numerics(loss_value, 'loss_value') * labels['boost']
 
-        loss = tf.reduce_mean(tf.stop_gradient(labels['boost']) * loss_unboosted) + 1e-4 * loss_reg
+        loss = tf.reduce_mean(loss_unboosted) + 1e-4 * loss_reg
         tf.add_to_collection(LOSS, loss_unboosted)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
