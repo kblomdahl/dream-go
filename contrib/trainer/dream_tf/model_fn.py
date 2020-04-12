@@ -53,8 +53,8 @@ def model_fn(features, labels, mode, params):
             inputs=tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         )
 
-        loss_unboosted = 0.17 * check_numerics(loss_policy, 'loss_policy') \
-                         + 0.17 * check_numerics(loss_next_policy, 'loss_next_policy') \
+        loss_unboosted = 0.25 * check_numerics(loss_policy, 'loss_policy') \
+                         + 0.25 * check_numerics(loss_next_policy, 'loss_next_policy') \
                          + 1.00 * check_numerics(loss_value, 'loss_value') * labels['boost']
 
         loss = tf.reduce_mean(loss_unboosted) + 1e-4 * loss_reg
