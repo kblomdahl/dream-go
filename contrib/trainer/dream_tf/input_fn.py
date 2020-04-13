@@ -112,7 +112,7 @@ def _augment(features, labels):
 
     labels['policy'] = tf.concat([policy, policy_pass], 0)
     labels['next_policy'] = tf.concat([next_policy, next_policy_pass], 0)
-    labels['ownership'] = tf.nn.softmax(0.5 + 0.5 * ownership)
+    labels['ownership'] = ownership
 
     return features, labels
 
