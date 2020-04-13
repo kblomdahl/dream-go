@@ -35,20 +35,26 @@ def model_fn(features, labels, mode, params):
         #
         # - Value head
         # - Policy head (2x)
+        # - Ownership
         #
-        loss_value = tf.reshape(tf.math.squared_difference(
+        loss_value = tf.reshape(tf.losses.huber_loss(
             check_numerics(labels['value'], 'value_labels'),
-            check_numerics(value_hat, 'value_hat')
+            check_numerics(value_hat, 'value_hat'),
+            reduction=tf.losses.Reduction.NONE
         ), (-1, 1))
 
-        loss_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=check_numerics(labels['policy'], 'policy_labels'),
-            logits=check_numerics(policy_hat, 'policy_hat')
+        loss_policy = tf.reshape(tf.losses.softmax_cross_entropy(
+            check_numerics(labels['policy'], 'policy_labels'),
+            check_numerics(policy_hat, 'policy_hat'),
+            label_smoothing=0.2,
+            reduction=tf.losses.Reduction.NONE
         ), (-1, 1))
 
-        loss_next_policy = tf.reshape(tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=check_numerics(labels['next_policy'], 'next_policy_labels'),
-            logits=check_numerics(next_policy_hat, 'next_policy_hat')
+        loss_next_policy = tf.reshape(tf.losses.softmax_cross_entropy(
+            check_numerics(labels['next_policy'], 'next_policy_labels'),
+            check_numerics(next_policy_hat, 'next_policy_hat'),
+            label_smoothing=0.2,
+            reduction=tf.losses.Reduction.NONE
         ), (-1, 1))
 
         loss_ownership = tf.reshape(ownership_loss(
@@ -195,6 +201,7 @@ def model_fn(features, labels, mode, params):
         train_op,
         eval_metric_ops
     )
+
 
 def check_numerics(tensor, message, name=None):
     return tf.debugging.check_numerics(tensor, message, name)

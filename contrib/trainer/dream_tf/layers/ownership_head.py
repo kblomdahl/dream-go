@@ -56,9 +56,11 @@ def ownership_head(x, mode, params):
 def ownership_loss(*, labels=None, logits=None):
     categorical_labels = tf.stack([(1 + labels) / 2, (1 - labels) / 2], axis=2)
     categorical_logits = tf.stack([logits, -logits], axis=2)
-    loss = tf.nn.softmax_cross_entropy_with_logits_v2(
-        labels=categorical_labels,
-        logits=categorical_logits
+    loss = tf.losses.softmax_cross_entropy(
+        categorical_labels,
+        categorical_logits,
+        label_smoothing=0.2,
+        reduction=tf.losses.Reduction.NONE
     )
 
     return tf.reduce_mean(loss, [1], keepdims=True)
