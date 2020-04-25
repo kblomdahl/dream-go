@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use asm::count_zeros;
 use board_fast::*;
 use board::Board;
 use color::Color;
@@ -142,12 +141,11 @@ impl Features for Board {
 
         let mut features = vec! [c_0; FEATURE_SIZE];
         let symmetry_table = symmetry.get_table();
-        let current = to_move as u8;
         let opponent = to_move.opposite();
 
         // board state (one-hot historic)
         for (i, point) in self.history.iter().take(2).enumerate() {
-            if point.is_valid() {
+            if point != Point::default() {
                 let other = symmetry_table[point];
 
                 features[O::index(3+i, other)] = c_1;
@@ -155,15 +153,13 @@ impl Features for Board {
         }
 
         // liberties
-        let mut liberties = [0; Point::MAX];
-
         for index in Point::all() {
             let other = symmetry_table[index];
 
-            if self.inner.vertices[index].color() != 0 {
-                let start = if self.inner.vertices[index].color() == current { 5 } else { 21 };
+            if self.inner.vertices[index].color() != None {
+                let start = if self.inner.vertices[index].color() == Some(to_move) { 5 } else { 21 };
                 let num_liberties = ::std::cmp::min(
-                    get_num_liberties(&self.inner, index, &mut liberties),
+                    get_num_liberties(&self.inner, index),
                     8
                 );
 
@@ -171,9 +167,9 @@ impl Features for Board {
                     features[O::index(start+i, other)] = c_1;
                 }
             } else {
-                if _is_valid_memoize(&self.inner, to_move, index, &mut liberties) {
+                if self.inner.is_valid(to_move, index) {
                     let num_liberties = ::std::cmp::min(
-                        get_num_liberties_if(&self.inner, to_move, index, &mut liberties),
+                        get_num_liberties_if(&self.inner, to_move, index),
                         8
                     );
 
@@ -182,9 +178,9 @@ impl Features for Board {
                     }
                 }
 
-                if _is_valid_memoize(&self.inner, opponent, index, &mut liberties) {
+                if self.inner.is_valid(opponent, index) {
                     let num_liberties = ::std::cmp::min(
-                        get_num_liberties_if(&self.inner, opponent, index, &mut liberties),
+                        get_num_liberties_if(&self.inner, opponent, index),
                         8
                     );
 
@@ -201,9 +197,9 @@ impl Features for Board {
         for index in Point::all() {
             let other = symmetry_table[index];
 
-            if self.inner.vertices[index].color() != 0 {
+            if self.inner.vertices[index].color() != None {
                 // pass
-            } else if _is_valid_memoize(&self.inner, to_move, index, &mut liberties) {
+            } else if self.inner.is_valid(to_move, index) {
                 // is super-ko
                 if self._is_ko(to_move, index) {
                     is_ko = c_1;
@@ -241,23 +237,6 @@ impl Features for Board {
     }
 }
 
-/// Fills the given array with all liberties of in the provided array of vertices
-/// for the group.
-///
-/// # Arguments
-///
-/// * `vertices` - the array to fill liberties from
-/// * `at_point` - the group to fill liberties for
-/// * `liberties` - output array containing the liberties of this group
-///
-fn fill_liberties(board: &BoardFast, at_point: Point, liberties: &mut [u8]) {
-    for current in board.block_at(at_point) {
-        for (other_index, vertex) in board.adjacent_to(current) {
-            liberties[other_index] = vertex.color();
-        }
-    }
-}
-
 /// Returns the number of liberties of the given group using any recorded
 /// value in `memoize` if available otherwise it is calculated. Any
 /// calculated value is written back to `memoize` for all strongly
@@ -269,59 +248,8 @@ fn fill_liberties(board: &BoardFast, at_point: Point, liberties: &mut [u8]) {
 /// * `at_point` - the index of the group to check
 /// * `memoize` - cache of already calculated liberty counts
 ///
-fn get_num_liberties(board: &BoardFast, at_point: Point, memoize: &mut [usize]) -> usize {
-    if memoize[at_point] != 0 {
-        memoize[at_point]
-    } else {
-        let mut liberties = [0xff; 448];
-        fill_liberties(board, at_point, &mut liberties);
-
-        // update the cached value in the memoize array for all stones
-        // that are strongly connected to the given index
-        let num_liberties = count_zeros(&liberties);
-
-        for current in board.block_at(at_point) {
-            memoize[current] = num_liberties;
-        }
-
-        num_liberties
-    }
-}
-
-/// Returns whether the given move is valid according to the
-/// Tromp-Taylor rules using the provided `memoize` table to
-/// determine the number of liberties.
-///
-/// This function also assume the given vertex is empty and does
-/// not perform the check itself.
-///
-/// # Arguments
-///
-/// * `color` - the color of the move
-/// * `at_point` - the HW index of the move
-/// * `memoize` - cache of already calculated liberty counts
-///
-fn _is_valid_memoize(board: &BoardFast, color: Color, at_point: Point, memoize: &mut [usize]) -> bool {
-    debug_assert!(board.vertices[at_point].color() == 0);
-
-    let current = color as u8;
-
-    board.adjacent_to(at_point).any(|(other_index, vertex)| {
-        let value = vertex.color();
-
-        // check for direct liberties
-        if value == 0 {
-            return true;
-        }
-
-        // check for the following two conditions simplified into one case:
-        //
-        // 1. If a neighbour is friendly then we are fine if it has at
-        //    least two liberties.
-        // 2. If a neighbour is unfriendly then we are fine if it has less
-        //    than two liberties (i.e. one).
-        value != 0x3 && (value == current) == (get_num_liberties(board, other_index, memoize) >= 2)
-    })
+fn get_num_liberties(board: &BoardFast, at_point: Point) -> usize {
+    board.get_n_liberty(at_point)
 }
 
 /// Returns the number of liberties of the group connected to the given stone
@@ -332,39 +260,10 @@ fn _is_valid_memoize(board: &BoardFast, color: Color, at_point: Point, memoize: 
 /// * `color` - the color of the stone to pretend place
 /// * `index` - the index of the stone to pretend place
 ///
-fn get_num_liberties_if(board: &BoardFast, color: Color, at_point: Point, memoize: &mut [usize]) -> usize {
-    debug_assert!(board.vertices[at_point].color() == 0);
-
+fn get_num_liberties_if(board: &BoardFast, color: Color, at_point: Point) -> usize {
     let mut other = board.clone();
-    other.vertices[at_point].set_color(color as u8);
-    other.vertices[at_point].set_visited(true);
-
-    // capture of opponent stones
-    let current = color as u8;
-    let opponent = color.opposite() as u8;
-
-    for (other_index, other_vertex) in board.adjacent_to(at_point) {
-        if other_vertex.color() == opponent && get_num_liberties(&board, other_index, memoize) == 1 {
-            other.capture(opponent as usize, other_index);
-        }
-    }
-
-    // add liberties based on the liberties of the friendly neighbouring
-    // groups
-    let mut liberties = [0xff; 448];
-
-    for (other_index, other_vertex) in other.adjacent_to(at_point) {
-        let other_color = other_vertex.color();
-
-        if other_color == current {
-            fill_liberties(&other, other_index, &mut liberties);
-        }
-
-        // add direct liberties of the new stone
-        liberties[other_index] = other_color;
-    }
-
-    count_zeros(&liberties)
+    other.place(color, at_point);
+    other.get_n_liberty(at_point)
 }
 
 #[cfg(test)]

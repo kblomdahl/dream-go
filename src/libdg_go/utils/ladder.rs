@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use board_fast::{BoardFast, Vertex, One, Two, Three};
+use board_fast::{BoardFast, Vertex};
 use color::Color;
 use point::Point;
 
@@ -31,11 +31,11 @@ pub trait Ladder {
 /// * `at_point` - the index of the group to check
 ///
 fn _can_escape_with_capture(board: &BoardFast, color: Color, at_point: Point) -> bool {
-    let opponent = color.opposite() as u8;
+    let opponent = Some(color.opposite());
 
     board.block_at(at_point).into_iter().any(|current| {
         board.adjacent_to(current).any(|(other_index, other_vertex)| {
-            other_vertex.color() == opponent && !board.has_n_liberty::<Two>(other_index, 2)
+            other_vertex.color() == opponent && !board.has_n_liberty(other_index, 2)
         })
     })
 }
@@ -56,13 +56,13 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, at_point: Point) -> bo
     // liberty (and it cannot counter capture a group) then extend into
     // that liberty. if no such group exists then this is not a ladder
     // capturing move.
-    let opponent = color.opposite() as u8;
+    let opponent = Some(color.opposite());
     let opponent_index = board.adjacent_to(at_point).filter_map(|(other_index, other_vertex)| {
         if other_vertex.color() == opponent {
-            let is_in_atari = !board.has_n_liberty::<Two>(other_index, 2);
+            let is_in_atari = !board.has_n_liberty(other_index, 2);
 
             if is_in_atari && !_can_escape_with_capture(&board, color.opposite(), other_index) {
-                Some(board.get_n_liberty::<One>(other_index, 1))
+                board.get_a_liberty(other_index)
             } else {
                 None
             }
@@ -85,17 +85,17 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, at_point: Point) -> bo
     // * If two liberties, keep searching.
     // * If more than two liberties, then this group can not be captured.
     //
-    if !board.has_n_liberty::<Two>(opponent_index, 2) {
+    if !board.has_n_liberty(opponent_index, 2) {
         return true;
-    } else if board.has_n_liberty::<Three>(opponent_index, 3) {
+    } else if board.has_n_liberty(opponent_index, 3) {
         return false;
     }
 
     // if playing `opponent_index` put any of my stones into atari
     // then this is not a ladder capturing move.
-    let player = color as u8;
+    let player = Some(color);
     let in_atari = board.adjacent_to(opponent_index).any(|(other_index, other_vertex)| {
-        other_vertex.color() == player && !board.has_n_liberty::<Two>(other_index, 2)
+        other_vertex.color() == player && !board.has_n_liberty(other_index, 2)
     });
 
     if in_atari  {
@@ -106,7 +106,7 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, at_point: Point) -> bo
     // in all of its liberties, if we succeed with either then this
     // is a ladder capturing move
     board.adjacent_to(opponent_index).any(|(other_index, other_vertex)| {
-        other_vertex.color() == 0 && {
+        other_vertex.color() == None && {
             let other = board.clone();
 
             _is_ladder_capture(other, color, other_index)
@@ -141,9 +141,9 @@ impl Ladder for BoardFast {
         debug_assert!(self.is_valid(color, at_point));
 
         // check if we are connected to a stone with one liberty
-        let player = color as u8;
+        let player = Some(color);
         let connected_to_one = self.adjacent_to(at_point).find(|&(other_index, other_vertex)| {
-            other_vertex.color() == player && !self.has_n_liberty::<Two>(other_index, 2)
+            other_vertex.color() == player && !self.has_n_liberty(other_index, 2)
         });
 
         if connected_to_one.is_none() {
@@ -157,10 +157,7 @@ impl Ladder for BoardFast {
         board.place(color, at_point);
 
         // check if we have exactly two liberties
-        let num_liberties = board.get_n_liberty::<Three>(at_point, 3).iter()
-            .fold(0, |acc, &liberty| {
-                acc + if liberty.is_valid() { 1 } else { 0 }
-            });
+        let num_liberties = board.get_n_liberty(at_point);
 
         if num_liberties != 2 {
             return false;
@@ -168,7 +165,7 @@ impl Ladder for BoardFast {
 
         // check that we cannot be captured in a ladder from either direction
         self.adjacent_to(at_point).all(|(other_index, other_vertex)| {
-            other_vertex.color() != 0 || {
+            other_vertex.color() != None || {
                 let board = board.clone();
 
                 !_is_ladder_capture(board, color.opposite(), other_index)

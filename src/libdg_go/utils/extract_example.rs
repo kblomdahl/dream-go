@@ -171,7 +171,7 @@ pub unsafe extern fn extract_single_example(
         };
 
         // find _all_ recorded moves, and their policies (if applicable).
-        let mut examples = Vec::with_capacity(254);
+        let mut examples: Vec<Candidate> = Vec::with_capacity(254);
         let mut has_policy = false;
         let mut pass_count = 0;
 
@@ -265,7 +265,7 @@ pub unsafe extern fn extract_single_example(
             (*out).komi = examples[i].board.komi();
 
             0
-        }).unwrap_or(-30)
+        }).unwrap_or(-32)
     }).unwrap_or(-1) as c_int
 }
 

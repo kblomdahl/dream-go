@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod count_zeros;
 mod contains;
 
-pub use self::count_zeros::count_zeros;
 pub use self::contains::contains_u64x16;

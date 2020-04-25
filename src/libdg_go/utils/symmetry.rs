@@ -155,7 +155,6 @@ mod tests {
         for point in Point::all() {
             let other = t.apply(point);
 
-            assert!(other.is_valid());
             assert!(seen.insert(other));
         }
     }

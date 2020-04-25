@@ -117,33 +117,7 @@ impl Board {
     pub fn at(&self, x: usize, y: usize) -> Option<Color> {
         let index = Point::new(x, y);
 
-        if self.inner.vertices[index].color() == Color::Black as u8 {
-            Some(Color::Black)
-        } else if self.inner.vertices[index].color() == Color::White as u8 {
-            Some(Color::White)
-        } else {
-            None
-        }
-    }
-
-    /// Returns true if playing at the given index violated the
-    /// super-ko rule.
-    ///
-    /// # Arguments
-    ///
-    /// * `color` - the color of the move
-    /// * `at_point` - the index of the move
-    /// * `workspace` - the memoization of the board liberties
-    ///
-    pub(super) fn _is_ko_mut(&self, color: Color, at_point: Point, workspace: &mut [u8]) -> bool {
-        debug_assert!(self.inner.is_valid(color, at_point));
-
-        self.inner.vertices[at_point].visited() && {
-            let adjust = self.inner.place_if_mut(color, at_point, workspace);
-            let next_zobrist_hash = self.zobrist_hash ^ adjust;
-
-            self.zobrist_history.contains(next_zobrist_hash)
-        }
+        self.inner.vertices[index].color()
     }
 
     /// Returns true if playing at the given index violated the
@@ -163,19 +137,6 @@ impl Board {
 
             self.zobrist_history.contains(next_zobrist_hash)
         }
-    }
-
-    /// Returns whether the given move is valid according to the
-    /// Tromp-Taylor rules.
-    ///
-    /// # Arguments
-    ///
-    /// * `color` - the color of the move
-    /// * `at_point` - the index of the move
-    /// * `workspace` - the memoization of the board liberties
-    ///
-    pub fn is_valid_mut(&self, color: Color, at_point: Point, workspace: &mut [u8]) -> bool {
-        self.inner.is_valid_mut(color, at_point, workspace) && !self._is_ko_mut(color, at_point, workspace)
     }
 
     /// Returns whether the given move is valid according to the
@@ -270,13 +231,11 @@ impl fmt::Display for Board {
             for x in 0..19 {
                 let index = Point::new(x, y);
 
-                if self.inner.vertices[index].color() == 0 {
-                    write!(f, "  ")?;
-                } else if self.inner.vertices[index].color() == Color::Black as u8 {
-                    write!(f, " \u{25cf}")?;
-                } else if self.inner.vertices[index].color() == Color::White as u8 {
-                    write!(f, " \u{25cb}")?;
-                }
+                match self.inner.vertices[index].color() {
+                    None => write!(f, "  ")?,
+                    Some(Color::Black) => write!(f, " \u{25cf}")?,
+                    Some(Color::White) => write!(f, " \u{25cb}")?,
+                };
             }
 
             writeln!(f, " \u{2502} {}", 1 + y)?;

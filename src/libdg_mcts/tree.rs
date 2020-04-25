@@ -1676,10 +1676,9 @@ mod tests {
 
     fn get_prior_distribution(rng: &mut SmallRng, board: &Board, to_move: Color) -> Vec<f32> {
         let mut prior: Vec<f32> = (0..368).map(|_| rng.gen::<f32>()).collect();
-        let mut memoize = [0; 368];
 
         for point in Point::all() {
-            if !board.is_valid_mut(to_move, point, &mut memoize) {
+            if !board.is_valid(to_move, point.x(), point.y()) {
                 prior[point.to_packed_index()] = ::std::f32::NEG_INFINITY;
             }
         }

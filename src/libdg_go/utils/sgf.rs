@@ -435,5 +435,21 @@ DT[2018-12-03]RE[W+R]TM[60]LT[]LC[1]GK[1]
             assert_eq!(count, 242);
         })
     }
+
+    /*
+    #[test]
+    fn ttemp() {
+        let sgf = "(;GM[1]FF[4]SZ[0]GN[]DT[2016-06-12]PB[]PW[]BR[]WR[]KM[650]HA[0]RU[Japanese]AP[GNU Go:3.8]RE[W+1.5]TM[600]TC[5]TT[40];B[dp];W[dd];B[qp];W[qd];B[oc];W[oq];B[lp];W[po];B[pp];W[op];B[oo];W[mp];B[on];W[mo];B[qm];W[lq];B[pf];W[pe];B[oe];W[qf];B[pg];W[qg];B[ph];W[qh];B[pi];W[fc];B[gd];W[fd];B[gf];W[hd];B[cd];W[ce];B[de];W[cf];B[gc];W[ge];B[fe];W[he];B[ed];W[ff];B[ee];W[gb];B[dc];W[cj];B[qi];W[pb];B[ch];W[cn];B[cl];W[fp];B[co];W[dn];B[eo];W[dl];B[bn];W[bm];B[bo];W[dg];B[dk];W[dj];B[ck];W[ek];B[bj];W[cm];B[bk];W[ej];B[el];W[fl];B[dh];W[eh];B[eg];W[bi];B[bh];W[ci];B[ai];W[fh];B[fg];W[em];B[cg];W[ep];B[dq];W[er];B[dr];W[nm];B[hp];W[fo];B[kq];W[kp];B[jp];W[lo];B[jn];W[om];B[pn];W[jq];B[iq];W[kr];B[km];W[ob];B[ll];W[nn];B[mc];W[qr];B[jd];W[eb];B[db];W[jf];B[hf];W[hh];B[nb];W[jl];B[lj];W[ql];B[rl];W[ic];B[jc];W[da];B[ca];W[ea];B[cb];W[pm];B[qn];W[jj];B[kh];W[pk];B[rj];W[nj];B[eq];W[fq];B[fr];W[gr];B[es];W[gq];B[mj];W[io];B[jo];W[in];B[ip];W[ki];B[lh];W[jh];B[rr];W[qq];B[rq];W[aj];B[ak];W[al];B[ef];W[bl];B[rh];W[rg];B[sg];W[sf];B[sh];W[pc];B[od];W[re];B[jr];W[rp];B[pq];W[pr];B[qo];W[rs];B[sr];W[jm];B[ln];W[ko];B[kn];W[ho];B[kq];W[lr];B[im];W[go];B[jk];W[ik];B[kk];W[il];B[ke];W[ni];B[nk];W[oj];B[mh];W[aj];B[ah];W[jb];B[kb];W[ib];B[qk];W[pl];B[do];W[ka];B[lb];W[nh];B[ng];W[kg];B[ig];W[jg];B[gh];W[gi];B[ih];W[ii];B[hg];W[gg];B[pd];W[lg];B[mg];W[qe];B[gh];W[hi];B[no];W[mn];B[pj];W[ok];B[lf];W[mk];B[ml];W[nl];B[en];W[fn];B[np];W[nq];B[ec];W[hc];B[la];W[ja];B[oa];W[pa];B[na];W[di];B[oh];W[an];B[qc];W[qb];B[ao];W[gg];B[bj];W[bk];B[gh];W[gs];B[gg];W[fs];B[er];W[jq];B[ir];W[kf];B[je];W[ie];B[ks];W[ls];B[js];W[kq];B[am];W[if];B[kj];W[an];B[lk];W[nk];B[am];W[bq];B[br];W[an];B[kl];W[mm];B[am];W[cr];B[cq];W[an];B[hr];W[hs];B[am];W[cs];B[bs];W[an];B[li];W[ji];B[le];W[am];B[ro];W[or];B[sp];W[qs])";
+        let mut count = 0;
+
+        for entry in Sgf::new(sgf.as_bytes(), 0.5) {
+            let entry = entry.ok().unwrap();
+            println!("{}", entry.board);
+            count += 1;
+        }
+
+        assert_eq!(count, 280);
+    }
+    */
 }
 

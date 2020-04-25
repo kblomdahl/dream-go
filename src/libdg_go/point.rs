@@ -50,13 +50,6 @@ impl Point {
         PointIter::default()
     }
 
-    pub fn is_valid(&self) -> bool {
-        let y = (self.packed_index as usize) / Self::STRIDE;
-        let x = (self.packed_index as usize) % Self::STRIDE;
-
-        y > 0 && y <= 19 && x > 0 && x <= 19
-    }
-
     pub fn x(&self) -> usize {
         (self.to_i() % Self::STRIDE).saturating_sub(1)
     }
@@ -121,6 +114,7 @@ define_index_type!(u16);
 define_index_type!(u32);
 define_index_type!(u64);
 define_index_type!(usize);
+define_index_type!(bool);
 define_index_type!(Point);
 
 pub struct PointIter {
@@ -175,8 +169,8 @@ mod tests {
     fn offset_bottomleft() {
         let point = Point::new(0, 0);
 
-        assert!(!point.offset(-1, 0).is_valid());
-        assert!(!point.offset(0, -1).is_valid());
+        point.offset(-1, 0); // undefined, but should not panic
+        point.offset(0, -1); // undefined, but should not panic
         assert_eq!(point.offset(1, 0), Point::new(1, 0));
         assert_eq!(point.offset(0, 1), Point::new(0, 1));
         assert_eq!(point.offset(1, 1), Point::new(1, 1));
@@ -186,8 +180,8 @@ mod tests {
     fn offset_topright() {
         let point = Point::new(18, 18);
 
-        assert!(!point.offset(1, 0).is_valid());
-        assert!(!point.offset(0, 1).is_valid());
+        point.offset(1, 0); // undefined, but should not panic
+        point.offset(0, 1); // undefined, but should not panic
         assert_eq!(point.offset(-1,  0), Point::new(17, 18));
         assert_eq!(point.offset( 0, -1), Point::new(18, 17));
         assert_eq!(point.offset(-1, -1), Point::new(17, 17));
@@ -196,7 +190,7 @@ mod tests {
     #[test]
     fn all_are_valid() {
         for point in Point::all() {
-            assert!(point.is_valid());
+            assert_ne!(point, Point::default());
         }
     }
 
@@ -205,11 +199,6 @@ mod tests {
         for point in Point::all() {
             assert_ne!(point, Point::default());
         }
-    }
-
-    #[test]
-    fn default_is_invalid() {
-        assert!(!Point::default().is_valid());
     }
 
     #[test]

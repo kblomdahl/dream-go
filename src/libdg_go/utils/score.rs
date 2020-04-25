@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use board_fast::{BoardFast, Vertex, Two};
+use board_fast::{BoardFast, Vertex};
 use board::Board;
 use color::Color;
 use point::Point;
@@ -101,8 +101,8 @@ pub trait Score {
 
 impl Score for Board {
     fn is_scorable(&self) -> bool {
-        let some_black = Point::all().any(|i| self.inner.vertices[i].color() == Color::Black as u8);
-        let some_white = Point::all().any(|i| self.inner.vertices[i].color() == Color::White as u8);
+        let some_black = Point::all().any(|i| self.inner.vertices[i].color() == Some(Color::Black));
+        let some_white = Point::all().any(|i| self.inner.vertices[i].color() == Some(Color::White));
 
         some_black && some_white && {
             let black_distance = get_territory_distance(&self.inner, Color::Black);
@@ -110,10 +110,8 @@ impl Score for Board {
 
             Point::all().all(|i| black_distance[i] == 0xff || white_distance[i] == 0xff)
         } && {
-            let mut workspace = [0; Point::MAX];
-
             Point::all().all(|i| {
-                self.inner.vertices[i].color() == 0 || self.inner.has_n_liberty_mut::<Two>(i, 2, &mut workspace)
+                self.inner.vertices[i].color() == None || self.inner.has_n_liberty(i, 2)
             })
         }
     }
@@ -145,16 +143,16 @@ impl Score for Board {
         for i in Point::all() {
             if other.vertices[i].color() == finished.inner.vertices[i].color() {
                 // pass
-            } else if other.vertices[i].color() != 0 {
-                if finished.inner.vertices[i].color() == 0 {
-                    let is_dead_black = other.vertices[i].color() == Color::Black as u8 && white_distance[i] != 0xff;
-                    let is_dead_white = other.vertices[i].color() == Color::White as u8 && black_distance[i] != 0xff;
+            } else if other.vertices[i].color() != None {
+                if finished.inner.vertices[i].color() == None {
+                    let is_dead_black = other.vertices[i].color() == Some(Color::Black) && white_distance[i] != 0xff;
+                    let is_dead_white = other.vertices[i].color() == Some(Color::White) && black_distance[i] != 0xff;
 
                     if is_dead_black || is_dead_white {
-                        other.vertices[i].set_color(0);
+                        other.vertices[i].set_color(None);
                     }
                 } else {
-                    other.vertices[i].set_color(0); // remove dead stone
+                    other.vertices[i].set_color(None); // remove dead stone
                 }
             }
         }
@@ -169,10 +167,11 @@ impl Score for Board {
 
         for i in Point::all() {
             if self.inner.vertices[i].color() == finished.inner.vertices[i].color() {
-                if self.inner.vertices[i].color() != 0 {
-                    let territory_status = match Color::from(self.inner.vertices[i].color()) {
-                        Color::Black => StoneStatus::BlackTerritory,
-                        Color::White => StoneStatus::WhiteTerritory,
+                if self.inner.vertices[i].color() != None {
+                    let territory_status = match self.inner.vertices[i].color() {
+                        Some(Color::Black) => StoneStatus::BlackTerritory,
+                        Some(Color::White) => StoneStatus::WhiteTerritory,
+                        None => unreachable!()
                     };
 
                     status_list.push((i, vec! [StoneStatus::Alive, territory_status]));
@@ -183,10 +182,10 @@ impl Score for Board {
                         status_list.push((i, vec! [StoneStatus::WhiteTerritory]));
                     }
                 }
-            } else if self.inner.vertices[i].color() != 0 {
-                if finished.inner.vertices[i].color() == 0 {
-                    let is_dead_black = self.inner.vertices[i].color() == Color::Black as u8 && white_distance[i] != 0xff;
-                    let is_dead_white = self.inner.vertices[i].color() == Color::White as u8 && black_distance[i] != 0xff;
+            } else if self.inner.vertices[i].color() != None {
+                if finished.inner.vertices[i].color() == None {
+                    let is_dead_black = self.inner.vertices[i].color() == Some(Color::Black) && white_distance[i] != 0xff;
+                    let is_dead_white = self.inner.vertices[i].color() == Some(Color::White) && black_distance[i] != 0xff;
 
                     if is_dead_black {
                         status_list.push((i, vec! [StoneStatus::Dead, StoneStatus::WhiteTerritory]));
@@ -194,17 +193,19 @@ impl Score for Board {
                         status_list.push((i, vec! [StoneStatus::Dead, StoneStatus::BlackTerritory]));
                     }
                 } else {
-                    let territory_status = match Color::from(self.inner.vertices[i].color()) {
-                        Color::Black => StoneStatus::WhiteTerritory,
-                        Color::White => StoneStatus::BlackTerritory
+                    let territory_status = match self.inner.vertices[i].color() {
+                        Some(Color::Black) => StoneStatus::WhiteTerritory,
+                        Some(Color::White) => StoneStatus::BlackTerritory,
+                        None => unreachable!()
                     };
 
                     status_list.push((i, vec! [StoneStatus::Dead, territory_status]));
                 }
-            } else if self.inner.vertices[i].color() == 0 {
-                let territory_status = match Color::from(finished.inner.vertices[i].color()) {
-                    Color::Black => StoneStatus::BlackTerritory,
-                    Color::White => StoneStatus::WhiteTerritory
+            } else if self.inner.vertices[i].color() == None {
+                let territory_status = match finished.inner.vertices[i].color() {
+                    Some(Color::Black) => StoneStatus::BlackTerritory,
+                    Some(Color::White) => StoneStatus::WhiteTerritory,
+                    None => unreachable!()
                 };
 
                 status_list.push((i, vec! [territory_status]));
@@ -251,7 +252,7 @@ fn get_tt_score(board: &BoardFast) -> (usize, usize) {
 /// * `color` - the color to get the distance from
 ///
 fn get_territory_distance(board: &BoardFast, color: Color) -> [u8; Point::MAX] {
-    let current = color as u8;
+    let current = Some(color);
 
     // find all of our stones and mark them as starting points
     let mut territory = [0xff; Point::MAX];
@@ -275,7 +276,7 @@ fn get_territory_distance(board: &BoardFast, color: Color) -> [u8; Point::MAX] {
         let t = territory[index] + 1;
 
         for (other_index, other_vertex) in board.adjacent_to(index) {
-            if other_vertex.color() == 0 && territory[other_index] > t {
+            if other_vertex.color() == None && territory[other_index] > t {
                 probes.push_back(other_index);
                 territory[other_index] = t;
             }

@@ -47,7 +47,7 @@ pub struct ScoringSearch;
 
 impl SearchOptions for ScoringSearch {
     fn is_policy_candidate(board: &Board, to_move: Color, point: Point) -> bool {
-        point.is_valid() && !is_eye(board, to_move, point)
+        point != Point::default() && !is_eye(board, to_move, point)
     }
 
     fn deterministic() -> bool {
@@ -68,7 +68,7 @@ impl SearchOptions for ScoringSearch {
 fn is_vertex_filled(board: &Board, color: Color, point: Point, dx: i8, dy: i8) -> bool {
     let other = point.offset(dx as isize, dy as isize);
 
-    other.is_valid() && board.at(point.x(), point.y()) == Some(color)
+    board.at(other.x(), other.y()) == Some(color)
 }
 
 /// Returns true if the given move would fill ones own eye. An eye in this case

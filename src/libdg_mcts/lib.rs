@@ -198,11 +198,10 @@ fn forward<P: Predictor, O: SearchOptions>(server: &P, board: &Board, to_move: C
 fn create_initial_policy<O: SearchOptions>(board: &Board, to_move: Color) -> (Vec<f32>, Vec<usize>) {
     // mark all illegal moves as -Inf, which effectively ensures they are never selected by
     // the tree search.
-    let mut workspace = [0; Point::MAX];
     let mut policy = vec! [::std::f32::NEG_INFINITY; 368];
 
     for point in Point::all() {
-        if O::is_policy_candidate(board, to_move, point) && board.is_valid_mut(to_move, point, &mut workspace) {
+        if O::is_policy_candidate(board, to_move, point) && board.is_valid(to_move, point.x(), point.y()) {
             policy[point.to_packed_index()] = 0.0;
         }
     }
