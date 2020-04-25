@@ -156,8 +156,8 @@ impl Features for Board {
         for index in Point::all() {
             let other = symmetry_table[index];
 
-            if self.inner.vertices[index].color() != None {
-                let start = if self.inner.vertices[index].color() == Some(to_move) { 5 } else { 21 };
+            if self.inner[index].color() != None {
+                let start = if self.inner[index].color() == Some(to_move) { 5 } else { 21 };
                 let num_liberties = ::std::cmp::min(
                     get_num_liberties(&self.inner, index),
                     8
@@ -197,7 +197,7 @@ impl Features for Board {
         for index in Point::all() {
             let other = symmetry_table[index];
 
-            if self.inner.vertices[index].color() != None {
+            if self.inner[index].color() != None {
                 // pass
             } else if self.inner.is_valid(to_move, index) {
                 // is super-ko

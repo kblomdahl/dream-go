@@ -117,7 +117,7 @@ impl Board {
     pub fn at(&self, x: usize, y: usize) -> Option<Color> {
         let index = Point::new(x, y);
 
-        self.inner.vertices[index].color()
+        self.inner[index].color()
     }
 
     /// Returns true if playing at the given index violated the
@@ -131,7 +131,7 @@ impl Board {
     pub(super) fn _is_ko(&self, color: Color, at_point: Point) -> bool {
         debug_assert!(self.inner.is_valid(color, at_point));
 
-        self.inner.vertices[at_point].visited() && {
+        self.inner[at_point].visited() && {
             let adjust = self.inner.place_if(color, at_point);
             let next_zobrist_hash = self.zobrist_hash ^ adjust;
 
@@ -231,7 +231,7 @@ impl fmt::Display for Board {
             for x in 0..19 {
                 let index = Point::new(x, y);
 
-                match self.inner.vertices[index].color() {
+                match self.inner[index].color() {
                     None => write!(f, "  ")?,
                     Some(Color::Black) => write!(f, " \u{25cf}")?,
                     Some(Color::White) => write!(f, " \u{25cb}")?,
@@ -272,9 +272,7 @@ impl PartialEq for Board {
             .zip(other.zobrist_history.iter())
             .all(|(a, b)| a == b);
 
-        history && self.inner.vertices.iter()
-            .zip(other.inner.vertices.iter())
-            .all(|(a, b)| a.color() == b.color())
+        history && Point::all().all(|p| self.inner[p].color() == other.inner[p].color())
     }
 }
 

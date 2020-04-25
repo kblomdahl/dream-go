@@ -17,6 +17,7 @@ use point::Point;
 use zobrist;
 
 use std::marker::PhantomData;
+use std::ops::{Index, IndexMut};
 
 /// Iterator over all vertices that are directly adjacent to the given one. It will
 /// always return four values:
@@ -323,7 +324,21 @@ pub struct BoardFast {
     /// - `num_liberties` - 9 bits
     /// - `visited` - 1 bit
     ///
-    pub vertices: [u32; Point::MAX],
+    vertices: [u32; Point::MAX],
+}
+
+impl Index<Point> for BoardFast {
+    type Output = u32;
+
+    fn index(&self, index: Point) -> &Self::Output {
+        &self.vertices[index]
+    }
+}
+
+impl IndexMut<Point> for BoardFast {
+    fn index_mut(&mut self, index: Point) -> &mut Self::Output {
+        &mut self.vertices[index]
+    }
 }
 
 impl BoardFast {
@@ -334,7 +349,7 @@ impl BoardFast {
         };
 
         for point in Point::all() {
-            board.vertices[point] = EMPTY;
+            board[point] = EMPTY;
         }
 
         board
@@ -382,9 +397,9 @@ impl BoardFast {
     /// * `at_point` - the index of a vertex in the group
     /// 
     pub fn get_n_liberty(&self, at_point: Point) -> usize {
-        let head = self.vertices[at_point].head_point();
+        let head = self[at_point].head_point();
 
-        self.vertices[head].num_liberties()
+        self[head].num_liberties()
     }
 
     /// Returns one of the liberties to the given block.
@@ -415,9 +430,9 @@ impl BoardFast {
     /// 
     #[inline]
     pub fn has_n_liberty(&self, at_point: Point, n: usize) -> bool {
-        let head = self.vertices[at_point].head_point();
+        let head = self[at_point].head_point();
 
-        self.vertices[head].num_liberties() >= n
+        self[head].num_liberties() >= n
     }
 
     /// Returns whether the given move is valid according to the
@@ -429,9 +444,9 @@ impl BoardFast {
     /// * `at_point` - the HW index of the move
     ///
     pub fn is_valid(&self, color: Color, at_point: Point) -> bool {
-        debug_assert!(self.vertices[at_point].is_valid());
+        debug_assert!(self[at_point].is_valid());
 
-        self.vertices[at_point].color() == None && {
+        self[at_point].color() == None && {
             let current = Some(color);
 
             for (other_index, other_vertex) in self.adjacent_to(at_point) {
@@ -466,9 +481,9 @@ impl BoardFast {
     /// * `block_at` - 
     /// 
     fn is_liberty_of(&self, liberty: Point, block_at: Point) -> bool {
-        debug_assert_eq!(block_at, self.vertices[block_at].head_point());
+        debug_assert_eq!(block_at, self[block_at].head_point());
 
-        let block_color = self.vertices[block_at].color();
+        let block_color = self[block_at].color();
 
         self.adjacent_to(liberty).any(|(_adj_point, adj_state)| {
             let is_same_color = adj_state.color() == block_color;
@@ -490,8 +505,8 @@ impl BoardFast {
     ///
     #[inline]
     fn join_blocks(&mut self, one: Point, two: Point) {
-        let head_one = self.vertices[one].head_point();
-        let head_two = self.vertices[two].head_point();
+        let head_one = self[one].head_point();
+        let head_two = self[two].head_point();
 
         if head_one == head_two {
             return
@@ -499,7 +514,7 @@ impl BoardFast {
 
         // remove the liberty that we just filled by connecting these two
         // blocks.
-        self.vertices[head_two].sub_liberties(1);
+        self[head_two].sub_liberties(1);
 
         // make each vertex in the first block part of the second block, and
         // calculate the number of additional liberties that the second
@@ -523,7 +538,7 @@ impl BoardFast {
             point_state.set_head_point(head_two);
         }
 
-        self.vertices[head_two].add_liberties(num_additional_liberties);
+        self[head_two].add_liberties(num_additional_liberties);
 
         // re-connect the two lists so if we have two chains `A` and `B`:
         //
@@ -534,11 +549,11 @@ impl BoardFast {
         //
         //   a -> 2 -> 3 -> 1 -> b -> c -> a
         //
-        let one_prev = self.vertices[one].next_point();
-        let two_prev = self.vertices[two].next_point();
+        let one_prev = self[one].next_point();
+        let two_prev = self[two].next_point();
 
-        self.vertices[two].set_next_point(one_prev);
-        self.vertices[one].set_next_point(two_prev);
+        self[two].set_next_point(one_prev);
+        self[one].set_next_point(two_prev);
     }
 
     /// Change the liberty count of each unique adjacent block to the given
@@ -551,10 +566,10 @@ impl BoardFast {
     /// 
     fn incr_adjacent_liberties(&mut self, starting_point: Point) {
         let mut already_changed = [Point::default(); 4];
-        let head = self.vertices[starting_point].head_point();
+        let head = self[starting_point].head_point();
 
         for (i, adj_point) in AdjacentIter::new(starting_point).enumerate() {
-            let adj_state = self.vertices[adj_point];
+            let adj_state = self[adj_point];
 
             if adj_state.color() != None {
                 let adj_head = adj_state.head_point();
@@ -563,7 +578,7 @@ impl BoardFast {
 
                 if is_different_block && !is_already_changed {
                     already_changed[i] = adj_head;
-                    self.vertices[adj_head].add_liberties(1);
+                    self[adj_head].add_liberties(1);
                 }
             }
         }
@@ -603,7 +618,7 @@ impl BoardFast {
 
         for &other_index in &points {
             hash ^= zobrist::TABLE[color as usize][other_index];
-            self.vertices[other_index].set_color(None);
+            self[other_index].set_color(None);
             self.incr_adjacent_liberties(other_index);
         }
 
@@ -655,11 +670,11 @@ impl BoardFast {
             .filter(|(_, adj_state)| adj_state.color() == None)
             .count();
 
-        self.vertices[at_point].set_color(Some(color));
-        self.vertices[at_point].set_next_point(at_point);
-        self.vertices[at_point].set_head_point(at_point);
-        self.vertices[at_point].set_liberties(num_immediate_liberties);
-        self.vertices[at_point].set_visited(true);
+        self[at_point].set_color(Some(color));
+        self[at_point].set_next_point(at_point);
+        self[at_point].set_head_point(at_point);
+        self[at_point].set_liberties(num_immediate_liberties);
+        self[at_point].set_visited(true);
 
         // connect this stone to any neighbouring groups, and clear the
         // opponents color
@@ -668,15 +683,15 @@ impl BoardFast {
         let opponent = color.opposite();
 
         for (i, other_point) in AdjacentIter::new(at_point).enumerate() {
-            let value = self.vertices[other_point].color();
+            let value = self[other_point].color();
 
             if value == Some(color) {
                 self.join_blocks(at_point, other_point);
             } else if value == Some(opponent) {
-                let head = self.vertices[other_point].head_point();
+                let head = self[other_point].head_point();
 
                 if !seen_blocks.contains(&head) {
-                    self.vertices[head].sub_liberties(1);
+                    self[head].sub_liberties(1);
                     seen_blocks[i] = head;
 
                     if !self.has_n_liberty(head, 1) {

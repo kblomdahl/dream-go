@@ -140,7 +140,7 @@ pub fn is_symmetric(board: &Board, transform: Transform) -> bool {
     Point::all().all(|i| {
         let j = lookup[i];
 
-        board.inner.vertices[i].color() == board.inner.vertices[j].color()
+        board.inner[i].color() == board.inner[j].color()
     })
 }
 
