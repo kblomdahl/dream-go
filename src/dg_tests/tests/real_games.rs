@@ -46,7 +46,7 @@ fn lee_sedol_alpha_go_game_4() {
 ;B[qs];W[rs];B[oh];W[sl];B[of];W[sj];B[ni];W[nj];B[oo];W[jp]
 "#, None);
 
-    assert_eq!(board.zobrist_hash(), 0x616d53bfd7c63e6c, "wrong hash\n{}", board);
+    assert_eq!(board.zobrist_hash(), 8306876591293505520, "wrong hash\n{}", board);
 }
 
 /// Famous game for basic sanity checks
@@ -71,7 +71,7 @@ fn ke_jie_alpha_go_game_2() {
 ;B[ce];W[dc];B[cf];W[dg];B[be]
 "#, None);
 
-    assert_eq!(board.zobrist_hash(), 0xad4f3d0dfc4e535b, "wrong hash\n{}", board);
+    assert_eq!(board.zobrist_hash(), 6611710067991275858, "wrong hash\n{}", board);
 }
 
 /// Test a game featuring a triple ko without the last two
@@ -114,5 +114,5 @@ fn park_taehee_kim_dayoung() {
 ;B[bd];W[qs];B[da]
 "#, None);
 
-    assert_eq!(board.zobrist_hash(), 0x2867823577192483, "wrong hash\n{}", board);
+    assert_eq!(board.zobrist_hash(), 8830202173104103970, "wrong hash\n{}", board);
 }

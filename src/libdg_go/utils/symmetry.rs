@@ -12,55 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
-use std::mem;
-
 use board_fast::{Vertex};
 use board::Board;
+use point::Point;
 
-fn get_transformation<F, G>(ax: F, ay: G) -> Box<[u16]>
+fn get_transformation<F, G>(ax: F, ay: G) -> Box<[Point]>
     where F: Fn(i32, i32) -> i32, G: Fn(i32, i32) -> i32
 {
-    (0..361)
-        .map(|i| {
-            let x = (i % 19) as i32;
-            let y = (i / 19) as i32;
-            let tx = ax(x - 9, y - 9) + 9;
-            let ty = ay(x - 9, y - 9) + 9;
+    let mut out = vec! [Point::default(); Point::MAX];
 
-            assert!(tx >= 0 && tx < 19, "tx {} -> {}", x, tx);
-            assert!(ty >= 0 && ty < 19, "ty {} -> {}", y, ty);
+    for point in Point::all() {
+        let x = point.x() as i32;
+        let y = point.y() as i32;
+        let tx = ax(x - 9, y - 9) + 9;
+        let ty = ay(x - 9, y - 9) + 9;
 
-            (19 * ty + tx) as u16
-        })
-        .collect::<Vec<u16>>()
-        .into_boxed_slice()
+        assert!(tx >= 0 && tx < 19, "tx {} -> {}", x, tx);
+        assert!(ty >= 0 && ty < 19, "ty {} -> {}", y, ty);
+
+        out[point.to_i()] = Point::new(tx as usize, ty as usize);
+    }
+
+    out.into_boxed_slice()
 }
 
 lazy_static! {
     /// Identity transformation.
-    static ref _IDENTITY: Box<[u16]> = get_transformation(|x,_| x, |_,y| y);
+    static ref _IDENTITY: Box<[Point]> = get_transformation(|x,_| x, |_,y| y);
 
     /// Flip the matrix across the horizontal axis.
-    static ref _FLIP_LR: Box<[u16]> = get_transformation(|x,_| -x, |_,y| y);
+    static ref _FLIP_LR: Box<[Point]> = get_transformation(|x,_| -x, |_,y| y);
 
     /// Flip the matrix across the vertical axis.
-    static ref _FLIP_UD: Box<[u16]> = get_transformation(|x,_| x, |_,y| -y);
+    static ref _FLIP_UD: Box<[Point]> = get_transformation(|x,_| x, |_,y| -y);
 
     /// Flip the matrix across the main-diagonal.
-    static ref _TRANSPOSE_MAIN: Box<[u16]> = get_transformation(|_,y| y, |x,_| x);
+    static ref _TRANSPOSE_MAIN: Box<[Point]> = get_transformation(|_,y| y, |x,_| x);
 
     /// Flip the matrix across the anti-diagonal.
-    static ref _TRANSPOSE_ANTI: Box<[u16]> = get_transformation(|_,y| -y, |x,_| -x);
+    static ref _TRANSPOSE_ANTI: Box<[Point]> = get_transformation(|_,y| -y, |x,_| -x);
 
     /// Rotate the matrix 90 degrees clock-wise.
-    static ref _ROT_90: Box<[u16]> = get_transformation(|_,y| y, |x,_| -x);
+    static ref _ROT_90: Box<[Point]> = get_transformation(|_,y| y, |x,_| -x);
 
     /// Rotate the matrix 180 degrees clock-wise.
-    static ref _ROT_180: Box<[u16]> = get_transformation(|x,_| -x, |_,y| -y);
+    static ref _ROT_180: Box<[Point]> = get_transformation(|x,_| -x, |_,y| -y);
 
     /// Rotate the matrix 270 degrees clock-wise.
-    static ref _ROT_270: Box<[u16]> = get_transformation(|_,y| -y, |x,_| x);
+    static ref _ROT_270: Box<[Point]> = get_transformation(|_,y| -y, |x,_| x);
 }
 
 /// Available transformations that are part of the go boards symmetry group.
@@ -90,8 +89,8 @@ impl Transform {
         }
     }
 
-    pub fn apply(self, index: usize) -> usize {
-        let dest = match self {
+    pub fn apply(self, index: Point) -> Point {
+        match self {
             Transform::Identity => _IDENTITY[index],
             Transform::FlipLR => _FLIP_LR[index],
             Transform::FlipUD => _FLIP_UD[index],
@@ -100,12 +99,10 @@ impl Transform {
             Transform::Rot90 => _ROT_90[index],
             Transform::Rot180 => _ROT_180[index],
             Transform::Rot270 => _ROT_270[index],
-        };
-
-        dest as usize
+        }
     }
 
-    pub fn get_table(self) -> &'static [u16] {
+    pub fn get_table(self) -> &'static [Point] {
         match self {
             Transform::Identity => &_IDENTITY,
             Transform::FlipLR => &_FLIP_LR,
@@ -130,51 +127,6 @@ pub static ALL: [Transform; 8] = [
     Transform::Rot270
 ];
 
-fn reorder<T: Copy>(src: &[T], dst: &mut [T], mapping: &[u16]) {
-    for i in 0..361 {
-        let j = mapping[i] as usize;
-
-        dst[j] = src[i];
-    }
-}
-
-/// Apply the given symmetry transformation to the tensor in CHW
-/// format, with any left-over elements at the end of the tensor
-/// untouched. The transformation is applied in-place.
-///
-/// # Arguments
-///
-/// * `values` -
-/// * `transform` -
-///
-pub fn apply<T: Copy>(values: &mut [T], transform: Transform) {
-    thread_local! {
-        static WORKSPACE: RefCell<[i32; 361]> = RefCell::new([0; 361]);
-    }
-
-    debug_assert!(mem::size_of::<T>() <= 4);
-
-    WORKSPACE.with(|workspace| { unsafe {
-        let mut workspace = workspace.borrow_mut();
-        let workspace = &mut *(&mut *workspace as *mut [i32] as *mut [T]);
-        let lookup: &[u16] = transform.get_table();
-        let n = values.len() / 361;
-
-        for i in 0..n {
-            let s = 361 * i;
-            let e = 361 * (i + 1);
-
-            reorder(
-                &values[s..e],
-                workspace,
-                lookup
-            );
-
-            values[s..e].copy_from_slice(workspace);
-        }
-    }});
-}
-
 /// Returns if the given board is symmetric over the given group.
 ///
 /// # Arguments
@@ -183,10 +135,10 @@ pub fn apply<T: Copy>(values: &mut [T], transform: Transform) {
 /// * `transform` -
 ///
 pub fn is_symmetric(board: &Board, transform: Transform) -> bool {
-    let lookup: &[u16] = transform.get_table();
+    let lookup: &[Point] = transform.get_table();
 
-    (0..361).all(|i| {
-        let j = lookup[i] as usize;
+    Point::all().all(|i| {
+        let j = lookup[i];
 
         board.inner.vertices[i].color() == board.inner.vertices[j].color()
     })
@@ -197,78 +149,54 @@ mod tests {
     use std::collections::HashSet;
     use super::*;
 
-    fn test_uniq(values: &[f32]) {
-        let u = values.into_iter()
-            .map(|&x| x as i32)
-            .inspect(|&x| {
-                assert!(x >= 0 && x < 361);
-            })
-            .collect::<HashSet<i32>>();
+    fn test_symmetry(t: Transform) {
+        let mut seen = HashSet::new();
 
-        assert_eq!(u.len(), 361);
+        for point in Point::all() {
+            let other = t.apply(point);
+
+            assert!(other.is_valid());
+            assert!(seen.insert(other));
+        }
     }
 
     #[test]
     pub fn identity() {
-        let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        apply(&mut seq, Transform::Identity);
-
-        test_uniq(&seq);
+        test_symmetry(Transform::Identity);
     }
 
     #[test]
     pub fn flip_lr() {
-        let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        apply(&mut seq, Transform::FlipLR);
-
-        test_uniq(&seq);
+        test_symmetry(Transform::FlipLR);
     }
 
     #[test]
     pub fn flip_ud() {
-        let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        apply(&mut seq, Transform::FlipUD);
-
-        test_uniq(&seq);
+        test_symmetry(Transform::FlipUD);
     }
 
     #[test]
     pub fn transpose() {
-        let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        apply(&mut seq, Transform::Transpose);
-
-        test_uniq(&seq);
+        test_symmetry(Transform::Transpose);
     }
 
     #[test]
     pub fn transpose_anti() {
-        let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        apply(&mut seq, Transform::TransposeAnti);
-
-        test_uniq(&seq);
+        test_symmetry(Transform::TransposeAnti);
     }
 
     #[test]
     pub fn rot90() {
-        let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        apply(&mut seq, Transform::Rot90);
-
-        test_uniq(&seq);
+        test_symmetry(Transform::Rot90);
     }
 
     #[test]
     pub fn rot180() {
-        let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        apply(&mut seq, Transform::Rot180);
-
-        test_uniq(&seq);
+        test_symmetry(Transform::Rot180);
     }
 
     #[test]
     pub fn rot270() {
-        let mut seq = (0..361).map(|i| i as f32).collect::<Vec<f32>>();
-        apply(&mut seq, Transform::Rot270);
-
-        test_uniq(&seq);
+        test_symmetry(Transform::Rot270);
     }
 }

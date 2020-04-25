@@ -23,13 +23,13 @@ use std::arch::x86_64::*;
 ///
 #[target_feature(enable = "avx,avx2,popcnt")]
 unsafe fn _count_zeros(haystack: &[u8]) -> usize {
-    debug_assert!(haystack.len() == 384);
+    debug_assert!(haystack.len() == 448);
 
     let mut haystack = haystack.as_ptr();
     let mut count = 0;
     let zero = _mm256_setzero_si256();
 
-    for _i in 0..12 {
+    for _i in 0..14 {
         let a = _mm256_loadu_si256(haystack as *const _);
         let eq_a = _mm256_cmpeq_epi8(a, zero);
 
@@ -52,7 +52,7 @@ pub fn count_zeros(haystack: &[u8]) -> usize {
     if is_x86_feature_detected!("avx2")  {
         unsafe { _count_zeros(haystack) }
     } else {
-        (0..361).filter(|&i| haystack[i] == 0).count()
+        (0..448).filter(|&i| haystack[i] == 0).count()
     }
 }
 
@@ -63,7 +63,7 @@ mod tests {
 
     #[bench]
     fn check_count_zeros(b: &mut Bencher) {
-        let mut array = [1u8; 384];
+        let mut array = [1u8; 448];
 
         array[  0] = 0; array[  3] = 0; array[ 18] = 0; array[ 21] = 0;
         array[ 42] = 0; array[ 71] = 0; array[121] = 0; array[209] = 0;

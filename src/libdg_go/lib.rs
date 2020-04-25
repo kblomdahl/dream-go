@@ -27,13 +27,14 @@ mod asm;
 mod board;
 #[macro_use] mod board_fast;
 mod circular_buf;
-mod codegen;
 mod color;
 pub mod utils;
+mod point;
 mod small_set;
 mod zobrist;
 
 pub use self::color::*;
 pub use self::board::*;
+pub use self::point::*;
 
 pub const DEFAULT_KOMI: f32 = 7.5;

@@ -1678,9 +1678,9 @@ mod tests {
         let mut prior: Vec<f32> = (0..368).map(|_| rng.gen::<f32>()).collect();
         let mut memoize = [0; 368];
 
-        for i in 0..362 {
-            if i != 361 && !board.is_valid_mut(to_move, i, &mut memoize) {
-                prior[i] = ::std::f32::NEG_INFINITY;
+        for point in Point::all() {
+            if !board.is_valid_mut(to_move, point, &mut memoize) {
+                prior[point.to_packed_index()] = ::std::f32::NEG_INFINITY;
             }
         }
 

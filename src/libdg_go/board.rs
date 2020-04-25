@@ -19,6 +19,7 @@ use board_fast::{BoardFast, Vertex};
 use color::Color;
 use circular_buf::CircularBuf;
 use small_set::SmallSet64;
+use point::Point;
 
 ///
 #[derive(Clone)]
@@ -28,7 +29,7 @@ pub struct Board {
     pub(super) inner: BoardFast,
 
     /// Stack containing the six most recent `vertices`.
-    pub(super) history: CircularBuf,
+    pub(super) history: CircularBuf<Point>,
 
     /// The zobrist hash of the current board state.
     pub(super) zobrist_hash: u64,
@@ -114,7 +115,7 @@ impl Board {
     ///
     #[inline]
     pub fn at(&self, x: usize, y: usize) -> Option<Color> {
-        let index = 19 * y + x;
+        let index = Point::new(x, y);
 
         if self.inner.vertices[index].color() == Color::Black as u8 {
             Some(Color::Black)
@@ -131,14 +132,14 @@ impl Board {
     /// # Arguments
     ///
     /// * `color` - the color of the move
-    /// * `index` - the index of the move
+    /// * `at_point` - the index of the move
     /// * `workspace` - the memoization of the board liberties
     ///
-    pub(super) fn _is_ko_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
-        debug_assert!(self.inner.is_valid(color, index));
+    pub(super) fn _is_ko_mut(&self, color: Color, at_point: Point, workspace: &mut [u8]) -> bool {
+        debug_assert!(self.inner.is_valid(color, at_point));
 
-        self.inner.vertices[index].visited() && {
-            let adjust = self.inner.place_if_mut(color, index, workspace);
+        self.inner.vertices[at_point].visited() && {
+            let adjust = self.inner.place_if_mut(color, at_point, workspace);
             let next_zobrist_hash = self.zobrist_hash ^ adjust;
 
             self.zobrist_history.contains(next_zobrist_hash)
@@ -151,13 +152,13 @@ impl Board {
     /// # Arguments
     ///
     /// * `color` - the color of the move
-    /// * `index` - the index of the move
+    /// * `at_point` - the index of the move
     ///
-    pub(super) fn _is_ko(&self, color: Color, index: usize) -> bool {
-        debug_assert!(self.inner.is_valid(color, index));
+    pub(super) fn _is_ko(&self, color: Color, at_point: Point) -> bool {
+        debug_assert!(self.inner.is_valid(color, at_point));
 
-        self.inner.vertices[index].visited() && {
-            let adjust = self.inner.place_if(color, index);
+        self.inner.vertices[at_point].visited() && {
+            let adjust = self.inner.place_if(color, at_point);
             let next_zobrist_hash = self.zobrist_hash ^ adjust;
 
             self.zobrist_history.contains(next_zobrist_hash)
@@ -170,11 +171,11 @@ impl Board {
     /// # Arguments
     ///
     /// * `color` - the color of the move
-    /// * `index` - the index of the move
+    /// * `at_point` - the index of the move
     /// * `workspace` - the memoization of the board liberties
     ///
-    pub fn is_valid_mut(&self, color: Color, index: usize, workspace: &mut [u8]) -> bool {
-        self.inner.is_valid_mut(color, index, workspace) && !self._is_ko_mut(color, index, workspace)
+    pub fn is_valid_mut(&self, color: Color, at_point: Point, workspace: &mut [u8]) -> bool {
+        self.inner.is_valid_mut(color, at_point, workspace) && !self._is_ko_mut(color, at_point, workspace)
     }
 
     /// Returns whether the given move is valid according to the
@@ -183,11 +184,11 @@ impl Board {
     /// # Arguments
     ///
     /// * `color` - the color of the move
-    /// * `index` - the index of the move
+    /// * `at_point` - the index of the move
     /// * `workspace` - the memoization of the board liberties
     ///
-    pub(super) fn _is_valid(&self, color: Color, index: usize) -> bool {
-        self.inner.is_valid(color, index) && !self._is_ko(color, index)
+    pub(super) fn _is_valid(&self, color: Color, at_point: Point) -> bool {
+        self.inner.is_valid(color, at_point) && !self._is_ko(color, at_point)
     }
 
     /// Returns whether the given move is valid according to the
@@ -200,7 +201,7 @@ impl Board {
     /// * `y` - the row of the move
     ///
     pub fn is_valid(&self, color: Color, x: usize, y: usize) -> bool {
-        self._is_valid(color, 19 * y + x)
+        self._is_valid(color, Point::new(x, y))
     }
 
     /// Place the given stone on the board without checking if it is legal, the
@@ -210,18 +211,18 @@ impl Board {
     /// # Arguments
     ///
     /// * `color` - the color of the move
-    /// * `index` - The index of the move
+    /// * `at_point` - The index of the move
     ///
-    pub fn _place(&mut self, color: Color, index: usize) {
+    pub fn _place(&mut self, color: Color, at_point: Point) {
         // place the stone on the board regardless of whether it is legal
         // or not.
-        self.zobrist_hash ^= self.inner.place(color, index);
+        self.zobrist_hash ^= self.inner.place(color, at_point);
         self.last_played = Some(color);
         self.count += 1;
 
         // store the actually played move since it is necessary for the feature
         // vector.
-        self.history.push(index as u16);
+        self.history.push(at_point);
         self.zobrist_history.push(self.zobrist_hash);
     }
 
@@ -236,7 +237,7 @@ impl Board {
     /// * `y` - The row of the move
     ///
     pub fn place(&mut self, color: Color, x: usize, y: usize) {
-        self._place(color, 19 * y + x)
+        self._place(color, Point::new(x, y))
     }
 }
 
@@ -267,7 +268,7 @@ impl fmt::Display for Board {
             write!(f, "{:2} \u{2502}", 1 + y)?;
 
             for x in 0..19 {
-                let index = 19 * y + x;
+                let index = Point::new(x, y);
 
                 if self.inner.vertices[index].color() == 0 {
                     write!(f, "  ")?;
@@ -430,7 +431,7 @@ mod tests {
 
         board.place(Color::White, 0, 1);
 
-        assert_eq!(board.at(0, 1), Some(Color::White));
+        assert_eq!(board.at(0, 1), Some(Color::White), "\n{}\n", board);
         assert_eq!(board.at(1, 1), Some(Color::Black));
         assert_eq!(board.at(1, 2), Some(Color::Black));
         assert_eq!(board.at(2, 1), Some(Color::Black));

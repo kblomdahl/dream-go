@@ -60,7 +60,7 @@ use std::thread::{self, JoinHandle};
 use dg_go::utils::features::{HWC, Features};
 use dg_go::utils::score::{Score};
 use dg_go::utils::symmetry;
-use dg_go::{Board, Color};
+use dg_go::{Board, Color, Point};
 use self::options::{SearchOptions, ScoringSearch};
 use self::time_control::TimeStrategy;
 use self::predict::Predictor;
@@ -198,13 +198,17 @@ fn forward<P: Predictor, O: SearchOptions>(server: &P, board: &Board, to_move: C
 fn create_initial_policy<O: SearchOptions>(board: &Board, to_move: Color) -> (Vec<f32>, Vec<usize>) {
     // mark all illegal moves as -Inf, which effectively ensures they are never selected by
     // the tree search.
-    let mut workspace = [0; 368];
+    let mut workspace = [0; Point::MAX];
     let mut policy = vec! [::std::f32::NEG_INFINITY; 368];
 
-    for i in 0..362 {
-        if O::is_policy_candidate(board, to_move, i) && (i == 361 || board.is_valid_mut(to_move, i, &mut workspace)) {
-            policy[i] = 0.0;
+    for point in Point::all() {
+        if O::is_policy_candidate(board, to_move, point) && board.is_valid_mut(to_move, point, &mut workspace) {
+            policy[point.to_packed_index()] = 0.0;
         }
+    }
+
+    if O::is_policy_candidate(board, to_move, Point::default()) {
+        policy[361] = 0.0;
     }
 
     // remove any symmetric moves that does not contribute to the search.
@@ -218,8 +222,10 @@ fn create_initial_policy<O: SearchOptions>(board: &Board, to_move: Color) -> (Ve
     let mut indices = vec! [0; 362];
     indices[361] = 361;
 
-    for i in 0..361 {
-        if let Some(target) = symmetries.iter().map(|t| t.apply(i)).min() {
+    for point in Point::all() {
+        let i = point.to_packed_index();
+
+        if let Some(target) = symmetries.iter().map(|t| t.apply(point).to_packed_index()).min() {
             indices[i] = target;
 
             if i != target {
@@ -254,8 +260,9 @@ fn add_valid_candidates(
 
     // de-transform each index in the source policy, to the identity board position
     // before adding it to the destination.
-    for i in 0..361 {
-        let j = indices[t.inverse().apply(i)];
+    for point in Point::all() {
+        let i = point.to_packed_index();
+        let j = indices[t.inverse().apply(point).to_packed_index()];
 
         dst[j] += src[i];
     }

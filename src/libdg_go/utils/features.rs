@@ -16,6 +16,7 @@ use asm::count_zeros;
 use board_fast::*;
 use board::Board;
 use color::Color;
+use point::Point;
 use dg_utils::{max, min};
 
 use super::ladder::Ladder;
@@ -30,15 +31,15 @@ pub const FEATURE_SIZE: usize = NUM_FEATURES * 361;
 /// Utility function for determining the data format of the array returned by
 /// `get_features`.
 pub trait Order {
-    fn index(c: usize, i: usize) -> usize;
+    fn index(c: usize, point: Point) -> usize;
 }
 
 /// Implementation of `Order` for the data format `NCHW`.
 pub struct CHW;
 
 impl Order for CHW {
-    fn index(c: usize, i: usize) -> usize {
-        c * 361 + i
+    fn index(c: usize, point: Point) -> usize {
+        c * 361 + point.to_packed_index()
     }
 }
 
@@ -46,7 +47,9 @@ impl Order for CHW {
 pub struct HWC;
 
 impl Order for HWC {
-    fn index(c: usize, i: usize) -> usize { NUM_FEATURES * i + c }
+    fn index(c: usize, point: Point) -> usize {
+        NUM_FEATURES * point.to_packed_index() + c
+    }
 }
 
 pub trait Features {
@@ -143,21 +146,19 @@ impl Features for Board {
         let opponent = to_move.opposite();
 
         // board state (one-hot historic)
-        for (i, index) in self.history.iter().take(2).enumerate() {
-            if index == 361 {
-                // pass
-            } else {
-                let other = symmetry_table[index as usize] as usize;
+        for (i, point) in self.history.iter().take(2).enumerate() {
+            if point.is_valid() {
+                let other = symmetry_table[point];
 
                 features[O::index(3+i, other)] = c_1;
             }
         }
 
         // liberties
-        let mut liberties = [0; 368];
+        let mut liberties = [0; Point::MAX];
 
-        for index in 0..361 {
-            let other = symmetry_table[index] as usize;
+        for index in Point::all() {
+            let other = symmetry_table[index];
 
             if self.inner.vertices[index].color() != 0 {
                 let start = if self.inner.vertices[index].color() == current { 5 } else { 21 };
@@ -197,8 +198,8 @@ impl Features for Board {
         // vertex properties
         let mut is_ko = c_0;
 
-        for index in 0..361 {
-            let other = symmetry_table[index] as usize;
+        for index in Point::all() {
+            let other = symmetry_table[index];
 
             if self.inner.vertices[index].color() != 0 {
                 // pass
@@ -228,8 +229,8 @@ impl Features for Board {
         let is_black = if to_move == Color::Black { c_komi } else { c_0 };
         let is_white = if to_move == Color::White { c_komi } else { c_0 };
 
-        for index in 0..361 {
-            let other = symmetry_table[index] as usize;
+        for index in Point::all() {
+            let other = symmetry_table[index];
 
             features[O::index(0, other)] = is_black;
             features[O::index(1, other)] = is_white;
@@ -246,11 +247,11 @@ impl Features for Board {
 /// # Arguments
 ///
 /// * `vertices` - the array to fill liberties from
-/// * `index` - the group to fill liberties for
+/// * `at_point` - the group to fill liberties for
 /// * `liberties` - output array containing the liberties of this group
 ///
-fn fill_liberties(board: &BoardFast, index: usize, liberties: &mut [u8]) {
-    for current in board.block_at(index) {
+fn fill_liberties(board: &BoardFast, at_point: Point, liberties: &mut [u8]) {
+    for current in board.block_at(at_point) {
         for (other_index, vertex) in board.adjacent_to(current) {
             liberties[other_index] = vertex.color();
         }
@@ -265,21 +266,21 @@ fn fill_liberties(board: &BoardFast, index: usize, liberties: &mut [u8]) {
 /// # Arguments
 ///
 /// * `board` - 
-/// * `index` - the index of the group to check
+/// * `at_point` - the index of the group to check
 /// * `memoize` - cache of already calculated liberty counts
 ///
-fn get_num_liberties(board: &BoardFast, index: usize, memoize: &mut [usize]) -> usize {
-    if memoize[index] != 0 {
-        memoize[index]
+fn get_num_liberties(board: &BoardFast, at_point: Point, memoize: &mut [usize]) -> usize {
+    if memoize[at_point] != 0 {
+        memoize[at_point]
     } else {
-        let mut liberties = [0xff; 384];
-        fill_liberties(board, index, &mut liberties);
+        let mut liberties = [0xff; 448];
+        fill_liberties(board, at_point, &mut liberties);
 
         // update the cached value in the memoize array for all stones
         // that are strongly connected to the given index
         let num_liberties = count_zeros(&liberties);
 
-        for current in board.block_at(index) {
+        for current in board.block_at(at_point) {
             memoize[current] = num_liberties;
         }
 
@@ -297,15 +298,15 @@ fn get_num_liberties(board: &BoardFast, index: usize, memoize: &mut [usize]) -> 
 /// # Arguments
 ///
 /// * `color` - the color of the move
-/// * `index` - the HW index of the move
+/// * `at_point` - the HW index of the move
 /// * `memoize` - cache of already calculated liberty counts
 ///
-fn _is_valid_memoize(board: &BoardFast, color: Color, index: usize, memoize: &mut [usize]) -> bool {
-    debug_assert!(board.vertices[index].color() == 0);
+fn _is_valid_memoize(board: &BoardFast, color: Color, at_point: Point, memoize: &mut [usize]) -> bool {
+    debug_assert!(board.vertices[at_point].color() == 0);
 
     let current = color as u8;
 
-    board.adjacent_to(index).any(|(other_index, vertex)| {
+    board.adjacent_to(at_point).any(|(other_index, vertex)| {
         let value = vertex.color();
 
         // check for direct liberties
@@ -331,18 +332,18 @@ fn _is_valid_memoize(board: &BoardFast, color: Color, index: usize, memoize: &mu
 /// * `color` - the color of the stone to pretend place
 /// * `index` - the index of the stone to pretend place
 ///
-fn get_num_liberties_if(board: &BoardFast, color: Color, index: usize, memoize: &mut [usize]) -> usize {
-    debug_assert!(board.vertices[index].color() == 0);
+fn get_num_liberties_if(board: &BoardFast, color: Color, at_point: Point, memoize: &mut [usize]) -> usize {
+    debug_assert!(board.vertices[at_point].color() == 0);
 
     let mut other = board.clone();
-    other.vertices[index].set_color(color as u8);
-    other.vertices[index].set_visited(true);
+    other.vertices[at_point].set_color(color as u8);
+    other.vertices[at_point].set_visited(true);
 
     // capture of opponent stones
     let current = color as u8;
     let opponent = color.opposite() as u8;
 
-    for (other_index, other_vertex) in board.adjacent_to(index) {
+    for (other_index, other_vertex) in board.adjacent_to(at_point) {
         if other_vertex.color() == opponent && get_num_liberties(&board, other_index, memoize) == 1 {
             other.capture(opponent as usize, other_index);
         }
@@ -350,9 +351,9 @@ fn get_num_liberties_if(board: &BoardFast, color: Color, index: usize, memoize: 
 
     // add liberties based on the liberties of the friendly neighbouring
     // groups
-    let mut liberties = [0xff; 384];
+    let mut liberties = [0xff; 448];
 
-    for (other_index, other_vertex) in other.adjacent_to(index) {
+    for (other_index, other_vertex) in other.adjacent_to(at_point) {
         let other_color = other_vertex.color();
 
         if other_color == current {

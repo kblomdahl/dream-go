@@ -15,6 +15,7 @@
 use board_fast::{BoardFast, Vertex, Two};
 use board::Board;
 use color::Color;
+use point::Point;
 
 use std::collections::VecDeque;
 
@@ -61,7 +62,7 @@ pub trait Score {
 
     /// Returns all territory that count as a score for either black
     /// or white.
-    fn get_scorable_territory(&self) -> Vec<usize>;
+    fn get_scorable_territory(&self) -> Vec<Point>;
 
     /// Returns the score for each player `(black, white)` of the
     /// current board state according to the Tromp-Taylor rules.
@@ -95,33 +96,33 @@ pub trait Score {
     ///
     /// * `finished` - A copy of this board that has been played to
     ///   finish, using some heuristic
-    fn get_stone_status(&self, finished: &Board) -> Vec<(usize, Vec<StoneStatus>)>;
+    fn get_stone_status(&self, finished: &Board) -> Vec<(Point, Vec<StoneStatus>)>;
 }
 
 impl Score for Board {
     fn is_scorable(&self) -> bool {
-        let some_black = (0..361).any(|i| self.inner.vertices[i].color() == Color::Black as u8);
-        let some_white = (0..361).any(|i| self.inner.vertices[i].color() == Color::White as u8);
+        let some_black = Point::all().any(|i| self.inner.vertices[i].color() == Color::Black as u8);
+        let some_white = Point::all().any(|i| self.inner.vertices[i].color() == Color::White as u8);
 
         some_black && some_white && {
             let black_distance = get_territory_distance(&self.inner, Color::Black);
             let white_distance = get_territory_distance(&self.inner, Color::White);
 
-            (0..361).all(|i| black_distance[i] == 0xff || white_distance[i] == 0xff)
+            Point::all().all(|i| black_distance[i] == 0xff || white_distance[i] == 0xff)
         } && {
-            let mut workspace = [0; 368];
+            let mut workspace = [0; Point::MAX];
 
-            (0..361).all(|i| {
+            Point::all().all(|i| {
                 self.inner.vertices[i].color() == 0 || self.inner.has_n_liberty_mut::<Two>(i, 2, &mut workspace)
             })
         }
     }
 
-    fn get_scorable_territory(&self) -> Vec<usize> {
+    fn get_scorable_territory(&self) -> Vec<Point> {
         let black_distance = get_territory_distance(&self.inner, Color::Black);
         let white_distance = get_territory_distance(&self.inner, Color::White);
 
-        (0..361).filter(|&i| {
+        Point::all().filter(|&i| {
             black_distance[i] == 0xff || white_distance[i] == 0xff
         }).collect()
     }
@@ -141,7 +142,7 @@ impl Score for Board {
         let white_distance = get_territory_distance(&finished.inner, Color::White);
         let mut other = self.inner.clone();
 
-        for i in 0..361 {
+        for i in Point::all() {
             if other.vertices[i].color() == finished.inner.vertices[i].color() {
                 // pass
             } else if other.vertices[i].color() != 0 {
@@ -161,12 +162,12 @@ impl Score for Board {
         get_tt_score(&other)
     }
 
-    fn get_stone_status(&self, finished: &Board) -> Vec<(usize, Vec<StoneStatus>)> {
+    fn get_stone_status(&self, finished: &Board) -> Vec<(Point, Vec<StoneStatus>)> {
         let black_distance = get_territory_distance(&finished.inner, Color::Black);
         let white_distance = get_territory_distance(&finished.inner, Color::White);
         let mut status_list = vec! [];
 
-        for i in 0..361 {
+        for i in Point::all() {
             if self.inner.vertices[i].color() == finished.inner.vertices[i].color() {
                 if self.inner.vertices[i].color() != 0 {
                     let territory_status = match Color::from(self.inner.vertices[i].color()) {
@@ -227,7 +228,7 @@ fn get_tt_score(board: &BoardFast) -> (usize, usize) {
     let black_distance = get_territory_distance(&board, Color::Black);
     let white_distance = get_territory_distance(&board, Color::White);
 
-    for i in 0..361 {
+    for i in Point::all() {
         if black_distance[i] == 0 as u8 {
             black += 1; // black has stone at vertex
         } else if white_distance[i] == 0 as u8 {
@@ -249,17 +250,17 @@ fn get_tt_score(board: &BoardFast) -> (usize, usize) {
 ///
 /// * `color` - the color to get the distance from
 ///
-fn get_territory_distance(board: &BoardFast, color: Color) -> [u8; 368] {
+fn get_territory_distance(board: &BoardFast, color: Color) -> [u8; Point::MAX] {
     let current = color as u8;
 
     // find all of our stones and mark them as starting points
-    let mut territory = [0xff; 368];
-    let mut probes = VecDeque::with_capacity(512);
+    let mut territory = [0xff; Point::MAX];
+    let mut probes = VecDeque::with_capacity(Point::MAX + 1);
 
-    for index in 0..361 {
-        if board.vertices[index].color() == current {
-            territory[index] = 0;
-            probes.push_back(index);
+    for point in Point::all() {
+        if board.vertices[point].color() == current {
+            territory[point] = 0;
+            probes.push_back(point);
         }
     }
 

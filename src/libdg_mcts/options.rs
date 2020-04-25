@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_go::{Board, Color};
-use tree;
+use dg_go::{Board, Color, Point};
 
 pub trait SearchOptions : Clone {
     /// Returns true if the given move should be considered during search.
@@ -22,9 +21,9 @@ pub trait SearchOptions : Clone {
     ///
     /// * `board` -
     /// * `to_move` -
-    /// * `index` -
+    /// * `point` -
     ///
-    fn is_policy_candidate(board: &Board, to_move: Color, index: usize) -> bool;
+    fn is_policy_candidate(board: &Board, to_move: Color, point: Point) -> bool;
 
     /// Returns true if the search should be deterministic.
     fn deterministic() -> bool;
@@ -34,7 +33,7 @@ pub trait SearchOptions : Clone {
 pub struct StandardSearch;
 
 impl SearchOptions for StandardSearch {
-    fn is_policy_candidate(_board: &Board, _to_move: Color, _index: usize) -> bool {
+    fn is_policy_candidate(_board: &Board, _to_move: Color, _point: Point) -> bool {
         true
     }
 
@@ -47,8 +46,8 @@ impl SearchOptions for StandardSearch {
 pub struct ScoringSearch;
 
 impl SearchOptions for ScoringSearch {
-    fn is_policy_candidate(board: &Board, to_move: Color, index: usize) -> bool {
-        index != 361 && !is_eye(board, to_move, index)
+    fn is_policy_candidate(board: &Board, to_move: Color, point: Point) -> bool {
+        point.is_valid() && !is_eye(board, to_move, point)
     }
 
     fn deterministic() -> bool {
@@ -62,18 +61,14 @@ impl SearchOptions for ScoringSearch {
 ///
 /// * `board` -
 /// * `color` -
-/// * `index` -
+/// * `point` -
 /// * `dx` -
 /// * `dy` -
 ///
-fn is_vertex_filled(board: &Board, color: Color, index: usize, dx: i8, dy: i8) -> bool {
-    let (x, y) = (tree::X[index] as isize, tree::Y[index] as isize);
-    let other_x = x + dx as isize;
-    let other_y = y + dy as isize;
+fn is_vertex_filled(board: &Board, color: Color, point: Point, dx: i8, dy: i8) -> bool {
+    let other = point.offset(dx as isize, dy as isize);
 
-    other_x >= 0 && other_x < 19 &&
-        other_y >= 0 && other_y < 19 &&
-        board.at(other_x as usize, other_y as usize) == Some(color)
+    other.is_valid() && board.at(point.x(), point.y()) == Some(color)
 }
 
 /// Returns true if the given move would fill ones own eye. An eye in this case
@@ -85,24 +80,26 @@ fn is_vertex_filled(board: &Board, color: Color, index: usize, dx: i8, dy: i8) -
 ///
 /// * `board` -
 /// * `color` -
-/// * `index` -
+/// * `point` -
 ///
-fn is_eye(board: &Board, color: Color, index: usize) -> bool {
+fn is_eye(board: &Board, color: Color, point: Point) -> bool {
     const CROSS: [(i8, i8); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
     const DIAGONAL: [(i8, i8); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
 
     let num_cross = CROSS.iter()
-        .filter(|(dx, dy)| is_vertex_filled(board, color, index, *dx, *dy))
+        .filter(|(dx, dy)| is_vertex_filled(board, color, point, *dx, *dy))
         .count();
     let num_diagonal = DIAGONAL.iter()
-        .filter(|(dx, dy)| is_vertex_filled(board, color, index, *dx, *dy))
+        .filter(|(dx, dy)| is_vertex_filled(board, color, point, *dx, *dy))
         .count();
 
     // distinguish between the three different cases, (i) an eye in the middle,
     // (ii) an eye in along the edge, and (iii) an eye in the corner.
-    let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
+    let packed_index = point.to_packed_index();
+    let x = point.x();
+    let y = point.y();
 
-    if index == 0 || index == 18 || index == 342 || index == 360 {
+    if packed_index == 0 || packed_index == 18 || packed_index == 342 || packed_index == 360 {
         num_cross >= 2 && num_diagonal >= 1  // corner move
     } else if x == 0 || x == 18 || y == 0 || y == 18 {
         num_cross >= 3 && num_diagonal >= 2  // edge

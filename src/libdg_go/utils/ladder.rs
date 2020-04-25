@@ -14,10 +14,11 @@
 
 use board_fast::{BoardFast, Vertex, One, Two, Three};
 use color::Color;
+use point::Point;
 
 pub trait Ladder {
-    fn is_ladder_capture(&self, color: Color, index: usize) -> bool;
-    fn is_ladder_escape(&self, color: Color, index: usize) -> bool;
+    fn is_ladder_capture(&self, color: Color, at_point: Point) -> bool;
+    fn is_ladder_escape(&self, color: Color, at_point: Point) -> bool;
 }
 
 /// Return true if the given group can capture any of its opponents
@@ -27,12 +28,12 @@ pub trait Ladder {
 ///
 /// * `board` - the `vertices` of the board to check
 /// * `color` - the color of the current player
-/// * `index` - the index of the group to check
+/// * `at_point` - the index of the group to check
 ///
-fn _can_escape_with_capture(board: &BoardFast, color: Color, index: usize) -> bool {
+fn _can_escape_with_capture(board: &BoardFast, color: Color, at_point: Point) -> bool {
     let opponent = color.opposite() as u8;
 
-    board.block_at(index).into_iter().any(|current| {
+    board.block_at(at_point).into_iter().any(|current| {
         board.adjacent_to(current).any(|(other_index, other_vertex)| {
             other_vertex.color() == opponent && !board.has_n_liberty::<Two>(other_index, 2)
         })
@@ -46,17 +47,17 @@ fn _can_escape_with_capture(board: &BoardFast, color: Color, index: usize) -> bo
 ///
 /// * `board` - the `vertices` of the board to check
 /// * `color` - the color of the current player
-/// * `index` - the index of the vertex to check
+/// * `at_point` - the index of the vertex to check
 ///
-fn _is_ladder_capture(mut board: BoardFast, color: Color, index: usize) -> bool {
-    board.place(color, index);
+fn _is_ladder_capture(mut board: BoardFast, color: Color, at_point: Point) -> bool {
+    board.place(color, at_point);
 
     // if any of the neighbouring opponent groups were reduced to one
     // liberty (and it cannot counter capture a group) then extend into
     // that liberty. if no such group exists then this is not a ladder
     // capturing move.
     let opponent = color.opposite() as u8;
-    let opponent_index = board.adjacent_to(index).filter_map(|(other_index, other_vertex)| {
+    let opponent_index = board.adjacent_to(at_point).filter_map(|(other_index, other_vertex)| {
         if other_vertex.color() == opponent {
             let is_in_atari = !board.has_n_liberty::<Two>(other_index, 2);
 
@@ -121,12 +122,12 @@ impl Ladder for BoardFast {
     /// # Arguments
     ///
     /// * `color` - the color of the current player
-    /// * `index` - the index of the stone to check
+    /// * `at_point` - the index of the stone to check
     ///
-    fn is_ladder_capture(&self, color: Color, index: usize) -> bool {
-        debug_assert!(self.is_valid(color, index));
+    fn is_ladder_capture(&self, color: Color, at_point: Point) -> bool {
+        debug_assert!(self.is_valid(color, at_point));
 
-        _is_ladder_capture(self.clone(), color, index)
+        _is_ladder_capture(self.clone(), color, at_point)
     }
 
     /// Returns true if playing a stone at the given index allows us to
@@ -135,13 +136,13 @@ impl Ladder for BoardFast {
     /// # Arguments
     ///
     /// * `color` - the color of the current player
-    /// * `index` - the index of the stone to check
-    fn is_ladder_escape(&self, color: Color, index: usize) -> bool {
-        debug_assert!(self.is_valid(color, index));
+    /// * `at_point` - the index of the stone to check
+    fn is_ladder_escape(&self, color: Color, at_point: Point) -> bool {
+        debug_assert!(self.is_valid(color, at_point));
 
         // check if we are connected to a stone with one liberty
         let player = color as u8;
-        let connected_to_one = self.adjacent_to(index).find(|&(other_index, other_vertex)| {
+        let connected_to_one = self.adjacent_to(at_point).find(|&(other_index, other_vertex)| {
             other_vertex.color() == player && !self.has_n_liberty::<Two>(other_index, 2)
         });
 
@@ -153,12 +154,12 @@ impl Ladder for BoardFast {
         // to play out the ladder.
         let mut board = self.clone();
 
-        board.place(color, index);
+        board.place(color, at_point);
 
         // check if we have exactly two liberties
-        let num_liberties = board.get_n_liberty::<Three>(index, 3).iter()
+        let num_liberties = board.get_n_liberty::<Three>(at_point, 3).iter()
             .fold(0, |acc, &liberty| {
-                acc + if liberty == 0xffff { 0 } else { 1 }
+                acc + if liberty.is_valid() { 1 } else { 0 }
             });
 
         if num_liberties != 2 {
@@ -166,7 +167,7 @@ impl Ladder for BoardFast {
         }
 
         // check that we cannot be captured in a ladder from either direction
-        self.adjacent_to(index).all(|(other_index, other_vertex)| {
+        self.adjacent_to(at_point).all(|(other_index, other_vertex)| {
             other_vertex.color() != 0 || {
                 let board = board.clone();
 
@@ -210,10 +211,9 @@ mod tests {
                         || (x == 18 && y ==  1)
                         || (x ==  0 && y == 17)
                         || (x == 17 && y ==  0);
-                    let index = 19 * y + x;
 
                     assert_eq!(
-                        board.inner.is_ladder_capture(Color::White, index),
+                        board.inner.is_ladder_capture(Color::White, Point::new(x, y)),
                         is_ladder
                     );
                 }
@@ -241,10 +241,9 @@ mod tests {
             for y in 0..19 {
                 if board.is_valid(Color::Black, x, y) {
                     let is_ladder = x == 3 && y == 4;
-                    let index = 19 * y + x;
 
                     assert_eq!(
-                        board.inner.is_ladder_capture(Color::Black, index),
+                        board.inner.is_ladder_capture(Color::Black, Point::new(x, y)),
                         is_ladder
                     );
                 }
@@ -266,16 +265,14 @@ mod tests {
         for x in 0..19 {
             for y in 0..19 {
                 if board.is_valid(Color::White, x, y) {
-                    let index = 19 * y + x;
-
                     // check that nothing is a ladder capture
-                    assert!(!board.inner.is_ladder_capture(Color::Black, index));
+                    assert!(!board.inner.is_ladder_capture(Color::Black, Point::new(x, y)));
 
                     // check that only the one move is a ladder escape
                     let is_escape = x == 4 && y == 3;
 
                     assert_eq!(
-                        board.inner.is_ladder_escape(Color::White, index),
+                        board.inner.is_ladder_escape(Color::White, Point::new(x, y)),
                         is_escape,
                         "({}, {}) is a ladder escape = {}", x, y, is_escape
                     );
@@ -319,7 +316,7 @@ mod tests {
             board.place(color, x, y);
         }
 
-        assert_eq!(board.inner.is_ladder_escape(Color::White, 251), true);
+        assert_eq!(board.inner.is_ladder_escape(Color::White, Point::new(4, 13)), true);
     }
 
     // Test that self-atari on the first move is not a ladder.
@@ -336,7 +333,7 @@ mod tests {
             board.place(color, x, y);
         }
 
-        assert_eq!(board.inner.is_ladder_capture(Color::White, 3 * 19 + 1), false);  // (Color::White, 1, 3)
+        assert_eq!(board.inner.is_ladder_capture(Color::White, Point::new(1, 3)), false);  // (Color::White, 1, 3)
     }
 
     // Test that self-atari of a neighbouring group is not a ladder.
@@ -353,6 +350,6 @@ mod tests {
             board.place(color, x, y);
         }
 
-        assert_eq!(board.inner.is_ladder_capture(Color::White, 3 * 19 + 1), false);  // (Color::White, 1, 3)
+        assert_eq!(board.inner.is_ladder_capture(Color::White, Point::new(1, 3)), false);  // (Color::White, 1, 3)
     }
 }

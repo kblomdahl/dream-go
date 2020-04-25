@@ -20,7 +20,7 @@ use std::time::Instant;
 
 use dg_go::utils::score::{Score, StoneStatus};
 use dg_go::utils::sgf::Sgf;
-use dg_go::{DEFAULT_KOMI, Board, Color};
+use dg_go::{DEFAULT_KOMI, Board, Color, Point};
 use dg_mcts::time_control;
 use dg_mcts as mcts;
 use dg_utils::config;
@@ -366,7 +366,7 @@ impl Gtp {
                 tree.disqualify(361);
 
                 for &index in &board.get_scorable_territory() {
-                    tree.disqualify(index);
+                    tree.disqualify(index.to_packed_index());
                 }
 
                 tree.best(0.0)
@@ -445,7 +445,7 @@ impl Gtp {
                 // we have computed
                 for index in GreedyPath::new(&search_tree, 8) {
                     if index != 361 {
-                        board._place(to_move, index);
+                        board._place(to_move, Point::from_packed_parts(index));
                     }
 
                     to_move = to_move.opposite();
