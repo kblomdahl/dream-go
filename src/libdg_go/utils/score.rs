@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn score_black() {
         let mut board = Board::new(7.5);
-        board.place(Color::Black, 0, 0);
+        board.place(Color::Black, Point::new(0, 0));
 
         assert!(!board.is_scorable());
         assert_eq!(board.get_score(), (361, 0));
@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn score_white() {
         let mut board = Board::new(7.5);
-        board.place(Color::White, 0, 0);
+        board.place(Color::White, Point::new(0, 0));
 
         assert!(!board.is_scorable());
         assert_eq!(board.get_score(), (0, 361));
@@ -313,19 +313,19 @@ mod tests {
     #[test]
     fn score_black_white() {
         let mut board = Board::new(7.5);
-        board.place(Color::White, 1, 0);
-        board.place(Color::White, 0, 1);
-        board.place(Color::White, 1, 1);
-        board.place(Color::White, 1, 2);
-        board.place(Color::White, 0, 3);
-        board.place(Color::White, 1, 3);
-        board.place(Color::Black, 2, 0);
-        board.place(Color::Black, 2, 1);
-        board.place(Color::Black, 2, 2);
-        board.place(Color::Black, 2, 3);
-        board.place(Color::Black, 0, 4);
-        board.place(Color::Black, 1, 4);
-        board.place(Color::Black, 2, 4);
+        board.place(Color::White, Point::new(1, 0));
+        board.place(Color::White, Point::new(0, 1));
+        board.place(Color::White, Point::new(1, 1));
+        board.place(Color::White, Point::new(1, 2));
+        board.place(Color::White, Point::new(0, 3));
+        board.place(Color::White, Point::new(1, 3));
+        board.place(Color::Black, Point::new(2, 0));
+        board.place(Color::Black, Point::new(2, 1));
+        board.place(Color::Black, Point::new(2, 2));
+        board.place(Color::Black, Point::new(2, 3));
+        board.place(Color::Black, Point::new(0, 4));
+        board.place(Color::Black, Point::new(1, 4));
+        board.place(Color::Black, Point::new(2, 4));
 
         assert!(board.is_scorable());
         assert_eq!(board.get_score(), (353, 8));

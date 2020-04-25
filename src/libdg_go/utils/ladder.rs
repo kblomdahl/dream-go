@@ -192,28 +192,27 @@ mod tests {
         // X . . . X
         //
         let mut board = Board::new(7.5);
-        board.place(Color::Black,  0,  0);
-        board.place(Color::Black,  0, 18);
-        board.place(Color::Black, 18,  0);
-        board.place(Color::Black, 18, 18);
+        board.place(Color::Black, Point::new( 0,  0));
+        board.place(Color::Black, Point::new( 0, 18));
+        board.place(Color::Black, Point::new(18,  0));
+        board.place(Color::Black, Point::new(18, 18));
 
-        for x in 0..19 {
-            for y in 0..19 {
-                if board.is_valid(Color::White, x, y) {
-                    let is_ladder = (x == 1 && y == 0)
-                        || (x ==  0 && y ==  1)
-                        || (x == 18 && y == 17)
-                        || (x == 17 && y == 18)
-                        || (x ==  1 && y == 18)
-                        || (x == 18 && y ==  1)
-                        || (x ==  0 && y == 17)
-                        || (x == 17 && y ==  0);
+        for point in Point::all() {
+            if board.is_valid(Color::White, point) {
+                let (x, y) = (point.x(), point.y());
+                let is_ladder = (x == 1 && y == 0)
+                    || (x ==  0 && y ==  1)
+                    || (x == 18 && y == 17)
+                    || (x == 17 && y == 18)
+                    || (x ==  1 && y == 18)
+                    || (x == 18 && y ==  1)
+                    || (x ==  0 && y == 17)
+                    || (x == 17 && y ==  0);
 
-                    assert_eq!(
-                        board.inner.is_ladder_capture(Color::White, Point::new(x, y)),
-                        is_ladder
-                    );
-                }
+                assert_eq!(
+                    board.inner.is_ladder_capture(Color::White, point),
+                    is_ladder
+                );
             }
         }
     }
@@ -229,21 +228,19 @@ mod tests {
         // . . . . .
         //
         let mut board = Board::new(7.5);
-        board.place(Color::White, 3, 3);
-        board.place(Color::Black, 2, 3);
-        board.place(Color::Black, 3, 2);
-        board.place(Color::Black, 4, 2);
+        board.place(Color::White, Point::new(3, 3));
+        board.place(Color::Black, Point::new(2, 3));
+        board.place(Color::Black, Point::new(3, 2));
+        board.place(Color::Black, Point::new(4, 2));
 
-        for x in 0..19 {
-            for y in 0..19 {
-                if board.is_valid(Color::Black, x, y) {
-                    let is_ladder = x == 3 && y == 4;
+        for point in Point::all() {
+            if board.is_valid(Color::Black, point) {
+                let is_ladder = point == Point::new(3, 4);
 
-                    assert_eq!(
-                        board.inner.is_ladder_capture(Color::Black, Point::new(x, y)),
-                        is_ladder
-                    );
-                }
+                assert_eq!(
+                    board.inner.is_ladder_capture(Color::Black, point),
+                    is_ladder
+                );
             }
         }
     }
@@ -252,28 +249,26 @@ mod tests {
     fn ladder_escape() {
         // test a standard ladder pattern with a stone on the diagonal
         let mut board = Board::new(7.5);
-        board.place(Color::White,  3,  3);
-        board.place(Color::White, 15, 15);  // ladder breaking
-        board.place(Color::Black,  2,  3);
-        board.place(Color::Black,  3,  2);
-        board.place(Color::Black,  4,  2);
-        board.place(Color::Black,  3,  4);
+        board.place(Color::White, Point::new( 3,  3));
+        board.place(Color::White, Point::new(15, 15));  // ladder breaking
+        board.place(Color::Black, Point::new( 2,  3));
+        board.place(Color::Black, Point::new( 3,  2));
+        board.place(Color::Black, Point::new( 4,  2));
+        board.place(Color::Black, Point::new( 3,  4));
 
-        for x in 0..19 {
-            for y in 0..19 {
-                if board.is_valid(Color::White, x, y) {
-                    // check that nothing is a ladder capture
-                    assert!(!board.inner.is_ladder_capture(Color::Black, Point::new(x, y)));
+        for point in Point::all() {
+            if board.is_valid(Color::White, point) {
+                // check that nothing is a ladder capture
+                assert!(!board.inner.is_ladder_capture(Color::Black, point));
 
-                    // check that only the one move is a ladder escape
-                    let is_escape = x == 4 && y == 3;
+                // check that only the one move is a ladder escape
+                let is_escape = point == Point::new(4, 3);
 
-                    assert_eq!(
-                        board.inner.is_ladder_escape(Color::White, Point::new(x, y)),
-                        is_escape,
-                        "({}, {}) is a ladder escape = {}", x, y, is_escape
-                    );
-                }
+                assert_eq!(
+                    board.inner.is_ladder_escape(Color::White, point),
+                    is_escape,
+                    "{:?} is a ladder escape = {}", point, is_escape
+                );
             }
         }
     }
@@ -310,7 +305,7 @@ mod tests {
         let mut board = Board::new(7.5);
 
         for &(color, x, y) in moves.into_iter() {
-            board.place(color, x, y);
+            board.place(color, Point::new(x, y));
         }
 
         assert_eq!(board.inner.is_ladder_escape(Color::White, Point::new(4, 13)), true);
@@ -327,7 +322,7 @@ mod tests {
         let mut board = Board::new(7.5);
 
         for &(color, x, y) in moves.into_iter() {
-            board.place(color, x, y);
+            board.place(color, Point::new(x, y));
         }
 
         assert_eq!(board.inner.is_ladder_capture(Color::White, Point::new(1, 3)), false);  // (Color::White, 1, 3)
@@ -344,7 +339,7 @@ mod tests {
         let mut board = Board::new(7.5);
 
         for &(color, x, y) in moves.into_iter() {
-            board.place(color, x, y);
+            board.place(color, Point::new(x, y));
         }
 
         assert_eq!(board.inner.is_ladder_capture(Color::White, Point::new(1, 3)), false);  // (Color::White, 1, 3)

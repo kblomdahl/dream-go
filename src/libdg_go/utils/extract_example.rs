@@ -14,6 +14,7 @@
 
 use color::Color;
 use board::Board;
+use point::Point;
 use ::DEFAULT_KOMI;
 
 use super::features::{HWC, FEATURE_SIZE, NUM_FEATURES, Features};
@@ -180,13 +181,13 @@ pub unsafe extern fn extract_single_example(
                 Err(SgfError::IllegalMove) => { return -30 },
                 Err(SgfError::ParseError) => { return -23 },
                 Ok(m) => {
-                    let is_pass = m.x >= 19 || m.y >= 19;
+                    let is_pass = m.point == Point::default();
 
                     pass_count = if is_pass { pass_count + 1 } else { 0 };
                     has_policy = has_policy || m.policy.is_some();
                     examples.push(Candidate {
                         board: m.board,
-                        index: if is_pass { 361 } else { 19 * m.y + m.x },
+                        index: if is_pass { 361 } else { m.point.to_packed_index() },
                         color: m.color,
                         policy: m.policy,
                         value: m.value
@@ -276,11 +277,9 @@ fn set_vertex_ownerships(property: Option<Captures>, value: f32, ownership: &mut
 
     if let Some(tb) = property {
         for vertex in VERTICES.captures_iter(tb.get(1).unwrap().as_str()) {
-            if let Ok((x, y)) = CGoban::parse(vertex.get(1).unwrap().as_str()) {
-                if x < 19 && y < 19 {
-                    let index = 19 * y + x;
-
-                    ownership[index] = value;
+            if let Ok(point) = CGoban::parse(vertex.get(1).unwrap().as_str()) {
+                if point != Point::default() {
+                    ownership[point.to_packed_index()] = value;
                 }
             }
         }

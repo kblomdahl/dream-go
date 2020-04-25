@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use dg_go::{Board, Color};
+use dg_go::{Board, Color, Point};
 use dg_utils::config;
 use dg_mcts::predict_service::PredictService;
 use dg_mcts::time_control::{TimeStrategy, TimeStrategyResult};
@@ -213,9 +213,9 @@ impl PonderService {
     /// # Arguments
     /// 
     /// * `color` - the color of the move
-    /// * `coordinate` - `(x, y)` coordinates of the move, or `None` to pass.
+    /// * `at_point` - `(x, y)` coordinates of the move, or `None` to pass.
     /// 
-    pub fn forward(&mut self, color: Color, coordinate: Option<(usize, usize)>) {
+    pub fn forward(&mut self, color: Color, at_point: Option<Point>) {
         let _result = self.service(move |_service, search_tree, (board, to_move)| {
             let search_tree = if to_move != color {
                 // passing moves are not recorded in the GTP protocol, so we
@@ -228,20 +228,16 @@ impl PonderService {
 
             // forward the search tree with the given move
             let search_tree = search_tree.and_then(|search_tree| {
-                let index = if let Some((x, y)) = coordinate {
-                    19 * y + x
-                } else {
-                    361
-                };
+                let index = at_point.map(|p| p.to_packed_index()).unwrap_or(361);
 
                 mcts::tree::Node::forward(search_tree, index)
             });
 
             // forward the board state with the given move
-            let other = if let Some((x, y)) = coordinate {
+            let other = if let Some(point) = at_point {
                 let mut other = board.clone();
 
-                other.place(color, x, y);
+                other.place(color, point);
                 other
             } else {
                 board

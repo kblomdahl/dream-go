@@ -110,14 +110,11 @@ impl Board {
     ///
     /// # Arguments
     ///
-    /// * `x` - the column of the coordinates
-    /// * `y` - the row of the coordinates
+    /// * `point` - the coordinates
     ///
     #[inline]
-    pub fn at(&self, x: usize, y: usize) -> Option<Color> {
-        let index = Point::new(x, y);
-
-        self.inner[index].color()
+    pub fn at(&self, point: Point) -> Option<Color> {
+        self.inner[point].color()
     }
 
     /// Returns true if playing at the given index violated the
@@ -158,11 +155,10 @@ impl Board {
     /// # Arguments
     ///
     /// * `color` - the color of the move
-    /// * `x` - the column of the move
-    /// * `y` - the row of the move
+    /// * `at_point` - where to play the move
     ///
-    pub fn is_valid(&self, color: Color, x: usize, y: usize) -> bool {
-        self._is_valid(color, Point::new(x, y))
+    pub fn is_valid(&self, color: Color, at_point: Point) -> bool {
+        self._is_valid(color, at_point)
     }
 
     /// Place the given stone on the board without checking if it is legal, the
@@ -172,7 +168,7 @@ impl Board {
     /// # Arguments
     ///
     /// * `color` - the color of the move
-    /// * `at_point` - The index of the move
+    /// * `at_point` - where to play the move
     ///
     pub fn _place(&mut self, color: Color, at_point: Point) {
         // place the stone on the board regardless of whether it is legal
@@ -194,11 +190,10 @@ impl Board {
     /// # Arguments
     ///
     /// * `color` - the color of the move
-    /// * `x` - The column of the move
-    /// * `y` - The row of the move
+    /// * `at_point` - where to play the move
     ///
-    pub fn place(&mut self, color: Color, x: usize, y: usize) {
-        self._place(color, Point::new(x, y))
+    pub fn place(&mut self, color: Color, at_point: Point) {
+        self._place(color, at_point)
     }
 }
 
@@ -289,13 +284,13 @@ mod tests {
     fn capture() {
         let mut board = Board::new(7.5);
 
-        board.place(Color::Black,  9,  9);
-        board.place(Color::White,  8,  9);
-        board.place(Color::White, 10,  9);
-        board.place(Color::White,  9,  8);
-        board.place(Color::White,  9, 10);
+        board.place(Color::Black, Point::new( 9,  9));
+        board.place(Color::White, Point::new( 8,  9));
+        board.place(Color::White, Point::new(10,  9));
+        board.place(Color::White, Point::new( 9,  8));
+        board.place(Color::White, Point::new( 9, 10));
 
-        assert_eq!(board.at(9, 9), None);
+        assert_eq!(board.at(Point::new(9, 9)), None);
     }
 
     /// Test that it is possible to capture a group of stones in the corner.
@@ -303,20 +298,20 @@ mod tests {
     fn capture_group() {
         let mut board = Board::new(7.5);
 
-        board.place(Color::Black, 0, 1);
-        board.place(Color::Black, 1, 0);
-        board.place(Color::Black, 0, 0);
-        board.place(Color::Black, 1, 1);
+        board.place(Color::Black, Point::new(0, 1));
+        board.place(Color::Black, Point::new(1, 0));
+        board.place(Color::Black, Point::new(0, 0));
+        board.place(Color::Black, Point::new(1, 1));
 
-        board.place(Color::White, 2, 0);
-        board.place(Color::White, 2, 1);
-        board.place(Color::White, 0, 2);
-        board.place(Color::White, 1, 2);
+        board.place(Color::White, Point::new(2, 0));
+        board.place(Color::White, Point::new(2, 1));
+        board.place(Color::White, Point::new(0, 2));
+        board.place(Color::White, Point::new(1, 2));
 
-        assert_eq!(board.at(0, 0), None);
-        assert_eq!(board.at(0, 1), None);
-        assert_eq!(board.at(1, 0), None);
-        assert_eq!(board.at(1, 1), None);
+        assert_eq!(board.at(Point::new(0, 0)), None);
+        assert_eq!(board.at(Point::new(0, 1)), None);
+        assert_eq!(board.at(Point::new(1, 0)), None);
+        assert_eq!(board.at(Point::new(1, 1)), None);
     }
 
     /// Test that it is not possible to play a suicide move in the corner
@@ -325,13 +320,13 @@ mod tests {
     fn suicide_corner() {
         let mut board = Board::new(7.5);
 
-        board.place(Color::White, 0, 0);
-        board.place(Color::Black, 1, 0);
-        board.place(Color::Black, 0, 1);
+        board.place(Color::White, Point::new(0, 0));
+        board.place(Color::Black, Point::new(1, 0));
+        board.place(Color::Black, Point::new(0, 1));
 
-        assert_eq!(board.at(0, 0), None);
-        assert!(!board.is_valid(Color::White, 0, 0));
-        assert!(board.is_valid(Color::Black, 0, 0));
+        assert_eq!(board.at(Point::new(0, 0)), None);
+        assert!(!board.is_valid(Color::White, Point::new(0, 0)));
+        assert!(board.is_valid(Color::Black, Point::new(0, 0)));
     }
 
     /// Test that it is not possible to play a suicide move in the middle
@@ -340,15 +335,15 @@ mod tests {
     fn suicide_middle() {
         let mut board = Board::new(7.5);
 
-        board.place(Color::Black,  9,  9);
-        board.place(Color::White,  8,  9);
-        board.place(Color::White, 10,  9);
-        board.place(Color::White,  9,  8);
-        board.place(Color::White,  9, 10);
+        board.place(Color::Black, Point::new( 9,  9));
+        board.place(Color::White, Point::new( 8,  9));
+        board.place(Color::White, Point::new(10,  9));
+        board.place(Color::White, Point::new( 9,  8));
+        board.place(Color::White, Point::new( 9, 10));
 
-        assert_eq!(board.at(9, 9), None);
-        assert!(!board.is_valid(Color::Black, 9, 9));
-        assert!(board.is_valid(Color::White, 9, 9));
+        assert_eq!(board.at(Point::new(9, 9)), None);
+        assert!(!board.is_valid(Color::Black, Point::new(9, 9)));
+        assert!(board.is_valid(Color::White, Point::new(9, 9)));
     }
 
     /// Test that we can accurately detect ko using the simplest possible
@@ -357,13 +352,13 @@ mod tests {
     fn ko() {
         let mut board = Board::new(7.5);
 
-        board.place(Color::Black, 0, 0);
-        board.place(Color::Black, 0, 2);
-        board.place(Color::Black, 1, 1);
-        board.place(Color::White, 1, 0);
-        board.place(Color::White, 0, 1);
+        board.place(Color::Black, Point::new(0, 0));
+        board.place(Color::Black, Point::new(0, 2));
+        board.place(Color::Black, Point::new(1, 1));
+        board.place(Color::White, Point::new(1, 0));
+        board.place(Color::White, Point::new(0, 1));
 
-        assert!(!board.is_valid(Color::Black, 0, 0));
+        assert!(!board.is_valid(Color::Black, Point::new(0, 0)));
     }
 
     /// Test that when the same group is a neighbour multiple times we do
@@ -372,28 +367,28 @@ mod tests {
     fn double_liberty_subtraction() {
         let mut board = Board::new(7.5);
 
-        board.place(Color::Black, 1, 1);
-        board.place(Color::Black, 1, 2);
-        board.place(Color::Black, 2, 1);
-        board.place(Color::Black, 0, 2);
-        board.place(Color::Black, 2, 0);
-        board.place(Color::White, 0, 3);
-        board.place(Color::White, 3, 0);
-        board.place(Color::White, 1, 3);
-        board.place(Color::White, 3, 1);
-        board.place(Color::White, 2, 2);
+        board.place(Color::Black, Point::new(1, 1));
+        board.place(Color::Black, Point::new(1, 2));
+        board.place(Color::Black, Point::new(2, 1));
+        board.place(Color::Black, Point::new(0, 2));
+        board.place(Color::Black, Point::new(2, 0));
+        board.place(Color::White, Point::new(0, 3));
+        board.place(Color::White, Point::new(3, 0));
+        board.place(Color::White, Point::new(1, 3));
+        board.place(Color::White, Point::new(3, 1));
+        board.place(Color::White, Point::new(2, 2));
 
-        assert!(board.is_valid(Color::White, 0, 1));
-        assert!(board.is_valid(Color::White, 1, 0));
+        assert!(board.is_valid(Color::White, Point::new(0, 1)));
+        assert!(board.is_valid(Color::White, Point::new(1, 0)));
 
-        board.place(Color::White, 0, 1);
+        board.place(Color::White, Point::new(0, 1));
 
-        assert_eq!(board.at(0, 1), Some(Color::White), "\n{}\n", board);
-        assert_eq!(board.at(1, 1), Some(Color::Black));
-        assert_eq!(board.at(1, 2), Some(Color::Black));
-        assert_eq!(board.at(2, 1), Some(Color::Black));
-        assert_eq!(board.at(0, 2), Some(Color::Black));
-        assert_eq!(board.at(2, 0), Some(Color::Black));
+        assert_eq!(board.at(Point::new(0, 1)), Some(Color::White), "\n{}\n", board);
+        assert_eq!(board.at(Point::new(1, 1)), Some(Color::Black));
+        assert_eq!(board.at(Point::new(1, 2)), Some(Color::Black));
+        assert_eq!(board.at(Point::new(2, 1)), Some(Color::Black));
+        assert_eq!(board.at(Point::new(0, 2)), Some(Color::Black));
+        assert_eq!(board.at(Point::new(2, 0)), Some(Color::Black));
     }
 
     #[test]
@@ -407,14 +402,14 @@ mod tests {
     fn alternate_turns() {
         let mut board = Board::new(0.5);
 
-        board.place(Color::Black, 0, 0);
+        board.place(Color::Black, Point::new(0, 0));
         assert_eq!(board.to_move(), Color::White);
 
-        board.place(Color::White, 1, 1);
+        board.place(Color::White, Point::new(1, 1));
         assert_eq!(board.to_move(), Color::Black);
 
         // if black pass, it should not mess everything up
-        board.place(Color::White, 2, 2);
+        board.place(Color::White, Point::new(2, 2));
         assert_eq!(board.to_move(), Color::Black);
     }
 }

@@ -68,7 +68,7 @@ impl SearchOptions for ScoringSearch {
 fn is_vertex_filled(board: &Board, color: Color, point: Point, dx: i8, dy: i8) -> bool {
     let other = point.offset(dx as isize, dy as isize);
 
-    board.at(other.x(), other.y()) == Some(color)
+    board.at(other) == Some(color)
 }
 
 /// Returns true if the given move would fill ones own eye. An eye in this case

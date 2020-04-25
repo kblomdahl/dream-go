@@ -17,7 +17,7 @@ extern crate dg_go;
 extern crate dg_mcts;
 extern crate test;
 
-use dg_go::{Board, Color};
+use dg_go::{Board, Color, Point};
 use dg_mcts::time_control::RolloutLimit;
 use dg_mcts as mcts;
 use test::Bencher;
@@ -51,9 +51,9 @@ fn lee_sedol_alphago_4_78(b: &mut Bencher) {
     let mut original_board = Board::new(7.5);
 
     for &(color, x, y) in lee_sedol_alphago_4_78.iter() {
-        assert!(original_board.is_valid(color, x, y));
+        assert!(original_board.is_valid(color, Point::new(x, y)));
 
-        original_board.place(color, x, y);
+        original_board.place(color, Point::new(x, y));
     }
 
     b.iter(move || {

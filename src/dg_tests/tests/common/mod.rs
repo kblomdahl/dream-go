@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 
-use dg_go::{DEFAULT_KOMI, Board, Color};
+use dg_go::{DEFAULT_KOMI, Board, Color, Point};
 use dg_nn;
 
 use regex::Regex;
@@ -61,9 +61,10 @@ pub fn playout_game(src: &str, max_moves: Option<usize>) -> Board {
             .unwrap_or(board.size());
 
         if x < board.size() && y < board.size() {
-            assert!(board.is_valid(color, x, 18 - y), "invalid move {}: {} {} {}\n{}", count, color, x, y, board);
+            let point = Point::new(x, 18 - y);
+            assert!(board.is_valid(color, point), "invalid move {}: {} {} {}\n{}", count, color, x, y, board);
 
-            board.place(color, x, 18 - y);
+            board.place(color, point);
         }
         count += 1;
 

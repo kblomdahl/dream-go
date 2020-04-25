@@ -201,7 +201,7 @@ fn create_initial_policy<O: SearchOptions>(board: &Board, to_move: Color) -> (Ve
     let mut policy = vec! [::std::f32::NEG_INFINITY; 368];
 
     for point in Point::all() {
-        if O::is_policy_candidate(board, to_move, point) && board.is_valid(to_move, point.x(), point.y()) {
+        if O::is_policy_candidate(board, to_move, point) && board.is_valid(to_move, point) {
             policy[point.to_packed_index()] = 0.0;
         }
     }

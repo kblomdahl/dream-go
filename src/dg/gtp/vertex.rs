@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use dg_go::Point;
+
 use std::fmt;
 use std::str;
 
@@ -36,6 +38,15 @@ impl Vertex {
     /// Returns if this is a passing move.
     pub fn is_pass(&self) -> bool {
         self.x >= 19 || self.y >= 19
+    }
+}
+
+impl From<Point> for Vertex {
+    fn from(point: Point) -> Self {
+        let x = point.x();
+        let y = point.y();
+
+        Self { x, y }
     }
 }
 

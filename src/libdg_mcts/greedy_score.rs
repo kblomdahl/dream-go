@@ -15,9 +15,9 @@
 use ordered_float::OrderedFloat;
 
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
-use dg_go::{Board, Color};
+use dg_go::{Board, Color, Point};
 use super::predict::Predictor;
-use super::{tree, full_forward, ScoringSearch};
+use super::{full_forward, ScoringSearch};
 
 
 /// Play the given board until the end using the policy of the neural network
@@ -50,11 +50,11 @@ pub fn greedy_score<P: Predictor>(server: &P, board: &Board, mut to_move: Color)
             .max_by_key(|&i| OrderedFloat(policy[i]));
 
         if let Some(index) = index {
-            let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
+            let point = Point::from_packed_parts(index);
 
-            sgf += &format!(";{}[{}]", to_move, CGoban::to_sgf(x, y));
+            sgf += &format!(";{}[{}]", to_move, CGoban::to_sgf(point));
             pass_count = 0;
-            board.place(to_move, x, y);
+            board.place(to_move, point);
         } else {  // no valid moves remaining
             sgf += &format!(";{}[]", to_move);
             pass_count += 1;

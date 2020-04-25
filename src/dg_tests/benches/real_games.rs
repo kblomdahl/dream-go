@@ -19,7 +19,7 @@ extern crate test;
 
 use test::Bencher;
 
-use dg_go::{DEFAULT_KOMI, Board, Color};
+use dg_go::{DEFAULT_KOMI, Board, Color, Point};
 use dg_go::utils::features::{HWC, Features};
 use dg_go::utils::symmetry::Transform;
 
@@ -91,10 +91,10 @@ fn playout(b: &mut Bencher) {
         let mut board = Board::new(DEFAULT_KOMI);
 
         for &(color, x, y) in rina_fujisawa_jeong_chio.iter() {
-            debug_assert!(board.is_valid(color, x, y));
+            debug_assert!(board.is_valid(color, Point::new(x, y)));
 
-            if board.is_valid(color, x, y) {
-                board.place(color, x, y);
+            if board.is_valid(color, Point::new(x, y)) {
+                board.place(color, Point::new(x, y));
             }
         }
 
@@ -131,9 +131,9 @@ fn get_features_16(b: &mut Bencher) {
     let mut board = Board::new(DEFAULT_KOMI);
 
     for &(color, x, y) in lee_sedol_alphago_4_78.iter() {
-        assert!(board.is_valid(color, x, y));
+        assert!(board.is_valid(color, Point::new(x, y)));
 
-        board.place(color, x, y);
+        board.place(color, Point::new(x, y));
     }
 
     b.iter(move || {
@@ -186,9 +186,9 @@ fn get_features_32(b: &mut Bencher) {
     let mut board = Board::new(DEFAULT_KOMI);
 
     for &(color, x, y) in rina_fujisawa_zhiying_yu.iter() {
-        assert!(board.is_valid(color, x, y));
+        assert!(board.is_valid(color, Point::new(x, y)));
 
-        board.place(color, x, y);
+        board.place(color, Point::new(x, y));
     }
 
     b.iter(move || {

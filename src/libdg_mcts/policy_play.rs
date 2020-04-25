@@ -20,12 +20,12 @@ use std::sync::Arc;
 use std::thread;
 
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
-use dg_go::{Board, Color};
+use dg_go::{Board, Color, Point};
 use dg_utils::{b85, config, min};
 use super::asm::sum_finite_f32;
 use super::predict::Predictor;
 use super::time_control::RolloutLimit;
-use super::{dirichlet, tree, predict_service};
+use super::{dirichlet, predict_service};
 use super::{GameResult, full_forward, get_random_komi, predict_aux};
 use dg_nn::Network;
 use options::StandardSearch;
@@ -201,10 +201,10 @@ fn policy_play_one<P: Predictor + 'static>(server: &P, ex_it: bool) -> Option<Ga
             sgf.push((board.clone(), color, skew, format!(";{}[]", color)));
             pass_count += 1;
         } else {
-            let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
+            let point = Point::from_packed_parts(index);
 
-            sgf.push((board.clone(), color, skew, format!(";{}[{}]", color, CGoban::to_sgf(x, y))));
-            board.place(color, x, y);
+            sgf.push((board.clone(), color, skew, format!(";{}[{}]", color, CGoban::to_sgf(point))));
+            board.place(color, point);
             pass_count = 0;
         }
 

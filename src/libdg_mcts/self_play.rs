@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
-use dg_go::{Board, Color};
+use dg_go::{Board, Color, Point};
 use dg_utils::{b85, config};
 use super::predict::Predictor;
 use super::time_control::RolloutLimit;
@@ -79,25 +79,20 @@ fn self_play_one<P: Predictor + 'static>(server: &P, num_parallel: &Arc<AtomicUs
                 return Some(GameResult::Ended(sgf, board))
             }
         } else {
-            let (x, y) = (tree::X[index] as usize, tree::Y[index] as usize);
+            let point = Point::from_packed_parts(index);
 
             sgf += &format!(";{}[{}]P[{}]V[{}]",
                 current,
-                CGoban::to_sgf(x, y),
+                CGoban::to_sgf(point),
                 b85::encode(&policy),
                 value_sgf
             );
             if prior_index != 361 {
-                sgf += &format!("TR[{}]",
-                    CGoban::to_sgf(
-                        tree::X[prior_index] as usize,
-                        tree::Y[prior_index] as usize
-                    )
-                );
+                sgf += &format!("TR[{}]", CGoban::to_sgf(point));
             };
 
             pass_count = 0;
-            board.place(current, x, y);
+            board.place(current, point);
         }
 
         // update the search trees

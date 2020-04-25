@@ -74,7 +74,7 @@ enum Command {
     DescribeEngine,  // write a description of the engine
     ExplainLastMove,  // write a description of why the last move was played
     Komi(f32),  // set the komi
-    Play(Color, Vertex),  // play a stone of the given color at the given vertex
+    Play(Color, Option<Point>),  // play a stone of the given color at the given vertex
     ListCommands,  // list all available commands
     KnownCommand(String),  // tell whether a command is known
     ShowBoard,  // write the position to stdout
@@ -169,7 +169,11 @@ impl Gtp {
             let color = caps[1].parse::<Color>().map_err(|_| "syntax error")?;
             let vertex = caps[2].parse::<Vertex>().map_err(|_| "syntax error")?;
 
-            Ok((id, Command::Play(color, vertex)))
+            if vertex.is_pass() {
+                Ok((id, Command::Play(color, None)))
+            } else {
+                Ok((id, Command::Play(color, Some(Point::new(vertex.x, vertex.y)))))
+            }
         } else if line == "list_commands" {
             Ok((id, Command::ListCommands))
         } else if let Some(caps) = KNOWN_COMMAND.captures(line) {
@@ -318,7 +322,7 @@ impl Gtp {
     /// * `to_move` - the color to generate the move for
     /// * `mode` - determine whether this is a clean-up move
     /// 
-    fn generate_move(&mut self, id: Option<usize>, to_move: Color, mode: &GenMoveMode) -> Option<Vertex> {
+    fn generate_move(&mut self, id: Option<usize>, to_move: Color, mode: &GenMoveMode) -> Option<Point> {
         let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[to_move as usize].remaining();
         let board = self.history.last().unwrap();
         let result = self.ponder.service(|service, search_tree, p_state| {
@@ -382,26 +386,26 @@ impl Gtp {
             let (vertex, tree, other) = if index >= 361 {  // passing move
                 (None, mcts::tree::Node::forward(tree, 361), board.clone())
             } else {
-                let (x, y) = (mcts::tree::X[index] as usize, mcts::tree::Y[index] as usize);
+                let at_point = Point::from_packed_parts(index);
                 let mut other = board.clone();
 
-                other.place(to_move, x, y);
-                (Some(Vertex { x, y }), mcts::tree::Node::forward(tree, index), other)
+                other.place(to_move, at_point);
+                (Some(at_point), mcts::tree::Node::forward(tree, index), other)
             };
 
             (Some((vertex, should_resign, explain_last_move)), tree, (other, to_move.opposite()))
         });
 
-        if let Ok(Some((vertex, should_resign, explain_last_move))) = result {
+        if let Ok(Some((point, should_resign, explain_last_move))) = result {
             self.explain_last_move = explain_last_move;
             self.finished_board = None;
 
             if should_resign {
                 success!(id, "resign");
                 None
-            } else if let Some(vertex) = vertex {  // passing move
-                success!(id, &format!("{}", vertex));
-                Some(vertex)
+            } else if let Some(point) = point {  // passing move
+                success!(id, &format!("{}", Vertex::from(point)));
+                Some(point)
             } else {
                 success!(id, "pass");
                 None
@@ -518,23 +522,24 @@ impl Gtp {
 
                 success!(id, "");
             },
-            Command::Play(color, vertex) => {
+            Command::Play(color, at_point) => {
                 let next_board = {
                     let board = self.history.last().unwrap();
 
-                    if vertex.is_pass() {
+                    if let Some(at_point) = at_point {
+                        if board.is_valid(color, at_point) {
+                            let mut other = board.clone();
+
+                            other.place(color, at_point);
+                            self.ponder.forward(color, Some(at_point));
+                            Some(other)
+                        } else {
+                            None
+                        }
+                    } else {
                         self.ponder.forward(color, None);
 
                         Some(board.clone())
-                    } else if board.is_valid(color, vertex.x, vertex.y) {
-                        let mut other = board.clone();
-
-                        other.place(color, vertex.x, vertex.y);
-                        self.ponder.forward(color, Some((vertex.x, vertex.y)));
-
-                        Some(other)
-                    } else {
-                        None
                     }
                 };
 
@@ -564,12 +569,12 @@ impl Gtp {
             },
             Command::GenMove(color, mode) => {
                 let start_time = Instant::now();
-                let vertex = self.generate_move(id, color, &mode);
+                let at_point = self.generate_move(id, color, &mode);
 
                 if !mode.is_regression() {
-                    if let Some(vertex) = vertex {
+                    if let Some(at_point) = at_point {
                         let mut board = self.history.last().unwrap().clone();
-                        board.place(color, vertex.x, vertex.y);
+                        board.place(color, at_point);
 
                         self.history.push(board);
                     }
@@ -619,12 +624,7 @@ impl Gtp {
                     let vertices = status_list.into_iter()
                         .filter_map(|(index, stone_status)| {
                             if stone_status.contains(&status) {
-                                let vertex = Vertex {
-                                    x: mcts::tree::X[index] as usize,
-                                    y: mcts::tree::Y[index] as usize
-                                };
-
-                                Some(format!("{}", vertex))
+                                Some(format!("{}", Vertex::from(index)))
                             } else {
                                 None
                             }
@@ -827,8 +827,8 @@ mod tests {
 
     #[test]
     fn play() {
-        assert_eq!(Gtp::parse_line("1 play b c2"), Some((Some(1), Command::Play(Color::Black, Vertex{x: 2, y: 1}))));
-        assert_eq!(Gtp::parse_line("play w a1"), Some((None, Command::Play(Color::White, Vertex{x: 0, y: 0}))));
+        assert_eq!(Gtp::parse_line("1 play b c2"), Some((Some(1), Command::Play(Color::Black, Some(Point::new(2, 1))))));
+        assert_eq!(Gtp::parse_line("play w a1"), Some((None, Command::Play(Color::White, Some(Point::new(0, 0))))));
     }
 
     #[test]

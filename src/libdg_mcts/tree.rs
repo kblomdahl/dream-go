@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use dg_go::utils::sgf::SgfCoordinate;
-use dg_go::{Board, Color};
+use dg_go::{Board, Color, Point};
 use dg_utils::lcb::normal_lcb_m;
 use dg_utils::{config, max};
 use super::asm::{argmax_f32, argmax_i32};
@@ -27,14 +27,6 @@ use std::fmt;
 use std::mem::ManuallyDrop;
 use std::intrinsics::{atomic_xadd, atomic_xsub, atomic_cxchg};
 use std::ptr;
-
-lazy_static! {
-    /// Mapping from policy index to the `x` coordinate it represents.
-    pub static ref X: Box<[u8]> = (0..361).map(|i| (i % 19) as u8).collect::<Vec<u8>>().into_boxed_slice();
-
-    /// Mapping from policy index to the `y` coordinate it represents.
-    pub static ref Y: Box<[u8]> = (0..361).map(|i| (i / 19) as u8).collect::<Vec<u8>>().into_boxed_slice();
-}
 
 /// An implementation of the _Polynomial UCT_ as suggested in the AlphaGo Zero
 /// paper [1].
@@ -1045,7 +1037,7 @@ impl<O: SearchOptions> Node<O> {
     ///
     fn is_valid_candidate(&self, board: &Board, index: usize) -> bool {
         self.prior[index].is_finite() && {
-            index == 361 || board.is_valid(self.to_move, X[index] as usize, Y[index] as usize)
+            index == 361 || board.is_valid(self.to_move, Point::from_packed_parts(index))
         } && self.with(index, |cand| cand.value().is_finite())
     }
 
@@ -1111,7 +1103,7 @@ impl<O: SearchOptions> Node<O> {
                     }
 
                     write!(fmt, "LB[{}:{}]",
-                        S::to_sgf(X[j] as usize, Y[j] as usize),
+                        S::to_sgf(Point::from_packed_parts(j)),
                         LABELS[i]
                     )?;
                 }
@@ -1142,7 +1134,7 @@ impl<O: SearchOptions> Node<O> {
             write!(fmt, "(")?;
             write!(fmt, ";{}[{}]",
                    if self.to_move == Color::Black { "B" } else { "W" },
-                   if i == 361 { "tt".to_string() } else { S::to_sgf(X[i] as usize, Y[i] as usize) },
+                   if i == 361 { "tt".to_string() } else { S::to_sgf(Point::from_packed_parts(i)) }
             )?;
             write!(fmt, "C[prior {:.4} value {:.4} (visits {} / total {}) uct {:.4}]",
                 self.prior[i],
@@ -1409,10 +1401,10 @@ pub unsafe fn probe<O: SearchOptions>(root: &mut Node<O>, board: &mut Board) -> 
             trace.push((current as *mut Node<O>, current.to_move, next_child));
 
             if next_child != 361 {  // not a passing move
-                let (x, y) = (X[next_child] as usize, Y[next_child] as usize);
+                let point = Point::from_packed_parts(next_child);
 
-                debug_assert!(board.is_valid(current.to_move, x, y), "{}\nx {}, y {}", board.to_string(), x, y);
-                board.place(current.to_move, x, y);
+                debug_assert!(board.is_valid(current.to_move, point), "{}\nnext_move {:?}", board.to_string(), point);
+                board.place(current.to_move, point);
             } else if current.pass_count >= 1 {
                 break;  // at least two consecutive passes
             }
@@ -1494,14 +1486,12 @@ impl<'a, S: SgfCoordinate, O: SearchOptions> fmt::Display for ToSgf<'a, S, O> {
             )?;
 
             // write the starting point to the SGF file as pre-set variables
-            for y in 0..19 {
-                for x in 0..19 {
-                    match self.starting_point.at(x, y) {
-                        None => Ok(()),
-                        Some(Color::Black) => write!(fmt, "AB[{}]", S::to_sgf(x, y)),
-                        Some(Color::White) => write!(fmt, "AW[{}]", S::to_sgf(x, y))
-                    }?
-                }
+            for point in Point::all() {
+                match self.starting_point.at(point) {
+                    None => Ok(()),
+                    Some(Color::Black) => write!(fmt, "AB[{}]", S::to_sgf(point)),
+                    Some(Color::White) => write!(fmt, "AW[{}]", S::to_sgf(point))
+                }?
             }
 
             // write the actual search tree
@@ -1552,8 +1542,8 @@ impl fmt::Display for PrettyVertex {
             ];
 
             fmt.pad(&format!("{}{}",
-                LETTERS[X[self.inner] as usize],
-                Y[self.inner] + 1
+                LETTERS[Point::from_packed_parts(self.inner).y()],
+                Point::from_packed_parts(self.inner).x() + 1
             ))
         }
     }
@@ -1678,7 +1668,7 @@ mod tests {
         let mut prior: Vec<f32> = (0..368).map(|_| rng.gen::<f32>()).collect();
 
         for point in Point::all() {
-            if !board.is_valid(to_move, point.x(), point.y()) {
+            if !board.is_valid(to_move, point) {
                 prior[point.to_packed_index()] = ::std::f32::NEG_INFINITY;
             }
         }
