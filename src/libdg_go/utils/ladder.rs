@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use board_fast::{BoardFast, Vertex};
+use board_fast::{BoardFast};
 use color::Color;
 use point::Point;
+use point_state::Vertex;
 
 pub trait Ladder {
     fn is_ladder_capture(&self, color: Color, at_point: Point) -> bool;
@@ -34,8 +35,8 @@ fn _can_escape_with_capture(board: &BoardFast, color: Color, at_point: Point) ->
     let opponent = Some(color.opposite());
 
     board.block_at(at_point).into_iter().any(|current| {
-        board.adjacent_to(current).any(|(other_index, other_vertex)| {
-            other_vertex.color() == opponent && !board.has_n_liberty(other_index, 2)
+        board.adjacent_to(current).any(|other_point| {
+            board[other_point].color() == opponent && !board.has_n_liberty(other_point, 2)
         })
     })
 }
@@ -57,12 +58,12 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, at_point: Point) -> bo
     // that liberty. if no such group exists then this is not a ladder
     // capturing move.
     let opponent = Some(color.opposite());
-    let opponent_index = board.adjacent_to(at_point).filter_map(|(other_index, other_vertex)| {
-        if other_vertex.color() == opponent {
-            let is_in_atari = !board.has_n_liberty(other_index, 2);
+    let opponent_index = board.adjacent_to(at_point).filter_map(|other_point| {
+        if board[other_point].color() == opponent {
+            let is_in_atari = !board.has_n_liberty(other_point, 2);
 
-            if is_in_atari && !_can_escape_with_capture(&board, color.opposite(), other_index) {
-                board.get_a_liberty(other_index)
+            if is_in_atari && !_can_escape_with_capture(&board, color.opposite(), other_point) {
+                board.get_a_liberty(other_point)
             } else {
                 None
             }
@@ -94,8 +95,8 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, at_point: Point) -> bo
     // if playing `opponent_index` put any of my stones into atari
     // then this is not a ladder capturing move.
     let player = Some(color);
-    let in_atari = board.adjacent_to(opponent_index).any(|(other_index, other_vertex)| {
-        other_vertex.color() == player && !board.has_n_liberty(other_index, 2)
+    let in_atari = board.adjacent_to(opponent_index).any(|other_point| {
+        board[other_point].color() == player && !board.has_n_liberty(other_point, 2)
     });
 
     if in_atari  {
@@ -105,11 +106,11 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, at_point: Point) -> bo
     // try capturing the new group by playing _ladder capturing moves_
     // in all of its liberties, if we succeed with either then this
     // is a ladder capturing move
-    board.adjacent_to(opponent_index).any(|(other_index, other_vertex)| {
-        other_vertex.color() == None && {
+    board.adjacent_to(opponent_index).any(|other_point| {
+        board[other_point].color() == None && {
             let other = board.clone();
 
-            _is_ladder_capture(other, color, other_index)
+            _is_ladder_capture(other, color, other_point)
         }
     })
 }
@@ -142,8 +143,8 @@ impl Ladder for BoardFast {
 
         // check if we are connected to a stone with one liberty
         let player = Some(color);
-        let connected_to_one = self.adjacent_to(at_point).find(|&(other_index, other_vertex)| {
-            other_vertex.color() == player && !self.has_n_liberty(other_index, 2)
+        let connected_to_one = self.adjacent_to(at_point).find(|&other_point| {
+            self[other_point].color() == player && !self.has_n_liberty(other_point, 2)
         });
 
         if connected_to_one.is_none() {
@@ -164,11 +165,11 @@ impl Ladder for BoardFast {
         }
 
         // check that we cannot be captured in a ladder from either direction
-        self.adjacent_to(at_point).all(|(other_index, other_vertex)| {
-            other_vertex.color() != None || {
+        self.adjacent_to(at_point).all(|other_point| {
+            self[other_point].color() != None || {
                 let board = board.clone();
 
-                !_is_ladder_capture(board, color.opposite(), other_index)
+                !_is_ladder_capture(board, color.opposite(), other_point)
             }
         })
     }

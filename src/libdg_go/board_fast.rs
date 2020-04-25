@@ -14,300 +14,30 @@
 
 use color::Color;
 use point::Point;
+use point_state::Vertex;
+use iter::{AdjacentIter, ChainIter, ValidIter, IsValid, NextLink};
 use zobrist;
 
-use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
-/// Iterator over all vertices that are directly adjacent to the given one. It will
-/// always return four values:
-///
-/// - North
-/// - East
-/// - South
-/// - West
-///
-pub struct AdjacentIter(Point, usize);
-pub struct AdjacentVertexIter<'a>(AdjacentIter, &'a BoardFast);
-
-impl AdjacentIter {
-    pub fn new(source: Point) -> AdjacentIter {
-        AdjacentIter(source, 0)
-    }
-
-    pub fn with_vertex(self, board: &BoardFast) -> AdjacentVertexIter {
-        AdjacentVertexIter(self, board)
-    }
-}
-
-impl Iterator for AdjacentIter {
-    type Item = Point;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        const DX: [i8; 4] = [1, -1, 0,  0];
-        const DY: [i8; 4] = [0,  0, 1, -1];
-
-        if self.1 < 4 {
-            let out = self.0.offset(DX[self.1] as isize, DY[self.1] as isize);
-            self.1 += 1;
-
-            Some(out)
-        } else {
-            None
-        }
-    }
-
-    #[inline(always)]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (4, Some(4))
-    }
-}
-
-impl<'a> Iterator for AdjacentVertexIter<'a> {
-    type Item = (Point, u32);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(point) = self.0.next() {
-            let vertex = self.1.vertices[point];
-
-            if vertex.is_valid() {
-                return Some((point, vertex));
-            }
-        }
-
-        None
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
-    }
-}
-
-/// Iterator over all vertices of the same color that are strongly connected to the
-/// given starting point.
-pub struct BlockIter<'a> {
-    board: &'a BoardFast,
-    starting_point: Point,
-    current_point: Option<Point>
-}
-
-impl<'a> BlockIter<'a> {
-    fn new(board: &'a BoardFast, starting_point: Point) -> BlockIter<'a> {
-        let current_point = Some(starting_point);
-
-        BlockIter { board, starting_point, current_point }
-    }
-}
-
-impl<'a> Iterator for BlockIter<'a> {
-    type Item = Point;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(current_point) = self.current_point {
-            let next_point = self.board.vertices[current_point].next_point();
-
-            self.current_point = if next_point != self.starting_point {
-                Some(next_point)
-            } else {
-                None
-            };
-
-            Some(current_point)
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (1, Some(361))
-    }
-
-    fn any<F: FnMut(Self::Item) -> bool>(&mut self, mut f: F) -> bool {
-        if let Some(mut current_point) = self.current_point {
-            loop {
-                if f(current_point) {
-                    return true;
-                }
-
-                current_point = self.board.vertices[current_point].next_point();
-
-                if current_point == self.starting_point {
-                    return false;
-                }
-            }
-        } else {
-            false
-        }
-    }
-}
-
-/// Iterator over all vertices, with a mutable reference, of the same color that are strongly
-/// connected to the given starting point.
-pub struct BlockIterMut<'a> {
-    board: *mut BoardFast,
-    starting_point: Point,
-    current_point: Option<Point>,
-    phantom_ref: PhantomData<&'a mut BoardFast>
-}
-
-impl<'a> BlockIterMut<'a> {
-    fn new(board: &'a mut BoardFast, starting_point: Point) -> BlockIterMut<'a> {
-        let current_point = Some(starting_point);
-        let phantom_ref = PhantomData::default();
-
-        BlockIterMut { board, starting_point, current_point, phantom_ref }
-    }
-}
-
-impl<'a> Iterator for BlockIterMut<'a> {
-    type Item = (Point, &'a mut u32);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(current_point) = self.current_point {
-            let vertex = unsafe { &mut (*self.board).vertices[current_point] };
-            let next_point = vertex.next_point();
-
-            self.current_point = if next_point != self.starting_point {
-                Some(next_point)
-            } else {
-                None
-            };
-
-            Some((current_point, vertex))
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (1, Some(361))
-    }
-}
-
 /// Representation of a set of strongly connected vertices of the same color.
-pub struct Block<'a> {
-    board: &'a BoardFast,
+pub struct Block {
+    board: *const BoardFast,
     starting_point: Point
 }
 
-impl<'a> Block<'a> {
-    fn new(board: &'a BoardFast, starting_point: Point) -> Block<'a> {
+impl<'a> Block {
+    fn new(board: &BoardFast, starting_point: Point) -> Block {
         Block { board, starting_point }
     }
 }
 
-impl<'a> IntoIterator for Block<'a> {
-    type Item = <BlockIter<'a> as Iterator>::Item;
-    type IntoIter = BlockIter<'a>;
+impl<'a> IntoIterator for Block {
+    type Item = Point;
+    type IntoIter = ChainIter<*const BoardFast>;
 
     fn into_iter(self) -> Self::IntoIter {
-        BlockIter::new(self.board, self.starting_point)
-    }
-}
-
-pub struct BlockMut<'a> {
-    board: &'a mut BoardFast,
-    starting_point: Point
-}
-
-impl<'a> BlockMut<'a> {
-    fn new(board: &'a mut BoardFast, starting_point: Point) -> BlockMut<'a> {
-        BlockMut { board, starting_point }
-    }
-}
-
-impl<'a> IntoIterator for BlockMut<'a> {
-    type Item = <BlockIterMut<'a> as Iterator>::Item;
-    type IntoIter = BlockIterMut<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        BlockIterMut::new(self.board, self.starting_point)
-    }
-}
-
-pub trait Vertex {
-    fn is_valid(self) -> bool;
-    fn color(self) -> Option<Color>;
-    fn next_point(self) -> Point;
-    fn head_point(self) -> Point;
-    fn num_liberties(self) -> usize;
-    fn visited(self) -> bool;
-
-    fn set_color(&mut self, color: Option<Color>);
-    fn set_next_point(&mut self, next_point: Point);
-    fn set_head_point(&mut self, head_point: Point);
-    fn set_liberties(&mut self, num_liberties: usize);
-    fn set_visited(&mut self, visited: bool);
-
-    fn add_liberties(&mut self, delta: usize);
-    fn sub_liberties(&mut self, delta: usize);
-}
-
-const EMPTY: u32 = 0x0;
-const INVALID: u32 = 0x3;
-
-impl Vertex for u32 {
-    fn is_valid(self) -> bool {
-        (self & 0x3) != 3
-    }
-
-    fn color(self) -> Option<Color> {
-        match self & 0x3 {
-            1 => Some(Color::Black),
-            2 => Some(Color::White),
-            _ => None,
-        }
-    }
-
-    fn next_point(self) -> Point {
-        Point::from_raw_parts(((self & 0x00000ffc) >> 2) as u16)
-    }
-
-    fn head_point(self) -> Point {
-        Point::from_raw_parts(((self & 0x003ff000) >> 12) as u16)
-    }
-
-    fn num_liberties(self) -> usize {
-        ((self & 0x7fc00000) >> 22) as usize
-    }
-
-    fn visited(self) -> bool {
-        (self & 0x80000000) != 0
-    }
-
-    fn set_color(&mut self, color: Option<Color>) {
-        let value = match color {
-            Some(Color::Black) => 1,
-            Some(Color::White) => 2,
-            _ => 0,
-        };
-
-        *self = (*self & 0xfffffffc) | (value as u32);
-    }
-
-    fn set_next_point(&mut self, next_vertex: Point) {
-        *self = (*self & 0xfffff003) | (next_vertex.to_i() << 2) as u32;
-    }
-
-    fn set_head_point(&mut self, head_vertex: Point) {
-        *self = (*self & 0xffc00fff) | (head_vertex.to_i() << 12) as u32;
-    }
-
-    fn set_liberties(&mut self, num_liberties: usize) {
-        *self = (*self & 0x803fffff) | (num_liberties << 22) as u32;
-    }
-
-    fn set_visited(&mut self, visited: bool) {
-        *self = (*self & 0x7fffffff) | if visited { 0x80000000 } else { 0 }
-    }
-
-    fn add_liberties(&mut self, delta: usize) {
-        *self += (delta << 22) as u32;
-    }
-
-    fn sub_liberties(&mut self, delta: usize) {
-        *self -= (delta << 22) as u32;
+        ChainIter::new(self.starting_point, self.board)
     }
 }
 
@@ -341,15 +71,27 @@ impl IndexMut<Point> for BoardFast {
     }
 }
 
+impl IsValid for &BoardFast {
+    fn is_valid(&self, point: Point) -> bool {
+        self[point].is_valid()
+    }
+}
+
+impl NextLink for *const BoardFast {
+    fn next_link(&self, point: Point) -> Point {
+        unsafe { (**self)[point].next_point() }
+    }
+}
+
 impl BoardFast {
     /// Returns an empty board.
     pub fn new() -> BoardFast {
         let mut board = BoardFast {
-            vertices: [INVALID; Point::MAX],
+            vertices: [u32::invalid(); Point::MAX],
         };
 
         for point in Point::all() {
-            board[point] = EMPTY;
+            board[point] = u32::empty();
         }
 
         board
@@ -362,8 +104,11 @@ impl BoardFast {
     ///
     /// * `at_point` -
     ///
-    pub fn adjacent_to(&self, at_point: Point) -> AdjacentVertexIter {
-        AdjacentIter::new(at_point).with_vertex(self)
+    pub fn adjacent_to(&self, at_point: Point) -> ValidIter<AdjacentIter, &BoardFast> {
+        ValidIter::new(
+            AdjacentIter::new(at_point),
+            &self
+        )
     }
 
     /// Returns the block, set of strongly connected vertices of the same
@@ -375,17 +120,6 @@ impl BoardFast {
     ///
     pub fn block_at(&self, at_point: Point) -> Block {
         Block::new(self, at_point)
-    }
-
-    /// Returns the block, set of strongly connected vertices of the same
-    /// color, at the given vertex with a mutable reference to each vertex.
-    ///
-    /// # Arguments
-    ///
-    /// * `at_point` -
-    ///
-    pub fn block_at_mut(&mut self, at_point: Point) -> BlockMut {
-        BlockMut::new(self, at_point)
     }
 
     /// Returns whether the given liberties of the given group (as counted by
@@ -410,9 +144,9 @@ impl BoardFast {
     /// 
     pub fn get_a_liberty(&self, at_point: Point) -> Option<Point> {
         for current in self.block_at(at_point) {
-            for (other_index, other_vertex) in self.adjacent_to(current) {
-                if other_vertex.color() == None {
-                    return Some(other_index);
+            for other_point in self.adjacent_to(current) {
+                if self[other_point].color() == None {
+                    return Some(other_point);
                 }
             }
         }
@@ -449,8 +183,8 @@ impl BoardFast {
         self[at_point].color() == None && {
             let current = Some(color);
 
-            for (other_index, other_vertex) in self.adjacent_to(at_point) {
-                let value = other_vertex.color();
+            for other_point in self.adjacent_to(at_point) {
+                let value = self[other_point].color();
 
                 // check for direct liberties
                 if value == None {
@@ -463,7 +197,7 @@ impl BoardFast {
                 //    least two liberties.
                 // 2. If a neighbour is unfriendly then we are fine if it has less
                 //    than two liberties (i.e. one).
-                if (value == current) == self.has_n_liberty(other_index, 2) {
+                if (value == current) == self.has_n_liberty(other_point, 2) {
                     return true;
                 }
             }
@@ -485,9 +219,9 @@ impl BoardFast {
 
         let block_color = self[block_at].color();
 
-        self.adjacent_to(liberty).any(|(_adj_point, adj_state)| {
-            let is_same_color = adj_state.color() == block_color;
-            let is_same_block = adj_state.head_point() == block_at;
+        self.adjacent_to(liberty).any(|adj_point| {
+            let is_same_color = self[adj_point].color() == block_color;
+            let is_same_block = self[adj_point].head_point() == block_at;
 
             is_same_color && is_same_block
         })
@@ -523,8 +257,8 @@ impl BoardFast {
         let mut num_additional_liberties = 0;
 
         for point in self.block_at(one) {
-            for (adj_point, adj_state) in self.adjacent_to(point) {
-                let is_empty = adj_state.color() == None;
+            for adj_point in self.adjacent_to(point) {
+                let is_empty = self[adj_point].color() == None;
                 let is_new = !already_added[adj_point];
 
                 if is_empty && is_new && !self.is_liberty_of(adj_point, head_two) {
@@ -534,8 +268,8 @@ impl BoardFast {
             }
         }
 
-        for (_point, point_state) in self.block_at_mut(one) {
-            point_state.set_head_point(head_two);
+        for point in self.block_at(one) {
+            self[point].set_head_point(head_two);
         }
 
         self[head_two].add_liberties(num_additional_liberties);
@@ -613,10 +347,9 @@ impl BoardFast {
     ///
     #[inline]
     pub fn capture(&mut self, color: Color, at_point: Point) -> u64 {
-        let points = self.block_at(at_point).into_iter().collect::<Vec<_>>();
         let mut hash = 0;
 
-        for &other_index in &points {
+        for other_index in self.block_at(at_point) {
             hash ^= zobrist::TABLE[color as usize][other_index];
             self[other_index].set_color(None);
             self.incr_adjacent_liberties(other_index);
@@ -639,10 +372,10 @@ impl BoardFast {
         let mut seen_blocks = [Point::default(); 4];
         let mut adjust = zobrist::TABLE[color as usize][at_point];
 
-        for (i, (_, other_vertex)) in self.adjacent_to(at_point).enumerate() {
-            let head = other_vertex.head_point();
+        for (i, other_point) in self.adjacent_to(at_point).enumerate() {
+            let head = self[other_point].head_point();
 
-            if other_vertex.color() == Some(opponent) && !self.has_n_liberty(head, 2) {
+            if self[head].color() == Some(opponent) && !self.has_n_liberty(head, 2) {
                 if !seen_blocks.contains(&head) {
                     seen_blocks[i] = head;
                     adjust ^= self.capture_if(opponent, head);
@@ -667,7 +400,7 @@ impl BoardFast {
         // or not.
         let num_immediate_liberties = self
             .adjacent_to(at_point)
-            .filter(|(_, adj_state)| adj_state.color() == None)
+            .filter(|&adj_point| self[adj_point].color() == None)
             .count();
 
         self[at_point].set_color(Some(color));
@@ -702,31 +435,5 @@ impl BoardFast {
         }
 
         hash
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exhaustive_vertex_bitfield() {
-        let mut x: u32 = 0;
-
-        for color in vec! [None, Some(Color::Black), Some(Color::White)].into_iter() {
-            x.set_color(color);
-
-            for next_vertex in Point::all() {
-                x.set_next_point(next_vertex);
-
-                for visited in vec! [true, false] {
-                    x.set_visited(visited);
-
-                    assert_eq!(x.color(), color);
-                    assert_eq!(x.next_point(), next_vertex);
-                    assert_eq!(x.visited(), visited);
-                }
-            }
-        }
     }
 }

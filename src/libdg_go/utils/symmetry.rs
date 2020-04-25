@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use board_fast::{Vertex};
 use board::Board;
 use point::Point;
+use point_state::Vertex;
 
 fn get_transformation<F, G>(ax: F, ay: G) -> Box<[Point]>
     where F: Fn(i32, i32) -> i32, G: Fn(i32, i32) -> i32

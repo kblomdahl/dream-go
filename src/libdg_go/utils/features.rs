@@ -16,6 +16,7 @@ use board_fast::*;
 use board::Board;
 use color::Color;
 use point::Point;
+use point_state::Vertex;
 use dg_utils::{max, min};
 
 use super::ladder::Ladder;

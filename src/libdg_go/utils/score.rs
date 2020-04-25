@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use board_fast::{BoardFast, Vertex};
+use board_fast::BoardFast;
 use board::Board;
 use color::Color;
 use point::Point;
+use point_state::Vertex;
 
 use std::collections::VecDeque;
 
@@ -275,10 +276,10 @@ fn get_territory_distance(board: &BoardFast, color: Color) -> [u8; Point::MAX] {
         let index = probes.pop_front().unwrap();
         let t = territory[index] + 1;
 
-        for (other_index, other_vertex) in board.adjacent_to(index) {
-            if other_vertex.color() == None && territory[other_index] > t {
-                probes.push_back(other_index);
-                territory[other_index] = t;
+        for other_point in board.adjacent_to(index) {
+            if board[other_point].color() == None && territory[other_point] > t {
+                probes.push_back(other_point);
+                territory[other_point] = t;
             }
         }
     }

@@ -15,11 +15,12 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use board_fast::{BoardFast, Vertex};
+use board_fast::{BoardFast};
 use color::Color;
 use circular_buf::CircularBuf;
 use small_set::SmallSet64;
 use point::Point;
+use point_state::Vertex;
 
 ///
 #[derive(Clone)]
