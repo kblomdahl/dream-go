@@ -1255,7 +1255,7 @@ impl<O: SearchOptions> Node<O> {
             let (c_threshold, c_total) = percentile(
                 self.children.nonzero().map(|i| self.with(i, |child| child.count())),
                 c_total,
-                0.1
+                0.5
             );
             let mut s = vec! [::std::f64::NAN; 362];
             let mut s_total = 0.0;
