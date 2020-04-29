@@ -63,6 +63,7 @@ use dg_go::utils::symmetry;
 use dg_go::{Board, Color, Point};
 use self::options::{SearchOptions, ScoringSearch};
 use self::time_control::TimeStrategy;
+use self::tree::ProbeResult;
 use self::predict::Predictor;
 use dg_nn::Profiler;
 use dg_utils::config;
@@ -327,28 +328,32 @@ fn predict_worker<T, P, O>(context: ThreadContext<T, O>, server: P)
             let trace = unsafe { tree::probe(root, &mut board) };
             global_rwlock::read_unlock();
 
-            if let Some(trace) = trace {
-                let &(_, color, _) = trace.last().unwrap();
-                let to_move = color.opposite();
-                let result = forward::<_, O>(&server, &board, to_move);
+            match trace {
+                ProbeResult::Found(trace) => {
+                    let &(_, color, _) = trace.last().unwrap();
+                    let to_move = color.opposite();
+                    let result = forward::<_, O>(&server, &board, to_move);
 
-                if let Some((value, policy)) = result {
-                    global_rwlock::read_lock();
+                    if let Some((value, policy)) = result {
+                        global_rwlock::read_lock();
 
-                    unsafe {
-                        tree::insert(&trace, to_move, value, policy);
-                        break
+                        unsafe {
+                            tree::insert(&trace, to_move, value, policy);
+                            break
+                        }
+                    } else {
+                        unsafe { tree::undo(trace, true) };
+
+                        return  // unrecognized error
                     }
-                } else {
-                    unsafe { tree::undo(trace, true) };
-
-                    return  // unrecognized error
+                },
+                ProbeResult::Conflict => {
+                    server.synchronize();
+                    global_rwlock::read_lock();
+                },
+                ProbeResult::NoResult => {
+                    return;
                 }
-            } else if !root.has_valid_candidates(&context.starting_point) {
-                return;  // skip `rcu::unregister` since we are not registered
-            } else {
-                server.synchronize();
-                global_rwlock::read_lock();
             }
         }
     }
@@ -409,7 +414,6 @@ fn predict_aux<T, P, O>(
     let context: ThreadContext<T, O> = ThreadContext {
         root: Arc::new(UnsafeCell::new(starting_tree)),
         starting_point: starting_point.clone(),
-
         time_strategy: time_strategy.clone()
     };
 
@@ -436,7 +440,7 @@ fn predict_aux<T, P, O>(
     assert_eq!(Arc::strong_count(&context.root), 1);
 
     // choose the best move according to the search tree
-    let root = UnsafeCell::into_inner(Arc::try_unwrap(context.root).ok().expect(""));
+    let root = UnsafeCell::into_inner(Arc::try_unwrap(context.root).ok().expect("no root"));
     let (value, index) = root.best(if !O::deterministic() && starting_point.count() < 8 {
         *config::TEMPERATURE
     } else {

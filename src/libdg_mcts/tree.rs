@@ -963,6 +963,38 @@ impl<O: SearchOptions> ChildrenImpl<O> {
     }
 }
 
+/// The result of selecting which is the next move:
+/// 
+/// * `Conflict` - We tried to expand the same move as someone else.
+/// * `NoResult` - There were no valid moves to consider.
+/// * `Found` - 
+/// 
+pub enum ProbeResult<T> {
+    Conflict,
+    NoResult,
+    Found(T)
+}
+
+impl<T> ProbeResult<T> {
+    pub fn is_some(&self) -> bool {
+        match *self {
+            ProbeResult::Found(_) => true,
+            _ => false
+        }
+    }
+
+    pub fn is_none(&self) -> bool {
+        !self.is_some()
+    }
+
+    pub fn unwrap(self) -> T {
+        match self {
+            ProbeResult::Found(x) => x,
+            _ => panic!()
+        }
+    }
+}
+
 /// A monte carlo search tree.
 #[repr(align(64))]
 pub struct Node<O: SearchOptions> {
@@ -1026,6 +1058,12 @@ impl<O: SearchOptions> Node<O> {
             prior: prior_padding,
             children: ChildrenImpl::Small(ManuallyDrop::new(SmallChildrenImpl::with_value(value)))
         }
+    }
+
+    /// Returns this node with the given search options instead of the current
+    /// search options.
+    pub fn to_options<O2: SearchOptions>(self) -> Node<O2> {
+        unsafe { ::std::mem::transmute(self) }
     }
 
     /// Returns true if the given vertex is a valid candidate move in this tree.
@@ -1303,7 +1341,7 @@ impl<O: SearchOptions> Node<O> {
     ///
     /// * `apply_fpu` - whether to use the first-play urgency heuristic
     ///
-    fn select(&mut self, apply_fpu: bool) -> Option<usize> {
+    fn select(&mut self, apply_fpu: bool) -> ProbeResult<(usize, f32)> {
         let mut value = self.children.value(self.initial_value);
 
         if apply_fpu {
@@ -1336,19 +1374,22 @@ impl<O: SearchOptions> Node<O> {
         // is already expanding the node we want to expand.
         let initial_value = self.initial_value;
         let max_i = argmax_f32(&value);
-        let max_i = max_i.and_then(|i| {
-            self.children.with_mut(i, |mut child| {
-                if child.set_expanding() && child.ptr().is_null() {
-                    None  // someone else is already expanding this node
-                } else {
-                    child.add_vcount(*config::VLOSS_CNT);
+        let max_i =
+            if let Some(i) = max_i {
+                self.children.with_mut(i, |mut child| {
+                    if child.set_expanding() && child.ptr().is_null() {
+                        ProbeResult::Conflict
+                    } else {
+                        child.add_vcount(*config::VLOSS_CNT);
 
-                    Some(i)
-                }
-            }, initial_value)
-        });
+                        ProbeResult::Found((i, value[i]))
+                    }
+                }, initial_value)
+            } else {
+                ProbeResult::NoResult
+            };
 
-        if max_i.is_some() {
+        if let ProbeResult::Found(_) = max_i {
             unsafe {
                 atomic_xadd(&mut self.vtotal_count, *config::VLOSS_CNT);
             }
@@ -1392,41 +1433,55 @@ pub unsafe fn undo<O: SearchOptions>(trace: NodeTrace<O>, undo_expanding: bool) 
 /// * `root` - the search tree to probe into
 /// * `board` - the board to update with the traversed moves
 ///
-pub unsafe fn probe<O: SearchOptions>(root: &mut Node<O>, board: &mut Board) -> Option<NodeTrace<O>> {
+pub unsafe fn probe<O: SearchOptions>(root: &mut Node<O>, board: &mut Board) -> ProbeResult<NodeTrace<O>> {
     let mut trace = vec! [];
     let mut current = root;
 
     loop {
-        if let Some(next_child) = current.select(!trace.is_empty()) {
-            trace.push((current as *mut Node<O>, current.to_move, next_child));
+        let apply_fpu = !trace.is_empty();
 
-            if next_child != 361 {  // not a passing move
-                let point = Point::from_packed_parts(next_child);
+        match current.select(apply_fpu) {
+            ProbeResult::Conflict => {
+                undo(trace, false);
+                return ProbeResult::Conflict;
+            },
+            ProbeResult::NoResult => {
+                return ProbeResult::NoResult;
+            },
+            ProbeResult::Found((next_child, next_value)) => {
+                trace.push((current as *mut Node<O>, current.to_move, next_child));
 
-                debug_assert!(board.is_valid(current.to_move, point), "{}\nnext_move {:?}", board.to_string(), point);
-                board.place(current.to_move, point);
-            } else if current.pass_count >= 1 {
-                break;  // at least two consecutive passes
+                if next_child != 361 {  // not a passing move
+                    let point = Point::from_packed_parts(next_child);
+
+                    debug_assert!(
+                        board.is_valid(current.to_move, point),
+                        "{}\nnext_move {} {:?}, next_value {}\n{}",
+                        board.to_string(),
+                        current.to_move,
+                        point,
+                        next_value,
+                        ToPretty { root: current, verbose: true }
+                    );
+
+                    board.place(current.to_move, point);
+                } else if current.pass_count >= 1 {
+                    break;  // at least two consecutive passes
+                }
+
+                //
+                let child = current.with(next_child, |child| child.ptr());
+
+                if child.is_null() {
+                    break
+                } else {
+                    current = &mut *child;
+                }
             }
-
-            //
-            let child = current.with(next_child, |child| child.ptr());
-
-            if child.is_null() {
-                break
-            } else {
-                current = &mut *child;
-            }
-        } else {
-            // undo the entire trace, since we added virtual losses (optimistically)
-            // on the way down.
-            undo(trace, false);
-
-            return None;
         }
     }
 
-    Some(trace)
+    ProbeResult::Found(trace)
 }
 
 /// Insert a new node at the end of the given trace and perform the backup pass
@@ -1585,6 +1640,7 @@ impl<'a, O: SearchOptions> Iterator for GreedyPath<'a, O> {
 /// within a `write!` macro.
 pub struct ToPretty<'a, O: SearchOptions> {
     root: &'a Node<O>,
+    verbose: bool
 }
 
 impl<'a, O: SearchOptions> fmt::Display for ToPretty<'a, O> {
@@ -1596,7 +1652,7 @@ impl<'a, O: SearchOptions> fmt::Display for ToPretty<'a, O> {
             }))
         });
 
-        if !*config::VERBOSE {
+        if !self.verbose {
             children.truncate(10);
         }
 
@@ -1651,7 +1707,9 @@ impl<'a, O: SearchOptions> fmt::Display for ToPretty<'a, O> {
 /// * `starting_point` -
 ///
 pub fn to_pretty<O: SearchOptions>(root: &Node<O>) -> ToPretty<O> {
-    ToPretty { root }
+    let verbose = *config::VERBOSE;
+
+    ToPretty { root, verbose }
 }
 
 #[cfg(test)]
@@ -1691,7 +1749,7 @@ mod tests {
         loop {
             let trace = probe(&mut root, &mut Board::new(DEFAULT_KOMI));
 
-            if let Some(trace) = trace {
+            if let ProbeResult::Found(trace) = trace {
                 assert_eq!(trace.len(), 1);
 
                 // check that we are not re-visiting a node that we have not yet finished
@@ -1740,7 +1798,7 @@ mod tests {
             get_prior_distribution(&mut rng, &board, Color::Black)
         );
 
-        if let Some(trace) = probe(&mut root, &mut board) {
+        if let ProbeResult::Found(trace) = probe(&mut root, &mut board) {
             let i = trace[0].2;
 
             // check that the virtual loss was applied

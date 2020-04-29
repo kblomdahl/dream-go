@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_go::{Board, Color, Point};
+use dg_go::{Board, Color, Point, IsPartOf};
 
 pub trait SearchOptions : Clone {
     /// Returns true if the given move should be considered during search.
@@ -68,7 +68,7 @@ impl SearchOptions for ScoringSearch {
 fn is_vertex_filled(board: &Board, color: Color, point: Point, dx: i8, dy: i8) -> bool {
     let other = point.offset(dx as isize, dy as isize);
 
-    board.at(other) == Some(color)
+    board.is_part_of(other) && board.at(other) == Some(color)
 }
 
 /// Returns true if the given move would fill ones own eye. An eye in this case
@@ -95,15 +95,62 @@ fn is_eye(board: &Board, color: Color, point: Point) -> bool {
 
     // distinguish between the three different cases, (i) an eye in the middle,
     // (ii) an eye in along the edge, and (iii) an eye in the corner.
-    let packed_index = point.to_packed_index();
-    let x = point.x();
-    let y = point.y();
+    let (x, y) = (point.x(), point.y());
 
-    if packed_index == 0 || packed_index == 18 || packed_index == 342 || packed_index == 360 {
+    if (x == 0 || x == 18) && (y == 0 || y == 18) {
         num_cross >= 2 && num_diagonal >= 1  // corner move
     } else if x == 0 || x == 18 || y == 0 || y == 18 {
         num_cross >= 3 && num_diagonal >= 2  // edge
     } else {
         num_cross >= 4 && num_diagonal >= 3
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn corner() {
+        let mut board = Board::new(0.5);
+        board.place(Color::Black, Point::new(1, 0));
+        board.place(Color::Black, Point::new(0, 1));
+        board.place(Color::Black, Point::new(1, 1));
+
+        assert!(is_eye(&board, Color::Black, Point::new(0, 0)));
+        assert!(!is_eye(&board, Color::White, Point::new(0, 0)));
+    }
+
+    #[test]
+    fn side() {
+        let mut board = Board::new(0.5);
+        board.place(Color::Black, Point::new(0, 0));
+        board.place(Color::Black, Point::new(0, 1));
+        board.place(Color::Black, Point::new(1, 1));
+        board.place(Color::Black, Point::new(2, 1));
+        board.place(Color::Black, Point::new(2, 0));
+
+        assert!(is_eye(&board, Color::Black, Point::new(1, 0)));
+        assert!(!is_eye(&board, Color::White, Point::new(1, 0)));
+    }
+
+    #[test]
+    fn middle() {
+        let mut board = Board::new(0.5);
+        board.place(Color::Black, Point::new(0, 1));
+        board.place(Color::Black, Point::new(0, 2));
+        board.place(Color::Black, Point::new(1, 0));
+        board.place(Color::Black, Point::new(2, 0));
+        board.place(Color::Black, Point::new(2, 2));
+        board.place(Color::Black, Point::new(2, 1));
+        board.place(Color::Black, Point::new(1, 2));
+
+        assert!(is_eye(&board, Color::Black, Point::new(1, 1)), "{}", board);
+        assert!(!is_eye(&board, Color::White, Point::new(1, 1)), "{}", board);
+
+        board.place(Color::Black, Point::new(0, 0));
+
+        assert!(is_eye(&board, Color::Black, Point::new(1, 1)), "{}", board);
+        assert!(!is_eye(&board, Color::White, Point::new(1, 1)), "{}", board);
     }
 }
