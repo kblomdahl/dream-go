@@ -31,6 +31,7 @@ extern crate time;
 
 pub mod asm;
 mod dirichlet;
+mod game_result;
 mod global_cache;
 mod greedy_score;
 pub mod options;
@@ -44,6 +45,7 @@ pub mod time_control;
 
 /* -------- Exports -------- */
 
+pub use self::game_result::*;
 pub use self::greedy_score::*;
 pub use self::self_play::*;
 pub use self::policy_play::*;
@@ -53,12 +55,10 @@ pub use self::policy_play::*;
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
-use std::fmt;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use dg_go::utils::features::{HWC, Features};
-use dg_go::utils::score::{Score};
 use dg_go::utils::symmetry;
 use dg_go::{Board, Color, Point};
 use self::options::{SearchOptions, ScoringSearch};
@@ -71,40 +71,6 @@ use dg_utils::types::f16;
 use self::asm::sum_finite_f32;
 use self::asm::normalize_finite_f32;
 use self::parallel::global_rwlock;
-
-pub enum GameResult {
-    Resign(String, Board, Color, f32),
-    Ended(String, Board)
-}
-
-impl fmt::Display for GameResult {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        let now = time::now_utc();
-        let iso8601 = time::strftime("%Y-%m-%dT%H:%M:%S%z", &now).unwrap();
-
-        match *self {
-            GameResult::Resign(ref sgf, ref board, winner, _) => {
-                write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[{:.1}]RE[{}+Resign]{})", iso8601, board.komi(), winner, sgf)
-            },
-            GameResult::Ended(ref sgf, ref board) => {
-                let (black, white) = board.get_score();
-                let black = black as f32;
-                let white = white as f32 + board.komi();
-                let winner = {
-                    if black > white {
-                        format!("B+{:.1}", black - white)
-                    } else if white > black {
-                        format!("W+{:.1}", white - black)
-                    } else {
-                        "0".to_string()
-                    }
-                };
-
-                write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[{:.1}]RE[{}]{})", iso8601, board.komi(), winner, sgf)
-            }
-        }
-    }
-}
 
 /// Return the value and policy for the given board position, as the interpolation
 /// of their value for every symmetry.
