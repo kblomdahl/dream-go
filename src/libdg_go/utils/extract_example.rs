@@ -407,9 +407,7 @@ mod tests {
 
     #[test]
     fn resign_is_not_scored() {
-        let content = "(;GM[1]RE[B+R])";
-
-        assert!(!is_scored(&content));
+        assert!(!is_scored(&"(;GM[1]RE[B+R])"));
     }
 
     #[test]
@@ -439,98 +437,17 @@ mod tests {
 
     #[test]
     fn territory() {
-        let content = r#"
-(;GM[1]FF[4]SZ[19]GN[GNU Go 3.8]DT[2013-01-15]PB[comeone]PW[DFS]
-KM[0.0]HA[6]RU[Japanese]AP[GNU Go:3.8]RE[0]
-;W[cn];B[cl];W[em];B[fp];W[dk];B[ck];W[dj];B[co];W[dn];B[bo];W[cf]
-;B[bn];W[fc];B[ee];W[hd];B[ch];W[ef];B[ff];W[eg];B[fe];W[hf];B[fg]
-;W[eh];B[hg];W[ig];B[hh];W[fh];B[gf];W[if];B[ih];W[ld];B[ke];W[kg]
-;B[le];W[nd];B[me];W[pe];B[od];W[ne];B[oe];W[nf];B[lg];W[of];B[qe]
-;W[pf];B[qf];W[qg];B[qc];W[jh];B[ij];W[lh];B[mg];W[mh];B[ng];W[oi]
-;B[md];W[nc];B[ic];W[lb];B[hc];W[gd];B[gc];W[fd];B[fb];W[eb];B[gb]
-;W[dc];B[lc];W[kc];B[mc];W[mb];B[kd];W[cd];B[de];W[ce];B[df];W[cg]
-;B[dg];W[dh];B[ci];W[cj];B[bj];W[bk];B[bl];W[bi];B[ak];W[bh];B[il]
-;W[qn];B[ob];W[nb];B[kb];W[nq];B[lq];W[oo];B[qq];W[op];B[or];W[gp]
-;B[fo];W[jo];B[ip];W[io];B[hp];W[jk];B[ik];W[gh];B[gg];W[hm];B[jm]
-;W[ko];B[lm];W[nr];B[qo];W[ro];B[rp];W[po];B[qp];W[nl];B[fl];W[ho]
-;B[fm];W[gk];B[hl];W[gl];B[gm];W[gn];B[gj];W[fk];B[nm];W[om];B[ml]
-;W[nk];B[mo];W[lp];B[mp];W[mq];B[nn];W[kl];B[kj];W[km];B[kk];W[jl]
-;B[kn];W[jn];B[im];W[ln];B[hn];W[go];B[fn];W[jj];B[gq];W[rn];B[qh]
-;W[ph];B[rg];W[pg];B[qi];W[pr];B[qr];W[oq];B[sr];W[rs];B[ps];W[os]
-;B[pl];W[qk];B[rk];W[pk];B[rl];W[kq];B[jr];W[kr];B[qs];W[sp];B[sq]
-;W[rr];B[pn];W[ql];B[so];W[qm];B[nh];W[ni];B[oc];W[ka];B[jb];W[ir]
-;B[jq];W[js];B[hr];W[kp];B[iq];W[is];B[hq];W[hs];B[fr];W[fs];B[es]
-;W[gs];B[eq];W[el];B[ai];W[ah];B[gi];W[oa];B[pa];W[na];B[qb];W[rm]
-;B[rj];W[aj];B[jf];W[jg];B[ai];W[sl];B[sk];W[sm];B[cb];W[ea];B[bc]
-;W[ec];B[ja];W[aj];B[ab];W[ba];B[ai];W[fj];B[fi];W[ei];B[qj];W[pj]
-;B[ji];W[ki];B[ii];W[aj];B[li]
-TB[aa][ba][ca][ga][ha][ia][ja][ka][la][pa][qa][ra][sa][ab][bb][cb]
-  [db][fb][gb][jb][kb][ob][pb][qb][rb][sb][ac][bc][gc][hc][ic][jc]
-  [kc][lc][mc][oc][qc][rc][sc][ad][bd][dd][ed][id][jd][kd][ld][md]
-  [od][qd][rd][sd][de][ee][fe][ge][je][ke][le][me][oe][qe][re][se]
-  [df][ff][gf][jf][lf][qf][rf][sf][dg][fg][gg][hg][lg][mg][ng][rg]
-  [sg][hh][ih][nh][oh][qh][rh][sh][fi][gi][hi][ii][ji][qi][ri][bj]
-  [gj][hj][ij][nj][qj][rj][ak][bk][ck][hk][ik][rk][sk][bl][cl][fl]
-  [hl][il][rl][bm][fm][gm][hm][im][jm][bn][en][fn][hn][ao][bo][co]
-  [fo][no][ap][bp][cp][dp][ep][fp][hp][ip][aq][bq][cq][dq][eq][fq]
-  [gq][hq][iq][jq][ar][br][cr][dr][er][fr][gr][hr][jr][as][bs][cs]
-  [ds][es]
-TW[da][ea][fa][ma][na][oa][eb][ib][lb][mb][nb][cc][dc][ec][fc][nc]
-  [pc][cd][fd][gd][hd][nd][pd][ae][be][ce][he][ie][ne][pe][af][bf]
-  [cf][ef][hf][if][kf][mf][nf][of][pf][ag][bg][cg][eg][ig][jg][kg]
-  [og][pg][qg][ah][bh][ch][dh][eh][fh][gh][jh][kh][lh][mh][ph][ai]
-  [bi][ci][di][ei][ki][li][mi][ni][oi][pi][aj][cj][dj][ej][fj][jj]
-  [kj][lj][mj][pj][sj][dk][ek][fk][gk][jk][kk][lk][mk][nk][ok][pk]
-  [qk][dl][el][gl][jl][kl][ll][ml][nl][ol][pl][ql][sl][am][cm][dm]
-  [em][km][lm][mm][nm][om][pm][qm][rm][sm][an][cn][dn][gn][in][jn]
-  [kn][ln][mn][nn][on][pn][qn][rn][sn][do][eo][go][ho][io][jo][ko]
-  [lo][mo][oo][po][qo][ro][so][gp][jp][kp][lp][mp][np][op][pp][qp]
-  [rp][sp][kq][lq][mq][nq][oq][pq][qq][rq][sq][ir][kr][lr][mr][nr]
-  [or][pr][qr][rr][sr][fs][gs][hs][is][js][ks][ls][ms][ns][os][ps]
-  [qs][rs][ss]
-)"#;
+        let content = "(GM[1];TB[aa][ba]TW[da][ea])";
+        let ownership = get_vertex_ownership(content, Color::Black);
 
-        assert_eq!(get_vertex_ownership(content, Color::Black), vec! [
-            1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 0.0,
-            -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, -1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0,
-            -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0,
-            -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0,
-            1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0,
-            1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
-            -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0,
-            -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0,
-            1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
-            1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0,
-            -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0,
-            -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, -1.0,
-            -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-            -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 0.0,
-            -1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0,
-            -1.0, -1.0, -1.0, -1.0, 1.0, 0.0, -1.0, 1.0, 1.0,
-            -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0,
-            1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
-            1.0, 1.0, 0.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0,
-            1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
-            1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
-            -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0,
-            -1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
-            -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0,
-            1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0,
-            -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0,
-            -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0,
-            -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, -1.0, -1.0, -1.0,
-            -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
-            -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0
-        ]);
+        for i in 0..361 {
+            if i == 0 || i == 1 {
+                assert_eq!(ownership[i], 1.0, "ownership[{}] != 1.0", i);
+            } else if i == 3 || i == 4 {
+                assert_eq!(ownership[i], -1.0, "ownership[{}] != -1.0", i);
+            } else {
+                assert_eq!(ownership[i], 0.0, "ownership[{}] != 0.0", i);
+            }
+        }
     }
 }
