@@ -18,20 +18,21 @@ use point::Point;
 use ::DEFAULT_KOMI;
 
 use super::features::{HWC, FEATURE_SIZE, NUM_FEATURES, Features};
-use super::sgf::{Sgf, SgfError};
+use super::sgf::{Sgf, SgfEntry, SgfError};
 use super::symmetry;
 
 use dg_utils::types::f16;
 use dg_utils::b85;
+use utils::sgf::{CGoban, SgfCoordinate};
 
 use libc::{c_char, c_int};
-use rand::prelude::SliceRandom;
+use rand::distributions::Uniform;
 use rand::rngs::StdRng;
-use rand::SeedableRng;
+use rand::{SeedableRng, Rng};
 use regex::{Regex, Captures};
 use std::ffi::CStr;
 use std::sync::Mutex;
-use utils::sgf::{CGoban, SgfCoordinate};
+use ordered_float::OrderedFloat;
 
 #[repr(C)]
 pub struct Example {
@@ -77,12 +78,16 @@ impl Candidate<'_> {
     fn has_policy(&self) -> bool {
         self.policy.is_some()
     }
+}
 
-    /// Returns true if this candidate has a _reasonable_ win rate, i.e. between `[-0.95, 0.95]`.
-    fn has_reasonable_value(&self) -> bool {
-        match self.value {
-            None => true,
-            Some(v) => v.abs() < 0.95
+impl<'a> From<SgfEntry<'a>> for Candidate<'a> {
+    fn from(m: SgfEntry<'a>) -> Self {
+        Self {
+            board: m.board,
+            index: m.point.to_packed_index(),
+            color: m.color,
+            policy: m.policy,
+            value: m.value
         }
     }
 }
@@ -125,51 +130,12 @@ pub unsafe extern fn extract_single_example(
     out: *mut Example
 ) -> c_int
 {
-    lazy_static! {
-        static ref EMPTY_POLICY: Vec<f32> = vec! [0.0; 362];
-
-        static ref WINNER: Regex = Regex::new(r"RE\[([^\]]+)\]").unwrap();
-        static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
-        static ref KOMI: Regex = Regex::new(r"KM\[([^\]]*)\]").unwrap();
-    }
-
     CStr::from_ptr(raw_sgf_content as *const _).to_str().map(|content| {
-        // find the komi by looking for the pattern `KM[...]` at any point
-        // in the file.
-        let komi = {
-            if let Some(caps) = KOMI.captures(&content) {
-                if caps[1] == *"0" || caps[1] == *"0.0" {
-                    DEFAULT_KOMI  // Fox sometimes output an empty komi
-                } else {
-                    match caps[1].parse::<f32>() {
-                        Ok(komi) => {
-                            if komi >= 100.0 {
-                                // Fox seems to sometimes output 550 instead of 5.5, etc.
-                                komi / 100.0
-                            } else {
-                                komi
-                            }
-                        },
-                        Err(_) => { return -21; },
-                    }
-                }
-            } else {
-                DEFAULT_KOMI
-            }
-        };
-
-        // find the winner by looking for the pattern `RE[...]`.
-        let winner = {
-            if let Some(caps) = WINNER.captures(&content) {
-                match caps[1].chars().nth(0) {
-                    Some('B') => Color::Black,
-                    Some('W') => Color::White,
-                    _ => { return -22; }
-                }
-            } else {
-                return -22;
-            }
-        };
+        let komi =
+            match get_komi_from_sgf(content) {
+                Ok(km) => km,
+                Err(code) => { return code; }
+            };
 
         // find _all_ recorded moves, and their policies (if applicable).
         let mut examples: Vec<Candidate> = Vec::with_capacity(254);
@@ -185,13 +151,7 @@ pub unsafe extern fn extract_single_example(
 
                     pass_count = if is_pass { pass_count + 1 } else { 0 };
                     has_policy = has_policy || m.policy.is_some();
-                    examples.push(Candidate {
-                        board: m.board,
-                        index: if is_pass { 361 } else { m.point.to_packed_index() },
-                        color: m.color,
-                        policy: m.policy,
-                        value: m.value
-                    });
+                    examples.push(Candidate::from(m));
                 }
             }
         }
@@ -199,7 +159,7 @@ pub unsafe extern fn extract_single_example(
         // if the game was scored, then add two passing moves to the end of
         // the game. This is necessary since a lot of games seems to be
         // missing them.
-        while SCORED.is_match(&content) && pass_count < 2 {
+        while is_scored(content) && pass_count < 2 {
             let last_board = examples.last().map(|cand| cand.board.clone());
             let last_color = examples.last().map(|cand| cand.color).unwrap_or(Color::White);
 
@@ -219,57 +179,192 @@ pub unsafe extern fn extract_single_example(
             return -31;
         }
 
-        // if any of the candidate examples has full policies, then only consider
-        // those policies. Also remove any candidates whose `value` is too extreme
-        // since the MCTS does not tend to play too well in those situations.
-        let candidate_examples: Vec<usize> = (0..examples.len())
-            .filter(|&i| {
-                (!has_policy || examples[i].has_policy()) && examples[i].has_reasonable_value()
-            }).collect();
-
-        let chosen_candidate = RNG.lock().map(|ref mut rng| {
-            use std::ops::DerefMut;
-
-            candidate_examples.choose(rng.deref_mut())
-        }).unwrap_or(None);
-
-        chosen_candidate.map(|&i| {
-            let next_example = examples.get(i+1);
-            let features = examples[i].board.get_features::<HWC, f16>(
-                examples[i].color,
-                symmetry::Transform::Identity
-            );
-
-            (*out).features.clone_from_slice(&features);
-            (*out).index = examples[i].index as c_int;
-            (*out).next_index = next_example.map(|example| example.index).unwrap_or(361) as c_int;
-            (*out).color = examples[i].color as c_int;
-            (*out).policy.clone_from_slice(&match examples[i].policy {
-                Some(ref policy) => {
-                    assert_eq!(policy.len(), 905, "illegal policy -- {:?}", policy);
-
-                    b85::decode::<f16, f32>(policy).unwrap()
-                },
-                None => EMPTY_POLICY.clone()
-            });
-            (*out).next_policy.clone_from_slice(&match next_example.and_then(|example| example.policy) {
-                Some(ref policy) => {
-                    assert_eq!(policy.len(), 905, "illegal policy -- {:?}", policy);
-
-                    b85::decode::<f16, f32>(policy).unwrap()
-                },
-                None => EMPTY_POLICY.clone()
-            });
-            (*out).ownership.clone_from_slice(&get_vertex_ownership(content, examples[i].color));
-            (*out).winner = winner as c_int;
-            (*out).number = i as c_int;
-            (*out).komi = examples[i].board.komi();
-
-            0
+        choose_example(&examples, has_policy).map(|i| {
+            copy_candidates_to(content, &examples, i, &mut *out)
         }).unwrap_or(-32)
     }).unwrap_or(-1) as c_int
 }
 
+/// Choose a single example from the given examples. If there are given policies
+/// among the examples then those are favoured.
+/// 
+/// # Arguments
+/// 
+/// * `examples` -
+/// * `has_policy` - 
+/// 
+fn choose_example(examples: &[Candidate], has_policy: bool) -> Option<usize> {
+    let candidate_examples: Vec<usize> = (0..examples.len())
+        .filter(|&i| !has_policy || examples[i].has_policy())
+        .collect();
+
+    if candidate_examples.is_empty() {
+        return None;
+    }
+
+    // choose a single example based on the value distribution, so that moves
+    // closer to `0.5` are more likely to be picked.
+    let mut cum_examples: Vec<OrderedFloat<f32>> = vec! [];
+    let mut so_far: f32 = 0.0;
+
+    for &i in &candidate_examples {
+        let value =
+            match examples[i].value {
+                Some(val) => 0.5 - (val - 0.5).abs(),
+                None => 0.5,
+            };
+
+        cum_examples.push(OrderedFloat(so_far));
+        so_far += value;
+    }
+
+    let selected = RNG.lock().unwrap().sample(Uniform::new(0.0, so_far));
+
+    match cum_examples.binary_search(&OrderedFloat(selected)) {
+        Ok(i) => Some(i),
+        Err(i) => Some(i)
+    }
+}
+
+/// Set the given example values according to the given SGF and chosen examples.
+/// 
+/// # Arguments
+/// 
+/// * `content` - 
+/// * `examples` - 
+/// * `i` - 
+/// * `out` - 
+/// 
+fn copy_candidates_to(
+    content: &str,
+    examples: &[Candidate],
+    i: usize,
+    out: &mut Example
+) -> c_int
+{
+    lazy_static! {
+        static ref EMPTY_POLICY: Vec<f32> = vec! [0.0; 362];
+    }
+
+    let winner =
+        match get_winner_from_sgf(content) {
+            Ok(re) => re,
+            Err(code) => { return code; }
+        };
+    let next_example = examples.get(i+1);
+    let features = examples[i].board.get_features::<HWC, f16>(
+        examples[i].color,
+        symmetry::Transform::Identity
+    );
+
+    out.features.clone_from_slice(&features);
+    out.index = examples[i].index as c_int;
+    out.next_index = next_example.map(|example| example.index).unwrap_or(361) as c_int;
+    out.color = examples[i].color as c_int;
+    out.ownership.clone_from_slice(&get_vertex_ownership(content, examples[i].color));
+    out.winner = winner as c_int;
+    out.number = i as c_int;
+    out.komi = examples[i].board.komi();
+
+    match examples[i].policy {
+        Some(ref policy) => {
+            assert_eq!(policy.len(), 905, "illegal policy -- {:?}", policy);
+            out.policy.copy_from_slice(&b85::decode::<f16, f32>(policy).unwrap());
+        },
+        None => {
+            out.policy.copy_from_slice(&*EMPTY_POLICY);
+        }
+    };
+
+    match next_example.and_then(|example| example.policy) {
+        Some(ref policy) => {
+            assert_eq!(policy.len(), 905, "illegal next_policy -- {:?}", policy);
+            out.next_policy.copy_from_slice(&b85::decode::<f16, f32>(policy).unwrap());
+        },
+        None => {
+            out.next_policy.copy_from_slice(&*EMPTY_POLICY);
+        }
+    };
+
+    0
+}
+
+/// Returns the komi of the given SGF, as parsed by a simple regular expression.
+/// 
+/// # Arguments
+/// 
+/// * - `content` - 
+/// 
+fn get_komi_from_sgf(content: &str) -> Result<f32, i32> {
+    lazy_static! {
+        static ref KOMI: Regex = Regex::new(r"KM\[([^\]]*)\]").unwrap();
+    }
+
+    if let Some(caps) = KOMI.captures(&content) {
+        if caps[1] == *"0" || caps[1] == *"0.0" {
+            Ok(DEFAULT_KOMI)  // Fox sometimes output an empty komi
+        } else {
+            match caps[1].parse::<f32>() {
+                Ok(komi) => {
+                    if komi >= 100.0 {
+                        // Fox seems to sometimes output 550 instead of 5.5, etc.
+                        Ok(komi / 100.0)
+                    } else {
+                        Ok(komi)
+                    }
+                },
+                Err(_) => { return Err(-21); },
+            }
+        }
+    } else {
+        Ok(DEFAULT_KOMI)
+    }
+}
+
+/// Returns the winner of the given SGF, as parsed by a simple regular expression.
+/// 
+/// # Arguments
+/// 
+/// * - `content` - 
+/// 
+fn get_winner_from_sgf(content: &str) -> Result<Color, i32> {
+    lazy_static! {
+        static ref WINNER: Regex = Regex::new(r"RE\[([^\]]+)\]").unwrap();
+    }
+
+    if let Some(caps) = WINNER.captures(&content) {
+        match caps[1].chars().nth(0) {
+            Some('B') => Ok(Color::Black),
+            Some('W') => Ok(Color::White),
+            _ => Err(-22)
+        }
+    } else {
+        Err(-22)
+    }
+}
+
+/// Returns if the given SGF has given score.
+/// 
+/// # Arguments
+/// 
+/// * `content` - 
+/// 
+fn is_scored(content: &str) -> bool {
+    lazy_static! {
+        static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
+    }
+
+    SCORED.is_match(content) 
+}
+
+/// Update the vertex ownership based on the given SGF properties.
+/// 
+/// # Arguments
+/// 
+/// * `property` - 
+/// * `value` - 
+/// * `ownership` - 
+/// 
 fn set_vertex_ownerships(property: Option<Captures>, value: f32, ownership: &mut [f32]) {
     lazy_static! {
         static ref VERTICES: Regex = Regex::new(r"\[([a-z]*)\]").unwrap();
@@ -309,6 +404,38 @@ fn get_vertex_ownership(content: &str, to_move: Color) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resign_is_not_scored() {
+        let content = "(;GM[1]RE[B+R])";
+
+        assert!(!is_scored(&content));
+    }
+
+    #[test]
+    fn scored_is_scored() {
+        assert!(is_scored(&"(;GM[1]RE[B+1.5])"));
+        assert!(is_scored(&"(;GM[1]RE[W+1.5])"));
+    }
+
+    #[test]
+    fn black_is_winner() {
+        assert_eq!(get_winner_from_sgf(&"(;GM[1]RE[B+0.5])"), Ok(Color::Black));
+    }
+
+    #[test]
+    fn white_is_winner() {
+        assert_eq!(get_winner_from_sgf(&"(;GM[1]RE[W+0.5])"), Ok(Color::White));
+    }
+
+    #[test]
+    fn komi_is() {
+        assert_eq!(get_komi_from_sgf(&"(;GM[1]KM[0])"), Ok(DEFAULT_KOMI));
+        assert_eq!(get_komi_from_sgf(&"(;GM[1]KM[7.5])"), Ok(7.5));
+        assert_eq!(get_komi_from_sgf(&"(;GM[1]KM[6.5])"), Ok(6.5));
+        assert_eq!(get_komi_from_sgf(&"(;GM[1]KM[5.5])"), Ok(5.5));
+        assert_eq!(get_komi_from_sgf(&"(;GM[1]KM[0.5])"), Ok(0.5));
+    }
 
     #[test]
     fn territory() {

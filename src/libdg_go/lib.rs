@@ -21,6 +21,7 @@ extern crate libc;
 extern crate memchr;
 extern crate rand;
 extern crate regex;
+extern crate ordered_float;
 #[cfg(test)] extern crate test;
 
 mod asm;
