@@ -34,7 +34,11 @@ pub struct CGoban;
 
 impl SgfCoordinate for CGoban {
     fn to_sgf(point: Point) -> String {
-        format!("{}{}", SGF_LETTERS[point.x()], SGF_LETTERS[point.y()])
+        if point != Point::default() {
+            format!("{}{}", SGF_LETTERS[point.x()], SGF_LETTERS[point.y()])
+        } else {
+            String::new()
+        }
     }
 
     fn parse(s: &str) -> Result<Point, SgfCoordinateError> {
@@ -65,7 +69,11 @@ pub struct Sabaki;
 
 impl SgfCoordinate for Sabaki {
     fn to_sgf(point: Point) -> String {
-        format!("{}{}", SGF_LETTERS[point.x()], SGF_LETTERS[18 - point.y()])
+        if point != Point::default() {
+            format!("{}{}", SGF_LETTERS[point.x()], SGF_LETTERS[18 - point.y()])
+        } else {
+            String::new()
+        }
     }
 
     fn parse(s: &str) -> Result<Point, SgfCoordinateError> {

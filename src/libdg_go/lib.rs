@@ -39,5 +39,6 @@ pub use self::color::*;
 pub use self::board::*;
 pub use self::point::*;
 pub use self::point_state::*;
+pub use self::iter::IsPartOf;
 
 pub const DEFAULT_KOMI: f32 = 7.5;

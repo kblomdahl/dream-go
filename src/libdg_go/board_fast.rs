@@ -15,7 +15,7 @@
 use color::Color;
 use point::Point;
 use point_state::Vertex;
-use iter::{AdjacentIter, ChainIter, ValidIter, IsValid, NextLink};
+use iter::{AdjacentIter, ChainIter, ValidIter, IsPartOf, NextLink};
 use zobrist;
 
 use std::ops::{Index, IndexMut};
@@ -71,9 +71,17 @@ impl IndexMut<Point> for BoardFast {
     }
 }
 
-impl IsValid for &BoardFast {
-    fn is_valid(&self, point: Point) -> bool {
-        self[point].is_valid()
+impl IsPartOf for BoardFast {
+    fn is_part_of(&self, point: Point) -> bool {
+        let index = point.to_i();
+
+        index < self.vertices.len() && self[point].is_valid()
+    }
+}
+
+impl IsPartOf for &BoardFast {
+    fn is_part_of(&self, point: Point) -> bool {
+        (*self).is_part_of(point)
     }
 }
 
@@ -178,7 +186,7 @@ impl BoardFast {
     /// * `at_point` - the HW index of the move
     ///
     pub fn is_valid(&self, color: Color, at_point: Point) -> bool {
-        debug_assert!(self[at_point].is_valid());
+        debug_assert!(self.is_part_of(at_point));
 
         self[at_point].color() == None && {
             let current = Some(color);

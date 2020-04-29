@@ -14,29 +14,29 @@
 
 use point::Point;
 
-pub trait IsValid {
-    fn is_valid(&self, point: Point) -> bool;
+pub trait IsPartOf {
+    fn is_part_of(&self, point: Point) -> bool;
 }
 
 /// Iterates over all points that are considered valid according to the given
 /// validator.
-pub struct ValidIter<I: Iterator<Item=Point>, T: IsValid> {
+pub struct ValidIter<I: Iterator<Item=Point>, T: IsPartOf> {
     iter: I,
     validator: T
 }
 
-impl<I: Iterator<Item=Point>, T: IsValid> ValidIter<I, T> {
+impl<I: Iterator<Item=Point>, T: IsPartOf> ValidIter<I, T> {
     pub fn new(iter: I, validator: T) -> Self {
         Self { iter, validator }
     }
 }
 
-impl<I: Iterator<Item=Point>, T: IsValid> Iterator for ValidIter<I, T> {
+impl<I: Iterator<Item=Point>, T: IsPartOf> Iterator for ValidIter<I, T> {
     type Item = Point;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(point) = self.iter.next() {
-            if self.validator.is_valid(point) {
+            if self.validator.is_part_of(point) {
                 return Some(point);
             }
         }
@@ -49,10 +49,10 @@ impl<I: Iterator<Item=Point>, T: IsValid> Iterator for ValidIter<I, T> {
 mod test {
     use super::*;
 
-    struct FakeIsValid;
+    struct FakeIsPartOf;
 
-    impl IsValid for FakeIsValid {
-        fn is_valid(&self, point: Point) -> bool {
+    impl IsPartOf for FakeIsPartOf {
+        fn is_part_of(&self, point: Point) -> bool {
             point.x() == 0
         }
     }
@@ -74,7 +74,7 @@ mod test {
         ];
 
         assert_eq!(
-            ValidIter::new(original.into_iter(), FakeIsValid{}).collect::<Vec<_>>(),
+            ValidIter::new(original.into_iter(), FakeIsPartOf{}).collect::<Vec<_>>(),
             expected
         )
     }

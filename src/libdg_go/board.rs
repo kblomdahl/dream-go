@@ -19,6 +19,7 @@ use board_fast::{BoardFast};
 use color::Color;
 use circular_buf::CircularBuf;
 use small_set::SmallSet64;
+use iter::IsPartOf;
 use point::Point;
 use point_state::Vertex;
 
@@ -115,6 +116,8 @@ impl Board {
     ///
     #[inline]
     pub fn at(&self, point: Point) -> Option<Color> {
+        debug_assert!(self.is_part_of(point));
+
         self.inner[point].color()
     }
 
@@ -143,23 +146,10 @@ impl Board {
     /// # Arguments
     ///
     /// * `color` - the color of the move
-    /// * `at_point` - the index of the move
-    /// * `workspace` - the memoization of the board liberties
-    ///
-    pub(super) fn _is_valid(&self, color: Color, at_point: Point) -> bool {
-        self.inner.is_valid(color, at_point) && !self._is_ko(color, at_point)
-    }
-
-    /// Returns whether the given move is valid according to the
-    /// Tromp-Taylor rules.
-    ///
-    /// # Arguments
-    ///
-    /// * `color` - the color of the move
     /// * `at_point` - where to play the move
     ///
     pub fn is_valid(&self, color: Color, at_point: Point) -> bool {
-        self._is_valid(color, at_point)
+        self.inner.is_valid(color, at_point) && !self._is_ko(color, at_point)
     }
 
     /// Place the given stone on the board without checking if it is legal, the
@@ -246,6 +236,12 @@ impl fmt::Display for Board {
         writeln!(f, "    \u{25cf} Black    \u{25cb} White")?;
 
         Ok(())
+    }
+}
+
+impl IsPartOf for Board {
+    fn is_part_of(&self, point: Point) -> bool {
+        self.inner.is_part_of(point)
     }
 }
 

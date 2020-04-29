@@ -34,10 +34,14 @@ impl Point {
     }
 
     pub fn from_packed_parts(packed_index: usize) -> Self {
-        let x = packed_index % 19;
-        let y = packed_index / 19;
+        if packed_index == 361 {
+            Point::default()
+        } else {
+            let x = packed_index % 19;
+            let y = packed_index / 19;
 
-        Point::new(x, y)
+            Point::new(x, y)
+        }
     }
 
     pub fn from_raw_parts(packed_index: u16) -> Self {
@@ -131,7 +135,11 @@ impl Point {
     }
 
     pub fn to_packed_index(&self) -> usize {
-        19 * self.y() + self.x()
+        if *self == Self::default() {
+            361
+        } else {
+            19 * self.y() + self.x()
+        }
     }
 
     pub(super) fn to_i(&self) -> usize {
