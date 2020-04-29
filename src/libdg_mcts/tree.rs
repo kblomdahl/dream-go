@@ -23,6 +23,7 @@ use super::SearchOptions;
 
 use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
+use std::cmp::Ordering;
 use std::fmt;
 use std::mem::ManuallyDrop;
 use std::intrinsics::{atomic_xadd, atomic_xsub, atomic_cxchg};
@@ -1244,22 +1245,7 @@ impl<O: SearchOptions> Node<O> {
         if temperature <= 9e-2 { // greedy
             let max_i = (0..362)
                 .filter(|&i| self.with(i, |child| child.count() > 0))
-                .max_by_key(|&i| {
-                    self.with(i, |child| {
-                        let lcb = normal_lcb_m(
-                            child.value(),
-                            child.value_std(),
-                            child.count(),
-                            self.total_count
-                        );
-
-                        (
-                            OrderedFloat(lcb),
-                            child.count(),
-                            OrderedFloat(self.prior[i])
-                        )
-                    })
-                })
+                .max_by(|&a, &b| compare_children(self, a, b, 80))
                 .unwrap_or(361);
 
             (self.with(max_i, |child| child.value()), max_i)
@@ -1522,6 +1508,54 @@ pub unsafe fn insert<O: SearchOptions>(trace: &NodeTrace<O>, color: Color, value
     PUCT::update(trace, color, value);
 }
 
+/// Compare two children of an MCTS node such that the better candiate is bigger
+/// than a worse candidate. The algorithm will compare the LCB if both
+/// candidates has at least `min_lcb_visits` visit counts, otherwise fallback to
+/// comparing the visit count.
+/// 
+/// # Arguments
+/// 
+/// * `node` - 
+/// * `a` -
+/// * `b` -
+/// * `min_lcb_visits` -
+/// 
+fn compare_children<O: SearchOptions>(
+    node: &Node<O>,
+    a: usize,
+    b: usize,
+    min_lcb_visits: i32
+) -> Ordering
+{
+    let a_count = node.with(a, |a| a.count());
+    let b_count = node.with(b, |b| b.count());
+
+    if a_count >= min_lcb_visits && b_count >= min_lcb_visits {
+        let a_lcb = node.with(a, |a| normal_lcb_m(a.value(), a.value_std(), a.count(), node.total_count));
+        let b_lcb = node.with(b, |b| normal_lcb_m(b.value(), b.value_std(), b.count(), node.total_count));
+
+        if a_lcb != b_lcb {
+            return OrderedFloat(a_lcb).cmp(&OrderedFloat(b_lcb));
+        }
+    }
+
+    if a_count != b_count {
+        return a_count.cmp(&b_count);
+    }
+
+    let a_prior = node.prior[a];
+    let b_prior = node.prior[b];
+
+    if a_prior != b_prior {
+        return OrderedFloat(a_prior).cmp(&OrderedFloat(b_prior));
+    }
+
+    let a_value = node.with(a, |a| a.value());
+    let b_value = node.with(b, |b| b.value());
+
+    OrderedFloat(a_value).cmp(&OrderedFloat(b_value))
+}
+
 /// Type alias for `Node` that acts as a wrapper for calling `as_sgf` from
 /// within a `write!` macro.
 pub struct ToSgf<'a, S: SgfCoordinate, O: SearchOptions> {
@@ -1646,11 +1680,7 @@ pub struct ToPretty<'a, O: SearchOptions> {
 impl<'a, O: SearchOptions> fmt::Display for ToPretty<'a, O> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         let mut children = self.root.children.nonzero().collect::<Vec<usize>>();
-        children.sort_by_key(|&i| {
-            OrderedFloat(-self.root.with(i, |child| {
-                normal_lcb_m(child.value(), child.value_std(), child.count(), self.root.total_count)
-            }))
-        });
+        children.sort_by(|&a, &b| compare_children(self.root, b, a, 80));
 
         if !self.verbose {
             children.truncate(10);
