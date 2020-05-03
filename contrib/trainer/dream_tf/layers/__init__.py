@@ -30,11 +30,12 @@ COMPUTE_TYPE = tf.float16
 
 
 def normalize_constraint(x):
-    """ Returns a constraint that set each output vector to `tf.norm(x) = 1` """
+    """ Returns a constraint that set each output vector to `tf.norm(x) <= 1` """
     out_dims = x.shape[-1]
     x_f = tf.reshape(x, (-1, out_dims))
     n = tf.norm(x_f, axis=0)
-    x_n = x_f / (tf.sqrt(tf.cast(out_dims, tf.float32)) * tf.reshape(n, (1, out_dims)))
+    d = tf.clip_by_value(n, 0.001, tf.rsqrt(tf.cast(out_dims, tf.float32)))
+    x_n = x_f * d / n
 
     return tf.reshape(x_n, x.shape)
 
