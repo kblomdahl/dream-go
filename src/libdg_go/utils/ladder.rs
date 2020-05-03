@@ -305,7 +305,7 @@ mod tests {
 
         let mut board = Board::new(7.5);
 
-        for &(color, x, y) in moves.into_iter() {
+        for &(color, x, y) in moves.iter() {
             board.place(color, Point::new(x, y));
         }
 
@@ -322,7 +322,7 @@ mod tests {
 
         let mut board = Board::new(7.5);
 
-        for &(color, x, y) in moves.into_iter() {
+        for &(color, x, y) in moves.iter() {
             board.place(color, Point::new(x, y));
         }
 
@@ -339,7 +339,7 @@ mod tests {
 
         let mut board = Board::new(7.5);
 
-        for &(color, x, y) in moves.into_iter() {
+        for &(color, x, y) in moves.iter() {
             board.place(color, Point::new(x, y));
         }
 

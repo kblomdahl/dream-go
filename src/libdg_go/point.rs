@@ -228,6 +228,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn from_packed() {
+        let point = Point::from_packed_parts(72);
+
+        assert_eq!(point.x(), 15);
+        assert_eq!(point.y(), 3);
+    }
+
+    #[test]
     fn identity() {
         let point = Point::new(3, 7);
 
