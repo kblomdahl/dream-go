@@ -30,13 +30,13 @@ extern crate time;
 /* -------- Modules -------- */
 
 pub mod asm;
+mod choose;
 mod dirichlet;
 mod game_result;
 mod global_cache;
 mod greedy_score;
 pub mod options;
 mod parallel;
-mod policy_play;
 pub mod predict;
 pub mod predict_service;
 mod self_play;
@@ -48,7 +48,6 @@ pub mod time_control;
 pub use self::game_result::*;
 pub use self::greedy_score::*;
 pub use self::self_play::*;
-pub use self::policy_play::*;
 
 /* -------- Code -------- */
 

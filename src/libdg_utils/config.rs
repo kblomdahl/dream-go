@@ -19,8 +19,7 @@ use regex::Regex;
 
 #[derive(PartialEq)]
 pub enum Procedure {
-    SelfPlay(usize),
-    PolicyPlay(usize, bool),
+    SelfPlay(usize, bool),
     Gtp,
     Help
 }
@@ -93,10 +92,11 @@ lazy_static! {
     /// The main producedure to run during this execution.
     pub static ref PROCEDURE: Procedure = if has_opt("--help") {
         Procedure::Help
-    } else if has_opt("--policy-play") {
-        Procedure::PolicyPlay(get_opt("--policy-play").unwrap_or(::std::usize::MAX), has_opt("--ex-it"))
     } else if has_opt("--self-play") {
-        Procedure::SelfPlay(get_opt("--self-play").unwrap_or(1))
+        Procedure::SelfPlay(
+            get_opt("--self-play").unwrap_or(1),
+            has_opt("--ex-it")
+        )
     } else {
         Procedure::Gtp
     };
@@ -116,6 +116,10 @@ lazy_static! {
     /// that might arise during real games, especially when playing over network.
     pub static ref SAFE_TIME_MS: usize = get_opt("--safe-time")
         .unwrap_or(100);
+
+    /// The target number of rollouts for each search tree when using expert
+    /// iterations.
+    pub static ref NUM_EX_IT_ROLLOUT: RolloutLimit = get_opt("--num-ex-it-rollout").unwrap_or(RolloutLimit::Default(1600));
 
     /// The target number of rollouts for each search tree.
     pub static ref NUM_ROLLOUT: RolloutLimit = get_opt("--num-rollout").unwrap_or(RolloutLimit::Default(1600));

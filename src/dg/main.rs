@@ -43,34 +43,26 @@ fn main() {
         Procedure::Help => {
             println!("Usage: ./dream-go [options]");
             println!();
-            println!("  --self-play <n>       Extract a dataset from self-play containing n examples");
-            println!("  --policy-play <n>     Extract a dataset from self-play using only the policy network");
-            println!("  --ex-it               When combined with --policy-play perform search on some partial");
-            println!("                        policies");
-            println!("  --gtp                 Run GTP client (default)");
+            println!("  --self-play <n>          Extract a dataset from self-play containing n examples");
+            println!("  --ex-it                  When combined with --policy-play perform search on some partial");
+            println!("                           policies");
+            println!("  --gtp                    Run GTP client (default)");
             println!();
             println!("Advanced options:");
-            println!("  --safe-time <n>       The minimum number of milliseconds to leave on the game clock");
-            println!("  --num-rollout <n>     The number of rollouts to add to the search tree for every move");
-            println!("  --num-games <n>       The number of games to play or extract in parallel");
-            println!("  --num-threads <n>     The number of search threads to use in total");
-            println!("  --num-samples <n>     The number of games to extract from each game record");
-            println!("  --batch-size <n>      The number parallel rollouts to perform on the GPU");
-            println!("  --tt                  Play using Tromp-Taylor rules");
-            println!("  --no-ponder           Do not think in the background during idle time");
-            println!("  --no-resign           Do not allow the engine to resign in games");
+            println!("  --safe-time <n>          The minimum number of milliseconds to leave on the game clock");
+            println!("  --num-rollout <n>        The number of rollouts to add to the search tree for every move");
+            println!("  --num-ex-it-rollout <n>  The number of rollouts to add to the search tree for every move");
+            println!("  --num-games <n>          The number of games to play or extract in parallel");
+            println!("  --num-threads <n>        The number of search threads to use in total");
+            println!("  --num-samples <n>        The number of games to extract from each game record");
+            println!("  --batch-size <n>         The number parallel rollouts to perform on the GPU");
+            println!("  --tt                     Play using Tromp-Taylor rules");
+            println!("  --no-ponder              Do not think in the background during idle time");
+            println!("  --no-resign              Do not allow the engine to resign in games");
         },
 
-        Procedure::SelfPlay(n) => {
-            let (receiver, _server) = dg_mcts::self_play(load_network(), n);
-
-            for result in receiver.iter() {
-                println!("{}", result);
-            }
-        },
-
-        Procedure::PolicyPlay(n, ex_it) => {
-            let (receiver, _server) = dg_mcts::policy_play(load_network(), n, ex_it);
+        Procedure::SelfPlay(n, ex_it) => {
+            let (receiver, _server) = dg_mcts::self_play(load_network(), n, ex_it);
 
             for result in receiver.iter() {
                 println!("{}", result);

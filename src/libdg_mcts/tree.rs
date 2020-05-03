@@ -17,6 +17,7 @@ use dg_go::{Board, Color, Point};
 use dg_utils::lcb::normal_lcb_m;
 use dg_utils::{config, max};
 use super::asm::{argmax_f32, argmax_i32};
+use super::choose::choose;
 use super::parallel::spin::Mutex;
 use super::parallel::global_rwlock;
 use super::SearchOptions;
@@ -244,33 +245,6 @@ impl FPU {
             unsafe { FPU::apply_small_impl(value, small, fpu_reduce) }
         }
     }
-}
-
-/// Returns the weighted n:th percentile of the given array, and the sum of
-/// all smaller elements.
-///
-/// # Arguments
-///
-/// * `array` -
-/// * `n` -
-///
-fn percentile<I: Iterator<Item=i32>>(array: I, total: i32, n: f64) -> (i32, f64) {
-    let mut copy = array.collect::<Vec<i32>>();
-    copy.sort_unstable_by_key(|val| -val);
-
-    // step forward in the array until we have accumulated the requested amount
-    let max_value = (total as f64) * (1.0 - n);
-    let mut so_far = 0.0;
-
-    for val in copy.into_iter() {
-        so_far += val as f64;
-
-        if so_far >= max_value {
-            return (val, so_far);
-        }
-    }
-
-    (::std::i32::MAX, so_far)
 }
 
 /// Flyweight structure used to contain the values of a single child in a `Node`. These
@@ -1243,41 +1217,22 @@ impl<O: SearchOptions> Node<O> {
     ///
     pub fn best(&self, temperature: f32) -> (f32, usize) {
         if temperature <= 9e-2 { // greedy
-            let max_i = (0..362)
-                .filter(|&i| self.with(i, |child| child.count() > 0))
+            let max_i = self.children.nonzero()
                 .max_by(|&a, &b| compare_children(self, a, b, 80))
                 .unwrap_or(361);
 
             (self.with(max_i, |child| child.value()), max_i)
         } else {
-            let t = (temperature as f64).recip();
-            let c_total = self.children.nonzero().map(|i| self.with(i, |child| child.count())).sum::<i32>();
-            let (c_threshold, c_total) = percentile(
-                self.children.nonzero().map(|i| self.with(i, |child| child.count())),
-                c_total,
-                0.5
-            );
-            let mut s = vec! [::std::f64::NAN; 362];
-            let mut s_total = 0.0;
+            let visits = (0..362)
+                .map(|i| self.with(i, |child| child.count()))
+                .collect::<Vec<i32>>();
+            let temperature = (temperature as f64).recip();
+            let at = thread_rng().gen::<f64>();
 
-            for i in self.children.nonzero() {
-                let count = self.with(i, |child| child.count());
-
-                if count >= c_threshold {
-                    s_total += (count as f64 / c_total).powf(t);
-                    s[i] = s_total;
-                }
-            }
-
-            debug_assert!(s_total.is_finite());
-
-            if s_total < ::std::f64::MIN_POSITIVE {
-                (self.initial_value, 361)  // no valid moves
+            if let Some((i, _)) = choose(&visits, 0.5, temperature, at) {
+                (self.with(i, |child| child.value()), i)
             } else {
-                let threshold = s_total * thread_rng().gen::<f64>();
-                let max_i = (0..362).find(|&i| s[i] >= threshold).unwrap();
-
-                (self.with(max_i, |child| child.value()), max_i)
+                (self.initial_value, 361)  // no valid moves
             }
         }
     }

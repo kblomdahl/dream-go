@@ -77,11 +77,11 @@ cd contrib/trainer/ && python3 -m dream_tf --start self_play_bal.sgf
 
 The training procedure for [Expert Iteration](https://arxiv.org/abs/1705.08439) is almost the same as for _AlphaZero_ with two exceptions:
 
-1. We generate `--policy-play` games instead of `--self-play` games. These are self-play games without any search, so they are about 800 to 1,600 times faster to generate, but of lower quality.
+1. We generate games with `--num-rollout 1` and `--ex-it`. These are self-play games without any search, so they are about 800 to 1,600 times faster to generate, but of lower quality.
 1. We generate the monte-carlo search tree during data extraction using the `--ex-it` switch only for examples that actually end-up as examples for the neural network.
 
 ```bash
-./dream_go --num-games 32 --num-threads 32 --batch-size 32 --ex-it --policy-play 200000 > policy_play.sgf
+./dream_go --num-games 32 --num-threads 32 --batch-size 32 --num-rollout 1 --ex-it --self-play 200000 > policy_play.sgf
 ```
 ```bash
 sort < policy_play.sgf | uniq | shuf | ./tools/sgf2balance.py > policy_play_bal.sgf
