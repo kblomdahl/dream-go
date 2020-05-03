@@ -52,7 +52,7 @@ unsafe fn _sum_finite_f32(array: &[f32]) -> f32 {
 
     // horizontal sum (this is faster than a fancy `_mm256_hadd_ps` dance
     let mut out: [f32; 8] = ::std::mem::MaybeUninit::uninit().assume_init();
-    _mm256_store_ps(out.as_mut_ptr() as *mut _, so_far);
+    _mm256_storeu_ps(out.as_mut_ptr() as *mut _, so_far);
 
     ((out[0] + out[1]) + (out[2] + out[3])) + ((out[4] + out[5]) + (out[6] + out[7]))
 }
@@ -95,7 +95,7 @@ unsafe fn _sum_i32(array: &[i32]) -> i32 {
 
     // horizontal sum (this is faster than a fancy `_mm256_hadd_epi32` dance
     let mut out: [i32; 8] = ::std::mem::MaybeUninit::uninit().assume_init();
-    _mm256_store_si256(out.as_mut_ptr() as *mut _, so_far);
+    _mm256_storeu_si256(out.as_mut_ptr() as *mut _, so_far);
 
     ((out[0] + out[1]) + (out[2] + out[3])) + ((out[4] + out[5]) + (out[6] + out[7]))
 }
