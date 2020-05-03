@@ -1631,8 +1631,8 @@ impl fmt::Display for PrettyVertex {
             ];
 
             fmt.pad(&format!("{}{}",
-                LETTERS[Point::from_packed_parts(self.inner).y()],
-                Point::from_packed_parts(self.inner).x() + 1
+                LETTERS[Point::from_packed_parts(self.inner).x()],
+                Point::from_packed_parts(self.inner).y() + 1
             ))
         }
     }
