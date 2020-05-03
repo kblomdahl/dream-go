@@ -38,9 +38,11 @@ pub trait Predictor : Clone + Send {
 
 /// An implementation of `Predictor` that returns completely random predictions. This
 /// is useful for testing purposes.
+#[cfg(test)]
 #[derive(Clone, Default)]
 pub struct RandomPredictor;
 
+#[cfg(test)]
 impl Predictor for RandomPredictor {
     fn predict(&self, _features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
         use rand::{thread_rng, Rng};
@@ -69,3 +71,36 @@ impl Predictor for RandomPredictor {
     }
 }
 
+/// An implementation of `Predict` that always returns the given point as the
+/// prediction. This is mainly intended for testing purposes.
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub struct FakePredictor {
+    point: usize,
+    value: f32
+}
+
+#[cfg(test)]
+impl FakePredictor {
+    pub fn new(point: usize, value: f32) -> Self {
+        Self { point, value }
+    }
+}
+
+#[cfg(test)]
+impl Predictor for FakePredictor {
+    fn predict(&self, _features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
+        let mut policy = vec! [0.0; 368];
+        policy[self.point] = 1.0;
+
+        Some((self.value, policy))
+    }
+
+    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
+        features_list.map(|features| self.predict(features)).collect()
+    }
+
+    fn synchronize(&self) {
+        // pass
+    }
+}

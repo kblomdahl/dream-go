@@ -450,3 +450,65 @@ pub fn self_play(
 
     (receiver, server)
 }
+
+#[cfg(test)]
+mod tests {
+    use ::predict::FakePredictor;
+    use super::*;
+
+    #[test]
+    fn moving_average() {
+        let mut avg = MovingAverage::new(0.5, 0.2);
+        let mut prev_distance = 0.5;
+
+        for _ in 0..10 {
+            avg.update(1.0);
+            let distance = 1.0 - avg.get();
+
+            assert!(distance < prev_distance, "{} < {}", distance, prev_distance);
+            prev_distance = distance;
+        }
+    }
+
+    #[test]
+    fn played_from_policy() {
+        let mut policy = vec! [0.0; 362];
+        policy[0] = 1.0;
+
+        assert_eq!(
+            format!("{}", Played::from_forward(Color::Black, Point::new(0, 0), 0.5, policy)),
+            ";B[aa]".to_string()
+        );
+    }
+
+    #[test]
+    fn played_from_mcts() {
+        let server = FakePredictor::new(1, 0.6);
+        let board = Board::new(0.5);
+        let (value, index, tree) =
+            predict_aux::<_, _, StandardSearch>(
+                &server,
+                1,
+                RolloutLimit::new(10),
+                None,
+                &board,
+                Color::Black
+            ).unwrap();
+
+        let point = Point::from_packed_parts(index);
+        let played = format!("{}", Played::from_mcts(Color::Black, point, value, &tree));
+
+        assert!(played.contains(";B[ba]"), "{}", played);
+        assert!(played.contains("TR[ba]"), "{}", played);
+        assert!(played.contains("V["), "{}", played);  // exact value depends on the shape of the rollouts, so we cannot check
+        assert!(played.contains("P["), "{}", played);  // exact policy depends on the number of rollouts, so we cannot check
+    }
+
+    #[test]
+    fn played_pass() {
+        assert_eq!(
+            format!("{}", Played::pass(Color::Black)),
+            ";B[]".to_string()
+        );
+    }
+}
