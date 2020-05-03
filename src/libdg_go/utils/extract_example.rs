@@ -214,8 +214,8 @@ fn choose_example(examples: &[Candidate], has_policy: bool) -> Option<usize> {
                 None => 0.5,
             };
 
-        cum_examples.push(OrderedFloat(so_far));
         so_far += value;
+        cum_examples.push(OrderedFloat(so_far));
     }
 
     let selected = RNG.lock().unwrap().sample(Uniform::new(0.0, so_far));
