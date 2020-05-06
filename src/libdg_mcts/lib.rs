@@ -167,7 +167,7 @@ fn create_initial_policy<O: SearchOptions>(board: &Board, to_move: Color) -> (Ve
     let mut policy = vec! [::std::f32::NEG_INFINITY; 368];
 
     for point in Point::all() {
-        if O::is_policy_candidate(board, to_move, point) && board.is_valid(to_move, point) {
+        if board.is_valid(to_move, point) && O::is_policy_candidate(board, to_move, point) {
             policy[point.to_packed_index()] = 0.0;
         }
     }
@@ -257,9 +257,9 @@ fn normalize_policy(policy: &mut Vec<f32>) {
 
 /// The shared variables between the master and each worker thread in the `predict` function.
 #[derive(Clone)]
-struct ThreadContext<T: TimeStrategy + Clone + Send, O: SearchOptions> {
+struct ThreadContext<T: TimeStrategy + Clone + Send> {
     /// The root of the monte carlo tree.
-    root: Arc<UnsafeCell<tree::Node<O>>>,
+    root: Arc<UnsafeCell<tree::Node>>,
 
     /// The initial board position at the root the tree.
     starting_point: Board,
@@ -268,7 +268,7 @@ struct ThreadContext<T: TimeStrategy + Clone + Send, O: SearchOptions> {
     time_strategy: T,
 }
 
-unsafe impl<T: TimeStrategy + Clone + Send, O: SearchOptions> Send for ThreadContext<T, O> { }
+unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
 
 
 /// Worker that probes into the given monte carlo search tree until the context
@@ -279,7 +279,7 @@ unsafe impl<T: TimeStrategy + Clone + Send, O: SearchOptions> Send for ThreadCon
 /// * `context` -
 /// * `server` -
 ///
-fn predict_worker<T, P, O>(context: ThreadContext<T, O>, server: P)
+fn predict_worker<T, P, O>(context: ThreadContext<T>, server: P)
     where T: TimeStrategy + Clone + Send + 'static,
           P: Predictor,
           O: SearchOptions
@@ -341,10 +341,10 @@ fn predict_aux<T, P, O>(
     server: &P,
     num_workers: usize,
     time_strategy: T,
-    starting_tree: Option<tree::Node<O>>,
+    starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
-) -> Option<(f32, usize, tree::Node<O>)>
+) -> Option<(f32, usize, tree::Node)>
     where T: TimeStrategy + Clone + Send + 'static,
           P: Predictor + 'static,
           O: SearchOptions + 'static
@@ -376,7 +376,7 @@ fn predict_aux<T, P, O>(
 
     // start-up all of the worker threads, and then start listening for requests on the
     // channel we gave each thread.
-    let context: ThreadContext<T, O> = ThreadContext {
+    let context = ThreadContext {
         root: Arc::new(UnsafeCell::new(starting_tree)),
         starting_point: starting_point.clone(),
         time_strategy: time_strategy.clone()
@@ -434,10 +434,10 @@ pub fn predict<T, P, O>(
     server: &P,
     num_workers: Option<usize>,
     time_control: T,
-    starting_tree: Option<tree::Node<O>>,
+    starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
-) -> Option<(f32, usize, tree::Node<O>)>
+) -> Option<(f32, usize, tree::Node)>
     where T: TimeStrategy + Clone + Send + 'static,
           P: Predictor + 'static,
           O: SearchOptions + 'static

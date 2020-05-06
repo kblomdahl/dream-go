@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use super::{TimeStrategy, TimeStrategyResult};
-use options::SearchOptions;
 use tree;
 
 #[derive(Clone)]
@@ -34,9 +33,9 @@ impl RolloutLimit {
 }
 
 impl TimeStrategy for RolloutLimit {
-    fn try_extend<O: SearchOptions, F: Fn() -> bool>(
+    fn try_extend<F: Fn() -> bool>(
         &self,
-        root: &tree::Node<O>,
+        root: &tree::Node,
         _predicate: F,
         _factor: f32
     ) -> TimeStrategyResult

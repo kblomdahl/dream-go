@@ -38,11 +38,9 @@ pub trait Predictor : Clone + Send {
 
 /// An implementation of `Predictor` that returns completely random predictions. This
 /// is useful for testing purposes.
-#[cfg(test)]
 #[derive(Clone, Default)]
 pub struct RandomPredictor;
 
-#[cfg(test)]
 impl Predictor for RandomPredictor {
     fn predict(&self, _features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
         use rand::{thread_rng, Rng};

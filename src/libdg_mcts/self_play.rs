@@ -16,13 +16,14 @@ use dg_go::utils::score::Score;
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color, Point};
 use dg_utils::{b85, config};
+use super::asm::sum_finite_f32;
 use super::choose::choose;
 use super::predict::Predictor;
 use super::time_control::{TimeStrategy, RolloutLimit};
 use super::{GameResult, get_random_komi};
 use super::{predict_service, predict_aux, full_forward, tree};
 use dg_nn::Network;
-use options::{SearchOptions, StandardSearch, ScoringSearch};
+use options::{StandardSearch, ScoringSearch};
 
 use rand::{Rng, thread_rng};
 use std::fmt::{self, Display, Formatter};
@@ -58,6 +59,33 @@ impl MovingAverage {
     }
 }
 
+/// Returns the skewness of the given vector as defined by Pearson's moment
+/// coefficient of skewness [1].
+/// 
+/// [1] https://en.wikipedia.org/wiki/Skewness
+/// 
+/// # Arguments
+/// 
+/// * `values` - 
+/// 
+fn skewness(values: &[f32]) -> f32 {
+    let recip_len = (values.len() as f32).recip();
+    let mean = sum_finite_f32(values) * recip_len;
+    let mut k_2 = 0.0;
+    let mut k_3 = 0.0;
+
+    for &x in values.iter() {
+        if x.is_finite() {
+            let delta = x - mean;
+
+            k_2 += delta.powi(2) * recip_len;
+            k_3 += delta.powi(3) * recip_len;
+        }
+    }
+
+    k_3 / k_2.powf(1.5)
+}
+
 /// A move that has been played in the game, together with the meta-data about
 /// why we're playing this move.
 struct Played {
@@ -83,11 +111,11 @@ impl Played {
         }
     }
 
-    fn from_mcts<O: SearchOptions + 'static>(
+    fn from_mcts(
         to_move: Color,
         point: Point,
         value: f32,
-        tree: &tree::Node<O>
+        tree: &tree::Node
     ) -> Self
     {
         let (_, prior_index) = tree.prior();
@@ -161,13 +189,13 @@ impl Display for Played {
 }
 
 /// An AI-player in a game.
-struct Player<O: SearchOptions + 'static> {
+struct Player {
     winrate: MovingAverage,
-    root: Option<tree::Node<O>>,
+    root: Option<tree::Node>,
     color: Color,
 }
 
-impl<O: SearchOptions + 'static> Player<O> {
+impl Player {
     fn new(color: Color) -> Self {
         Self {
             winrate: MovingAverage::new(0.5, MOMENTUM),
@@ -194,7 +222,7 @@ impl<O: SearchOptions + 'static> Player<O> {
         server: &P,
         num_workers: usize,
         time_control: T
-    ) -> Option<(f32, usize, tree::Node<O>)>
+    ) -> Option<(f32, usize, tree::Node)>
     {
         if !allow_pass {
             let (value, index, tree) = predict_aux::<_, _, ScoringSearch>(
@@ -203,15 +231,15 @@ impl<O: SearchOptions + 'static> Player<O> {
                 time_control,
                 self.root.take().map(|mut n| {
                     n.disqualify(361);
-                    n.to_options::<ScoringSearch>()
+                    n
                 }),
                 &board,
                 self.color
             )?;
 
-            Some((value, index, tree.to_options::<O>()))
+            Some((value, index, tree))
         } else {
-            predict_aux::<_, _, O>(
+            predict_aux::<_, _, StandardSearch>(
                 server,
                 num_workers,
                 time_control,
@@ -253,6 +281,24 @@ impl<O: SearchOptions + 'static> Player<O> {
         debug_assert!(0.0 <= value && value <= 1.0, "{}", value);
 
         Some(Played::from_mcts(self.color, point, value, &tree))
+    }
+
+    /// Returns true if the given skewness of the policy indicates that this
+    /// move is a good candidate for policy extraction.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `value` -
+    /// * `policy` -
+    /// 
+    fn is_good_candidate(&self, value: f32, policy: &[f32]) -> bool {
+        value >= -0.90 && value <= 0.90 && {
+            let skewness = skewness(policy);
+            let distance = (skewness - 12.0).abs();
+            let distance = if distance < 0.5 { 0.5 } else { distance };
+
+            thread_rng().gen::<f32>() < 0.01 / distance
+        }
     }
 
     /// Predict the best next move for the given board state. If `ex_it` is
@@ -297,7 +343,7 @@ impl<O: SearchOptions + 'static> Player<O> {
             // update internal state
             let point = Point::from_packed_parts(index);
             let played =
-                if ex_it {
+                if ex_it && self.is_good_candidate(value, &tree.softmax()) {
                     self.ex_it(board, point, allow_pass, server, num_workers)?
                 } else {
                     Played::from_mcts(self.color, point, value, &tree)
@@ -310,7 +356,7 @@ impl<O: SearchOptions + 'static> Player<O> {
         } else {
             let (value, mut policy) =
                 if allow_pass {
-                    full_forward::<_, O>(server, board, self.color)?
+                    full_forward::<_, StandardSearch>(server, board, self.color)?
                 } else {
                     full_forward::<_, ScoringSearch>(server, board, self.color)?
                 };
@@ -331,7 +377,7 @@ impl<O: SearchOptions + 'static> Player<O> {
             // update internal state
             let point = Point::from_packed_parts(index);
             let played =
-                if ex_it {
+                if ex_it && self.is_good_candidate(value, &policy) {
                     self.ex_it(board, point, allow_pass, server, num_workers)?
                 } else {
                     Played::from_forward(self.color, point, value, policy)
@@ -369,7 +415,7 @@ fn self_play_one<P: Predictor + 'static>(
     let mut sgf = String::new();
     let mut pass_count = 0;
 
-    let mut players: Vec<Player<StandardSearch>> = vec! [
+    let mut players: Vec<Player> = vec! [
         Player::new(Color::Black),
         Player::new(Color::White)
     ];
@@ -382,7 +428,6 @@ fn self_play_one<P: Predictor + 'static>(
             );
 
         let allow_pass = board.is_scorable();
-        let ex_it = ex_it && thread_rng().gen::<f32>() < 0.01;
         let played = players[0].predict(&mut board, allow_pass, ex_it, server, num_workers)?;
         sgf += &format!("{}", played);
 
@@ -468,6 +513,27 @@ mod tests {
             assert!(distance < prev_distance, "{} < {}", distance, prev_distance);
             prev_distance = distance;
         }
+    }
+
+    #[test]
+    fn normal_skewness() {
+        let values = vec! [-4.0, -3.0, -2.0, -1.0, 1.0, 2.0, 3.0, 4.0];
+
+        assert_eq!(skewness(&values), 0.0);
+    }
+
+    #[test]
+    fn positive_skewness() {
+        let values = vec! [-4.0, -3.0, -3.0, -2.0, -1.0, 1.0, 2.0, 3.0];
+
+        assert!(skewness(&values) > 1e-3);
+    }
+
+    #[test]
+    fn negative_skewness() {
+        let values = vec! [-3.0, -2.0, -1.0, 1.0, 2.0, 3.0, 3.0, 4.0];
+
+        assert!(skewness(&values) < -1e-3);
     }
 
     #[test]

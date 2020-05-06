@@ -20,7 +20,6 @@ use super::asm::{argmax_f32, argmax_i32};
 use super::choose::choose;
 use super::parallel::spin::Mutex;
 use super::parallel::global_rwlock;
-use super::SearchOptions;
 
 use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
@@ -39,7 +38,7 @@ pub struct PUCT;
 
 impl PUCT {
     #[inline(always)]
-    unsafe fn get_big_impl<O: SearchOptions>(node: &Node<O>, big: &BigChildrenImpl<O>, value: &mut [f32]) {
+    unsafe fn get_big_impl(node: &Node, big: &BigChildrenImpl, value: &mut [f32]) {
         use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
 
         let n = node.total_count + node.vtotal_count;
@@ -59,12 +58,12 @@ impl PUCT {
 
     #[allow(unused_attributes)]
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn get_big_avx2<O: SearchOptions>(node: &Node<O>, big: &BigChildrenImpl<O>, value: &mut [f32]) {
+    unsafe fn get_big_avx2(node: &Node, big: &BigChildrenImpl, value: &mut [f32]) {
         PUCT::get_big_impl(node, big, value);
     }
 
     #[inline(always)]
-    unsafe fn get_small_impl<O: SearchOptions>(node: &Node<O>, small: &SmallChildrenImpl<O>, value: &mut [f32]) {
+    unsafe fn get_small_impl(node: &Node, small: &SmallChildrenImpl, value: &mut [f32]) {
         debug_assert!(SMALL_SIZE == 8);
 
         use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
@@ -92,7 +91,7 @@ impl PUCT {
 
     #[allow(unused_attributes)]
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn get_small_avx2<O: SearchOptions>(node: &Node<O>, small: &SmallChildrenImpl<O>, value: &mut [f32]) {
+    unsafe fn get_small_avx2(node: &Node, small: &SmallChildrenImpl, value: &mut [f32]) {
         PUCT::get_small_impl(node, small, value);
     }
 
@@ -105,7 +104,7 @@ impl PUCT {
     /// * `value` -
     ///
     #[inline]
-    unsafe fn update<O: SearchOptions>(trace: &NodeTrace<O>, color: Color, value: f32) {
+    unsafe fn update(trace: &NodeTrace, color: Color, value: f32) {
         use std::intrinsics::{fadd_fast, fsub_fast, fdiv_fast, fmul_fast};
 
         for &(node, _, index) in trace.iter() {
@@ -149,7 +148,7 @@ impl PUCT {
     /// * `value` - the winrates to use in the calculations
     ///
     #[inline(always)]
-    fn get<O: SearchOptions>(node: &Node<O>, value: &mut [f32]) {
+    fn get(node: &Node, value: &mut [f32]) {
         if is_x86_feature_detected!("avx2") {
             unsafe {
                 match node.children {
@@ -172,7 +171,7 @@ impl PUCT {
 struct FPU;
 
 impl FPU {
-    unsafe fn apply_big_impl<O: SearchOptions>(value: &mut [f32], big: &BigChildrenImpl<O>, fpu_reduce: f32) {
+    unsafe fn apply_big_impl(value: &mut [f32], big: &BigChildrenImpl, fpu_reduce: f32) {
         use std::intrinsics::fsub_fast;
 
         for i in 0..368 {
@@ -185,11 +184,11 @@ impl FPU {
     }
 
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn apply_big_avx2<O: SearchOptions>(value: &mut [f32], big: &BigChildrenImpl<O>, fpu_reduce: f32) {
+    unsafe fn apply_big_avx2(value: &mut [f32], big: &BigChildrenImpl, fpu_reduce: f32) {
         FPU::apply_big_impl(value, big, fpu_reduce)
     }
 
-    unsafe fn apply_small_impl<O: SearchOptions>(value: &mut [f32], small: &SmallChildrenImpl<O>, fpu_reduce: f32) {
+    unsafe fn apply_small_impl(value: &mut [f32], small: &SmallChildrenImpl, fpu_reduce: f32) {
         use std::arch::x86_64::*;
         use std::intrinsics::fsub_fast;
 
@@ -206,7 +205,7 @@ impl FPU {
     }
 
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn apply_small_avx2<O: SearchOptions>(value: &mut [f32], small: &SmallChildrenImpl<O>, fpu_reduce: f32) {
+    unsafe fn apply_small_avx2(value: &mut [f32], small: &SmallChildrenImpl, fpu_reduce: f32) {
         FPU::apply_small_impl(value, small, fpu_reduce)
     }
 
@@ -220,7 +219,7 @@ impl FPU {
     /// * `fpu_reduce` - the reduction to apply
     ///
     #[inline(always)]
-    fn apply_big<O: SearchOptions>(value: &mut [f32], big: &BigChildrenImpl<O>, fpu_reduce: f32) {
+    fn apply_big(value: &mut [f32], big: &BigChildrenImpl, fpu_reduce: f32) {
         if is_x86_feature_detected!("avx2") {
             unsafe { FPU::apply_big_avx2(value, big, fpu_reduce) }
         } else {
@@ -238,7 +237,7 @@ impl FPU {
     /// * `fpu_reduce` - the reduction to apply
     ///
     #[inline(always)]
-    fn apply_small<O: SearchOptions>(value: &mut [f32], small: &SmallChildrenImpl<O>, fpu_reduce: f32) {
+    fn apply_small(value: &mut [f32], small: &SmallChildrenImpl, fpu_reduce: f32) {
         if is_x86_feature_detected!("avx2") {
             unsafe { FPU::apply_small_avx2(value, small, fpu_reduce) }
         } else {
@@ -250,16 +249,16 @@ impl FPU {
 /// Flyweight structure used to contain the values of a single child in a `Node`. These
 /// values should never be modified as they will **not** be synchronized back to the
 /// origin structure.
-pub struct Child<O: SearchOptions> {
+pub struct Child {
     expanding: bool,
     count: i32,
     vcount: i16,
-    ptr: *mut Node<O>,
+    ptr: *mut Node,
     value: f32,
     value_s: f32
 }
 
-impl<O: SearchOptions> Child<O> {
+impl Child {
     /// Returns a default child, with the given `value`. This constructor is normally used
     /// when a sparse `Node` does not contain a child it was asked for.
     ///
@@ -267,7 +266,7 @@ impl<O: SearchOptions> Child<O> {
     ///
     /// * `value` - the value of the parent `Node`
     ///
-    fn with_value(value: f32) -> Child<O> {
+    fn with_value(value: f32) -> Child {
         Child {
             count: 0,
             vcount: 0,
@@ -285,7 +284,7 @@ impl<O: SearchOptions> Child<O> {
     /// * `small` - the `SmallChildrenImpl` to initialize from
     /// * `index` - the sparse index in `SmallChildrenImpl` to initialize from
     ///
-    fn from_small(small: &SmallChildrenImpl<O>, index: usize) -> Child<O> {
+    fn from_small(small: &SmallChildrenImpl, index: usize) -> Child {
         Child {
             count: small.count[index],
             vcount: small.vcount[index],
@@ -303,7 +302,7 @@ impl<O: SearchOptions> Child<O> {
     /// * `big` - the `BigChildrenImpl` to initialize from
     /// * `index` - the dense index in `BigChildrenImpl` to initialize from
     ///
-    fn from_big(big: &BigChildrenImpl<O>, index: usize) -> Child<O> {
+    fn from_big(big: &BigChildrenImpl, index: usize) -> Child {
         debug_assert!(index < 362, "{}", index);
 
         Child {
@@ -332,7 +331,7 @@ impl<O: SearchOptions> Child<O> {
     }
 
     /// Return the child node itself.
-    pub fn ptr(&self) -> *mut Node<O> {
+    pub fn ptr(&self) -> *mut Node {
         self.ptr
     }
 
@@ -354,16 +353,16 @@ impl<O: SearchOptions> Child<O> {
 
 /// Flyweight mutable structure used to contain the values of a single child in a `Node`.
 #[derive(Debug)]
-pub struct ChildMut<O: SearchOptions> {
+pub struct ChildMut {
     expanding: *mut bool,
     count: *mut i32,
     vcount: *mut i16,
-    ptr: *mut *mut Node<O>,
+    ptr: *mut *mut Node,
     value: *mut f32,
     value_s: *mut f32
 }
 
-impl<O: SearchOptions> ChildMut<O> {
+impl ChildMut {
     /// Returns a child that is initialized from a `SmallChildrenImpl` at the given `index`. The
     /// given `small` node must outlive the returned `ChildMut`.
     ///
@@ -372,7 +371,7 @@ impl<O: SearchOptions> ChildMut<O> {
     /// * `small` - the `SmallChildrenImpl` to initialize from
     /// * `index` - the sparse index in `SmallChildrenImpl` to initialize from
     ///
-    unsafe fn from_small(small: &mut SmallChildrenImpl<O>, index: usize) -> ChildMut<O> {
+    unsafe fn from_small(small: &mut SmallChildrenImpl, index: usize) -> ChildMut {
         ChildMut {
             count: small.count.get_unchecked_mut(index),
             vcount: small.vcount.get_unchecked_mut(index),
@@ -391,7 +390,7 @@ impl<O: SearchOptions> ChildMut<O> {
     /// * `big` - the `BigChildrenImpl` to initialize from
     /// * `index` - the dense index in `BigChildrenImpl` to initialize from
     ///
-    unsafe fn from_big(big: &mut BigChildrenImpl<O>, index: usize) -> ChildMut<O> {
+    unsafe fn from_big(big: &mut BigChildrenImpl, index: usize) -> ChildMut {
         debug_assert!(index < 362);
 
         ChildMut {
@@ -420,7 +419,7 @@ impl<O: SearchOptions> ChildMut<O> {
     }
 
     /// Return the child node itself.
-    pub fn ptr(&self) -> *mut Node<O> {
+    pub fn ptr(&self) -> *mut Node {
         unsafe { *self.ptr }
     }
 
@@ -499,7 +498,7 @@ impl<O: SearchOptions> ChildMut<O> {
     ///
     /// * `value` - the new child `Node`
     ///
-    fn set_ptr(&mut self, value: *mut Node<O>) {
+    fn set_ptr(&mut self, value: *mut Node) {
         unsafe { *self.ptr = value; }
     }
 
@@ -528,7 +527,7 @@ impl<O: SearchOptions> ChildMut<O> {
 
 /// A dense representation of a `Node`.
 #[repr(align(64))]
-pub struct BigChildrenImpl<O: SearchOptions> {
+pub struct BigChildrenImpl {
     /// The number of times each edge has been traversed.
     pub count: [i32; 368],
 
@@ -548,10 +547,10 @@ pub struct BigChildrenImpl<O: SearchOptions> {
     expanding: [bool; 362],
 
     /// The sub-tree that each edge points towards.
-    ptr: [*mut Node<O>; 362]
+    ptr: [*mut Node; 362]
 }
 
-impl<O: SearchOptions> Drop for BigChildrenImpl<O> {
+impl Drop for BigChildrenImpl {
     fn drop(&mut self) {
         for &child in self.ptr.iter() {
             if !child.is_null() {
@@ -561,7 +560,7 @@ impl<O: SearchOptions> Drop for BigChildrenImpl<O> {
     }
 }
 
-impl<O: SearchOptions> BigChildrenImpl<O> {
+impl BigChildrenImpl {
     /// Returns a `BigChildrenImpl` that is equivalent to the given `small` node.
     ///
     /// # Arguments
@@ -569,7 +568,7 @@ impl<O: SearchOptions> BigChildrenImpl<O> {
     /// * `small` - the node to initialize from
     /// * `value` - the initial _value_ to use for any children not in `small`
     ///
-    unsafe fn from_small(small: &SmallChildrenImpl<O>, value: f32) -> BigChildrenImpl<O> {
+    unsafe fn from_small(small: &SmallChildrenImpl, value: f32) -> BigChildrenImpl {
         let mut big = BigChildrenImpl {
             count: [0; 368],
             vcount: [0; 368],
@@ -616,7 +615,7 @@ enum SmallChildrenResult {
 /// A sparse representation of a `Node` that only stores `SMALL_SIZE` children before
 /// overflowing. It store the sparse indices in `indices`, which is an unsorted mapping
 /// from sparse index to dense index.
-pub struct SmallChildrenImpl<O: SearchOptions> {
+pub struct SmallChildrenImpl {
     /// The number of times each edge has been traversed.
     pub count: [i32; SMALL_SIZE],
 
@@ -636,13 +635,13 @@ pub struct SmallChildrenImpl<O: SearchOptions> {
     expanding: [bool; SMALL_SIZE],
 
     /// The sub-tree that each edge points towards.
-    ptr: [*mut Node<O>; SMALL_SIZE],
+    ptr: [*mut Node; SMALL_SIZE],
 
     /// Indices of the children stored in this node.
     indices: [i16; SMALL_SIZE]
 }
 
-impl<O: SearchOptions> Drop for SmallChildrenImpl<O> {
+impl Drop for SmallChildrenImpl {
     fn drop(&mut self) {
         for &child in self.ptr.iter() {
             if !child.is_null() {
@@ -652,14 +651,14 @@ impl<O: SearchOptions> Drop for SmallChildrenImpl<O> {
     }
 }
 
-impl<O: SearchOptions> SmallChildrenImpl<O> {
+impl SmallChildrenImpl {
     /// Returns an empty sparse node.
     ///
     /// # Arguments
     ///
     /// * `value` - the initial _value_ for any child
     ///
-    fn with_value(value: f32) -> SmallChildrenImpl<O> {
+    fn with_value(value: f32) -> SmallChildrenImpl {
         SmallChildrenImpl {
             count: [0; SMALL_SIZE],
             vcount: [0; SMALL_SIZE],
@@ -751,14 +750,14 @@ impl Iterator for ChildrenNonZeroIter {
 }
 
 /// Union of `SmallChildrenImpl` and `BigChildrenImpl`, where the later is stored on the heap.
-pub enum ChildrenImpl<O: SearchOptions> {
-    Small(ManuallyDrop<SmallChildrenImpl<O>>),
-    Big(Box<BigChildrenImpl<O>>)
+pub enum ChildrenImpl {
+    Small(ManuallyDrop<SmallChildrenImpl>),
+    Big(Box<BigChildrenImpl>)
 }
 
-unsafe impl<O: SearchOptions> Send for ChildrenImpl<O> {}
+unsafe impl Send for ChildrenImpl {}
 
-impl<O: SearchOptions> ChildrenImpl<O> {
+impl ChildrenImpl {
     /// Returns the scattered value array of all children.
     ///
     /// # Arguments
@@ -847,7 +846,7 @@ impl<O: SearchOptions> ChildrenImpl<O> {
     /// * `initial_value` -
     ///
     pub fn with<T, F>(&self, index: usize, callback: F, initial_value: f32) -> T
-        where F: FnOnce(Child<O>) -> T
+        where F: FnOnce(Child) -> T
     {
         callback(match self {
             ChildrenImpl::Small(ref small) => {
@@ -874,7 +873,7 @@ impl<O: SearchOptions> ChildrenImpl<O> {
     /// * `small` - the children implementation
     /// * `index` - the index to fetch
     ///
-    fn with_mut_small(small: &mut SmallChildrenImpl<O>, index: usize) -> Option<ChildMut<O>> {
+    fn with_mut_small(small: &mut SmallChildrenImpl, index: usize) -> Option<ChildMut> {
         'retry: loop {
             return match small.find_index(index) {
                 SmallChildrenResult::Found(other) => {
@@ -908,7 +907,7 @@ impl<O: SearchOptions> ChildrenImpl<O> {
     /// * `initial_value` -
     ///
     pub fn with_mut<T, F>(&mut self, index: usize, callback: F, initial_value: f32) -> T
-        where F: FnOnce(ChildMut<O>) -> T
+        where F: FnOnce(ChildMut) -> T
     {
         let child = match self {
             ChildrenImpl::Small(ref mut small) => {
@@ -972,7 +971,7 @@ impl<T> ProbeResult<T> {
 
 /// A monte carlo search tree.
 #[repr(align(64))]
-pub struct Node<O: SearchOptions> {
+pub struct Node {
     /// Spinlock used to protect the data in this node during modifications.
     pub lock: Mutex,
 
@@ -995,10 +994,10 @@ pub struct Node<O: SearchOptions> {
     pub prior: [f32; 368],
 
     /// The sparse (or dense) representation of the remaining MCTS fields.
-    pub children: ChildrenImpl<O>
+    pub children: ChildrenImpl
 }
 
-impl<O: SearchOptions> Drop for Node<O> {
+impl Drop for Node {
     fn drop(&mut self) {
         if let ChildrenImpl::Small(ref mut small) = self.children {
             unsafe { ManuallyDrop::drop(small) }
@@ -1006,7 +1005,7 @@ impl<O: SearchOptions> Drop for Node<O> {
     }
 }
 
-impl<O: SearchOptions> Node<O> {
+impl Node {
     /// Returns an empty search tree with the given starting color and prior
     /// values.
     ///
@@ -1015,7 +1014,7 @@ impl<O: SearchOptions> Node<O> {
     /// * `to_move` - the color of the first players color
     /// * `prior` - the prior values of the nodes
     ///
-    pub fn new(to_move: Color, value: f32, prior: Vec<f32>) -> Node<O> {
+    pub fn new(to_move: Color, value: f32, prior: Vec<f32>) -> Node {
         assert!(prior.len() >= 362);
 
         // copy the prior values into an array size that is dividable
@@ -1033,12 +1032,6 @@ impl<O: SearchOptions> Node<O> {
             prior: prior_padding,
             children: ChildrenImpl::Small(ManuallyDrop::new(SmallChildrenImpl::with_value(value)))
         }
-    }
-
-    /// Returns this node with the given search options instead of the current
-    /// search options.
-    pub fn to_options<O2: SearchOptions>(self) -> Node<O2> {
-        unsafe { ::std::mem::transmute(self) }
     }
 
     /// Returns true if the given vertex is a valid candidate move in this tree.
@@ -1079,7 +1072,7 @@ impl<O: SearchOptions> Node<O> {
     /// * `callback` -
     ///
     pub fn with<T, F>(&self, index: usize, callback: F) -> T
-        where F: FnOnce(Child<O>) -> T
+        where F: FnOnce(Child) -> T
     {
         self.children.with(index, callback, self.initial_value)
     }
@@ -1093,7 +1086,7 @@ impl<O: SearchOptions> Node<O> {
     /// * `callback` -
     ///
     pub fn with_mut<T, F>(&mut self, index: usize, callback: F) -> T
-        where F: FnOnce(ChildMut<O>) -> T
+        where F: FnOnce(ChildMut) -> T
     {
         self.children.with_mut(index, callback, self.initial_value)
     }
@@ -1178,7 +1171,7 @@ impl<O: SearchOptions> Node<O> {
     /// * `self` - the search tree to pluck the child from
     /// * `index` - the move to pluck the sub-tree for
     ///
-    pub fn forward(mut self, index: usize) -> Option<Node<O>> {
+    pub fn forward(mut self, index: usize) -> Option<Node> {
         let color = self.to_move;
         let pass_count = self.pass_count;
 
@@ -1340,7 +1333,7 @@ impl<O: SearchOptions> Node<O> {
     }
 }
 
-pub type NodeTrace<O> = Vec<(*mut Node<O>, Color, usize)>;
+pub type NodeTrace = Vec<(*mut Node, Color, usize)>;
 
 /// Undo a probe into the search tree by undoing any virtual losses, and / or visits
 /// added during the probe.
@@ -1350,7 +1343,7 @@ pub type NodeTrace<O> = Vec<(*mut Node<O>, Color, usize)>;
 /// * `trace` - the trace to undo
 /// * `undo_expanding` - whether to also revert the `expanding` flag
 ///
-pub unsafe fn undo<O: SearchOptions>(trace: NodeTrace<O>, undo_expanding: bool) {
+pub unsafe fn undo(trace: NodeTrace, undo_expanding: bool) {
     for (node, _, next_child) in trace.into_iter() {
         atomic_xsub(&mut (*node).vtotal_count, *config::VLOSS_CNT as i32);
 
@@ -1374,7 +1367,7 @@ pub unsafe fn undo<O: SearchOptions>(trace: NodeTrace<O>, undo_expanding: bool) 
 /// * `root` - the search tree to probe into
 /// * `board` - the board to update with the traversed moves
 ///
-pub unsafe fn probe<O: SearchOptions>(root: &mut Node<O>, board: &mut Board) -> ProbeResult<NodeTrace<O>> {
+pub unsafe fn probe(root: &mut Node, board: &mut Board) -> ProbeResult<NodeTrace> {
     let mut trace = vec! [];
     let mut current = root;
 
@@ -1390,7 +1383,7 @@ pub unsafe fn probe<O: SearchOptions>(root: &mut Node<O>, board: &mut Board) -> 
                 return ProbeResult::NoResult;
             },
             ProbeResult::Found((next_child, next_value)) => {
-                trace.push((current as *mut Node<O>, current.to_move, next_child));
+                trace.push((current as *mut Node, current.to_move, next_child));
 
                 if next_child != 361 {  // not a passing move
                     let point = Point::from_packed_parts(next_child);
@@ -1435,7 +1428,7 @@ pub unsafe fn probe<O: SearchOptions>(root: &mut Node<O>, board: &mut Board) -> 
 /// * `value` -
 /// * `prior` -
 ///
-pub unsafe fn insert<O: SearchOptions>(trace: &NodeTrace<O>, color: Color, value: f32, prior: Vec<f32>) {
+pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32>) {
     if let Some(&(node, _, index)) = trace.last() {
         let mut next = Box::new(Node::new(color, value, prior));
         if index == 361 {
@@ -1475,8 +1468,8 @@ pub unsafe fn insert<O: SearchOptions>(trace: &NodeTrace<O>, color: Color, value
 /// * `b` -
 /// * `min_lcb_visits` -
 /// 
-fn compare_children<O: SearchOptions>(
-    node: &Node<O>,
+fn compare_children(
+    node: &Node,
     a: usize,
     b: usize,
     min_lcb_visits: i32
@@ -1513,14 +1506,14 @@ fn compare_children<O: SearchOptions>(
 
 /// Type alias for `Node` that acts as a wrapper for calling `as_sgf` from
 /// within a `write!` macro.
-pub struct ToSgf<'a, S: SgfCoordinate, O: SearchOptions> {
+pub struct ToSgf<'a, S: SgfCoordinate> {
     _coordinate_format: ::std::marker::PhantomData<S>,
     starting_point: Board,
-    root: &'a Node<O>,
+    root: &'a Node,
     meta: bool
 }
 
-impl<'a, S: SgfCoordinate, O: SearchOptions> fmt::Display for ToSgf<'a, S, O> {
+impl<'a, S: SgfCoordinate> fmt::Display for ToSgf<'a, S> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         if self.meta {
             // add the standard SGF prefix
@@ -1559,7 +1552,7 @@ impl<'a, S: SgfCoordinate, O: SearchOptions> fmt::Display for ToSgf<'a, S, O> {
 /// * `starting_point` -
 /// * `meta` - whether to include the SGF meta data (rules, etc.)
 ///
-pub fn to_sgf<'a, S, O: SearchOptions>(root: &'a Node<O>, starting_point: &Board, meta: bool) -> ToSgf<'a, S, O>
+pub fn to_sgf<'a, S>(root: &'a Node, starting_point: &Board, meta: bool) -> ToSgf<'a, S>
     where S: SgfCoordinate
 {
     ToSgf {
@@ -1594,20 +1587,20 @@ impl fmt::Display for PrettyVertex {
 }
 
 /// Iterator that traverse the most likely path down a search tree
-pub struct GreedyPath<'a, O: SearchOptions> {
-    current: &'a Node<O>,
+pub struct GreedyPath<'a> {
+    current: &'a Node,
     threshold: i32
 }
 
-impl<'a, O: SearchOptions> GreedyPath<'a, O> {
-    pub fn new(node: &'a Node<O>, threshold: i32) -> GreedyPath<'a, O> {
+impl<'a> GreedyPath<'a> {
+    pub fn new(node: &'a Node, threshold: i32) -> GreedyPath<'a> {
         debug_assert!(threshold >= 1);
 
         GreedyPath { current: node, threshold: threshold }
     }
 }
 
-impl<'a, O: SearchOptions> Iterator for GreedyPath<'a, O> {
+impl<'a> Iterator for GreedyPath<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<usize> {
@@ -1627,12 +1620,12 @@ impl<'a, O: SearchOptions> Iterator for GreedyPath<'a, O> {
 
 /// Type alias for `Node` that acts as a wrapper for calling `as_sgf` from
 /// within a `write!` macro.
-pub struct ToPretty<'a, O: SearchOptions> {
-    root: &'a Node<O>,
+pub struct ToPretty<'a> {
+    root: &'a Node,
     verbose: bool
 }
 
-impl<'a, O: SearchOptions> fmt::Display for ToPretty<'a, O> {
+impl<'a> fmt::Display for ToPretty<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         let mut children = self.root.children.nonzero().collect::<Vec<usize>>();
         children.sort_by(|&a, &b| compare_children(self.root, b, a, 80));
@@ -1691,7 +1684,7 @@ impl<'a, O: SearchOptions> fmt::Display for ToPretty<'a, O> {
 /// * `root` -
 /// * `starting_point` -
 ///
-pub fn to_pretty<O: SearchOptions>(root: &Node<O>) -> ToPretty<O> {
+pub fn to_pretty(root: &Node) -> ToPretty {
     let verbose = *config::VERBOSE;
 
     ToPretty { root, verbose }
@@ -1704,7 +1697,6 @@ mod tests {
     use dg_go::*;
     use asm::sum_finite_f32;
     use asm::normalize_finite_f32;
-    use options::StandardSearch;
     use super::*;
 
     fn get_prior_distribution(rng: &mut SmallRng, board: &Board, to_move: Color) -> Vec<f32> {
@@ -1725,7 +1717,7 @@ mod tests {
     unsafe fn unsafe_visit_order() {
         let mut choices = vec![];
         let mut rng = SmallRng::from_seed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-        let mut root = Node::<StandardSearch>::new(
+        let mut root = Node::new(
             Color::Black,
             0.5,
             get_prior_distribution(&mut rng, &Board::new(DEFAULT_KOMI), Color::Black)
@@ -1777,7 +1769,7 @@ mod tests {
     unsafe fn unsafe_virtual_loss() {
         let mut board = Board::new(DEFAULT_KOMI);
         let mut rng = SmallRng::from_seed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-        let mut root = Node::<StandardSearch>::new(
+        let mut root = Node::new(
             Color::Black,
             0.5,
             get_prior_distribution(&mut rng, &board, Color::Black)
@@ -1813,7 +1805,7 @@ mod tests {
 
     unsafe fn unsafe_value_update() {
         let mut board = Board::new(DEFAULT_KOMI);
-        let mut root = Node::<StandardSearch>::new(
+        let mut root = Node::new(
             Color::Black,
             0.5,
             (0..362).map(|i| if i == 60 { 1.0 } else { 0.0 }).collect()
@@ -1878,7 +1870,7 @@ mod tests {
 
     unsafe fn unsafe_undo_trace() {
         let mut board = Board::new(DEFAULT_KOMI);
-        let mut root = Node::<StandardSearch>::new(
+        let mut root = Node::new(
             Color::Black,
             0.5,
             (0..362).map(|i| if i == 60 { 1.0 } else { 0.0 }).collect()
