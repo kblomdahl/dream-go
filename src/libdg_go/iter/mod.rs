@@ -13,9 +13,13 @@
 // limitations under the License.
 
 mod adjacent_iter;
+mod adjacent_chain_iter;
 mod chain_iter;
+mod liberty_iter;
 mod valid_iter;
 
 pub use self::adjacent_iter::*;
+pub use self::adjacent_chain_iter::*;
 pub use self::chain_iter::*;
+pub use self::liberty_iter::*;
 pub use self::valid_iter::*;

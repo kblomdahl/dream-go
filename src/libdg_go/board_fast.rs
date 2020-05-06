@@ -15,7 +15,7 @@
 use color::Color;
 use point::Point;
 use point_state::Vertex;
-use iter::{AdjacentIter, ChainIter, ValidIter, IsPartOf, NextLink};
+use iter::{AdjacentIter, AdjacentChainIter, ChainIter, ValidIter, IsPartOf, NextLink, HasColor, LibertyIter};
 use zobrist;
 
 use std::ops::{Index, IndexMut};
@@ -128,6 +128,20 @@ impl BoardFast {
     ///
     pub fn block_at(&self, at_point: Point) -> Block {
         Block::new(self, at_point)
+    }
+
+    /// Returns all liberties of the block at the given point, the iterator may
+    /// contain duplicate vertices.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `at_point` - 
+    /// 
+    pub fn liberties_of(&self, at_point: Point) -> LibertyIter<'_, *const Self> {
+        ValidIter::new(
+            AdjacentChainIter::new(ChainIter::new(at_point, self)),
+            HasColor::new(self, None)
+        )
     }
 
     /// Returns whether the given liberties of the given group (as counted by
