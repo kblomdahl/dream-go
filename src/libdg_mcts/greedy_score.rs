@@ -31,13 +31,14 @@ use super::{full_forward, ScoringSearch};
 /// * `to_move` - the color of the player whose turn it is to play
 /// 
 pub fn greedy_score<P: Predictor>(server: &P, board: &Board, mut to_move: Color) -> (Board, String) {
+    let options = ScoringSearch::default();
     let mut board = board.clone();
     let mut sgf = String::new();
     let mut pass_count = 0;
     let mut count = 0;
 
     while count < 722 && pass_count < 2 {
-        let policy = if let Some(response) = full_forward::<_, ScoringSearch>(server, &board, to_move) {
+        let policy = if let Some(response) = full_forward(server, &options, &board, to_move) {
             response.1
         } else {
             return (board, sgf)

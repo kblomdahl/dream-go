@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use dg_go::{Board, Color, Point, IsPartOf};
+use dg_utils::config;
 
-pub trait SearchOptions : Clone {
+pub trait SearchOptions {
     /// Returns true if the given move should be considered during search.
     ///
     /// # Arguments
@@ -23,35 +24,74 @@ pub trait SearchOptions : Clone {
     /// * `to_move` -
     /// * `point` -
     ///
-    fn is_policy_candidate(board: &Board, to_move: Color, point: Point) -> bool;
+    fn is_policy_candidate(&self, board: &Board, to_move: Color, point: Point) -> bool;
+
+    /// Returns the number of worker threads to use.
+    fn num_workers(&self) -> usize;
 
     /// Returns true if the search should be deterministic.
-    fn deterministic() -> bool;
+    fn deterministic(&self) -> bool;
 }
 
 #[derive(Clone)]
-pub struct StandardSearch;
+pub struct StandardSearch {
+    num_workers: usize
+}
+
+impl StandardSearch {
+    pub fn new(num_workers: usize) -> Self {
+        Self { num_workers }
+    }
+}
+
+impl Default for StandardSearch {
+    fn default() -> Self {
+        Self::new(*config::NUM_THREADS)
+    }
+}
 
 impl SearchOptions for StandardSearch {
-    fn is_policy_candidate(_board: &Board, _to_move: Color, _point: Point) -> bool {
+    fn is_policy_candidate(&self, _board: &Board, _to_move: Color, _point: Point) -> bool {
         true
     }
 
-    fn deterministic() -> bool {
+    fn deterministic(&self) -> bool {
         false
+    }
+
+    fn num_workers(&self) -> usize {
+        self.num_workers
     }
 }
 
 #[derive(Clone)]
-pub struct ScoringSearch;
+pub struct ScoringSearch {
+    num_workers: usize
+}
+
+impl ScoringSearch {
+    pub fn new(num_workers: usize) -> Self {
+        Self { num_workers }
+    }
+}
+
+impl Default for ScoringSearch {
+    fn default() -> Self {
+        Self::new(*config::NUM_THREADS)
+    }
+}
 
 impl SearchOptions for ScoringSearch {
-    fn is_policy_candidate(board: &Board, to_move: Color, point: Point) -> bool {
+    fn is_policy_candidate(&self, board: &Board, to_move: Color, point: Point) -> bool {
         point != Point::default() && !is_eye(board, to_move, point)
     }
 
-    fn deterministic() -> bool {
+    fn deterministic(&self) -> bool {
         true
+    }
+
+    fn num_workers(&self) -> usize {
+        self.num_workers
     }
 }
 

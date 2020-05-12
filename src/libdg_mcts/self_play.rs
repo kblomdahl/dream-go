@@ -225,9 +225,9 @@ impl Player {
     ) -> Option<(f32, usize, tree::Node)>
     {
         if !allow_pass {
-            let (value, index, tree) = predict_aux::<_, _, ScoringSearch>(
+            let (value, index, tree) = predict_aux(
                 server,
-                num_workers,
+                Box::new(ScoringSearch::new(num_workers)),
                 time_control,
                 self.root.take().map(|mut n| {
                     n.disqualify(361);
@@ -239,9 +239,9 @@ impl Player {
 
             Some((value, index, tree))
         } else {
-            predict_aux::<_, _, StandardSearch>(
+            predict_aux(
                 server,
-                num_workers,
+                Box::new(StandardSearch::new(num_workers)),
                 time_control,
                 self.root.take(),
                 &board,
@@ -356,9 +356,9 @@ impl Player {
         } else {
             let (value, mut policy) =
                 if allow_pass {
-                    full_forward::<_, StandardSearch>(server, board, self.color)?
+                    full_forward(server, &StandardSearch::default(), board, self.color)?
                 } else {
-                    full_forward::<_, ScoringSearch>(server, board, self.color)?
+                    full_forward(server, &ScoringSearch::default(), board, self.color)?
                 };
             if !allow_pass {
                 policy[361] = ::std::f32::NEG_INFINITY;
@@ -552,9 +552,9 @@ mod tests {
         let server = FakePredictor::new(1, 0.6);
         let board = Board::new(0.5);
         let (value, index, tree) =
-            predict_aux::<_, _, StandardSearch>(
+            predict_aux::<_, _>(
                 &server,
-                1,
+                Box::new(StandardSearch::default()),
                 RolloutLimit::new(10),
                 None,
                 &board,

@@ -82,9 +82,9 @@ fn ponder_worker(
 {
     let start_time = ProcessTime::now();
     let max_tree_size = (*config::NUM_ROLLOUT).user_defined_or(500_000);
-    let result = mcts::predict::<_, _, StandardSearch>(
+    let result = mcts::predict(
         &service.lock().clone_to_static(),
-        None,
+        Box::new(StandardSearch::default()),
         PonderTimeControl { is_running, max_tree_size },
         search_tree,
         &board,

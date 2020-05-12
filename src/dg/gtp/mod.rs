@@ -340,18 +340,18 @@ impl Gtp {
                     .map(|tree| tree.total_count)
                     .unwrap_or(0);
 
-                mcts::predict::<_, _, StandardSearch>(
+                mcts::predict(
                     &service.lock().clone_to_static(),
-                    None,
+                    Box::new(StandardSearch::default()),
                     time_control::ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods),
                     search_tree,
                     &board,
                     to_move
                 )
             } else {
-                mcts::predict::<_, _, StandardSearch>(
+                mcts::predict(
                     &service.lock().clone_to_static(),
-                    None,
+                    Box::new(StandardSearch::default()),
                     time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
                     search_tree,
                     &board,
@@ -433,9 +433,9 @@ impl Gtp {
                 // if the search tree is too small, the expand it before continuing
                 let mut board = board.clone();
                 let mut to_move = board.to_move();
-                let search_tree = match mcts::predict::<_, _, ScoringSearch>(
+                let search_tree = match mcts::predict(
                     &service.lock().clone_to_static(),
-                    None,
+                    Box::new(ScoringSearch::default()),
                     time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
                     None,
                     &board,

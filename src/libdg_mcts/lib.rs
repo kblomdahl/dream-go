@@ -77,11 +77,12 @@ use self::parallel::global_rwlock;
 /// # Arguments
 ///
 /// * `server` - the server to use for predictions
+/// * `options` - 
 /// * `board` - the board position to evaluate
 /// * `to_move` - the color to evaluate for
 ///
-fn full_forward<P: Predictor, O: SearchOptions>(server: &P, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>)> {
-    let (initial_policy, indices) = create_initial_policy::<O>(board, to_move);
+fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>)> {
+    let (initial_policy, indices) = create_initial_policy(options, board, to_move);
     let mut policy = initial_policy.clone();
     let mut value = 0.0f32;
 
@@ -128,10 +129,11 @@ fn full_forward<P: Predictor, O: SearchOptions>(server: &P, board: &Board, to_mo
 /// # Arguments
 ///
 /// * `server` - the workspace to use during the forward pass
+/// * `options` - 
 /// * `board` - the board position
 /// * `to_move` - the current player
 ///
-fn forward<P: Predictor, O: SearchOptions>(server: &P, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>)> {
+fn forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>)> {
     let t = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
 
     global_cache::get_or_insert(board, to_move, t, || {
@@ -145,7 +147,7 @@ fn forward<P: Predictor, O: SearchOptions>(server: &P, board: &Board, to_move: C
         )?;
 
         // fix-up the potentially broken policy
-        let (mut policy, indices) = create_initial_policy::<O>(board, to_move);
+        let (mut policy, indices) = create_initial_policy(options, board, to_move);
         add_valid_candidates(&mut policy, original_policy, &indices, t);
         normalize_policy(&mut policy);
 
@@ -161,18 +163,18 @@ fn forward<P: Predictor, O: SearchOptions>(server: &P, board: &Board, to_move: C
 /// * `board` -
 /// * `color` -
 ///
-fn create_initial_policy<O: SearchOptions>(board: &Board, to_move: Color) -> (Vec<f32>, Vec<usize>) {
+fn create_initial_policy(options: &dyn SearchOptions, board: &Board, to_move: Color) -> (Vec<f32>, Vec<usize>) {
     // mark all illegal moves as -Inf, which effectively ensures they are never selected by
     // the tree search.
     let mut policy = vec! [::std::f32::NEG_INFINITY; 368];
 
     for point in Point::all() {
-        if board.is_valid(to_move, point) && O::is_policy_candidate(board, to_move, point) {
+        if board.is_valid(to_move, point) && options.is_policy_candidate(board, to_move, point) {
             policy[point.to_packed_index()] = 0.0;
         }
     }
 
-    if O::is_policy_candidate(board, to_move, Point::default()) {
+    if options.is_policy_candidate(board, to_move, Point::default()) {
         policy[361] = 0.0;
     }
 
@@ -261,6 +263,9 @@ struct ThreadContext<T: TimeStrategy + Clone + Send> {
     /// The root of the monte carlo tree.
     root: Arc<UnsafeCell<tree::Node>>,
 
+    /// The search options to use.
+    options: Arc<Box<dyn SearchOptions>>,
+
     /// The initial board position at the root the tree.
     starting_point: Board,
 
@@ -279,12 +284,12 @@ unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
 /// * `context` -
 /// * `server` -
 ///
-fn predict_worker<T, P, O>(context: ThreadContext<T>, server: P)
+fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
     where T: TimeStrategy + Clone + Send + 'static,
-          P: Predictor,
-          O: SearchOptions
+          P: Predictor
 {
     let root = unsafe { &mut *context.root.get() };
+    let options = &**context.options;
 
     global_rwlock::read_lock();
     while !time_control::is_done(root, &context.time_strategy) {
@@ -297,7 +302,7 @@ fn predict_worker<T, P, O>(context: ThreadContext<T>, server: P)
                 ProbeResult::Found(trace) => {
                     let &(_, color, _) = trace.last().unwrap();
                     let to_move = color.opposite();
-                    let result = forward::<_, O>(&server, &board, to_move);
+                    let result = forward(&server, options, &board, to_move);
 
                     if let Some((value, policy)) = result {
                         global_rwlock::read_lock();
@@ -331,29 +336,29 @@ fn predict_worker<T, P, O>(context: ThreadContext<T>, server: P)
 /// # Arguments
 ///
 /// * `server` - the server to use during evaluation
-/// * `num_workers` -
+/// * `options` -
+/// * `time_control` -
 /// * `starting_tree` -
 /// * `starting_point` -
 /// * `starting_color` -
-/// * `deterministic` -
 ///
-fn predict_aux<T, P, O>(
+fn predict_aux<T, P>(
     server: &P,
-    num_workers: usize,
+    options: Box<dyn SearchOptions>,
     time_strategy: T,
     starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
 ) -> Option<(f32, usize, tree::Node)>
     where T: TimeStrategy + Clone + Send + 'static,
-          P: Predictor + 'static,
-          O: SearchOptions + 'static
+          P: Predictor + 'static
 {
-    let (starting_value, mut starting_policy) = full_forward::<P, O>(server, starting_point, starting_color)?;
+    let (starting_value, mut starting_policy) = full_forward::<P>(server, &*options, starting_point, starting_color)?;
+    let deterministic = options.deterministic();
 
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
-    if !O::deterministic() {
+    if !deterministic {
         dirichlet::add(&mut starting_policy[..362], 0.03);
     }
 
@@ -376,8 +381,10 @@ fn predict_aux<T, P, O>(
 
     // start-up all of the worker threads, and then start listening for requests on the
     // channel we gave each thread.
+    let num_workers = options.num_workers();
     let context = ThreadContext {
         root: Arc::new(UnsafeCell::new(starting_tree)),
+        options: Arc::new(options),
         starting_point: starting_point.clone(),
         time_strategy: time_strategy.clone()
     };
@@ -386,7 +393,7 @@ fn predict_aux<T, P, O>(
         let context = context.clone();
         let server = server.clone();
 
-        predict_worker::<_, _, O>(context, server);
+        predict_worker(context, server);
     } else {
         let handles = (0..num_workers).map(|_| {
             let context = context.clone();
@@ -394,7 +401,7 @@ fn predict_aux<T, P, O>(
 
             thread::Builder::new()
                 .name("predict_worker".into())
-                .spawn(move || predict_worker::<_, _, O>(context, server))
+                .spawn(move || predict_worker(context, server))
                 .unwrap()
         }).collect::<Vec<JoinHandle<()>>>();
 
@@ -406,7 +413,7 @@ fn predict_aux<T, P, O>(
 
     // choose the best move according to the search tree
     let root = UnsafeCell::into_inner(Arc::try_unwrap(context.root).ok().expect("no root"));
-    let (value, index) = root.best(if !O::deterministic() && starting_point.count() < 8 {
+    let (value, index) = root.best(if !deterministic && starting_point.count() < 8 {
         *config::TEMPERATURE
     } else {
         0.0
@@ -424,28 +431,25 @@ fn predict_aux<T, P, O>(
 /// # Arguments
 ///
 /// * `server` - the server to use during evaluation
-/// * `num_workers` -
+/// * `options` -
+/// * `time_control` -
 /// * `starting_tree` -
 /// * `starting_point` -
 /// * `starting_color` -
-/// * `deterministic` -
 ///
-pub fn predict<T, P, O>(
+pub fn predict<T, P>(
     server: &P,
-    num_workers: Option<usize>,
+    options: Box<dyn SearchOptions>,
     time_control: T,
     starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
 ) -> Option<(f32, usize, tree::Node)>
     where T: TimeStrategy + Clone + Send + 'static,
-          P: Predictor + 'static,
-          O: SearchOptions + 'static
+          P: Predictor + 'static
 {
-    let num_workers = num_workers.unwrap_or(*config::NUM_THREADS);
-
     Profiler::with(move || {
-        predict_aux::<T, _, O>(server, num_workers, time_control, starting_tree, starting_point, starting_color)
+        predict_aux::<T, _>(server, options, time_control, starting_tree, starting_point, starting_color)
     })
 }
 
@@ -500,6 +504,7 @@ mod tests {
         let context = ThreadContext {
             root: root.clone(),
             starting_point: Board::new(7.5),
+            options: Arc::new(Box::new(StandardSearch::new(1))),
             time_strategy: time_control::RolloutLimit::new(100)
         };
 
@@ -507,7 +512,7 @@ mod tests {
             unsafe { &mut *context.root.get() }.disqualify(i);
         }
 
-        predict_worker::<_, _, StandardSearch>(context, predict::RandomPredictor::default());
+        predict_worker::<_, _>(context, predict::RandomPredictor::default());
         assert_eq!(unsafe { &*root.get() }.best(0.0), (::std::f32::NEG_INFINITY, 361));
     }
 
@@ -530,9 +535,9 @@ mod tests {
 
     #[test]
     fn no_finite_candidates() {
-        let (value, index, root) = predict::<_, _, StandardSearch>(
+        let (value, index, root) = predict::<_, _>(
             &NanPredictor::default(),
-            None,
+            Box::new(StandardSearch::new(1)),
             time_control::RolloutLimit::new(1600),
             None,
             &Board::new(7.5),
