@@ -15,7 +15,7 @@
 use color::Color;
 use point::Point;
 use point_state::Vertex;
-use iter::{AdjacentIter, AdjacentChainIter, ChainIter, ValidIter, IsPartOf, NextLink, HasColor, LibertyIter};
+use iter::*;
 use zobrist;
 
 use std::ops::{Index, IndexMut};
@@ -141,6 +141,20 @@ impl BoardFast {
         ValidIter::new(
             AdjacentChainIter::new(ChainIter::new(at_point, self)),
             HasColor::new(self, None)
+        )
+    }
+
+    /// Returns all adjacent vertices of the block at the given `point`, the
+    /// iterator may contain duplicate vertices.
+    /// 
+    /// # Arguments
+    /// 
+    /// - `at_point` -
+    /// 
+    pub fn adjacencies_of(&self, at_point: Point) -> AdjacenciesIter<'_, *const Self> {
+        ValidIter::new(
+            AdjacentChainIter::new(ChainIter::new(at_point, self)),
+            &self
         )
     }
 

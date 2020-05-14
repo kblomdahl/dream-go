@@ -38,6 +38,7 @@ impl<'a> IsPartOf for HasColor<'a> {
 }
 
 pub type LibertyIter<'a, L> = ValidIter<AdjacentChainIter<L>, HasColor<'a>>;
+pub type AdjacenciesIter<'a, L> = ValidIter<AdjacentChainIter<L>, &'a BoardFast>;
 
 #[cfg(test)]
 mod tests {

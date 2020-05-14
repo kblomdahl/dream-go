@@ -129,6 +129,27 @@ impl<'a, R: AllRegions<'a>, B: AllBlocks<'a>> Benson<'a, R, B> {
         regions.len() < original_len
     }
 
+    /// Returns if the given `point` is part of an unconditionally alive block
+    /// 
+    /// # Arguments
+    /// 
+    /// * `point` -
+    /// 
+    pub fn is_alive(&self, point: Point) -> bool {
+        self.points[point.to_i()] == PointStatus::Block
+    }
+
+    /// Returns if the given `point` is vital to an unconditionally alive 
+    /// block.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `point` -
+    /// 
+    pub fn is_eye(&self, point: Point) -> bool {
+        self.points[point.to_i()] == PointStatus::Region
+    }
+
     /// Returns if the given `point` is not a liberty of a group that is
     /// unconditionally alive.
     /// 
@@ -180,7 +201,7 @@ impl<'a> Block for BlockImpl<'a> {
     }
 
     fn is_liberty(&self, point: Point) -> bool {
-        self.board.liberties_of(self.block_at).any(|l| l == point)
+        self.board.adjacencies_of(self.block_at).any(|l| l == point)
     }
 }
 
@@ -268,7 +289,7 @@ impl<'a> AllRegions<'a> for AllRegionsImpl {
             );
 
         flood.starting_points()
-            .map(|&starting_point| {
+            .filter_map(|&starting_point| {
                 let points = flood.region_at(starting_point).collect::<Vec<_>>();
                 let neighbours =
                     ValidIter::new(
@@ -277,7 +298,11 @@ impl<'a> AllRegions<'a> for AllRegionsImpl {
                     )
                     .collect::<Vec<_>>();
 
-                RegionImpl { points, neighbours }
+                if neighbours.len() == 0 {
+                    None
+                } else {
+                    Some(RegionImpl { points, neighbours })
+                }
             })
             .collect::<Vec<_>>()
     }
@@ -552,6 +577,16 @@ mod tests {
         }
     }
 
+    #[test]
+    fn empty_is_all_valid() {
+        let board = Board::new(0.5);
+        let benson = BensonImpl::new(&board, Color::Black);
+
+        for point in Point::all() {
+            assert_eq!(benson.is_valid(point), true);
+        }
+    }
+
     #[bench]
     fn benson_impl(b: &mut Bencher) {
         let points = vec! [
@@ -594,5 +629,29 @@ mod tests {
                 assert_eq!(benson.is_valid(point), true);
             }
         })
+    }
+
+    #[test]
+    fn eyes() {
+        let mut board = Board::new(0.5);
+        board.place(Color::White, Point::new(0, 1));
+        board.place(Color::White, Point::new(1, 1));
+        board.place(Color::White, Point::new(2, 0));
+        board.place(Color::White, Point::new(2, 1));
+        board.place(Color::White, Point::new(3, 1));
+        board.place(Color::White, Point::new(4, 0));
+        board.place(Color::White, Point::new(4, 1));
+
+        board.place(Color::Black, Point::new(0, 0));
+
+        let benson = BensonImpl::new(&board, Color::White);
+
+        for point in Point::all() {
+            if board.at(point) == Some(Color::White) {
+                assert!(benson.is_alive(point), "{:?} is not alive", point);
+            } else if vec! [Point::new(0, 0), Point::new(1, 0), Point::new(3, 0)].contains(&point) {
+                assert!(benson.is_eye(point), "{:?} is not eye", point);
+            }
+        }
     }
 }
