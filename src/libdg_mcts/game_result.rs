@@ -54,9 +54,7 @@ fn get_territory_as_sgf(board: &Board) -> String {
     let mut white = String::new();
 
     for (point, statuses) in board.get_stone_status(&board) {
-        if statuses.contains(&StoneStatus::Dead) {
-            return "".into();  // game is not scorable
-        } else if statuses.contains(&StoneStatus::WhiteTerritory) {
+        if statuses.contains(&StoneStatus::WhiteTerritory) {
             white += &format!("[{}]", CGoban::to_sgf(point));
         } else if statuses.contains(&StoneStatus::BlackTerritory) {
             black += &format!("[{}]", CGoban::to_sgf(point));
