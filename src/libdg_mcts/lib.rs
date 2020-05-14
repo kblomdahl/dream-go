@@ -167,14 +167,15 @@ fn create_initial_policy(options: &dyn SearchOptions, board: &Board, to_move: Co
     // mark all illegal moves as -Inf, which effectively ensures they are never selected by
     // the tree search.
     let mut policy = vec! [::std::f32::NEG_INFINITY; 368];
+    let policy_checker = options.policy_checker(board, to_move);
 
     for point in Point::all() {
-        if board.is_valid(to_move, point) && options.is_policy_candidate(board, to_move, point) {
+        if policy_checker.is_policy_candidate(point) {
             policy[point.to_packed_index()] = 0.0;
         }
     }
 
-    if options.is_policy_candidate(board, to_move, Point::default()) {
+    if policy_checker.is_policy_candidate(Point::default()) {
         policy[361] = 0.0;
     }
 
@@ -274,7 +275,6 @@ struct ThreadContext<T: TimeStrategy + Clone + Send> {
 }
 
 unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
-
 
 /// Worker that probes into the given monte carlo search tree until the context
 /// is exhausted.

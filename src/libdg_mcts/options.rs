@@ -12,25 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use dg_go::utils::benson::BensonImpl;
 use dg_go::{Board, Color, Point, IsPartOf};
 use dg_utils::config;
 
-pub trait SearchOptions {
+pub trait PolicyChecker {
     /// Returns true if the given move should be considered during search.
     ///
     /// # Arguments
     ///
-    /// * `board` -
-    /// * `to_move` -
     /// * `point` -
     ///
-    fn is_policy_candidate(&self, board: &Board, to_move: Color, point: Point) -> bool;
+    fn is_policy_candidate(&self, point: Point) -> bool;
+}
+
+pub trait SearchOptions {
+    /// Returns the policy checker to use for the given `board`.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `board` - 
+    /// * `to_move` -
+    /// 
+    fn policy_checker(&self, board: &Board, to_move: Color) -> Box<dyn PolicyChecker>;
 
     /// Returns the number of worker threads to use.
     fn num_workers(&self) -> usize;
 
     /// Returns true if the search should be deterministic.
     fn deterministic(&self) -> bool;
+}
+
+pub struct StandardPolicyChecker {
+    board: Board,
+    to_move: Color
+}
+
+impl StandardPolicyChecker {
+    fn new(board: &Board, to_move: Color) -> Self {
+        let board = board.clone();
+
+        Self { board, to_move }
+    }
+}
+
+impl PolicyChecker for StandardPolicyChecker {
+    fn is_policy_candidate(&self, point: Point) -> bool {
+        point == Point::default() || self.board.is_valid(self.to_move, point)
+    }
 }
 
 #[derive(Clone)]
@@ -51,8 +80,8 @@ impl Default for StandardSearch {
 }
 
 impl SearchOptions for StandardSearch {
-    fn is_policy_candidate(&self, _board: &Board, _to_move: Color, _point: Point) -> bool {
-        true
+    fn policy_checker(&self, board: &Board, to_move: Color) -> Box<dyn PolicyChecker> {
+        Box::new(StandardPolicyChecker::new(board, to_move))
     }
 
     fn deterministic(&self) -> bool {
@@ -61,6 +90,38 @@ impl SearchOptions for StandardSearch {
 
     fn num_workers(&self) -> usize {
         self.num_workers
+    }
+}
+
+pub struct ScoringPolicyChecker {
+    is_valid: [bool; Point::MAX],
+    board: Board,
+    to_move: Color
+}
+
+impl ScoringPolicyChecker {
+    fn new(board: &Board, to_move: Color) -> ScoringPolicyChecker {
+        let benson = BensonImpl::new(board, to_move);
+        let mut out = Self {
+            is_valid: [false; Point::MAX],
+            board: board.clone(),
+            to_move: to_move
+        };
+
+        for point in Point::all() {
+            out.is_valid[point] = benson.is_valid(point);
+        }
+
+        out
+    }
+}
+
+impl PolicyChecker for ScoringPolicyChecker {
+    fn is_policy_candidate(&self, point: Point) -> bool {
+        point != Point::default() &&
+            self.is_valid[point] &&
+            self.board.is_valid(self.to_move, point) &&
+            !is_eye(&self.board, self.to_move, point)
     }
 }
 
@@ -82,8 +143,8 @@ impl Default for ScoringSearch {
 }
 
 impl SearchOptions for ScoringSearch {
-    fn is_policy_candidate(&self, board: &Board, to_move: Color, point: Point) -> bool {
-        point != Point::default() && !is_eye(board, to_move, point)
+    fn policy_checker(&self, board: &Board, to_move: Color) -> Box<dyn PolicyChecker> {
+        Box::new(ScoringPolicyChecker::new(board, to_move))
     }
 
     fn deterministic(&self) -> bool {
