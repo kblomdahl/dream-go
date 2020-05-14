@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use utils::benson::BensonImpl;
 use board_fast::BoardFast;
 use board::Board;
 use color::Color;
@@ -102,28 +103,28 @@ pub trait Score {
 
 impl Score for Board {
     fn is_scorable(&self) -> bool {
-        let some_black = Point::all().any(|i| self.inner[i].color() == Some(Color::Black));
-        let some_white = Point::all().any(|i| self.inner[i].color() == Some(Color::White));
+        let benson_black = BensonImpl::new(self, Color::Black);
+        let benson_white = BensonImpl::new(self, Color::White);
 
-        some_black && some_white && {
-            let black_distance = get_territory_distance(&self.inner, Color::Black);
-            let white_distance = get_territory_distance(&self.inner, Color::White);
-
-            Point::all().all(|i| black_distance[i] == 0xff || white_distance[i] == 0xff)
-        } && {
-            Point::all().all(|i| {
-                self.inner[i].color() == None || self.inner.has_n_liberty(i, 2)
+        Point::all()
+            .all(|point| {
+                match self.inner[point].color() {
+                    None => !benson_black.is_valid(point) || !benson_white.is_valid(point),
+                    Some(Color::Black) => !benson_black.is_valid(point) || (benson_black.is_valid(point) && !benson_white.is_valid(point)),
+                    Some(Color::White) => !benson_white.is_valid(point) || (benson_white.is_valid(point) && !benson_black.is_valid(point)),
+                }
             })
-        }
     }
 
     fn get_scorable_territory(&self) -> Vec<Point> {
-        let black_distance = get_territory_distance(&self.inner, Color::Black);
-        let white_distance = get_territory_distance(&self.inner, Color::White);
+        let benson_black = BensonImpl::new(self, Color::Black);
+        let benson_white = BensonImpl::new(self, Color::White);
 
-        Point::all().filter(|&i| {
-            black_distance[i] == 0xff || white_distance[i] == 0xff
-        }).collect()
+        Point::all()
+            .filter(|&point| {
+                !benson_black.is_valid(point) || !benson_white.is_valid(point)
+            })
+            .collect()
     }
 
     fn get_score(&self) -> (usize, usize) {
@@ -135,26 +136,15 @@ impl Score for Board {
     }
 
     fn get_guess_score(&self, finished: &Board) -> (usize, usize) {
-        // do not score the finished board directly, since there might be dame
-        // fillings, etc, that we do not want to take into account.
-        let black_distance = get_territory_distance(&finished.inner, Color::Black);
-        let white_distance = get_territory_distance(&finished.inner, Color::White);
+        let benson_black = BensonImpl::new(finished, Color::Black);
+        let benson_white = BensonImpl::new(finished, Color::White);
         let mut other = self.inner.clone();
 
-        for i in Point::all() {
-            if other[i].color() == finished.inner[i].color() {
-                // pass
-            } else if other[i].color() != None {
-                if finished.inner[i].color() == None {
-                    let is_dead_black = other[i].color() == Some(Color::Black) && white_distance[i] != 0xff;
-                    let is_dead_white = other[i].color() == Some(Color::White) && black_distance[i] != 0xff;
-
-                    if is_dead_black || is_dead_white {
-                        other[i].set_color(None);
-                    }
-                } else {
-                    other[i].set_color(None); // remove dead stone
-                }
+        for point in Point::all() {
+            if finished.inner[point].color() == Some(Color::White) && !benson_white.is_valid(point) {
+                other[point].set_color(None);
+            } else if finished.inner[point].color() == Some(Color::Black) && !benson_black.is_valid(point) {
+                other[point].set_color(None);
             }
         }
 
@@ -162,54 +152,37 @@ impl Score for Board {
     }
 
     fn get_stone_status(&self, finished: &Board) -> Vec<(Point, Vec<StoneStatus>)> {
-        let black_distance = get_territory_distance(&finished.inner, Color::Black);
-        let white_distance = get_territory_distance(&finished.inner, Color::White);
+        let benson_black = BensonImpl::new(finished, Color::Black);
+        let benson_white = BensonImpl::new(finished, Color::White);
         let mut status_list = vec! [];
 
-        for i in Point::all() {
-            if self.inner[i].color() == finished.inner[i].color() {
-                if self.inner[i].color() != None {
-                    let territory_status = match self.inner[i].color() {
-                        Some(Color::Black) => StoneStatus::BlackTerritory,
-                        Some(Color::White) => StoneStatus::WhiteTerritory,
-                        None => unreachable!()
-                    };
-
-                    status_list.push((i, vec! [StoneStatus::Alive, territory_status]));
+        for point in Point::all() {
+            if self.inner[point].color() == Some(Color::White) {
+                if !benson_white.is_valid(point) {
+                    status_list.push((point, vec! [StoneStatus::Alive, StoneStatus::WhiteTerritory]));
+                } else if !benson_black.is_valid(point) {
+                    status_list.push((point, vec! [StoneStatus::Dead, StoneStatus::BlackTerritory]));
                 } else {
-                    if black_distance[i] != 0xff && white_distance[i] == 0xff {
-                        status_list.push((i, vec! [StoneStatus::BlackTerritory]));
-                    } else if black_distance[i] == 0xff && white_distance[i] != 0xff {
-                        status_list.push((i, vec! [StoneStatus::WhiteTerritory]));
-                    }
+                    status_list.push((point, vec! [StoneStatus::Seki, StoneStatus::WhiteTerritory]));
                 }
-            } else if self.inner[i].color() != None {
-                if finished.inner[i].color() == None {
-                    let is_dead_black = self.inner[i].color() == Some(Color::Black) && white_distance[i] != 0xff;
-                    let is_dead_white = self.inner[i].color() == Some(Color::White) && black_distance[i] != 0xff;
+            }
 
-                    if is_dead_black {
-                        status_list.push((i, vec! [StoneStatus::Dead, StoneStatus::WhiteTerritory]));
-                    } else if is_dead_white {
-                        status_list.push((i, vec! [StoneStatus::Dead, StoneStatus::BlackTerritory]));
-                    }
+            if self.inner[point].color() == Some(Color::Black) {
+                if !benson_black.is_valid(point) {
+                    status_list.push((point, vec! [StoneStatus::Alive, StoneStatus::BlackTerritory]));
+                } else if !benson_white.is_valid(point) {
+                    status_list.push((point, vec! [StoneStatus::Dead, StoneStatus::WhiteTerritory]));
                 } else {
-                    let territory_status = match self.inner[i].color() {
-                        Some(Color::Black) => StoneStatus::WhiteTerritory,
-                        Some(Color::White) => StoneStatus::BlackTerritory,
-                        None => unreachable!()
-                    };
-
-                    status_list.push((i, vec! [StoneStatus::Dead, territory_status]));
+                    status_list.push((point, vec! [StoneStatus::Seki, StoneStatus::BlackTerritory]));
                 }
-            } else if self.inner[i].color() == None {
-                let territory_status = match finished.inner[i].color() {
-                    Some(Color::Black) => StoneStatus::BlackTerritory,
-                    Some(Color::White) => StoneStatus::WhiteTerritory,
-                    None => unreachable!()
-                };
+            }
 
-                status_list.push((i, vec! [territory_status]));
+            if self.inner[point].color() == None {
+                if !benson_black.is_valid(point) {
+                    status_list.push((point, vec! [StoneStatus::BlackTerritory]));
+                } else if !benson_white.is_valid(point) {
+                    status_list.push((point, vec! [StoneStatus::WhiteTerritory]));
+                }
             }
         }
 
@@ -330,5 +303,50 @@ mod tests {
 
         assert!(board.is_scorable());
         assert_eq!(board.get_score(), (353, 8));
+    }
+
+    #[test]
+    fn eyes_should_be_territory() {
+        let mut board = Board::new(0.5);
+        board.place(Color::White, Point::new(0, 1));
+        board.place(Color::White, Point::new(1, 1));
+        board.place(Color::White, Point::new(2, 0));
+        board.place(Color::White, Point::new(2, 1));
+        board.place(Color::White, Point::new(3, 1));
+        board.place(Color::White, Point::new(4, 0));
+        board.place(Color::White, Point::new(4, 1));
+
+        board.place(Color::Black, Point::new(0, 0));
+        board.place(Color::Black, Point::new(9, 9));
+
+        for (point, statuses) in board.get_stone_status(&board) {
+            if board.at(point) == Some(Color::White) {
+                assert_eq!(
+                    statuses,
+                    vec! [StoneStatus::Alive, StoneStatus::WhiteTerritory]
+                );
+            } else if point == Point::new(1, 0) || point == Point::new(3, 0) {
+                assert_eq!(
+                    statuses,
+                    vec! [StoneStatus::WhiteTerritory]
+                );
+            } else if point == Point::new(0, 0) || point == Point::new(9, 9) {
+                assert_eq!(
+                    statuses,
+                    vec! [StoneStatus::Dead, StoneStatus::WhiteTerritory],
+                    "{:?} {:?}",
+                    point,
+                    statuses
+                );
+            } else {
+                assert_eq!(
+                    statuses,
+                    vec! [StoneStatus::WhiteTerritory],
+                    "{:?} {:?}",
+                    point,
+                    statuses
+                );
+            }
+        }
     }
 }
