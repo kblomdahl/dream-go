@@ -101,7 +101,8 @@ pub struct ScoringPolicyChecker {
 
 impl ScoringPolicyChecker {
     fn new(board: &Board, to_move: Color) -> ScoringPolicyChecker {
-        let benson = BensonImpl::new(board, to_move);
+        let benson_black = BensonImpl::new(board, Color::Black);
+        let benson_white = BensonImpl::new(board, Color::White);
         let mut out = Self {
             is_valid: [false; Point::MAX],
             board: board.clone(),
@@ -109,7 +110,7 @@ impl ScoringPolicyChecker {
         };
 
         for point in Point::all() {
-            out.is_valid[point] = benson.is_valid(point);
+            out.is_valid[point] = !benson_black.is_eye(point) && !benson_white.is_eye(point);
         }
 
         out
