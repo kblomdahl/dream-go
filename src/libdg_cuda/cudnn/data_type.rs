@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod data_type;
-mod status;
-mod handle;
-mod tensor_descriptor;
-mod tensor_format;
+#[allow(non_camel_case_types)]
+pub type cudnnDataType_t = DataType;
 
-pub use self::data_type::*;
-pub use self::status::*;
-pub use self::handle::*;
-pub use self::tensor_descriptor::*;
-pub use self::tensor_format::*;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DataType {
+    Float = 0,
+    Double = 1,
+    Half = 2,
+    Int8 = 3,
+    Int32 = 4,
+    Int8x4 = 5,
+    Uint8 = 6,
+    Uint8x4 = 7,
+    Int8x32 = 8,
+}

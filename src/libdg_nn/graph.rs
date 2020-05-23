@@ -255,9 +255,9 @@ impl Drop for Workspace {
 }
 
 struct UpLayer {
-    input: cudnn::TensorDescriptor,
-    output: cudnn::TensorDescriptor,
-    offset: cudnn::TensorDescriptor,
+    input: cudnn2::TensorDescriptor,
+    output: cudnn2::TensorDescriptor,
+    offset: cudnn2::TensorDescriptor,
     filter: cudnn::FilterDescriptor,
     relu: cudnn::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
@@ -267,9 +267,6 @@ struct UpLayer {
 impl Drop for UpLayer {
     fn drop(&mut self) {
         unsafe {
-            cudnn::cudnnDestroyTensorDescriptor(self.input);
-            cudnn::cudnnDestroyTensorDescriptor(self.output);
-            cudnn::cudnnDestroyTensorDescriptor(self.offset);
             cudnn::cudnnDestroyFilterDescriptor(self.filter);
             cudnn::cudnnDestroyActivationDescriptor(self.relu);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
@@ -291,39 +288,27 @@ impl UpLayer {
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
         let mut out = UpLayer {
-            input: ptr::null(),
-            output: ptr::null(),
-            offset: ptr::null(),
+            input: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [n, NUM_FEATURES as i32, 19, 19]
+            )?,
+            output: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [n, num_channels as i32, 19, 19]
+            )?,
+            offset: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [1, num_channels as i32, 1, 1]
+            )?,
             filter: ptr::null(),
             relu: ptr::null(),
             descr: ptr::null(),
 
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new()
         };
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.input,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            n, NUM_FEATURES as i32, 19, 19
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.output))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.output,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            n, num_channels as i32, 19, 19
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.offset,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            1, num_channels as i32, 1, 1
-        ))?;
 
         check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter))?;
         check!(cudnn::cudnnSetFilter4dDescriptor(
@@ -358,10 +343,10 @@ impl UpLayer {
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             **handle,
-            out.input,
+            *out.input,
             out.filter,
             out.descr,
-            out.output,
+            *out.output,
             1, &mut num_fwd_algo, &mut out.fwd_algo
         ))?;
 
@@ -394,15 +379,15 @@ impl UpLayer {
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             *workspace.handle_dnn,
             &ONE,
-            self.input, **input,
+            *self.input, **input,
             self.filter, weights.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_1, self.fwd_algo.memory,
             &ZERO,
-            self.output, *output,
-            self.offset, offset.get(device_id),
+            *self.output, *output,
+            *self.offset, offset.get(device_id),
             self.relu,
-            self.output, *output,
+            *self.output, *output,
         ))?;
 
         Ok(output)
@@ -410,8 +395,8 @@ impl UpLayer {
 }
 
 struct ResidualLayer {
-    tensor: cudnn::TensorDescriptor,
-    offset: cudnn::TensorDescriptor,
+    tensor: cudnn2::TensorDescriptor,
+    offset: cudnn2::TensorDescriptor,
     filter: cudnn::FilterDescriptor,
     relu: cudnn::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
@@ -426,8 +411,6 @@ struct ResidualLayer {
 impl Drop for ResidualLayer {
     fn drop(&mut self) {
         unsafe {
-            cudnn::cudnnDestroyTensorDescriptor(self.tensor);
-            cudnn::cudnnDestroyTensorDescriptor(self.offset);
             cudnn::cudnnDestroyFilterDescriptor(self.filter);
             cudnn::cudnnDestroyActivationDescriptor(self.relu);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
@@ -461,8 +444,16 @@ impl ResidualLayer {
         let gate_t = alpha.map(|t| t.as_f32()).unwrap_or(0.5);
         let gate_c = 1.0 - gate_t;
         let mut out = ResidualLayer {
-            tensor: ptr::null(),
-            offset: ptr::null(),
+            tensor: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [n, num_channels as i32, 19, 19]
+            )?,
+            offset: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [1, num_channels as i32, 1, 1]
+            )?,
             filter: ptr::null(),
             relu: ptr::null(),
             descr: ptr::null(),
@@ -474,22 +465,6 @@ impl ResidualLayer {
             gate_c: gate_c,
             gate_t: gate_t
         };
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.tensor))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.tensor,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            n, num_channels as i32, 19, 19
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.offset,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            1, num_channels as i32, 1, 1
-        ))?;
 
         check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter))?;
         check!(cudnn::cudnnSetFilter4dDescriptor(
@@ -524,10 +499,10 @@ impl ResidualLayer {
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             **handle,
-            out.tensor,
+            *out.tensor,
             out.filter,
             out.descr,
-            out.tensor,
+            *out.tensor,
             1, &mut num_fwd_algo, &mut out.fwd_algo
         ))?;
 
@@ -558,7 +533,7 @@ impl ResidualLayer {
         if offset_2.copy_to_device(device_id, *workspace.tower_stream)? {
             check!(cudnn::cudnnScaleTensor(
                 *workspace.handle_dnn,
-                self.offset, offset_2.get(device_id),
+                *self.offset, offset_2.get(device_id),
                 &self.gate_t
             ))?;
         }
@@ -573,30 +548,30 @@ impl ResidualLayer {
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             *workspace.handle_dnn,
             &ONE,
-            self.tensor, *input,
+            *self.tensor, *input,
             self.filter, weights_1.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_r, self.fwd_algo.memory,
             &ZERO,
-            self.tensor, *residual_2,
-            self.offset, offset_1.get(device_id),
+            *self.tensor, *residual_2,
+            *self.offset, offset_1.get(device_id),
             self.relu,
-            self.tensor, *residual_2
+            *self.tensor, *residual_2
         ))?;
 
         // perform the forward convolution (2)
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             *workspace.handle_dnn,
             &self.gate_t,
-            self.tensor, *residual_2,
+            *self.tensor, *residual_2,
             self.filter, weights_2.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_r, self.fwd_algo.memory,
             &self.gate_c,
-            self.tensor, *input,
-            self.offset, offset_2.get(device_id),
+            *self.tensor, *input,
+            *self.offset, offset_2.get(device_id),
             self.relu,
-            self.tensor, *input
+            *self.tensor, *input
         ))?;
 
         Ok(input)
@@ -604,18 +579,18 @@ impl ResidualLayer {
 }
 
 struct ValueLayer {
-    input: cudnn::TensorDescriptor,
-    offset: cudnn::TensorDescriptor,
+    input: cudnn2::TensorDescriptor,
+    offset: cudnn2::TensorDescriptor,
     filter: cudnn::FilterDescriptor,
     relu: cudnn::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
 
-    value_1: cudnn::TensorDescriptor,
-    value_2: cudnn::TensorDescriptor,
-    value_3: cudnn::TensorDescriptor,
-    bias_1: cudnn::TensorDescriptor,
-    bias_2: cudnn::TensorDescriptor,
+    value_1: cudnn2::TensorDescriptor,
+    value_2: cudnn2::TensorDescriptor,
+    value_3: cudnn2::TensorDescriptor,
+    bias_1: cudnn2::TensorDescriptor,
+    bias_2: cudnn2::TensorDescriptor,
     tanh: cudnn::ActivationDescriptor,
 
     count: usize
@@ -624,17 +599,9 @@ struct ValueLayer {
 impl Drop for ValueLayer {
     fn drop(&mut self) {
         unsafe {
-            cudnn::cudnnDestroyTensorDescriptor(self.input);
-            cudnn::cudnnDestroyTensorDescriptor(self.offset);
             cudnn::cudnnDestroyFilterDescriptor(self.filter);
             cudnn::cudnnDestroyActivationDescriptor(self.relu);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
-
-            cudnn::cudnnDestroyTensorDescriptor(self.value_1);
-            cudnn::cudnnDestroyTensorDescriptor(self.value_2);
-            cudnn::cudnnDestroyTensorDescriptor(self.value_3);
-            cudnn::cudnnDestroyTensorDescriptor(self.bias_1);
-            cudnn::cudnnDestroyTensorDescriptor(self.bias_2);
             cudnn::cudnnDestroyActivationDescriptor(self.tanh);
         }
     }
@@ -656,78 +623,50 @@ impl ValueLayer {
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
         let mut out = ValueLayer {
-            input: ptr::null(),
-            offset: ptr::null(),
+            input: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [n, num_channels, 19, 19]
+            )?,
+            offset: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [1, 2, 1, 1]
+            )?,
             filter: ptr::null(),
             relu: ptr::null(),
             descr: ptr::null(),
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
 
-            value_1: ptr::null(),
-            value_2: ptr::null(),
-            value_3: ptr::null(),
-            bias_1: ptr::null(),
-            bias_2: ptr::null(),
+            value_1: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [n, 2, 19, 19]
+            )?,
+            value_2: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [n, 256, 1, 1]
+            )?,
+            value_3: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [n, 1, 1, 1]
+            )?,
+            bias_1: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [1, 256, 1, 1]
+            )?,
+            bias_2: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [1, 1, 1, 1]
+            )?,
             tanh: ptr::null(),
 
             count: i
         };
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.input,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            n, num_channels, 19, 19
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_1))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.value_1,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            n, 2, 19, 19
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_2))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.value_2,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            n, 256, 1, 1
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.value_3))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.value_3,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            n, 1, 1, 1
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.offset,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            1, 2, 1, 1
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias_1))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.bias_1,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            1, 256, 1, 1
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias_2))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.bias_2,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            1, 1, 1, 1
-        ))?;
 
         check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter))?;
         check!(cudnn::cudnnSetFilter4dDescriptor(
@@ -770,10 +709,10 @@ impl ValueLayer {
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             **handle,
-            out.input,
+            *out.input,
             out.filter,
             out.descr,
-            out.value_1,
+            *out.value_1,
             1, &mut num_fwd_algo, &mut out.fwd_algo
         ))?;
 
@@ -816,15 +755,15 @@ impl ValueLayer {
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             *workspace.handle_dnn,
             &ONE,
-            self.input, **input,
+            *self.input, **input,
             self.filter, weights_1.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_v, self.fwd_algo.memory,
             &ZERO,
-            self.value_1, *value_1,
-            self.offset, offset_1.get(device_id),
+            *self.value_1, *value_1,
+            *self.offset, offset_1.get(device_id),
             self.relu,
-            self.value_1, *value_1
+            *self.value_1, *value_1
         ))?;
 
         load_output::<T::Output>(output_set, output_map, Output::ValueDown, *value_1, workspace.batch_size * 722, *workspace.value_stream)?;
@@ -848,15 +787,15 @@ impl ValueLayer {
 
         check!(cudnn::cudnnAddTensor(
             *workspace.handle_dnn,
-            &ONE, self.bias_1, offset_2.get(device_id),
-            &ONE, self.value_2, *value_2
+            &ONE, *self.bias_1, offset_2.get(device_id),
+            &ONE, *self.value_2, *value_2
         ))?;
 
         check!(cudnn::cudnnActivationForward(
             *workspace.handle_dnn,
             self.relu,
-            &ONE, self.value_2, *value_2,  // input
-            &ZERO, self.value_2, *value_2,  // output
+            &ONE, *self.value_2, *value_2,  // input
+            &ZERO, *self.value_2, *value_2,  // output
         ))?;
 
         load_output::<T::Output>(output_set, output_map, Output::ValueGemm, *value_2, workspace.batch_size * 256, *workspace.value_stream)?;
@@ -877,15 +816,15 @@ impl ValueLayer {
 
         check!(cudnn::cudnnAddTensor(
             *workspace.handle_dnn,
-            &ONE, self.bias_2, offset_3.get(device_id),
-            &ONE, self.value_3, *value_3
+            &ONE, *self.bias_2, offset_3.get(device_id),
+            &ONE, *self.value_3, *value_3
         ))?;
 
         check!(cudnn::cudnnActivationForward(
             *workspace.handle_dnn,
             self.tanh,
-            &ONE, self.value_3, *value_3,  // input
-            &ZERO, self.value_3, *value_3,  // output
+            &ONE, *self.value_3, *value_3,  // input
+            &ZERO, *self.value_3, *value_3,  // output
         ))?;
 
         Ok(value_3)
@@ -893,17 +832,17 @@ impl ValueLayer {
 }
 
 struct PolicyLayer {
-    input: cudnn::TensorDescriptor,
-    offset: cudnn::TensorDescriptor,
+    input: cudnn2::TensorDescriptor,
+    offset: cudnn2::TensorDescriptor,
     filter: cudnn::FilterDescriptor,
     relu: cudnn::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
 
-    bias: cudnn::TensorDescriptor,
+    bias: cudnn2::TensorDescriptor,
 
-    policy_1: cudnn::TensorDescriptor,
-    policy_2: cudnn::TensorDescriptor,
+    policy_1: cudnn2::TensorDescriptor,
+    policy_2: cudnn2::TensorDescriptor,
 
     count: usize
 }
@@ -911,16 +850,9 @@ struct PolicyLayer {
 impl Drop for PolicyLayer {
     fn drop(&mut self) {
         unsafe {
-            cudnn::cudnnDestroyTensorDescriptor(self.input);
-            cudnn::cudnnDestroyTensorDescriptor(self.offset);
             cudnn::cudnnDestroyFilterDescriptor(self.filter);
             cudnn::cudnnDestroyActivationDescriptor(self.relu);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
-
-            cudnn::cudnnDestroyTensorDescriptor(self.bias);
-
-            cudnn::cudnnDestroyTensorDescriptor(self.policy_1);
-            cudnn::cudnnDestroyTensorDescriptor(self.policy_2);
         }
     }
 }
@@ -941,60 +873,40 @@ impl PolicyLayer {
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
         let mut out = PolicyLayer {
-            input: ptr::null(),
-            offset: ptr::null(),
+            input: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [n, num_channels as i32, 19, 19]
+            )?,
+            offset: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [1, 4, 1, 1]
+            )?,
             filter: ptr::null(),
             relu: ptr::null(),
             descr: ptr::null(),
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
 
-            bias: ptr::null(),
+            bias: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [1, 362, 1, 1]
+            )?,
 
-            policy_1: ptr::null(),
-            policy_2: ptr::null(),
+            policy_1: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [n, 4, 19, 19]
+            )?,
+            policy_2: cudnn2::TensorDescriptor::new(
+                cudnn2::TensorFormat::NHWC,
+                cudnn2::DataType::Half,
+                &vec! [n, 362, 1, 1]
+            )?,
 
             count: i
         };
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.input))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.input,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            n, num_channels as i32, 19, 19
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.policy_1))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.policy_1,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            n, 4, 19, 19
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.policy_2))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.policy_2,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            n, 362, 1, 1
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.offset))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.offset,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            1, 4, 1, 1
-        ))?;
-
-        check!(cudnn::cudnnCreateTensorDescriptor(&mut out.bias))?;
-        check!(cudnn::cudnnSetTensor4dDescriptor(
-            out.bias,
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            1, 362, 1, 1
-        ))?;
 
         check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter))?;
         check!(cudnn::cudnnSetFilter4dDescriptor(
@@ -1029,10 +941,10 @@ impl PolicyLayer {
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             **handle,
-            out.input,
+            *out.input,
             out.filter,
             out.descr,
-            out.policy_1,
+            *out.policy_1,
             1, &mut num_fwd_algo, &mut out.fwd_algo
         ))?;
 
@@ -1071,15 +983,15 @@ impl PolicyLayer {
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             *workspace.handle_dnn,
             &ONE,
-            self.input, **input,
+            *self.input, **input,
             self.filter, weights_1.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_p, self.fwd_algo.memory,
             &ZERO,
-            self.policy_1, *policy_1,
-            self.offset, offset_1.get(device_id),
+            *self.policy_1, *policy_1,
+            *self.offset, offset_1.get(device_id),
             self.relu,
-            self.policy_1, *policy_1
+            *self.policy_1, *policy_1
         ))?;
 
         load_output::<T::Output>(output_set, output_map, Output::PolicyDown, *policy_1, workspace.batch_size * 1444, *workspace.policy_stream)?;
@@ -1109,8 +1021,8 @@ impl PolicyLayer {
 
         check!(cudnn::cudnnAddTensor(
             *workspace.handle_dnn,
-            &*TAU, self.bias, offset_2.get(device_id),
-            &*TAU, self.policy_2, *policy_2
+            &*TAU, *self.bias, offset_2.get(device_id),
+            &*TAU, *self.policy_2, *policy_2
         ))?;
 
         // softmax activation
@@ -1118,8 +1030,8 @@ impl PolicyLayer {
             *workspace.handle_dnn,
             cudnn::SoftmaxAlgorithm::Accurate,
             cudnn::SoftmaxMode::Instance,
-            &ONE, self.policy_2, *policy_2,  // input
-            &ZERO, self.policy_2, *policy_3,  // output
+            &ONE, *self.policy_2, *policy_2,  // input
+            &ZERO, *self.policy_2, *policy_3,  // output
         ))?;
 
         Ok(policy_3)

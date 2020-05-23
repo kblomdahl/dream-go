@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod data_type;
-mod status;
-mod handle;
-mod tensor_descriptor;
-mod tensor_format;
+#[allow(non_camel_case_types)]
+pub type cudnnTensorFormat_t = TensorFormat;
 
-pub use self::data_type::*;
-pub use self::status::*;
-pub use self::handle::*;
-pub use self::tensor_descriptor::*;
-pub use self::tensor_format::*;
+#[allow(non_camel_case_types)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(i32)]
+pub enum TensorFormat {
+    NCHW = 0,
+    NHWC = 1,
+    NCHW_VECT_C = 2,
+}
