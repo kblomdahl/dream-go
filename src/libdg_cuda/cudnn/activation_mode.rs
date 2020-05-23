@@ -12,20 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod activation_descriptor;
-mod activation_mode;
-mod data_type;
-mod nan_propagation;
-mod status;
-mod handle;
-mod tensor_descriptor;
-mod tensor_format;
+#[allow(non_camel_case_types)]
+pub type cudnnActivationMode_t = ActivationMode;
 
-pub use self::activation_descriptor::*;
-pub use self::activation_mode::*;
-pub use self::data_type::*;
-pub use self::nan_propagation::*;
-pub use self::status::*;
-pub use self::handle::*;
-pub use self::tensor_descriptor::*;
-pub use self::tensor_format::*;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ActivationMode {
+    Sigmoid = 0,
+    Relu = 1,
+    Tanh = 2,
+    ClippedRelu = 3,
+    Elu = 4,
+    Identity = 5,
+}

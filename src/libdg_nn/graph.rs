@@ -259,7 +259,7 @@ struct UpLayer {
     output: cudnn2::TensorDescriptor,
     offset: cudnn2::TensorDescriptor,
     filter: cudnn::FilterDescriptor,
-    relu: cudnn::ActivationDescriptor,
+    relu: cudnn2::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
 }
@@ -268,7 +268,6 @@ impl Drop for UpLayer {
     fn drop(&mut self) {
         unsafe {
             cudnn::cudnnDestroyFilterDescriptor(self.filter);
-            cudnn::cudnnDestroyActivationDescriptor(self.relu);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
         }
     }
@@ -304,7 +303,7 @@ impl UpLayer {
                 &vec! [1, num_channels as i32, 1, 1]
             )?,
             filter: ptr::null(),
-            relu: ptr::null(),
+            relu: cudnn2::ActivationDescriptor::relu()?,
             descr: ptr::null(),
 
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new()
@@ -316,14 +315,6 @@ impl UpLayer {
             cudnn::DataType::Half,
             cudnn::TensorFormat::NHWC,
             num_channels as i32, NUM_FEATURES as i32, 3, 3
-        ))?;
-
-        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu))?;
-        check!(cudnn::cudnnSetActivationDescriptor(
-            out.relu,
-            cudnn::ActivationMode::Relu,
-            cudnn::NanPropagation::NotPropagateNan,
-            0.0
         ))?;
 
         check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr))?;
@@ -386,7 +377,7 @@ impl UpLayer {
             &ZERO,
             *self.output, *output,
             *self.offset, offset.get(device_id),
-            self.relu,
+            *self.relu,
             *self.output, *output,
         ))?;
 
@@ -398,7 +389,7 @@ struct ResidualLayer {
     tensor: cudnn2::TensorDescriptor,
     offset: cudnn2::TensorDescriptor,
     filter: cudnn::FilterDescriptor,
-    relu: cudnn::ActivationDescriptor,
+    relu: cudnn2::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
     num_channels: usize,
@@ -412,7 +403,6 @@ impl Drop for ResidualLayer {
     fn drop(&mut self) {
         unsafe {
             cudnn::cudnnDestroyFilterDescriptor(self.filter);
-            cudnn::cudnnDestroyActivationDescriptor(self.relu);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
         }
     }
@@ -455,7 +445,7 @@ impl ResidualLayer {
                 &vec! [1, num_channels as i32, 1, 1]
             )?,
             filter: ptr::null(),
-            relu: ptr::null(),
+            relu: cudnn2::ActivationDescriptor::relu()?,
             descr: ptr::null(),
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
             num_channels: num_channels as usize,
@@ -472,14 +462,6 @@ impl ResidualLayer {
             cudnn::DataType::Half,
             cudnn::TensorFormat::NHWC,
             num_channels as i32, num_channels as i32, 3, 3
-        ))?;
-
-        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu))?;
-        check!(cudnn::cudnnSetActivationDescriptor(
-            out.relu,
-            cudnn::ActivationMode::Relu,
-            cudnn::NanPropagation::NotPropagateNan,
-            0.0
         ))?;
 
         check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr))?;
@@ -555,7 +537,7 @@ impl ResidualLayer {
             &ZERO,
             *self.tensor, *residual_2,
             *self.offset, offset_1.get(device_id),
-            self.relu,
+            *self.relu,
             *self.tensor, *residual_2
         ))?;
 
@@ -570,7 +552,7 @@ impl ResidualLayer {
             &self.gate_c,
             *self.tensor, *input,
             *self.offset, offset_2.get(device_id),
-            self.relu,
+            *self.relu,
             *self.tensor, *input
         ))?;
 
@@ -582,7 +564,7 @@ struct ValueLayer {
     input: cudnn2::TensorDescriptor,
     offset: cudnn2::TensorDescriptor,
     filter: cudnn::FilterDescriptor,
-    relu: cudnn::ActivationDescriptor,
+    relu: cudnn2::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
 
@@ -591,7 +573,7 @@ struct ValueLayer {
     value_3: cudnn2::TensorDescriptor,
     bias_1: cudnn2::TensorDescriptor,
     bias_2: cudnn2::TensorDescriptor,
-    tanh: cudnn::ActivationDescriptor,
+    tanh: cudnn2::ActivationDescriptor,
 
     count: usize
 }
@@ -600,9 +582,7 @@ impl Drop for ValueLayer {
     fn drop(&mut self) {
         unsafe {
             cudnn::cudnnDestroyFilterDescriptor(self.filter);
-            cudnn::cudnnDestroyActivationDescriptor(self.relu);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
-            cudnn::cudnnDestroyActivationDescriptor(self.tanh);
         }
     }
 }
@@ -634,7 +614,7 @@ impl ValueLayer {
                 &vec! [1, 2, 1, 1]
             )?,
             filter: ptr::null(),
-            relu: ptr::null(),
+            relu: cudnn2::ActivationDescriptor::relu()?,
             descr: ptr::null(),
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
 
@@ -663,7 +643,7 @@ impl ValueLayer {
                 cudnn2::DataType::Half,
                 &vec! [1, 1, 1, 1]
             )?,
-            tanh: ptr::null(),
+            tanh: cudnn2::ActivationDescriptor::tanh()?,
 
             count: i
         };
@@ -674,22 +654,6 @@ impl ValueLayer {
             cudnn::DataType::Half,
             cudnn::TensorFormat::NHWC,
             2, num_channels, 1, 1
-        ))?;
-
-        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu))?;
-        check!(cudnn::cudnnSetActivationDescriptor(
-            out.relu,
-            cudnn::ActivationMode::Relu,
-            cudnn::NanPropagation::NotPropagateNan,
-            0.0
-        ))?;
-
-        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.tanh))?;
-        check!(cudnn::cudnnSetActivationDescriptor(
-            out.tanh,
-            cudnn::ActivationMode::Tanh,
-            cudnn::NanPropagation::NotPropagateNan,
-            0.0
         ))?;
 
         check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr))?;
@@ -762,7 +726,7 @@ impl ValueLayer {
             &ZERO,
             *self.value_1, *value_1,
             *self.offset, offset_1.get(device_id),
-            self.relu,
+            *self.relu,
             *self.value_1, *value_1
         ))?;
 
@@ -793,7 +757,7 @@ impl ValueLayer {
 
         check!(cudnn::cudnnActivationForward(
             *workspace.handle_dnn,
-            self.relu,
+            *self.relu,
             &ONE, *self.value_2, *value_2,  // input
             &ZERO, *self.value_2, *value_2,  // output
         ))?;
@@ -822,7 +786,7 @@ impl ValueLayer {
 
         check!(cudnn::cudnnActivationForward(
             *workspace.handle_dnn,
-            self.tanh,
+            *self.tanh,
             &ONE, *self.value_3, *value_3,  // input
             &ZERO, *self.value_3, *value_3,  // output
         ))?;
@@ -835,7 +799,7 @@ struct PolicyLayer {
     input: cudnn2::TensorDescriptor,
     offset: cudnn2::TensorDescriptor,
     filter: cudnn::FilterDescriptor,
-    relu: cudnn::ActivationDescriptor,
+    relu: cudnn2::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
 
@@ -851,7 +815,6 @@ impl Drop for PolicyLayer {
     fn drop(&mut self) {
         unsafe {
             cudnn::cudnnDestroyFilterDescriptor(self.filter);
-            cudnn::cudnnDestroyActivationDescriptor(self.relu);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
         }
     }
@@ -884,7 +847,7 @@ impl PolicyLayer {
                 &vec! [1, 4, 1, 1]
             )?,
             filter: ptr::null(),
-            relu: ptr::null(),
+            relu: cudnn2::ActivationDescriptor::relu()?,
             descr: ptr::null(),
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
 
@@ -914,14 +877,6 @@ impl PolicyLayer {
             cudnn::DataType::Half,
             cudnn::TensorFormat::NHWC,
             4, num_channels as i32, 1, 1
-        ))?;
-
-        check!(cudnn::cudnnCreateActivationDescriptor(&mut out.relu))?;
-        check!(cudnn::cudnnSetActivationDescriptor(
-            out.relu,
-            cudnn::ActivationMode::Relu,
-            cudnn::NanPropagation::NotPropagateNan,
-            0.0
         ))?;
 
         check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr))?;
@@ -990,7 +945,7 @@ impl PolicyLayer {
             &ZERO,
             *self.policy_1, *policy_1,
             *self.offset, offset_1.get(device_id),
-            self.relu,
+            *self.relu,
             *self.policy_1, *policy_1
         ))?;
 
