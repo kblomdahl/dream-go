@@ -17,22 +17,22 @@ use std::ffi::CStr;
 use libc::c_char;
 
 #[allow(non_camel_case_types)]
-pub(super) type cudnnStatus_t = Status;
+pub(super) type cudaError_t = Error;
 
 #[link(name = "cudnn")]
 extern {
-    fn cudnnGetErrorString(status: cudnnStatus_t) -> *const c_char;
+    fn cudaGetErrorName(error: cudaError_t) -> *const c_char;
 }
 
 #[repr(i32)]
 #[derive(Clone, Copy, PartialEq)]
-pub enum Status {
+pub enum Error {
     Success = 0,
 }
 
-impl Status {
+impl Error {
     pub fn into_result<Ok>(self, ok: Ok) -> Result<Ok, Self> {
-        if self == Status::Success {
+        if self == Error::Success {
             Ok(ok)
         } else {
             Err(self)
@@ -40,9 +40,9 @@ impl Status {
     }
 }
 
-impl Debug for Status {
+impl Debug for Error {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let ptr = unsafe { cudnnGetErrorString(*self) };
+        let ptr = unsafe { cudaGetErrorName(*self) };
         let c_str = unsafe { CStr::from_ptr(ptr) };
 
         match c_str.to_str() {
@@ -59,13 +59,13 @@ mod tests {
 
     #[test]
     fn success_is_ok() {
-        assert_eq!(Status::Success.into_result(1), Ok(1));
+        assert_eq!(Error::Success.into_result(1), Ok(1));
     }
 
     #[test]
-    fn status_not_initialized() {
-        let status: Status = unsafe { transmute(1) };
+    fn invalid_value() {
+        let status: Error = unsafe { transmute(1) };
 
-        assert_eq!(format!("{:?}", status), "CUDNN_STATUS_NOT_INITIALIZED");
+        assert_eq!(format!("{:?}", status), "cudaErrorInvalidValue");
     }
 }

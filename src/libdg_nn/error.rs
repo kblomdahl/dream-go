@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use dg_cuda as cuda2;
 use dg_cuda::cudnn as cudnn2;
 use super::ffi::{cudnn, cuda, cublas};
 
@@ -20,6 +21,7 @@ pub enum Error {
     CuDNN(cudnn::Status),
     CuDNN2(cudnn2::Status),
     Cuda(cuda::Error),
+    Cuda2(cuda2::Error),
     CuBLAS(cublas::Status),
     MissingWeights
 }
@@ -38,6 +40,14 @@ impl From<cuda::Error> for Error {
         match s {
             cuda::Error::Success => unreachable!(),
             other => Error::Cuda(other)
+        }
+    }
+}
+
+impl From<cuda2::Error> for Error {
+    fn from(s: cuda2::Error) -> Error {
+        match s {
+            other => Error::Cuda2(other)
         }
     }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crate::cudnn::{Status, cudnnStatus_t};
+use crate::Stream;
 
 use libc::c_void;
 use std::ops::Deref;
@@ -53,8 +54,8 @@ impl Handle {
         status.into_result(out)
     }
 
-    pub fn set_stream(&self, stream: *const c_void) -> Result<(), Status> {
-        unsafe { cudnnSetStream(self.handle, stream) }.into_result(())
+    pub fn set_stream(&self, stream: &Stream) -> Result<(), Status> {
+        unsafe { cudnnSetStream(self.handle, **stream) }.into_result(())
     }
 }
 

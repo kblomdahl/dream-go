@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use libc::c_void;
 
+use dg_cuda as cuda2;
 use dg_cuda::cudnn as cudnn2;
 use dg_go::utils::features::{FEATURE_SIZE, NUM_FEATURES};
 use dg_utils::types::f16;
@@ -178,11 +179,11 @@ impl Builder {
             handle_blas: ptr::null(),
             handle_dnn: handle_dnn,
 
-            tower_finished: ptr::null(),
+            tower_finished: cuda2::Event::new()?,
 
-            tower_stream: ptr::null(),
-            policy_stream: ptr::null(),
-            value_stream: ptr::null(),
+            tower_stream: cuda2::Stream::new()?,
+            policy_stream: cuda2::Stream::new()?,
+            value_stream: cuda2::Stream::new()?,
 
             c_up: c_up,
             c_value: c_value,
@@ -192,10 +193,6 @@ impl Builder {
 
         unsafe {
             check!(cublas::cublasCreate_v2(&mut w.handle_blas))?;
-            check!(cuda::cudaStreamCreateWithFlags(&mut w.tower_stream, 1))?;
-            check!(cuda::cudaStreamCreateWithFlags(&mut w.policy_stream, 1))?;
-            check!(cuda::cudaStreamCreateWithFlags(&mut w.value_stream, 1))?;
-            check!(cuda::cudaEventCreateWithFlags(&mut w.tower_finished, 2))?;
 
             #[cfg(feature = "tensor-core")] {
                 check!(cublas::cublasSetMathMode(w.handle_blas, cublas::Math::TensorOp))?;
@@ -237,11 +234,11 @@ pub struct Workspace {
     handle_dnn: cudnn2::Handle,
     handle_blas: cublas::Handle,
 
-    tower_finished: cuda::Event,
+    tower_finished: cuda2::Event,
 
-    tower_stream: cuda::Stream,
-    policy_stream: cuda::Stream,
-    value_stream: cuda::Stream,
+    tower_stream: cuda2::Stream,
+    policy_stream: cuda2::Stream,
+    value_stream: cuda2::Stream,
 
     c_up: Rc<UpLayer>,
     c_value: Rc<ValueLayer>,
@@ -252,12 +249,6 @@ pub struct Workspace {
 impl Drop for Workspace {
     fn drop(&mut self) {
         unsafe {
-            cuda::cudaEventDestroy(self.tower_finished);
-
-            cuda::cudaStreamDestroy(self.value_stream);
-            cuda::cudaStreamDestroy(self.policy_stream);
-            cuda::cudaStreamDestroy(self.tower_stream);
-
             cublas::cublasDestroy_v2(self.handle_blas);
         }
     }
@@ -386,19 +377,19 @@ impl UpLayer {
         input: &SlotGuard<'a>
     ) -> Result<SlotGuard<'a>, Error>
     {
-        workspace.handle_dnn.set_stream(workspace.tower_stream)?;
-        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream))?;
+        workspace.handle_dnn.set_stream(&workspace.tower_stream)?;
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, *workspace.tower_stream))?;
 
         let device_id = get_current_device()?;
         let weights = &workspace.tensors["01_upsample/conv_1:0"];
         let offset = &workspace.tensors["01_upsample/conv_1/offset:0"];
 
-        offset.copy_to_device(device_id, workspace.tower_stream)?;
-        weights.copy_to_device(device_id, workspace.tower_stream)?;
+        offset.copy_to_device(device_id, *workspace.tower_stream)?;
+        weights.copy_to_device(device_id, *workspace.tower_stream)?;
 
         // perform the forward convolution
-        let workspace_1 = slots.get_slot(Slot::Workspace_1, self.fwd_algo.memory, workspace.tower_stream)?;
-        let output = slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361, workspace.tower_stream)?;
+        let workspace_1 = slots.get_slot(Slot::Workspace_1, self.fwd_algo.memory, *workspace.tower_stream)?;
+        let output = slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361, *workspace.tower_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             *workspace.handle_dnn,
@@ -552,8 +543,8 @@ impl ResidualLayer {
         input: SlotGuard<'a>
     ) -> Result<SlotGuard<'a>, Error>
     {
-        workspace.handle_dnn.set_stream(workspace.tower_stream)?;
-        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream))?;
+        workspace.handle_dnn.set_stream(&workspace.tower_stream)?;
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, *workspace.tower_stream))?;
 
         let device_id = get_current_device()?;
         let weights_1 = &workspace.tensors[&format!("{:02}_residual/conv_1:0", self.count)];
@@ -561,10 +552,10 @@ impl ResidualLayer {
         let offset_1 = &workspace.tensors[&format!("{:02}_residual/conv_1/offset:0", self.count)];
         let offset_2 = &workspace.tensors[&format!("{:02}_residual/conv_2/offset:0", self.count)];
 
-        weights_1.copy_to_device(device_id, workspace.tower_stream)?;
-        weights_2.copy_to_device(device_id, workspace.tower_stream)?;
-        offset_1.copy_to_device(device_id, workspace.tower_stream)?;
-        if offset_2.copy_to_device(device_id, workspace.tower_stream)? {
+        weights_1.copy_to_device(device_id, *workspace.tower_stream)?;
+        weights_2.copy_to_device(device_id, *workspace.tower_stream)?;
+        offset_1.copy_to_device(device_id, *workspace.tower_stream)?;
+        if offset_2.copy_to_device(device_id, *workspace.tower_stream)? {
             check!(cudnn::cudnnScaleTensor(
                 *workspace.handle_dnn,
                 self.offset, offset_2.get(device_id),
@@ -575,9 +566,9 @@ impl ResidualLayer {
         debug_assert!(offset_1.size_in_elements == offset_2.size_in_elements);
 
         // perform the forward convolution (1)
-        let workspace_r = slots.get_slot(Slot::Workspace_r, self.fwd_algo.memory, workspace.tower_stream)?;
+        let workspace_r = slots.get_slot(Slot::Workspace_r, self.fwd_algo.memory, *workspace.tower_stream)?;
         let residual_2_size = size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361;
-        let residual_2 = slots.get_slot(Slot::Residual_2, residual_2_size, workspace.tower_stream)?;
+        let residual_2 = slots.get_slot(Slot::Residual_2, residual_2_size, *workspace.tower_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             *workspace.handle_dnn,
@@ -800,8 +791,8 @@ impl ValueLayer {
         input: &SlotGuard<'a>
     ) -> Result<SlotGuard<'a>, Error>
     {
-        workspace.handle_dnn.set_stream(workspace.value_stream)?;
-        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.value_stream))?;
+        workspace.handle_dnn.set_stream(&workspace.value_stream)?;
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, *workspace.value_stream))?;
 
         let device_id = get_current_device()?;
         let weights_1 = &workspace.tensors[&format!("{:02}v_value/conv_1:0", self.count)];
@@ -811,16 +802,16 @@ impl ValueLayer {
         let offset_2 = &workspace.tensors[&format!("{:02}v_value/linear_1/offset:0", self.count)];
         let offset_3 = &workspace.tensors[&format!("{:02}v_value/linear_2/offset:0", self.count)];
 
-        weights_1.copy_to_device(device_id, workspace.value_stream)?;
-        weights_2.copy_to_device(device_id, workspace.value_stream)?;
-        weights_3.copy_to_device(device_id, workspace.value_stream)?;
-        offset_1.copy_to_device(device_id, workspace.value_stream)?;
-        offset_2.copy_to_device(device_id, workspace.value_stream)?;
-        offset_3.copy_to_device(device_id, workspace.value_stream)?;
+        weights_1.copy_to_device(device_id, *workspace.value_stream)?;
+        weights_2.copy_to_device(device_id, *workspace.value_stream)?;
+        weights_3.copy_to_device(device_id, *workspace.value_stream)?;
+        offset_1.copy_to_device(device_id, *workspace.value_stream)?;
+        offset_2.copy_to_device(device_id, *workspace.value_stream)?;
+        offset_3.copy_to_device(device_id, *workspace.value_stream)?;
 
         // perform the forward convolution
-        let workspace_v = slots.get_slot(Slot::Workspace_v, self.fwd_algo.memory, workspace.value_stream)?;
-        let value_1 = slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 722, workspace.value_stream)?;
+        let workspace_v = slots.get_slot(Slot::Workspace_v, self.fwd_algo.memory, *workspace.value_stream)?;
+        let value_1 = slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 722, *workspace.value_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             *workspace.handle_dnn,
@@ -836,11 +827,11 @@ impl ValueLayer {
             self.value_1, *value_1
         ))?;
 
-        load_output::<T::Output>(output_set, output_map, Output::ValueDown, *value_1, workspace.batch_size * 722, workspace.value_stream)?;
+        load_output::<T::Output>(output_set, output_map, Output::ValueDown, *value_1, workspace.batch_size * 722, *workspace.value_stream)?;
 
         // perform the feed-forward linear layer (relu)
-        let value_2 = slots.get_slot(Slot::Value_2, size_of::<T::Output>() * workspace.batch_size * 256, workspace.value_stream)?;
-        let value_3 = slots.get_slot(Slot::Value_3, size_of::<T::Output>() * workspace.batch_size * 1, workspace.value_stream)?;
+        let value_2 = slots.get_slot(Slot::Value_2, size_of::<T::Output>() * workspace.batch_size * 256, *workspace.value_stream)?;
+        let value_3 = slots.get_slot(Slot::Value_3, size_of::<T::Output>() * workspace.batch_size * 1, *workspace.value_stream)?;
 
         check!(cublas::cublasGemmEx(
             workspace.handle_blas,
@@ -868,7 +859,7 @@ impl ValueLayer {
             &ZERO, self.value_2, *value_2,  // output
         ))?;
 
-        load_output::<T::Output>(output_set, output_map, Output::ValueGemm, *value_2, workspace.batch_size * 256, workspace.value_stream)?;
+        load_output::<T::Output>(output_set, output_map, Output::ValueGemm, *value_2, workspace.batch_size * 256, *workspace.value_stream)?;
 
         // perform the feed-forward linear layer (tanh)
         check!(cublas::cublasGemmEx(
@@ -1059,8 +1050,8 @@ impl PolicyLayer {
         input: &SlotGuard<'a>
     ) -> Result<SlotGuard<'a>, Error>
     {
-        workspace.handle_dnn.set_stream(workspace.policy_stream)?;
-        check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream))?;
+        workspace.handle_dnn.set_stream(&workspace.policy_stream)?;
+        check!(cublas::cublasSetStream_v2(workspace.handle_blas, *workspace.policy_stream))?;
 
         let device_id = get_current_device()?;
         let weights_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1:0", self.count)];
@@ -1068,14 +1059,14 @@ impl PolicyLayer {
         let offset_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1/offset:0", self.count)];
         let offset_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1/offset:0", self.count)];
 
-        offset_1.copy_to_device(device_id, workspace.policy_stream)?;
-        offset_2.copy_to_device(device_id, workspace.policy_stream)?;
-        weights_1.copy_to_device(device_id, workspace.policy_stream)?;
-        weights_2.copy_to_device(device_id, workspace.policy_stream)?;
+        offset_1.copy_to_device(device_id, *workspace.policy_stream)?;
+        offset_2.copy_to_device(device_id, *workspace.policy_stream)?;
+        weights_1.copy_to_device(device_id, *workspace.policy_stream)?;
+        weights_2.copy_to_device(device_id, *workspace.policy_stream)?;
 
         // perform the forward convolution
-        let workspace_p = slots.get_slot(Slot::Workspace_p, self.fwd_algo.memory, workspace.policy_stream)?;
-        let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 1444, workspace.policy_stream)?;
+        let workspace_p = slots.get_slot(Slot::Workspace_p, self.fwd_algo.memory, *workspace.policy_stream)?;
+        let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 1444, *workspace.policy_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
             *workspace.handle_dnn,
@@ -1091,11 +1082,11 @@ impl PolicyLayer {
             self.policy_1, *policy_1
         ))?;
 
-        load_output::<T::Output>(output_set, output_map, Output::PolicyDown, *policy_1, workspace.batch_size * 1444, workspace.policy_stream)?;
+        load_output::<T::Output>(output_set, output_map, Output::PolicyDown, *policy_1, workspace.batch_size * 1444, *workspace.policy_stream)?;
 
         // perform the feed-forward linear layers
-        let policy_2 = slots.get_slot(Slot::Policy_2, size_of::<T::Output>() * workspace.batch_size * 362, workspace.policy_stream)?;
-        let policy_3 = slots.get_slot(Slot::Policy_3, size_of::<T::Output>() * workspace.batch_size * 362, workspace.policy_stream)?;
+        let policy_2 = slots.get_slot(Slot::Policy_2, size_of::<T::Output>() * workspace.batch_size * 362, *workspace.policy_stream)?;
+        let policy_3 = slots.get_slot(Slot::Policy_3, size_of::<T::Output>() * workspace.batch_size * 362, *workspace.policy_stream)?;
 
         check!(cublas::cublasGemmEx(
             workspace.handle_blas,
@@ -1157,10 +1148,10 @@ pub fn forward<T: InferenceType>(
     let mut map = OutputMap::default();
 
     unsafe {
-        workspace.handle_dnn.set_stream(workspace.tower_stream)?;
+        workspace.handle_dnn.set_stream(&workspace.tower_stream)?;
 
         // copy all of the input features into a temporary workspace
-        let input = slots.get_slot(Slot::Input, size_of::<T>() * features.len(), workspace.tower_stream)?;
+        let input = slots.get_slot(Slot::Input, size_of::<T>() * features.len(), *workspace.tower_stream)?;
         let image_size = 361 * workspace.num_channels;
 
         check!(cuda::cudaMemcpyAsync(
@@ -1168,13 +1159,13 @@ pub fn forward<T: InferenceType>(
             features.as_ptr() as *const c_void,
             size_of::<T>() * features.len(),
             cuda::MemcpyKind::HostToDevice,
-            workspace.tower_stream
+            *workspace.tower_stream
         ))?;
 
         // Upsample 32 -> 128 channels
         let mut residual_1 = workspace.c_up.clone().forward::<T>(workspace, &slots, &input)?;
 
-        load_output::<T::Tower>(&outputs, &mut map, Output::Upsample, *residual_1, workspace.batch_size * image_size, workspace.tower_stream)?;
+        load_output::<T::Tower>(&outputs, &mut map, Output::Upsample, *residual_1, workspace.batch_size * image_size, *workspace.tower_stream)?;
 
         // residual blocks
         let num_residual = workspace.c_residual.len();
@@ -1184,20 +1175,20 @@ pub fn forward<T: InferenceType>(
             let output = ::std::mem::transmute(Output::Residual_00 as u8 + i as u8);
 
             residual_1 = residual.forward::<T>(workspace, &slots, residual_1)?;
-            load_output::<T::Tower>(&outputs, &mut map, output, *residual_1, workspace.batch_size * image_size, workspace.tower_stream)?;
+            load_output::<T::Tower>(&outputs, &mut map, output, *residual_1, workspace.batch_size * image_size, *workspace.tower_stream)?;
         }
 
-        check!(cuda::cudaEventRecord(workspace.tower_finished, workspace.tower_stream))?;
-        check!(cuda::cudaStreamWaitEvent(workspace.value_stream, workspace.tower_finished, 0))?;
-        check!(cuda::cudaStreamWaitEvent(workspace.policy_stream, workspace.tower_finished, 0))?;
+        workspace.tower_finished.record(&workspace.tower_stream)?;
+        workspace.value_stream.wait_event(&workspace.tower_finished)?;
+        workspace.policy_stream.wait_event(&workspace.tower_finished)?;
 
         // run the value and policy head, then wait for them to finish (if
         // they are requested)
         let value = workspace.c_value.clone().forward::<T>(workspace, &slots, &outputs, &mut map, &residual_1)?;
         let policy = workspace.c_policy.clone().forward::<T>(workspace, &slots, &outputs, &mut map, &residual_1)?;
 
-        load_output::<T::Output>(&outputs, &mut map, Output::Value, *value, workspace.batch_size, workspace.value_stream)?;
-        load_output::<T::Output>(&outputs, &mut map, Output::Policy, *policy, workspace.batch_size * 362, workspace.policy_stream)?;
+        load_output::<T::Output>(&outputs, &mut map, Output::Value, *value, workspace.batch_size, *workspace.value_stream)?;
+        load_output::<T::Output>(&outputs, &mut map, Output::Policy, *policy, workspace.batch_size * 362, *workspace.policy_stream)?;
     }
 
     // pretty-print the tensor to stderr if logging is turned on

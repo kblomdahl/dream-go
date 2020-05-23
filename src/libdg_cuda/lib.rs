@@ -19,3 +19,8 @@ extern crate dg_utils;
 extern crate libc;
 
 pub mod cudnn;
+mod error;
+mod stream;
+
+pub use self::error::*;
+pub use self::stream::*;
