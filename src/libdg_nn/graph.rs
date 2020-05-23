@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use libc::c_void;
 
+use dg_cuda::cudnn as cudnn2;
 use dg_go::utils::features::{FEATURE_SIZE, NUM_FEATURES};
 use dg_utils::types::f16;
 use dg_utils::config;
@@ -162,15 +163,11 @@ impl Builder {
     /// * `batch_size` -
     ///
     pub fn get_workspace(&self, batch_size: usize) -> Result<Workspace, Error> {
-        let mut handle_dnn: cudnn::Handle = ptr::null();
-        unsafe {
-            check!(cudnn::cudnnCreate(&mut handle_dnn))?;
-        }
-
-        let c_up = unsafe { Rc::new(UpLayer::new(handle_dnn, batch_size as i32, &self.tensors)?) };
-        let c_residual = unsafe { self.get_residual_layers(handle_dnn, batch_size)? };
-        let c_value = unsafe { Rc::new(ValueLayer::new(handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?) };
-        let c_policy = unsafe { Rc::new(PolicyLayer::new(handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?) };
+        let handle_dnn: cudnn2::Handle = cudnn2::Handle::new()?;
+        let c_up = unsafe { Rc::new(UpLayer::new(&handle_dnn, batch_size as i32, &self.tensors)?) };
+        let c_residual = unsafe { self.get_residual_layers(&handle_dnn, batch_size)? };
+        let c_value = unsafe { Rc::new(ValueLayer::new(&handle_dnn, batch_size as i32, 3 + c_residual.len(), &self.tensors)?) };
+        let c_policy = unsafe { Rc::new(PolicyLayer::new(&handle_dnn, batch_size as i32, 3 + c_residual.len(), &self.tensors)?) };
 
         let mut w = Workspace {
             batch_size: batch_size,
@@ -210,7 +207,7 @@ impl Builder {
 
     unsafe fn get_residual_layers(
         &self,
-        handle_dnn: cudnn::Handle,
+        handle_dnn: &cudnn2::Handle,
         batch_size: usize
     ) -> Result<Vec<Rc<ResidualLayer>>, Error>
     {
@@ -237,7 +234,7 @@ pub struct Workspace {
     slots: Slots,
     num_channels: usize,
 
-    handle_dnn: cudnn::Handle,
+    handle_dnn: cudnn2::Handle,
     handle_blas: cublas::Handle,
 
     tower_finished: cuda::Event,
@@ -262,7 +259,6 @@ impl Drop for Workspace {
             cuda::cudaStreamDestroy(self.tower_stream);
 
             cublas::cublasDestroy_v2(self.handle_blas);
-            cudnn::cudnnDestroy(self.handle_dnn);
         }
     }
 }
@@ -299,7 +295,7 @@ impl UpLayer {
     /// * `n` - The number of images.
     /// * `tensors` -
     ///
-    unsafe fn new(handle: cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> Result<UpLayer, Error> {
+    unsafe fn new(handle: &cudnn2::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> Result<UpLayer, Error> {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
@@ -370,7 +366,7 @@ impl UpLayer {
         let mut num_fwd_algo = 0;
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
-            handle,
+            **handle,
             out.input,
             out.filter,
             out.descr,
@@ -390,7 +386,7 @@ impl UpLayer {
         input: &SlotGuard<'a>
     ) -> Result<SlotGuard<'a>, Error>
     {
-        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream))?;
+        workspace.handle_dnn.set_stream(workspace.tower_stream)?;
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream))?;
 
         let device_id = get_current_device()?;
@@ -405,7 +401,7 @@ impl UpLayer {
         let output = slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361, workspace.tower_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             &ONE,
             self.input, **input,
             self.filter, weights.get(device_id),
@@ -459,7 +455,7 @@ impl ResidualLayer {
     /// * `i` - The index of the layer.
     /// * `tensors` -
     ///
-    unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<Option<ResidualLayer>, Error> {
+    unsafe fn new(handle: &cudnn2::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<Option<ResidualLayer>, Error> {
         let weights_1 = tensors.get(&format!("{:02}_residual/conv_1:0", i));
         let weights_2 = tensors.get(&format!("{:02}_residual/conv_2:0", i));
         let alpha = tensors.get(&format!("{:02}_residual/alpha:0", i));
@@ -536,7 +532,7 @@ impl ResidualLayer {
         let mut num_fwd_algo = 0;
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
-            handle,
+            **handle,
             out.tensor,
             out.filter,
             out.descr,
@@ -556,7 +552,7 @@ impl ResidualLayer {
         input: SlotGuard<'a>
     ) -> Result<SlotGuard<'a>, Error>
     {
-        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream))?;
+        workspace.handle_dnn.set_stream(workspace.tower_stream)?;
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.tower_stream))?;
 
         let device_id = get_current_device()?;
@@ -570,7 +566,7 @@ impl ResidualLayer {
         offset_1.copy_to_device(device_id, workspace.tower_stream)?;
         if offset_2.copy_to_device(device_id, workspace.tower_stream)? {
             check!(cudnn::cudnnScaleTensor(
-                workspace.handle_dnn,
+                *workspace.handle_dnn,
                 self.offset, offset_2.get(device_id),
                 &self.gate_t
             ))?;
@@ -584,7 +580,7 @@ impl ResidualLayer {
         let residual_2 = slots.get_slot(Slot::Residual_2, residual_2_size, workspace.tower_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             &ONE,
             self.tensor, *input,
             self.filter, weights_1.get(device_id),
@@ -599,7 +595,7 @@ impl ResidualLayer {
 
         // perform the forward convolution (2)
         check!(cudnn::cudnnConvolutionBiasActivationForward(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             &self.gate_t,
             self.tensor, *residual_2,
             self.filter, weights_2.get(device_id),
@@ -664,7 +660,7 @@ impl ValueLayer {
     /// * `i` - The index of the layer.
     /// * `tensors` -
     ///
-    unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<ValueLayer, Error> {
+    unsafe fn new(handle: &cudnn2::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<ValueLayer, Error> {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
@@ -782,7 +778,7 @@ impl ValueLayer {
         let mut num_fwd_algo = 0;
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
-            handle,
+            **handle,
             out.input,
             out.filter,
             out.descr,
@@ -804,7 +800,7 @@ impl ValueLayer {
         input: &SlotGuard<'a>
     ) -> Result<SlotGuard<'a>, Error>
     {
-        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.value_stream))?;
+        workspace.handle_dnn.set_stream(workspace.value_stream)?;
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.value_stream))?;
 
         let device_id = get_current_device()?;
@@ -827,7 +823,7 @@ impl ValueLayer {
         let value_1 = slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 722, workspace.value_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             &ONE,
             self.input, **input,
             self.filter, weights_1.get(device_id),
@@ -860,13 +856,13 @@ impl ValueLayer {
         ))?;
 
         check!(cudnn::cudnnAddTensor(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             &ONE, self.bias_1, offset_2.get(device_id),
             &ONE, self.value_2, *value_2
         ))?;
 
         check!(cudnn::cudnnActivationForward(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             self.relu,
             &ONE, self.value_2, *value_2,  // input
             &ZERO, self.value_2, *value_2,  // output
@@ -889,13 +885,13 @@ impl ValueLayer {
         ))?;
 
         check!(cudnn::cudnnAddTensor(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             &ONE, self.bias_2, offset_3.get(device_id),
             &ONE, self.value_3, *value_3
         ))?;
 
         check!(cudnn::cudnnActivationForward(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             self.tanh,
             &ONE, self.value_3, *value_3,  // input
             &ZERO, self.value_3, *value_3,  // output
@@ -949,7 +945,7 @@ impl PolicyLayer {
     /// * `i` - The index of the layer.
     /// * `tensors` -
     ///
-    unsafe fn new(handle: cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<PolicyLayer, Error> {
+    unsafe fn new(handle: &cudnn2::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<PolicyLayer, Error> {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
@@ -1041,7 +1037,7 @@ impl PolicyLayer {
         let mut num_fwd_algo = 0;
 
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
-            handle,
+            **handle,
             out.input,
             out.filter,
             out.descr,
@@ -1063,7 +1059,7 @@ impl PolicyLayer {
         input: &SlotGuard<'a>
     ) -> Result<SlotGuard<'a>, Error>
     {
-        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.policy_stream))?;
+        workspace.handle_dnn.set_stream(workspace.policy_stream)?;
         check!(cublas::cublasSetStream_v2(workspace.handle_blas, workspace.policy_stream))?;
 
         let device_id = get_current_device()?;
@@ -1082,7 +1078,7 @@ impl PolicyLayer {
         let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 1444, workspace.policy_stream)?;
 
         check!(cudnn::cudnnConvolutionBiasActivationForward(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             &ONE,
             self.input, **input,
             self.filter, weights_1.get(device_id),
@@ -1121,14 +1117,14 @@ impl PolicyLayer {
         }
 
         check!(cudnn::cudnnAddTensor(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             &*TAU, self.bias, offset_2.get(device_id),
             &*TAU, self.policy_2, *policy_2
         ))?;
 
         // softmax activation
         check!(cudnn::cudnnSoftmaxForward(
-            workspace.handle_dnn,
+            *workspace.handle_dnn,
             cudnn::SoftmaxAlgorithm::Accurate,
             cudnn::SoftmaxMode::Instance,
             &ONE, self.policy_2, *policy_2,  // input
@@ -1161,7 +1157,7 @@ pub fn forward<T: InferenceType>(
     let mut map = OutputMap::default();
 
     unsafe {
-        check!(cudnn::cudnnSetStream(workspace.handle_dnn, workspace.tower_stream))?;
+        workspace.handle_dnn.set_stream(workspace.tower_stream)?;
 
         // copy all of the input features into a temporary workspace
         let input = slots.get_slot(Slot::Input, size_of::<T>() * features.len(), workspace.tower_stream)?;

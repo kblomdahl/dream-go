@@ -47,6 +47,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dg_cuda"
+version = "0.0.0"
+dependencies = [
+ "dg_utils 0.0.0",
+ "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "dg_go"
 version = "0.0.0"
 dependencies = [
@@ -79,6 +87,7 @@ dependencies = [
 name = "dg_nn"
 version = "0.0.0"
 dependencies = [
+ "dg_cuda 0.0.0",
  "dg_go 0.0.0",
  "dg_utils 0.0.0",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",

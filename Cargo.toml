@@ -9,6 +9,7 @@ lto = true
 members = [
     "src/dg",
     "src/dg_tests",
+    "src/libdg_cuda",
     "src/libdg_go",
     "src/libdg_mcts",
     "src/libdg_nn",
