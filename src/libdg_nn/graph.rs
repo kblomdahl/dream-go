@@ -309,6 +309,22 @@ fn create_convolution_bias_activation_1x1(
     )
 }
 
+/// Returns a `Softmax` structure for the given `batch_size` and `num_channels`.
+/// 
+/// # Arguments
+/// 
+/// * `batch_size` -
+/// * `num_channels` -
+/// 
+fn create_softmax(batch_size: i32, num_channels: i32) -> Result<cudnn2::Softmax, cudnn2::Status> {
+    cudnn2::Softmax::new(
+        cudnn2::SoftmaxMode::Instance,
+        create_dense_descriptor(batch_size, num_channels)?,
+        create_dense_descriptor(batch_size, num_channels)?,
+        &[1.0, 0.0]
+    )
+}
+
 // -------- Graph --------
 
 pub struct Builder {
@@ -726,6 +742,7 @@ struct PolicyLayer {
     conv_1: cudnn2::ConvolutionBiasActivation,
     policy_2: cudnn2::TensorDescriptor,
     offset_2: cudnn2::TensorDescriptor,
+    softmax_3: cudnn2::Softmax,
     count: usize
 }
 
@@ -749,6 +766,7 @@ impl PolicyLayer {
             conv_1: create_convolution_bias_activation_1x1(handle, n, 4, num_channels, &[1.0, 0.0])?,
             policy_2: create_dense_descriptor(n, 362)?,
             offset_2: create_offset_descriptor(362)?,
+            softmax_3: create_softmax(n, 362)?,
             count: i
         })
     }
@@ -822,13 +840,7 @@ impl PolicyLayer {
         ))?;
 
         // softmax activation
-        check!(cudnn::cudnnSoftmaxForward(
-            *workspace.handle_dnn,
-            cudnn::SoftmaxAlgorithm::Accurate,
-            cudnn::SoftmaxMode::Instance,
-            &ONE, *self.policy_2, *policy_2,  // input
-            &ZERO, *self.policy_2, *policy_3,  // output
-        ))?;
+        self.softmax_3.forward(&workspace.handle_dnn, *policy_2, *policy_3)?;
 
         Ok(policy_3)
     }
