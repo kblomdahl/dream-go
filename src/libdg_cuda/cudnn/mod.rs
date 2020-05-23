@@ -14,20 +14,34 @@
 
 mod activation_descriptor;
 mod activation_mode;
+mod convolution_descriptor;
+mod convolution_fwd_algo;
+mod convolution_fwd_algo_perf;
+mod convolution_mode;
 mod data_type;
+mod determinism;
 mod filter_descriptor;
+mod math_type;
 mod nan_propagation;
 mod status;
 mod handle;
 mod tensor_descriptor;
 mod tensor_format;
+mod version;
 
 pub use self::activation_descriptor::*;
 pub use self::activation_mode::*;
+pub use self::convolution_descriptor::*;
+pub use self::convolution_fwd_algo::*;
+pub use self::convolution_fwd_algo_perf::*;
+pub use self::convolution_mode::*;
 pub use self::data_type::*;
+pub use self::determinism::*;
 pub use self::filter_descriptor::*;
+pub use self::math_type::*;
 pub use self::nan_propagation::*;
 pub use self::status::*;
 pub use self::handle::*;
 pub use self::tensor_descriptor::*;
 pub use self::tensor_format::*;
+pub use self::version::*;
