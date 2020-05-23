@@ -141,6 +141,174 @@ fn has_true_half() -> bool {
         (version_major >= 7)
 }
 
+/// Returns a `TensorDescriptor` for an feature tensor for the given
+/// `batch_size` and `num_channels`.
+/// 
+/// # Arguments
+/// 
+/// * `batch_size` -
+/// * `num_channels` -
+/// 
+fn create_tensor_descriptor(batch_size: i32, num_channels: i32) -> Result<cudnn2::TensorDescriptor, cudnn2::Status> {
+    cudnn2::TensorDescriptor::new(
+        cudnn2::TensorFormat::NHWC,
+        cudnn2::DataType::Half,
+        &[batch_size, num_channels, 19, 19]
+    )
+}
+
+/// Returns a `TensorDescriptor` for an offset tensor for the given
+/// `num_channels`.
+/// 
+/// # Arguments
+/// 
+/// * `num_channels` -
+/// 
+fn create_offset_descriptor(num_channels: i32) -> Result<cudnn2::TensorDescriptor, cudnn2::Status> {
+    cudnn2::TensorDescriptor::new(
+        cudnn2::TensorFormat::NHWC,
+        cudnn2::DataType::Half,
+        &[1, num_channels, 1, 1]
+    )
+}
+
+/// Returns a `TensorDescriptor` for a dense tensor for the given `batch_size`
+/// and `size`.
+///
+/// # Arguments
+/// 
+/// * `batch_size` -
+/// * `size` -
+/// 
+fn create_dense_descriptor(batch_size: i32, size: i32) -> Result<cudnn2::TensorDescriptor, cudnn2::Status> {
+    cudnn2::TensorDescriptor::new(
+        cudnn2::TensorFormat::NHWC,
+        cudnn2::DataType::Half,
+        &[batch_size, size, 1, 1]
+    )
+}
+
+/// Returns a `FilterDescriptor` for a three wide and high filter for the given
+/// `num_outputs` and `num_inputs` features.
+/// 
+/// # Arguments
+/// 
+/// * `num_outputs` -
+/// * `num_inputs` -
+/// 
+fn create_filter_descriptor_3x3(num_outputs: i32, num_inputs: i32) -> Result<cudnn2::FilterDescriptor, cudnn2::Status> {
+    cudnn2::FilterDescriptor::new(
+        cudnn2::DataType::Half,
+        cudnn2::TensorFormat::NHWC,
+        &[num_outputs, num_inputs, 3, 3]
+    )
+}
+
+/// Returns a `FilterDescriptor` for a one wide and high filter for the given
+/// `num_outputs` and `num_inputs` features.
+/// 
+/// # Arguments
+/// 
+/// * `num_outputs` -
+/// * `num_inputs` -
+/// 
+fn create_filter_descriptor_1x1(num_outputs: i32, num_inputs: i32) -> Result<cudnn2::FilterDescriptor, cudnn2::Status> {
+    cudnn2::FilterDescriptor::new(
+        cudnn2::DataType::Half,
+        cudnn2::TensorFormat::NHWC,
+        &[num_outputs, num_inputs, 1, 1]
+    )
+}
+
+/// Returns a `ConvolutionDescriptor` for a three wide and high filter.
+fn create_convolution_descriptor_3x3() -> Result<cudnn2::ConvolutionDescriptor, cudnn2::Status> {
+    cudnn2::ConvolutionDescriptor::new(
+        &[1, 1],
+        &[1, 1],
+        &[1, 1],
+        cudnn2::ConvolutionMode::CrossCorrelation,
+        if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
+    )
+}
+
+/// Returns a `ConvolutionDescriptor` for a one wide and high filter.
+fn create_convolution_descriptor_1x1() -> Result<cudnn2::ConvolutionDescriptor, cudnn2::Status> {
+    cudnn2::ConvolutionDescriptor::new(
+        &[0, 0],
+        &[1, 1],
+        &[1, 1],
+        cudnn2::ConvolutionMode::CrossCorrelation,
+        if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
+    )
+}
+
+/// Returns a `ConvolutionBiasActivation` for a three wide and high
+/// convolution, add bias, and activation operation for the given
+/// `batch_size`, `num_outputs`, and `num_inputs`.
+/// 
+/// # Arguments
+/// 
+/// * `handle` -
+/// * `batch_size` -
+/// * `num_outputs` -
+/// * `num_inputs` - 
+/// 
+fn create_convolution_bias_activation_3x3(
+    handle: &cudnn2::Handle,
+    batch_size: i32,
+    num_outputs: i32,
+    num_inputs: i32,
+    alpha: &[f32]
+) -> Result<cudnn2::ConvolutionBiasActivation, cudnn2::Status>
+{
+    debug_assert_eq!(alpha.len(), 2);
+
+    cudnn2::ConvolutionBiasActivation::new(
+        handle,
+        alpha[0],
+        create_tensor_descriptor(batch_size, num_inputs)?,
+        create_filter_descriptor_3x3(num_outputs, num_inputs)?,
+        create_convolution_descriptor_3x3()?,
+        alpha[1],
+        create_offset_descriptor(num_outputs)?,
+        cudnn2::ActivationDescriptor::relu()?,
+        create_tensor_descriptor(batch_size, num_outputs)?
+    )
+}
+/// Returns a `ConvolutionBiasActivation` for a one wide and high
+/// convolution, add bias, and activation operation for the given
+/// `batch_size`, `num_outputs`, and `num_inputs`.
+/// 
+/// # Arguments
+/// 
+/// * `handle` -
+/// * `batch_size` -
+/// * `num_outputs` -
+/// * `num_inputs` - 
+/// 
+fn create_convolution_bias_activation_1x1(
+    handle: &cudnn2::Handle,
+    batch_size: i32,
+    num_outputs: i32,
+    num_inputs: i32,
+    alpha: &[f32]
+) -> Result<cudnn2::ConvolutionBiasActivation, cudnn2::Status>
+{
+    debug_assert_eq!(alpha.len(), 2);
+
+    cudnn2::ConvolutionBiasActivation::new(
+        handle,
+        alpha[0],
+        create_tensor_descriptor(batch_size, num_inputs)?,
+        create_filter_descriptor_1x1(num_outputs, num_inputs)?,
+        create_convolution_descriptor_1x1()?,
+        alpha[1],
+        create_offset_descriptor(num_outputs)?,
+        cudnn2::ActivationDescriptor::relu()?,
+        create_tensor_descriptor(batch_size, num_outputs)?
+    )
+}
+
 // -------- Graph --------
 
 pub struct Builder {
@@ -273,39 +441,7 @@ impl UpLayer {
             .unwrap_or(DEFAULT_NUM_CHANNELS);
 
         Ok(UpLayer {
-            up: cudnn2::ConvolutionBiasActivation::new(
-                handle,
-                1.0,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[n, NUM_FEATURES as i32, 19, 19]
-                )?,
-                cudnn2::FilterDescriptor::new(
-                    cudnn2::DataType::Half,
-                    cudnn2::TensorFormat::NHWC,
-                    &[num_channels as i32, NUM_FEATURES as i32, 3, 3]
-                )?,
-                cudnn2::ConvolutionDescriptor::new(
-                    &[1, 1],
-                    &[1, 1],
-                    &[1, 1],
-                    cudnn2::ConvolutionMode::CrossCorrelation,
-                    if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-                )?,
-                0.0,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[1, num_channels as i32, 1, 1]
-                )?,
-                cudnn2::ActivationDescriptor::relu()?,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[n, num_channels as i32, 19, 19]
-                )?
-            )?
+            up: create_convolution_bias_activation_3x3(handle, n, num_channels, NUM_FEATURES as i32, &[1.0, 0.0])?
         })
     }
 
@@ -378,74 +514,8 @@ impl ResidualLayer {
         let gate_t = alpha.map(|t| t.as_f32()).unwrap_or(0.5);
 
         Ok(Some(ResidualLayer {
-            conv_1: cudnn2::ConvolutionBiasActivation::new(
-                handle,
-                1.0,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[n, num_channels as i32, 19, 19]
-                )?,
-                cudnn2::FilterDescriptor::new(
-                    cudnn2::DataType::Half,
-                    cudnn2::TensorFormat::NHWC,
-                    &[num_channels as i32, num_channels as i32, 3, 3]
-                )?,
-                cudnn2::ConvolutionDescriptor::new(
-                    &[1, 1],
-                    &[1, 1],
-                    &[1, 1],
-                    cudnn2::ConvolutionMode::CrossCorrelation,
-                    if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-                )?,
-                0.0,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[1, num_channels as i32, 1, 1]
-                )?,
-                cudnn2::ActivationDescriptor::relu()?,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[n, num_channels as i32, 19, 19]
-                )?
-            )?,
-
-            conv_2: cudnn2::ConvolutionBiasActivation::new(
-                handle,
-                gate_t,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[n, num_channels as i32, 19, 19]
-                )?,
-                cudnn2::FilterDescriptor::new(
-                    cudnn2::DataType::Half,
-                    cudnn2::TensorFormat::NHWC,
-                    &[num_channels as i32, num_channels as i32, 3, 3]
-                )?,
-                cudnn2::ConvolutionDescriptor::new(
-                    &[1, 1],
-                    &[1, 1],
-                    &[1, 1],
-                    cudnn2::ConvolutionMode::CrossCorrelation,
-                    if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-                )?,
-                1.0 - gate_t,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[1, num_channels as i32, 1, 1]
-                )?,
-                cudnn2::ActivationDescriptor::relu()?,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[n, num_channels as i32, 19, 19]
-                )?
-            )?,
-
+            conv_1: create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[1.0, 0.0])?,
+            conv_2: create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[gate_t, 1.0 - gate_t])?,
             gate_t: gate_t,
             num_channels: num_channels as usize,
             count: i,
@@ -537,69 +607,15 @@ impl ValueLayer {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
-        let relu = cudnn2::ActivationDescriptor::relu()?;
-        let value_2 = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[n, 256, 1, 1]
-        )?;
-        let value_3 = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[n, 1, 1, 1]
-        )?;
-        let bias_1 = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[1, 256, 1, 1]
-        )?;
-        let bias_2 = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[1, 1, 1, 1]
-        )?;
-        let tanh = cudnn2::ActivationDescriptor::tanh()?;
 
         Ok(ValueLayer {
-            conv_1: cudnn2::ConvolutionBiasActivation::new(
-                handle,
-                1.0,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[n, num_channels, 19, 19]
-                )?,
-                cudnn2::FilterDescriptor::new(
-                    cudnn2::DataType::Half,
-                    cudnn2::TensorFormat::NHWC,
-                    &[2, num_channels, 1, 1]
-                )?,
-                cudnn2::ConvolutionDescriptor::new(
-                    &[0, 0],
-                    &[1, 1],
-                    &[1, 1],
-                    cudnn2::ConvolutionMode::CrossCorrelation,
-                    if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-                )?,
-                0.0,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[1, 2, 1, 1]
-                )?,
-                cudnn2::ActivationDescriptor::relu()?,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[n, 2, 19, 19]
-                )?
-            )?,
-            value_2,
-            value_3,
-            bias_1,
-            bias_2,
-            relu,
-            tanh,
+            conv_1: create_convolution_bias_activation_1x1(handle, n, 2, num_channels, &[1.0, 0.0])?,
+            value_2: create_dense_descriptor(n, 256)?,
+            value_3: create_dense_descriptor(n, 1)?,
+            bias_1: create_offset_descriptor(256)?,
+            bias_2: create_offset_descriptor(1)?,
+            relu: cudnn2::ActivationDescriptor::relu()?,
+            tanh: cudnn2::ActivationDescriptor::tanh()?,
             count: i
         })
     }
@@ -732,53 +748,11 @@ impl PolicyLayer {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
-        let policy_2 = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[n, 362, 1, 1]
-        )?;
-        let offset_2 = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[1, 362, 1, 1]
-        )?;
 
         Ok(PolicyLayer {
-            conv_1: cudnn2::ConvolutionBiasActivation::new(
-                handle,
-                1.0,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[n, num_channels as i32, 19, 19]
-                )?,
-                cudnn2::FilterDescriptor::new(
-                    cudnn2::DataType::Half,
-                    cudnn2::TensorFormat::NHWC,
-                    &[4, num_channels as i32, 1, 1]
-                )?,
-                cudnn2::ConvolutionDescriptor::new(
-                    &[0, 0],
-                    &[1, 1],
-                    &[1, 1],
-                    cudnn2::ConvolutionMode::CrossCorrelation,
-                    if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-                )?,
-                0.0,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[1, 4, 1, 1]
-                )?,
-                cudnn2::ActivationDescriptor::relu()?,
-                cudnn2::TensorDescriptor::new(
-                    cudnn2::TensorFormat::NHWC,
-                    cudnn2::DataType::Half,
-                    &[n, 4, 19, 19]
-                )?
-            )?,
-            policy_2,
-            offset_2,
+            conv_1: create_convolution_bias_activation_1x1(handle, n, 4, num_channels, &[1.0, 0.0])?,
+            policy_2: create_dense_descriptor(n, 362)?,
+            offset_2: create_offset_descriptor(362)?,
             count: i
         })
     }
