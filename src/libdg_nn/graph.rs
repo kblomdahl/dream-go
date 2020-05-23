@@ -258,7 +258,7 @@ struct UpLayer {
     input: cudnn2::TensorDescriptor,
     output: cudnn2::TensorDescriptor,
     offset: cudnn2::TensorDescriptor,
-    filter: cudnn::FilterDescriptor,
+    filter: cudnn2::FilterDescriptor,
     relu: cudnn2::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
@@ -267,7 +267,6 @@ struct UpLayer {
 impl Drop for UpLayer {
     fn drop(&mut self) {
         unsafe {
-            cudnn::cudnnDestroyFilterDescriptor(self.filter);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
         }
     }
@@ -290,32 +289,28 @@ impl UpLayer {
             input: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [n, NUM_FEATURES as i32, 19, 19]
+                &[n, NUM_FEATURES as i32, 19, 19]
             )?,
             output: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [n, num_channels as i32, 19, 19]
+                &[n, num_channels as i32, 19, 19]
             )?,
             offset: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [1, num_channels as i32, 1, 1]
+                &[1, num_channels as i32, 1, 1]
             )?,
-            filter: ptr::null(),
+            filter: cudnn2::FilterDescriptor::new(
+                cudnn2::DataType::Half,
+                cudnn2::TensorFormat::NHWC,
+                &[num_channels as i32, NUM_FEATURES as i32, 3, 3]
+            )?,
             relu: cudnn2::ActivationDescriptor::relu()?,
             descr: ptr::null(),
 
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new()
         };
-
-        check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter))?;
-        check!(cudnn::cudnnSetFilter4dDescriptor(
-            out.filter,
-            cudnn::DataType::Half,
-            cudnn::TensorFormat::NHWC,
-            num_channels as i32, NUM_FEATURES as i32, 3, 3
-        ))?;
 
         check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr))?;
         check!(cudnn::cudnnSetConvolution2dDescriptor(
@@ -335,7 +330,7 @@ impl UpLayer {
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             **handle,
             *out.input,
-            out.filter,
+            *out.filter,
             out.descr,
             *out.output,
             1, &mut num_fwd_algo, &mut out.fwd_algo
@@ -371,7 +366,7 @@ impl UpLayer {
             *workspace.handle_dnn,
             &ONE,
             *self.input, **input,
-            self.filter, weights.get(device_id),
+            *self.filter, weights.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_1, self.fwd_algo.memory,
             &ZERO,
@@ -388,7 +383,7 @@ impl UpLayer {
 struct ResidualLayer {
     tensor: cudnn2::TensorDescriptor,
     offset: cudnn2::TensorDescriptor,
-    filter: cudnn::FilterDescriptor,
+    filter: cudnn2::FilterDescriptor,
     relu: cudnn2::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
@@ -402,7 +397,6 @@ struct ResidualLayer {
 impl Drop for ResidualLayer {
     fn drop(&mut self) {
         unsafe {
-            cudnn::cudnnDestroyFilterDescriptor(self.filter);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
         }
     }
@@ -437,14 +431,18 @@ impl ResidualLayer {
             tensor: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [n, num_channels as i32, 19, 19]
+                &[n, num_channels as i32, 19, 19]
             )?,
             offset: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [1, num_channels as i32, 1, 1]
+                &[1, num_channels as i32, 1, 1]
             )?,
-            filter: ptr::null(),
+            filter: cudnn2::FilterDescriptor::new(
+                cudnn2::DataType::Half,
+                cudnn2::TensorFormat::NHWC,
+                &[num_channels as i32, num_channels as i32, 3, 3]
+            )?,
             relu: cudnn2::ActivationDescriptor::relu()?,
             descr: ptr::null(),
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
@@ -455,14 +453,6 @@ impl ResidualLayer {
             gate_c: gate_c,
             gate_t: gate_t
         };
-
-        check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter))?;
-        check!(cudnn::cudnnSetFilter4dDescriptor(
-            out.filter,
-            cudnn::DataType::Half,
-            cudnn::TensorFormat::NHWC,
-            num_channels as i32, num_channels as i32, 3, 3
-        ))?;
 
         check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr))?;
         check!(cudnn::cudnnSetConvolution2dDescriptor(
@@ -482,7 +472,7 @@ impl ResidualLayer {
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             **handle,
             *out.tensor,
-            out.filter,
+            *out.filter,
             out.descr,
             *out.tensor,
             1, &mut num_fwd_algo, &mut out.fwd_algo
@@ -531,7 +521,7 @@ impl ResidualLayer {
             *workspace.handle_dnn,
             &ONE,
             *self.tensor, *input,
-            self.filter, weights_1.get(device_id),
+            *self.filter, weights_1.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_r, self.fwd_algo.memory,
             &ZERO,
@@ -546,7 +536,7 @@ impl ResidualLayer {
             *workspace.handle_dnn,
             &self.gate_t,
             *self.tensor, *residual_2,
-            self.filter, weights_2.get(device_id),
+            *self.filter, weights_2.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_r, self.fwd_algo.memory,
             &self.gate_c,
@@ -563,7 +553,7 @@ impl ResidualLayer {
 struct ValueLayer {
     input: cudnn2::TensorDescriptor,
     offset: cudnn2::TensorDescriptor,
-    filter: cudnn::FilterDescriptor,
+    filter: cudnn2::FilterDescriptor,
     relu: cudnn2::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
@@ -581,7 +571,6 @@ struct ValueLayer {
 impl Drop for ValueLayer {
     fn drop(&mut self) {
         unsafe {
-            cudnn::cudnnDestroyFilterDescriptor(self.filter);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
         }
     }
@@ -606,14 +595,18 @@ impl ValueLayer {
             input: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [n, num_channels, 19, 19]
+                &[n, num_channels, 19, 19]
             )?,
             offset: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [1, 2, 1, 1]
+                &[1, 2, 1, 1]
             )?,
-            filter: ptr::null(),
+            filter: cudnn2::FilterDescriptor::new(
+                cudnn2::DataType::Half,
+                cudnn2::TensorFormat::NHWC,
+                &[2, num_channels, 1, 1]
+            )?,
             relu: cudnn2::ActivationDescriptor::relu()?,
             descr: ptr::null(),
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
@@ -621,40 +614,32 @@ impl ValueLayer {
             value_1: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [n, 2, 19, 19]
+                &[n, 2, 19, 19]
             )?,
             value_2: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [n, 256, 1, 1]
+                &[n, 256, 1, 1]
             )?,
             value_3: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [n, 1, 1, 1]
+                &[n, 1, 1, 1]
             )?,
             bias_1: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [1, 256, 1, 1]
+                &[1, 256, 1, 1]
             )?,
             bias_2: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [1, 1, 1, 1]
+                &[1, 1, 1, 1]
             )?,
             tanh: cudnn2::ActivationDescriptor::tanh()?,
 
             count: i
         };
-
-        check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter))?;
-        check!(cudnn::cudnnSetFilter4dDescriptor(
-            out.filter,
-            cudnn::DataType::Half,
-            cudnn::TensorFormat::NHWC,
-            2, num_channels, 1, 1
-        ))?;
 
         check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr))?;
         check!(cudnn::cudnnSetConvolution2dDescriptor(
@@ -674,7 +659,7 @@ impl ValueLayer {
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             **handle,
             *out.input,
-            out.filter,
+            *out.filter,
             out.descr,
             *out.value_1,
             1, &mut num_fwd_algo, &mut out.fwd_algo
@@ -720,7 +705,7 @@ impl ValueLayer {
             *workspace.handle_dnn,
             &ONE,
             *self.input, **input,
-            self.filter, weights_1.get(device_id),
+            *self.filter, weights_1.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_v, self.fwd_algo.memory,
             &ZERO,
@@ -798,7 +783,7 @@ impl ValueLayer {
 struct PolicyLayer {
     input: cudnn2::TensorDescriptor,
     offset: cudnn2::TensorDescriptor,
-    filter: cudnn::FilterDescriptor,
+    filter: cudnn2::FilterDescriptor,
     relu: cudnn2::ActivationDescriptor,
     descr: cudnn::ConvolutionDescriptor,
     fwd_algo: cudnn::ConvolutionFwdAlgoPerf,
@@ -814,7 +799,6 @@ struct PolicyLayer {
 impl Drop for PolicyLayer {
     fn drop(&mut self) {
         unsafe {
-            cudnn::cudnnDestroyFilterDescriptor(self.filter);
             cudnn::cudnnDestroyConvolutionDescriptor(self.descr);
         }
     }
@@ -839,14 +823,18 @@ impl PolicyLayer {
             input: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [n, num_channels as i32, 19, 19]
+                &[n, num_channels as i32, 19, 19]
             )?,
             offset: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [1, 4, 1, 1]
+                &[1, 4, 1, 1]
             )?,
-            filter: ptr::null(),
+            filter: cudnn2::FilterDescriptor::new(
+                cudnn2::DataType::Half,
+                cudnn2::TensorFormat::NHWC,
+                &[4, num_channels as i32, 1, 1]
+            )?,
             relu: cudnn2::ActivationDescriptor::relu()?,
             descr: ptr::null(),
             fwd_algo: cudnn::ConvolutionFwdAlgoPerf::new(),
@@ -854,30 +842,22 @@ impl PolicyLayer {
             bias: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [1, 362, 1, 1]
+                &[1, 362, 1, 1]
             )?,
 
             policy_1: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [n, 4, 19, 19]
+                &[n, 4, 19, 19]
             )?,
             policy_2: cudnn2::TensorDescriptor::new(
                 cudnn2::TensorFormat::NHWC,
                 cudnn2::DataType::Half,
-                &vec! [n, 362, 1, 1]
+                &[n, 362, 1, 1]
             )?,
 
             count: i
         };
-
-        check!(cudnn::cudnnCreateFilterDescriptor(&mut out.filter))?;
-        check!(cudnn::cudnnSetFilter4dDescriptor(
-            out.filter,
-            cudnn::DataType::Half,
-            cudnn::TensorFormat::NHWC,
-            4, num_channels as i32, 1, 1
-        ))?;
 
         check!(cudnn::cudnnCreateConvolutionDescriptor(&mut out.descr))?;
         check!(cudnn::cudnnSetConvolution2dDescriptor(
@@ -897,7 +877,7 @@ impl PolicyLayer {
         check!(cudnn::cudnnGetConvolutionForwardAlgorithm_v7(
             **handle,
             *out.input,
-            out.filter,
+            *out.filter,
             out.descr,
             *out.policy_1,
             1, &mut num_fwd_algo, &mut out.fwd_algo
@@ -939,7 +919,7 @@ impl PolicyLayer {
             *workspace.handle_dnn,
             &ONE,
             *self.input, **input,
-            self.filter, weights_1.get(device_id),
+            *self.filter, weights_1.get(device_id),
             self.descr, self.fwd_algo.algo,
             *workspace_p, self.fwd_algo.memory,
             &ZERO,

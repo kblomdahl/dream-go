@@ -15,6 +15,7 @@
 mod activation_descriptor;
 mod activation_mode;
 mod data_type;
+mod filter_descriptor;
 mod nan_propagation;
 mod status;
 mod handle;
@@ -24,6 +25,7 @@ mod tensor_format;
 pub use self::activation_descriptor::*;
 pub use self::activation_mode::*;
 pub use self::data_type::*;
+pub use self::filter_descriptor::*;
 pub use self::nan_propagation::*;
 pub use self::status::*;
 pub use self::handle::*;
