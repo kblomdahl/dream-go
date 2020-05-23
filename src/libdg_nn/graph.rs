@@ -482,7 +482,7 @@ impl UpLayer {
 struct ResidualLayer {
     conv_1: cudnn2::ConvolutionBiasActivation,
     conv_2: cudnn2::ConvolutionBiasActivation,
-    gate_t: f32,
+    scale_offset: cudnn2::Scale,
 
     num_channels: usize,
     count: usize,
@@ -516,7 +516,7 @@ impl ResidualLayer {
         Ok(Some(ResidualLayer {
             conv_1: create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[1.0, 0.0])?,
             conv_2: create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[gate_t, 1.0 - gate_t])?,
-            gate_t: gate_t,
+            scale_offset: cudnn2::Scale::new(create_offset_descriptor(num_channels)?, gate_t)?,
             num_channels: num_channels as usize,
             count: i,
         }))
@@ -542,11 +542,7 @@ impl ResidualLayer {
         weights_2.copy_to_device(device_id, *workspace.tower_stream)?;
         offset_1.copy_to_device(device_id, *workspace.tower_stream)?;
         if offset_2.copy_to_device(device_id, *workspace.tower_stream)? {
-            check!(cudnn::cudnnScaleTensor(
-                *workspace.handle_dnn,
-                **self.conv_1.offset(), offset_2.get(device_id),
-                &self.gate_t
-            ))?;
+            self.scale_offset.forward(&workspace.handle_dnn, offset_2.get(device_id))?;
         }
 
         debug_assert!(offset_1.size_in_elements == offset_2.size_in_elements);
