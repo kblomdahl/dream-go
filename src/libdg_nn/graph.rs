@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::mem::{size_of, transmute};
+use std::mem::size_of;
 use std::ptr;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -255,13 +255,7 @@ impl Drop for Workspace {
 }
 
 struct UpLayer {
-    input: cudnn2::TensorDescriptor,
-    output: cudnn2::TensorDescriptor,
-    offset: cudnn2::TensorDescriptor,
-    filter: cudnn2::FilterDescriptor,
-    relu: cudnn2::ActivationDescriptor,
-    descr: cudnn2::ConvolutionDescriptor,
-    fwd_algo: cudnn2::ConvolutionFwdAlgoPerf,
+    up: cudnn2::ConvolutionBiasActivation,
 }
 
 impl UpLayer {
@@ -277,50 +271,41 @@ impl UpLayer {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
-        let input = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[n, NUM_FEATURES as i32, 19, 19]
-        )?;
-        let output = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[n, num_channels as i32, 19, 19]
-        )?;
-        let offset = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[1, num_channels as i32, 1, 1]
-        )?;
-        let filter = cudnn2::FilterDescriptor::new(
-            cudnn2::DataType::Half,
-            cudnn2::TensorFormat::NHWC,
-            &[num_channels as i32, NUM_FEATURES as i32, 3, 3]
-        )?;
-        let descr = cudnn2::ConvolutionDescriptor::new(
-            &[1, 1],
-            &[1, 1],
-            &[1, 1],
-            cudnn2::ConvolutionMode::CrossCorrelation,
-            if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-        )?;
-        let fwd_algo = cudnn2::ConvolutionFwdAlgoPerf::new(
-            &handle,
-            &input,
-            &filter,
-            &descr,
-            &output
-        )?;
-        let relu = cudnn2::ActivationDescriptor::relu()?;
 
         Ok(UpLayer {
-            input,
-            output,
-            offset,
-            filter,
-            descr,
-            relu,
-            fwd_algo,
+            up: cudnn2::ConvolutionBiasActivation::new(
+                handle,
+                1.0,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[n, NUM_FEATURES as i32, 19, 19]
+                )?,
+                cudnn2::FilterDescriptor::new(
+                    cudnn2::DataType::Half,
+                    cudnn2::TensorFormat::NHWC,
+                    &[num_channels as i32, NUM_FEATURES as i32, 3, 3]
+                )?,
+                cudnn2::ConvolutionDescriptor::new(
+                    &[1, 1],
+                    &[1, 1],
+                    &[1, 1],
+                    cudnn2::ConvolutionMode::CrossCorrelation,
+                    if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
+                )?,
+                0.0,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[1, num_channels as i32, 1, 1]
+                )?,
+                cudnn2::ActivationDescriptor::relu()?,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[n, num_channels as i32, 19, 19]
+                )?
+            )?
         })
     }
 
@@ -332,7 +317,6 @@ impl UpLayer {
     ) -> Result<SlotGuard<'a>, Error>
     {
         workspace.handle_dnn.set_stream(&workspace.tower_stream)?;
-        check!(cublas::cublasSetStream_v2(workspace.handle_blas, *workspace.tower_stream))?;
 
         let device_id = get_current_device()?;
         let weights = &workspace.tensors["01_upsample/conv_1:0"];
@@ -342,39 +326,30 @@ impl UpLayer {
         weights.copy_to_device(device_id, *workspace.tower_stream)?;
 
         // perform the forward convolution
-        let workspace_1 = slots.get_slot(Slot::Workspace_1, self.fwd_algo.memory(), *workspace.tower_stream)?;
+        let workspace_1 = slots.get_slot(Slot::Workspace_1, self.up.fwd_algo_perf().memory(), *workspace.tower_stream)?;
         let output = slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361, *workspace.tower_stream)?;
 
-        check!(cudnn::cudnnConvolutionBiasActivationForward(
-            *workspace.handle_dnn,
-            &ONE,
-            *self.input, **input,
-            *self.filter, weights.get(device_id),
-            *self.descr, transmute(self.fwd_algo.algo()),
-            *workspace_1, self.fwd_algo.memory(),
-            &ZERO,
-            *self.output, *output,
-            *self.offset, offset.get(device_id),
-            *self.relu,
-            *self.output, *output,
-        ))?;
+        self.up.forward(
+            &workspace.handle_dnn,
+            **input,
+            weights.get(device_id),
+            *workspace_1, self.up.fwd_algo_perf().memory(),
+            *output,
+            offset.get(device_id),
+            *output
+        )?;
 
         Ok(output)
     }
 }
 
 struct ResidualLayer {
-    tensor: cudnn2::TensorDescriptor,
-    offset: cudnn2::TensorDescriptor,
-    filter: cudnn2::FilterDescriptor,
-    relu: cudnn2::ActivationDescriptor,
-    descr: cudnn2::ConvolutionDescriptor,
-    fwd_algo: cudnn2::ConvolutionFwdAlgoPerf,
-    num_channels: usize,
+    conv_1: cudnn2::ConvolutionBiasActivation,
+    conv_2: cudnn2::ConvolutionBiasActivation,
+    gate_t: f32,
 
+    num_channels: usize,
     count: usize,
-    gate_c: f32,  // carry gate
-    gate_t: f32   // transform gate
 }
 
 impl ResidualLayer {
@@ -401,51 +376,79 @@ impl ResidualLayer {
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
         let gate_t = alpha.map(|t| t.as_f32()).unwrap_or(0.5);
-        let gate_c = 1.0 - gate_t;
-        let tensor = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[n, num_channels as i32, 19, 19]
-        )?;
-        let offset = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[1, num_channels as i32, 1, 1]
-        )?;
-        let filter = cudnn2::FilterDescriptor::new(
-            cudnn2::DataType::Half,
-            cudnn2::TensorFormat::NHWC,
-            &[num_channels as i32, num_channels as i32, 3, 3]
-        )?;
-        let descr = cudnn2::ConvolutionDescriptor::new(
-            &[1, 1],
-            &[1, 1],
-            &[1, 1],
-            cudnn2::ConvolutionMode::CrossCorrelation,
-            if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-        )?;
-        let fwd_algo = cudnn2::ConvolutionFwdAlgoPerf::new(
-            &handle,
-            &tensor,
-            &filter,
-            &descr,
-            &tensor
-        )?;
-        let relu = cudnn2::ActivationDescriptor::relu()?;
 
         Ok(Some(ResidualLayer {
-            tensor,
-            offset,
-            filter,
-            descr,
-            relu,
-            fwd_algo,
+            conv_1: cudnn2::ConvolutionBiasActivation::new(
+                handle,
+                1.0,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[n, num_channels as i32, 19, 19]
+                )?,
+                cudnn2::FilterDescriptor::new(
+                    cudnn2::DataType::Half,
+                    cudnn2::TensorFormat::NHWC,
+                    &[num_channels as i32, num_channels as i32, 3, 3]
+                )?,
+                cudnn2::ConvolutionDescriptor::new(
+                    &[1, 1],
+                    &[1, 1],
+                    &[1, 1],
+                    cudnn2::ConvolutionMode::CrossCorrelation,
+                    if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
+                )?,
+                0.0,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[1, num_channels as i32, 1, 1]
+                )?,
+                cudnn2::ActivationDescriptor::relu()?,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[n, num_channels as i32, 19, 19]
+                )?
+            )?,
+
+            conv_2: cudnn2::ConvolutionBiasActivation::new(
+                handle,
+                gate_t,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[n, num_channels as i32, 19, 19]
+                )?,
+                cudnn2::FilterDescriptor::new(
+                    cudnn2::DataType::Half,
+                    cudnn2::TensorFormat::NHWC,
+                    &[num_channels as i32, num_channels as i32, 3, 3]
+                )?,
+                cudnn2::ConvolutionDescriptor::new(
+                    &[1, 1],
+                    &[1, 1],
+                    &[1, 1],
+                    cudnn2::ConvolutionMode::CrossCorrelation,
+                    if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
+                )?,
+                1.0 - gate_t,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[1, num_channels as i32, 1, 1]
+                )?,
+                cudnn2::ActivationDescriptor::relu()?,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[n, num_channels as i32, 19, 19]
+                )?
+            )?,
+
+            gate_t: gate_t,
             num_channels: num_channels as usize,
-
             count: i,
-
-            gate_c: gate_c,
-            gate_t: gate_t
         }))
     }
 
@@ -471,7 +474,7 @@ impl ResidualLayer {
         if offset_2.copy_to_device(device_id, *workspace.tower_stream)? {
             check!(cudnn::cudnnScaleTensor(
                 *workspace.handle_dnn,
-                *self.offset, offset_2.get(device_id),
+                **self.conv_1.offset(), offset_2.get(device_id),
                 &self.gate_t
             ))?;
         }
@@ -479,56 +482,41 @@ impl ResidualLayer {
         debug_assert!(offset_1.size_in_elements == offset_2.size_in_elements);
 
         // perform the forward convolution (1)
-        let workspace_r = slots.get_slot(Slot::Workspace_r, self.fwd_algo.memory(), *workspace.tower_stream)?;
+        let workspace_r = slots.get_slot(Slot::Workspace_r, self.conv_1.fwd_algo_perf().memory(), *workspace.tower_stream)?;
         let residual_2_size = size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361;
         let residual_2 = slots.get_slot(Slot::Residual_2, residual_2_size, *workspace.tower_stream)?;
 
-        check!(cudnn::cudnnConvolutionBiasActivationForward(
-            *workspace.handle_dnn,
-            &ONE,
-            *self.tensor, *input,
-            *self.filter, weights_1.get(device_id),
-            *self.descr, transmute(self.fwd_algo.algo()),
-            *workspace_r, self.fwd_algo.memory(),
-            &ZERO,
-            *self.tensor, *residual_2,
-            *self.offset, offset_1.get(device_id),
-            *self.relu,
-            *self.tensor, *residual_2
-        ))?;
+        self.conv_1.forward(
+            &workspace.handle_dnn,
+            *input,
+            weights_1.get(device_id),
+            *workspace_r, self.conv_1.fwd_algo_perf().memory(),
+            *residual_2,
+            offset_1.get(device_id),
+            *residual_2
+        )?;
 
-        // perform the forward convolution (2)
-        check!(cudnn::cudnnConvolutionBiasActivationForward(
-            *workspace.handle_dnn,
-            &self.gate_t,
-            *self.tensor, *residual_2,
-            *self.filter, weights_2.get(device_id),
-            *self.descr, transmute(self.fwd_algo.algo()),
-            *workspace_r, self.fwd_algo.memory(),
-            &self.gate_c,
-            *self.tensor, *input,
-            *self.offset, offset_2.get(device_id),
-            *self.relu,
-            *self.tensor, *input
-        ))?;
+        self.conv_2.forward(
+            &workspace.handle_dnn,
+            *residual_2,
+            weights_2.get(device_id),
+            *workspace_r, self.conv_2.fwd_algo_perf().memory(),
+            *input,
+            offset_2.get(device_id),
+            *input
+        )?;
 
         Ok(input)
     }
 }
 
 struct ValueLayer {
-    input: cudnn2::TensorDescriptor,
-    offset: cudnn2::TensorDescriptor,
-    filter: cudnn2::FilterDescriptor,
-    relu: cudnn2::ActivationDescriptor,
-    descr: cudnn2::ConvolutionDescriptor,
-    fwd_algo: cudnn2::ConvolutionFwdAlgoPerf,
-
-    value_1: cudnn2::TensorDescriptor,
+    conv_1: cudnn2::ConvolutionBiasActivation,
     value_2: cudnn2::TensorDescriptor,
     value_3: cudnn2::TensorDescriptor,
     bias_1: cudnn2::TensorDescriptor,
     bias_2: cudnn2::TensorDescriptor,
+    relu: cudnn2::ActivationDescriptor,
     tanh: cudnn2::ActivationDescriptor,
 
     count: usize
@@ -549,34 +537,7 @@ impl ValueLayer {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
-        let input = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[n, num_channels, 19, 19]
-        )?;
-        let offset = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[1, 2, 1, 1]
-        )?;
-        let filter = cudnn2::FilterDescriptor::new(
-            cudnn2::DataType::Half,
-            cudnn2::TensorFormat::NHWC,
-            &[2, num_channels, 1, 1]
-        )?;
         let relu = cudnn2::ActivationDescriptor::relu()?;
-        let descr = cudnn2::ConvolutionDescriptor::new(
-            &[0, 0],
-            &[1, 1],
-            &[1, 1],
-            cudnn2::ConvolutionMode::CrossCorrelation,
-            if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-        )?;
-        let value_1 = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[n, 2, 19, 19]
-        )?;
         let value_2 = cudnn2::TensorDescriptor::new(
             cudnn2::TensorFormat::NHWC,
             cudnn2::DataType::Half,
@@ -598,26 +559,46 @@ impl ValueLayer {
             &[1, 1, 1, 1]
         )?;
         let tanh = cudnn2::ActivationDescriptor::tanh()?;
-        let fwd_algo = cudnn2::ConvolutionFwdAlgoPerf::new(
-            &handle,
-            &input,
-            &filter,
-            &descr,
-            &value_1
-        )?;
 
         Ok(ValueLayer {
-            input,
-            offset,
-            filter,
-            relu,
-            descr,
-            value_1,
+            conv_1: cudnn2::ConvolutionBiasActivation::new(
+                handle,
+                1.0,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[n, num_channels, 19, 19]
+                )?,
+                cudnn2::FilterDescriptor::new(
+                    cudnn2::DataType::Half,
+                    cudnn2::TensorFormat::NHWC,
+                    &[2, num_channels, 1, 1]
+                )?,
+                cudnn2::ConvolutionDescriptor::new(
+                    &[0, 0],
+                    &[1, 1],
+                    &[1, 1],
+                    cudnn2::ConvolutionMode::CrossCorrelation,
+                    if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
+                )?,
+                0.0,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[1, 2, 1, 1]
+                )?,
+                cudnn2::ActivationDescriptor::relu()?,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[n, 2, 19, 19]
+                )?
+            )?,
             value_2,
             value_3,
             bias_1,
             bias_2,
-            fwd_algo,
+            relu,
             tanh,
             count: i
         })
@@ -651,22 +632,18 @@ impl ValueLayer {
         offset_3.copy_to_device(device_id, *workspace.value_stream)?;
 
         // perform the forward convolution
-        let workspace_v = slots.get_slot(Slot::Workspace_v, self.fwd_algo.memory(), *workspace.value_stream)?;
+        let workspace_v = slots.get_slot(Slot::Workspace_v, self.conv_1.fwd_algo_perf().memory(), *workspace.value_stream)?;
         let value_1 = slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 722, *workspace.value_stream)?;
 
-        check!(cudnn::cudnnConvolutionBiasActivationForward(
-            *workspace.handle_dnn,
-            &ONE,
-            *self.input, **input,
-            *self.filter, weights_1.get(device_id),
-            *self.descr, transmute(self.fwd_algo.algo()),
-            *workspace_v, self.fwd_algo.memory(),
-            &ZERO,
-            *self.value_1, *value_1,
-            *self.offset, offset_1.get(device_id),
-            *self.relu,
-            *self.value_1, *value_1
-        ))?;
+        self.conv_1.forward(
+            &workspace.handle_dnn,
+            **input,
+            weights_1.get(device_id),
+            *workspace_v, self.conv_1.fwd_algo_perf().memory(),
+            *value_1,
+            offset_1.get(device_id),
+            *value_1
+        )?;
 
         load_output::<T::Output>(output_set, output_map, Output::ValueDown, *value_1, workspace.batch_size * 722, *workspace.value_stream)?;
 
@@ -734,18 +711,9 @@ impl ValueLayer {
 }
 
 struct PolicyLayer {
-    input: cudnn2::TensorDescriptor,
-    offset: cudnn2::TensorDescriptor,
-    filter: cudnn2::FilterDescriptor,
-    relu: cudnn2::ActivationDescriptor,
-    descr: cudnn2::ConvolutionDescriptor,
-    fwd_algo: cudnn2::ConvolutionFwdAlgoPerf,
-
-    bias: cudnn2::TensorDescriptor,
-
-    policy_1: cudnn2::TensorDescriptor,
+    conv_1: cudnn2::ConvolutionBiasActivation,
     policy_2: cudnn2::TensorDescriptor,
-
+    offset_2: cudnn2::TensorDescriptor,
     count: usize
 }
 
@@ -764,62 +732,53 @@ impl PolicyLayer {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
-        let input = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[n, num_channels as i32, 19, 19]
-        )?;
-        let offset = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[1, 4, 1, 1]
-        )?;
-        let filter = cudnn2::FilterDescriptor::new(
-            cudnn2::DataType::Half,
-            cudnn2::TensorFormat::NHWC,
-            &[4, num_channels as i32, 1, 1]
-        )?;
-        let descr = cudnn2::ConvolutionDescriptor::new(
-            &[0, 0],
-            &[1, 1],
-            &[1, 1],
-            cudnn2::ConvolutionMode::CrossCorrelation,
-            if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-        )?;
-        let bias = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[1, 362, 1, 1]
-        )?;
-        let policy_1 = cudnn2::TensorDescriptor::new(
-            cudnn2::TensorFormat::NHWC,
-            cudnn2::DataType::Half,
-            &[n, 4, 19, 19]
-        )?;
         let policy_2 = cudnn2::TensorDescriptor::new(
             cudnn2::TensorFormat::NHWC,
             cudnn2::DataType::Half,
             &[n, 362, 1, 1]
         )?;
-        let fwd_algo = cudnn2::ConvolutionFwdAlgoPerf::new(
-            &handle,
-            &input,
-            &filter,
-            &descr,
-            &policy_1
+        let offset_2 = cudnn2::TensorDescriptor::new(
+            cudnn2::TensorFormat::NHWC,
+            cudnn2::DataType::Half,
+            &[1, 362, 1, 1]
         )?;
-        let relu = cudnn2::ActivationDescriptor::relu()?;
 
         Ok(PolicyLayer {
-            input,
-            offset,
-            filter,
-            relu,
-            descr,
-            fwd_algo,
-            bias,
-            policy_1,
+            conv_1: cudnn2::ConvolutionBiasActivation::new(
+                handle,
+                1.0,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[n, num_channels as i32, 19, 19]
+                )?,
+                cudnn2::FilterDescriptor::new(
+                    cudnn2::DataType::Half,
+                    cudnn2::TensorFormat::NHWC,
+                    &[4, num_channels as i32, 1, 1]
+                )?,
+                cudnn2::ConvolutionDescriptor::new(
+                    &[0, 0],
+                    &[1, 1],
+                    &[1, 1],
+                    cudnn2::ConvolutionMode::CrossCorrelation,
+                    if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
+                )?,
+                0.0,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[1, 4, 1, 1]
+                )?,
+                cudnn2::ActivationDescriptor::relu()?,
+                cudnn2::TensorDescriptor::new(
+                    cudnn2::TensorFormat::NHWC,
+                    cudnn2::DataType::Half,
+                    &[n, 4, 19, 19]
+                )?
+            )?,
             policy_2,
+            offset_2,
             count: i
         })
     }
@@ -848,22 +807,18 @@ impl PolicyLayer {
         weights_2.copy_to_device(device_id, *workspace.policy_stream)?;
 
         // perform the forward convolution
-        let workspace_p = slots.get_slot(Slot::Workspace_p, self.fwd_algo.memory(), *workspace.policy_stream)?;
+        let workspace_p = slots.get_slot(Slot::Workspace_p, self.conv_1.fwd_algo_perf().memory(), *workspace.policy_stream)?;
         let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 1444, *workspace.policy_stream)?;
 
-        check!(cudnn::cudnnConvolutionBiasActivationForward(
-            *workspace.handle_dnn,
-            &ONE,
-            *self.input, **input,
-            *self.filter, weights_1.get(device_id),
-            *self.descr, transmute(self.fwd_algo.algo()),
-            *workspace_p, self.fwd_algo.memory(),
-            &ZERO,
-            *self.policy_1, *policy_1,
-            *self.offset, offset_1.get(device_id),
-            *self.relu,
-            *self.policy_1, *policy_1
-        ))?;
+        self.conv_1.forward(
+            &workspace.handle_dnn,
+            **input,
+            weights_1.get(device_id),
+            *workspace_p, self.conv_1.fwd_algo_perf().memory(),
+            *policy_1,
+            offset_1.get(device_id),
+            *policy_1
+        )?;
 
         load_output::<T::Output>(output_set, output_map, Output::PolicyDown, *policy_1, workspace.batch_size * 1444, *workspace.policy_stream)?;
 
@@ -892,7 +847,7 @@ impl PolicyLayer {
 
         check!(cudnn::cudnnAddTensor(
             *workspace.handle_dnn,
-            &*TAU, *self.bias, offset_2.get(device_id),
+            &*TAU, *self.offset_2, offset_2.get(device_id),
             &*TAU, *self.policy_2, *policy_2
         ))?;
 

@@ -14,6 +14,7 @@
 
 mod activation_descriptor;
 mod activation_mode;
+mod convolution_bias_activation;
 mod convolution_descriptor;
 mod convolution_fwd_algo;
 mod convolution_fwd_algo_perf;
@@ -31,6 +32,7 @@ mod version;
 
 pub use self::activation_descriptor::*;
 pub use self::activation_mode::*;
+pub use self::convolution_bias_activation::*;
 pub use self::convolution_descriptor::*;
 pub use self::convolution_fwd_algo::*;
 pub use self::convolution_fwd_algo_perf::*;
