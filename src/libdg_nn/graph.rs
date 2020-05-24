@@ -215,7 +215,7 @@ fn create_filter_descriptor_3x3(num_outputs: i32, num_inputs: i32) -> Result<cud
 fn create_filter_descriptor_1x1(num_outputs: i32, num_inputs: i32) -> Result<cudnn2::FilterDescriptor, cudnn2::Status> {
     cudnn2::FilterDescriptor::new(
         cudnn2::DataType::Half,
-        cudnn2::TensorFormat::NHWC,
+        cudnn2::TensorFormat::NCHW,
         &[num_outputs, num_inputs, 1, 1]
     )
 }
@@ -228,6 +228,18 @@ fn create_convolution_descriptor_3x3() -> Result<cudnn2::ConvolutionDescriptor, 
         &[1, 1],
         cudnn2::ConvolutionMode::CrossCorrelation,
         if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
+    )
+}
+
+/// Returns a `ConvolutionDescriptor` for a one wide and high filter using a
+/// 32-bit compute type.
+fn create_convolution_descriptor_1x1_float() -> Result<cudnn2::ConvolutionDescriptor, cudnn2::Status> {
+    cudnn2::ConvolutionDescriptor::new(
+        &[0, 0],
+        &[1, 1],
+        &[1, 1],
+        cudnn2::ConvolutionMode::CrossCorrelation,
+        cudnn2::DataType::Float
     )
 }
 
@@ -275,6 +287,7 @@ fn create_convolution_bias_activation_3x3(
         create_tensor_descriptor(batch_size, num_outputs)?
     )
 }
+
 /// Returns a `ConvolutionBiasActivation` for a one wide and high
 /// convolution, add bias, and activation operation for the given
 /// `batch_size`, `num_outputs`, and `num_inputs`.
@@ -309,6 +322,40 @@ fn create_convolution_bias_activation_1x1(
     )
 }
 
+/// Returns a `ConvolutionBiasActivation` for a one wide and high
+/// convolution, add bias, and activation operation for the given
+/// `batch_size`, `num_outputs`, and `num_inputs`.
+/// 
+/// # Arguments
+/// 
+/// * `handle` -
+/// * `batch_size` -
+/// * `num_outputs` -
+/// * `num_inputs` - 
+/// 
+fn create_dense_bias(
+    handle: &cudnn2::Handle,
+    batch_size: i32,
+    num_outputs: i32,
+    num_inputs: i32,
+    alpha: &[f32]
+) -> Result<cudnn2::ConvolutionBiasActivation, cudnn2::Status>
+{
+    debug_assert_eq!(alpha.len(), 2);
+
+    cudnn2::ConvolutionBiasActivation::new(
+        handle,
+        alpha[0],
+        create_dense_descriptor(batch_size, num_inputs)?,
+        create_filter_descriptor_1x1(num_outputs, num_inputs)?,
+        create_convolution_descriptor_1x1_float()?,
+        alpha[1],
+        create_offset_descriptor(num_outputs)?,
+        cudnn2::ActivationDescriptor::identity()?,
+        create_dense_descriptor(batch_size, num_outputs)?
+    )
+}
+
 /// Returns a `Softmax` structure for the given `batch_size` and `num_channels`.
 /// 
 /// # Arguments
@@ -321,6 +368,31 @@ fn create_softmax(batch_size: i32, num_channels: i32) -> Result<cudnn2::Softmax,
         cudnn2::SoftmaxMode::Instance,
         create_dense_descriptor(batch_size, num_channels)?,
         create_dense_descriptor(batch_size, num_channels)?,
+        &[1.0, 0.0]
+    )
+}
+
+/// Returns a `Transform` structure that transposes a 2D tensor with the given
+/// `num_outputs` and `num_inputs` from the shape `[num_inputs, num_outputs]` to
+/// `[num_outputs, num_inputs]`.
+/// 
+/// # Arguments
+/// 
+/// * `num_outputs` -
+/// * `num_inputs` -
+/// 
+fn create_dense_transpose(num_outputs: i32, num_inputs: i32) -> Result<cudnn2::Transform, cudnn2::Status> {
+    cudnn2::Transform::new(
+        cudnn2::TensorDescriptor::new_ex(
+            cudnn2::DataType::Half,
+            &[num_outputs, num_inputs, 1, 1],
+            &[1, num_outputs, 1, 1],
+        )?,
+        cudnn2::TensorDescriptor::new_ex(
+            cudnn2::DataType::Half,
+            &[num_outputs, num_inputs, 1, 1],
+            &[num_inputs, 1, 1, 1],
+        )?,
         &[1.0, 0.0]
     )
 }
@@ -740,10 +812,11 @@ impl ValueLayer {
 
 struct PolicyLayer {
     conv_1: cudnn2::ConvolutionBiasActivation,
-    policy_2: cudnn2::TensorDescriptor,
-    offset_2: cudnn2::TensorDescriptor,
-    softmax_3: cudnn2::Softmax,
-    count: usize
+    conv_2: cudnn2::ConvolutionBiasActivation,
+    transpose: cudnn2::Transform,
+    softmax: cudnn2::Softmax,
+    scale_tau: cudnn2::Scale,
+    count: usize,
 }
 
 impl PolicyLayer {
@@ -761,13 +834,15 @@ impl PolicyLayer {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
+        let tau = 1.0 / *config::SOFTMAX_TEMPERATURE;
 
         Ok(PolicyLayer {
             conv_1: create_convolution_bias_activation_1x1(handle, n, 4, num_channels, &[1.0, 0.0])?,
-            policy_2: create_dense_descriptor(n, 362)?,
-            offset_2: create_offset_descriptor(362)?,
-            softmax_3: create_softmax(n, 362)?,
-            count: i
+            conv_2: create_dense_bias(handle, n, 362, 1444, &[tau, 0.0])?,
+            transpose: create_dense_transpose(362, 1444)?,
+            softmax: create_softmax(n, 362)?,
+            scale_tau: cudnn2::Scale::new(create_offset_descriptor(362)?, tau)?,
+            count: i,
         })
     }
 
@@ -781,21 +856,37 @@ impl PolicyLayer {
     ) -> Result<SlotGuard<'a>, Error>
     {
         workspace.handle_dnn.set_stream(&workspace.policy_stream)?;
-        check!(cublas::cublasSetStream_v2(workspace.handle_blas, *workspace.policy_stream))?;
 
         let device_id = get_current_device()?;
         let weights_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1:0", self.count)];
         let weights_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1:0", self.count)];
         let offset_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1/offset:0", self.count)];
         let offset_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1/offset:0", self.count)];
+        let workspace_p_size = self.conv_1.fwd_algo_perf().memory().max(self.conv_2.fwd_algo_perf().memory()).max(weights_2.size_in_bytes);
+        let workspace_p = slots.get_slot(Slot::Workspace_p, workspace_p_size, *workspace.policy_stream)?;
 
         offset_1.copy_to_device(device_id, *workspace.policy_stream)?;
-        offset_2.copy_to_device(device_id, *workspace.policy_stream)?;
+        if offset_2.copy_to_device(device_id, *workspace.policy_stream)? {
+            self.scale_tau.forward(&workspace.handle_dnn, offset_2.get(device_id))?;
+        }
         weights_1.copy_to_device(device_id, *workspace.policy_stream)?;
-        weights_2.copy_to_device(device_id, *workspace.policy_stream)?;
+        if weights_2.copy_to_device(device_id, *workspace.policy_stream)? {
+            self.transpose.forward(
+                &workspace.handle_dnn,
+                weights_2.get(device_id),
+                *workspace_p
+            )?;
+
+            check!(cuda::cudaMemcpyAsync(
+                weights_2.get(device_id),
+                *workspace_p,
+                weights_2.size_in_bytes,
+                cuda::MemcpyKind::DeviceToDevice,
+                *workspace.policy_stream
+            ))?;
+        }
 
         // perform the forward convolution
-        let workspace_p = slots.get_slot(Slot::Workspace_p, self.conv_1.fwd_algo_perf().memory(), *workspace.policy_stream)?;
         let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 1444, *workspace.policy_stream)?;
 
         self.conv_1.forward(
@@ -814,33 +905,18 @@ impl PolicyLayer {
         let policy_2 = slots.get_slot(Slot::Policy_2, size_of::<T::Output>() * workspace.batch_size * 362, *workspace.policy_stream)?;
         let policy_3 = slots.get_slot(Slot::Policy_3, size_of::<T::Output>() * workspace.batch_size * 362, *workspace.policy_stream)?;
 
-        check!(cublas::cublasGemmEx(
-            workspace.handle_blas,
-            cublas::Operation::N,
-            cublas::Operation::N,
-            362, workspace.batch_size as i32, 1444,  // output, batch_size, input
-            &ONE as *const f32 as *const c_void,
-            weights_2.get(device_id), cuda::DataType::R16F, 362,  // input_2
-            *policy_1, cuda::DataType::R16F, 1444,  // input_1
-            &ZERO as *const f32 as *const c_void,
-            *policy_2, cuda::DataType::R16F, 362,  // output
-            cuda::DataType::R32F, cublas::GemmAlgo::DfaltTensorOp
-        ))?;
-
-        // apply the softmax temperature at the _add tensor_ layer since the cuDNN
-        // _softmax_ primitive does not support it directly.
-        lazy_static! {
-            static ref TAU: f32 = 1.0 / *config::SOFTMAX_TEMPERATURE;
-        }
-
-        check!(cudnn::cudnnAddTensor(
-            *workspace.handle_dnn,
-            &*TAU, *self.offset_2, offset_2.get(device_id),
-            &*TAU, *self.policy_2, *policy_2
-        ))?;
+        self.conv_2.forward(
+            &workspace.handle_dnn,
+            *policy_1,
+            weights_2.get(device_id),
+            *workspace_p, self.conv_2.fwd_algo_perf().memory(),
+            *policy_2,
+            offset_2.get(device_id),
+            *policy_2
+        )?;
 
         // softmax activation
-        self.softmax_3.forward(&workspace.handle_dnn, *policy_2, *policy_3)?;
+        self.softmax.forward(&workspace.handle_dnn, *policy_2, *policy_3)?;
 
         Ok(policy_3)
     }

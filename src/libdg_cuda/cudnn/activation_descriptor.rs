@@ -128,6 +128,14 @@ impl ActivationDescriptor {
         )
     }
 
+    pub fn identity() -> Result<Self, Status> {
+        Self::new(
+            ActivationMode::Identity,
+            NanPropagation::NotPropagateNaN,
+            0.0
+        )
+    }
+
     pub fn coef(&self) -> Result<f64, Status> {
         GetActivationDescriptor::new(self.act_desc).map(|out| out.coef)
     }

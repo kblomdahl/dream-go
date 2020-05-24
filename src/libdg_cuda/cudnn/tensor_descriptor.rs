@@ -34,6 +34,18 @@ extern {
         h: c_int,
         w: c_int
     ) -> cudnnStatus_t;
+    fn cudnnSetTensor4dDescriptorEx(
+        tensor_desc: cudnnTensorDescriptor_t,
+        data_type: cudnnDataType_t,
+        n: c_int,
+        c: c_int,
+        h: c_int,
+        w: c_int,
+        n_stride: c_int,
+        c_stride: c_int,
+        h_stride: c_int,
+        w_stride: c_int
+    ) -> cudnnStatus_t;
     fn cudnnGetTensor4dDescriptor(
         tensor_desc: cudnnTensorDescriptor_t,
         data_type: *mut cudnnDataType_t,
@@ -152,6 +164,45 @@ impl TensorDescriptor {
                         shape[1],
                         shape[2],
                         shape[3]
+                    )
+                };
+
+            status.into_result(out)
+        })
+    }
+
+    /// Returns a tensor descriptor created by `cudnnSetTensor4dDescriptorEx()`
+    /// with the given `format`, `data_type`, `shape`, and `stride`.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `data_type` -
+    /// * `shape` - Shape in NCHW order.
+    /// * `stride` -
+    /// 
+    pub fn new_ex(
+        data_type: DataType,
+        shape: &[i32],
+        stride: &[i32],
+    ) -> Result<Self, Status>
+    {
+        debug_assert_eq!(shape.len(), 4);
+        debug_assert_eq!(stride.len(), 4);
+
+        Self::empty().and_then(|out| {
+            let status =
+                unsafe {
+                    cudnnSetTensor4dDescriptorEx(
+                        out.tensor_desc,
+                        data_type,
+                        shape[0],
+                        shape[1],
+                        shape[2],
+                        shape[3],
+                        stride[0],
+                        stride[1],
+                        stride[2],
+                        stride[3],
                     )
                 };
 

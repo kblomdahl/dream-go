@@ -114,7 +114,7 @@ impl FilterDescriptor {
     /// * `K` is the number of output feature maps
     /// * `C` is the number of input feature maps
     /// * `R` is the number of rows per filter
-    /// * `C` is the number of columns per filter
+    /// * `S` is the number of columns per filter
     /// 
     /// # Arguments
     /// 

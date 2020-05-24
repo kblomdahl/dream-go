@@ -122,21 +122,7 @@ impl ConvolutionDescriptor {
         let mut out = Self { conv_desc: ptr::null_mut() };
         let status = unsafe { cudnnCreateConvolutionDescriptor(&mut out.conv_desc) };
 
-        status.into_result(out).and_then(|out| {
-            if supports_tensor_cores()? {
-                let status =
-                    unsafe {
-                        cudnnSetConvolutionMathType(
-                            out.conv_desc,
-                            MathType::TensorOpMath
-                        )
-                    };
-
-                status.into_result(out)
-            } else {
-                Ok(out)
-            }
-        })
+        status.into_result(out)
     }
 
     pub fn new(
@@ -167,8 +153,25 @@ impl ConvolutionDescriptor {
                     )
                 };
 
+            out.set_math_type()?;
             status.into_result(out)
         })
+    }
+
+    fn set_math_type(&self) -> Result<MathType, Status> {
+        if supports_tensor_cores()? {
+            let status =
+                unsafe {
+                    cudnnSetConvolutionMathType(
+                        self.conv_desc,
+                        MathType::TensorOpMath
+                    )
+                };
+
+            status.into_result(MathType::TensorOpMath)
+        } else {
+            Ok(MathType::DefaultMath)
+        }
     }
 
     pub fn math_type(&self) -> Result<MathType, Status> {

@@ -32,6 +32,7 @@ mod softmax_algorithm;
 mod softmax_mode;
 mod tensor_descriptor;
 mod tensor_format;
+mod transform_tensor;
 mod version;
 
 pub use self::activation_descriptor::*;
@@ -54,4 +55,5 @@ pub use self::softmax_algorithm::*;
 pub use self::softmax_mode::*;
 pub use self::tensor_descriptor::*;
 pub use self::tensor_format::*;
+pub use self::transform_tensor::*;
 pub use self::version::*;
