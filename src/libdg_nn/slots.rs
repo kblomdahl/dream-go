@@ -31,7 +31,6 @@ pub enum Slot {
     Policy_3 = 3,
     Value_1 = 4,
     Value_2 = 5,
-    Value_3 = 6,
     Residual_1 = 7,
     Residual_2 = 8,
     Workspace_1 = 9,  // workspace for tower head

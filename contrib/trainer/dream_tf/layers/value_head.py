@@ -31,38 +31,21 @@ def value_head(x, mode, params):
     """
     The value head attached after the residual blocks as described by DeepMind:
 
-    1. A convolution of 1 filter of kernel size 1 × 1 with stride 1
+    1. A convolution of 1 filter of kernel size 5 × 5 with stride 1
     2. Batch normalisation
-    3. A rectifier non-linearity
-    4. A fully connected linear layer to a hidden layer of size 256
-    5. A rectifier non-linearity
-    6. A fully connected linear layer to a scalar
-    7. A tanh non-linearity outputting a scalar in the range [-1, 1]
+    3. A global average pooling layer
+    4. A tanh non-linearity outputting a scalar in the range [-1, 1]
     """
     init_op = orthogonal_initializer()
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
 
-    conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 2), tf.float32, init_op, constraint=normalize_constraint, regularizer=l2_regularizer, use_resource=True)
-    linear_1 = tf.get_variable('linear_1', (722, 256), tf.float32, init_op, regularizer=l2_regularizer, use_resource=True)
-    linear_2 = tf.get_variable('linear_2', (256, 1), tf.float32, init_op, regularizer=l2_regularizer, use_resource=True)
-    offset_1 = tf.get_variable('linear_1/offset', (256,), tf.float32, zeros_op, use_resource=True)
-    offset_2 = tf.get_variable('linear_2/offset', (1,), tf.float32, zeros_op, use_resource=True)
-
-    tf.add_to_collection(DUMP_OPS, [linear_1, linear_1, 'f2'])
-    tf.add_to_collection(DUMP_OPS, [linear_2, linear_2, 'f2'])
-    tf.add_to_collection(DUMP_OPS, [offset_1, offset_1, 'f2'])
-    tf.add_to_collection(DUMP_OPS, [offset_2, offset_2, 'f2'])
+    conv_1 = tf.get_variable('conv_1', (5, 5, num_channels, 1), tf.float32, init_op, constraint=normalize_constraint, regularizer=l2_regularizer, use_resource=True)
 
     def _forward(x, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """
         y = batch_norm(conv2d(x, conv_1), conv_1, mode, params, is_recomputing=is_recomputing)
-        y = tf.nn.relu(y)
-
-        y = tf.reshape(y, (-1, 722))
-        y = tf.matmul(y, cast_to_compute_type(linear_1)) + cast_to_compute_type(offset_1)
-        y = tf.nn.relu(y)
-        y = tf.matmul(y, cast_to_compute_type(linear_2)) + cast_to_compute_type(offset_2)
+        y = tf.reduce_mean(y, [1, 2], keepdims=False)
 
         return tf.cast(tf.nn.tanh(y), tf.float32)
 
