@@ -99,6 +99,7 @@ dependencies = [
 name = "dg_tests"
 version = "0.0.0"
 dependencies = [
+ "dg_cuda 0.0.0",
  "dg_go 0.0.0",
  "dg_mcts 0.0.0",
  "dg_nn 0.0.0",

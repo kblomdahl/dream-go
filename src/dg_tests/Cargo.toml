@@ -6,6 +6,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+dg_cuda = { path = "../libdg_cuda"}
 dg_go = { path = "../libdg_go"}
 dg_mcts = { path = "../libdg_mcts"}
 dg_nn = { path = "../libdg_nn"}

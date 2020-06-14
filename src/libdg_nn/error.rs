@@ -14,25 +14,14 @@
 
 use dg_cuda as cuda2;
 use dg_cuda::cudnn as cudnn2;
-use super::ffi::{cudnn, cuda, cublas};
+use super::ffi::cuda;
 
 #[derive(Debug)]
 pub enum Error {
-    CuDNN(cudnn::Status),
     CuDNN2(cudnn2::Status),
     Cuda(cuda::Error),
     Cuda2(cuda2::Error),
-    CuBLAS(cublas::Status),
     MissingWeights
-}
-
-impl From<cublas::Status> for Error {
-    fn from(s: cublas::Status) -> Error {
-        match s {
-            cublas::Status::Success => unreachable!(),
-            other => Error::CuBLAS(other)
-        }
-    }
 }
 
 impl From<cuda::Error> for Error {
@@ -48,15 +37,6 @@ impl From<cuda2::Error> for Error {
     fn from(s: cuda2::Error) -> Error {
         match s {
             other => Error::Cuda2(other)
-        }
-    }
-}
-
-impl From<cudnn::Status> for Error {
-    fn from(s: cudnn::Status) -> Error {
-        match s {
-            cudnn::Status::Success => unreachable!(),
-            other => Error::CuDNN(other)
         }
     }
 }

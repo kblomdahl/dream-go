@@ -13,8 +13,9 @@
 // limitations under the License.
 #![feature(test)]
 
-extern crate dg_nn;
+extern crate dg_cuda;
 extern crate dg_utils;
+extern crate dg_nn;
 extern crate test;
 extern crate libc;
 
@@ -22,6 +23,7 @@ use std::ptr;
 use test::Bencher;
 use libc::{c_void};
 
+use dg_cuda::cudnn;
 use dg_nn::ffi::*;
 use dg_utils::types::*;
 
@@ -59,102 +61,73 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     tensor_format: cudnn::TensorFormat,
     data_type: cudnn::DataType,
     offset_type: cudnn::DataType,
-    conv_algo: cudnn::ConvolutionFwdAlgo,
     conv_type: cudnn::DataType
-)
+) -> Result<(), cudnn::Status>
     where f32: From<T>
 {
-    let mut handle: cudnn::Handle = ptr::null_mut();
+    let handle: cudnn::Handle = cudnn::Handle::new()?;
     const BATCH_SIZE: usize = 16;
 
-    assert!(cudnn::cudnnCreate(&mut handle).is_ok());
-
     // the a input description that match the given configuration
-    let mut inout_desc: cudnn::TensorDescriptor = ptr::null_mut();
-
-    assert!(cudnn::cudnnCreateTensorDescriptor(&mut inout_desc).is_ok());
-    assert!(cudnn::cudnnSetTensor4dDescriptor(
-        inout_desc,
+    let in_desc = cudnn::TensorDescriptor::new(
         tensor_format,
         data_type,
-        BATCH_SIZE as i32, num_features as i32, 19, 19
-    ).is_ok());
+        &[BATCH_SIZE as i32, num_features as i32, 19, 19]
+    )?;
+    let out_desc = cudnn::TensorDescriptor::new(
+        tensor_format,
+        data_type,
+        &[BATCH_SIZE as i32, num_features as i32, 19, 19]
+    )?;
 
     // the a bias description that match the given configuration
-    let mut offset_desc: cudnn::TensorDescriptor = ptr::null_mut();
-
-    assert!(cudnn::cudnnCreateTensorDescriptor(&mut offset_desc).is_ok());
-    assert!(cudnn::cudnnSetTensor4dDescriptor(
-        offset_desc,
-        if tensor_format == cudnn::TensorFormat::NCHWVECTC { cudnn::TensorFormat::NCHW } else { tensor_format },
+    let offset_desc = cudnn::TensorDescriptor::new(
+        if tensor_format == cudnn::TensorFormat::NCHW_VECT_C { cudnn::TensorFormat::NCHW } else { tensor_format },
         offset_type,
-        1, num_features as i32, 1, 1
-    ).is_ok());
+        &[1, num_features as i32, 1, 1]
+    )?;
 
     // the a convolutional description that match the given configuration
-    let mut conv_desc: cudnn::ConvolutionDescriptor = ptr::null_mut();
-
-    assert!(cudnn::cudnnCreateConvolutionDescriptor(&mut conv_desc).is_ok());
-    assert!(cudnn::cudnnSetConvolution2dDescriptor(
-        conv_desc,
-        1, 1, 1, 1, 1, 1,
+    let conv_desc = cudnn::ConvolutionDescriptor::new(
+        &[1, 1],
+        &[1, 1],
+        &[1, 1],
         cudnn::ConvolutionMode::CrossCorrelation,
         conv_type
-    ).is_ok());
-
-    #[cfg(feature = "tensor-core")]
-    {
-        assert!(cudnn::cudnnSetConvolutionMathType(conv_desc, cudnn::MathType::TensorOpMath).is_ok());
-    }
+    )?;
 
     // the relu descriptor
-    let mut relu: cudnn::ActivationDescriptor = ptr::null_mut();
-
-    assert!(cudnn::cudnnCreateActivationDescriptor(&mut relu).is_ok());
-    assert!(cudnn::cudnnSetActivationDescriptor(
-        relu,
-        cudnn::ActivationMode::Relu,
-        cudnn::NanPropagation::NotPropagateNan,
-        0.0
-    ).is_ok());
+    let relu = cudnn::ActivationDescriptor::relu()?;
 
     // create a 3x3 filter description of the given data type
-    let mut filter_desc: cudnn::FilterDescriptor = ptr::null_mut();
-
-    assert!(cudnn::cudnnCreateFilterDescriptor(&mut filter_desc).is_ok());
-    assert!(cudnn::cudnnSetFilter4dDescriptor(
-        filter_desc,
+    let filter_desc = cudnn::FilterDescriptor::new(
         data_type,
         tensor_format,
-        num_features as i32, num_features as i32, 3, 3
-    ).is_ok());
+        &[num_features as i32, num_features as i32, 3, 3]
+    )?;
 
     // figure out how large of a workspace we need given the convolution
     // configuration.
-    let mut workspace_size: usize = 0;
     let mut workspace = ptr::null_mut();
+    let fwd_algo_perf = cudnn::ConvolutionFwdAlgoPerf::new(
+        &handle,
+        &in_desc,
+        &filter_desc,
+        &conv_desc,
+        &out_desc
+    )?;
 
-    assert!(cudnn::cudnnGetConvolutionForwardWorkspaceSize(
-        handle,
-        inout_desc,
-        filter_desc,
-        conv_desc,
-        inout_desc,
-        conv_algo,
-        &mut workspace_size
-    ).is_ok());
-
-    assert!(cuda::cudaMalloc(&mut workspace, workspace_size).is_ok());
+    assert!(cuda::cudaMalloc(&mut workspace, fwd_algo_perf.memory()).is_ok());
 
     // allocate the `input` array and initialize it with ones.
     let mut input = ptr::null_mut();
-    let input_size = BATCH_SIZE * num_features * 361;
+    let input_size = BATCH_SIZE * num_features * 19 * 19;
 
-    assert!(cuda::cudaMalloc(&mut input, data_type.size() * input_size).is_ok());
+    assert!(cuda::cudaMalloc(&mut input, in_desc.size_in_bytes()?).is_ok());
     assert!(cuda::cudaMemcpy(
         input,
         vec! [T::from(1.0); input_size].as_ptr() as *const c_void,
-        data_type.size() * input_size,
+        in_desc.size_in_bytes()?,
         cuda::MemcpyKind::HostToDevice
     ).is_ok());
 
@@ -162,11 +135,11 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     let mut weights = ptr::null_mut();
     let weights_size = num_features * num_features * 3 * 3;
 
-    assert!(cuda::cudaMalloc(&mut weights, data_type.size() * weights_size).is_ok());
+    assert!(cuda::cudaMalloc(&mut weights, data_type.size_in_bytes() * weights_size).is_ok());
     assert!(cuda::cudaMemcpy(
         weights,
         vec! [T::from(0.1); weights_size].as_ptr() as *const c_void,
-        data_type.size() * weights_size,
+        data_type.size_in_bytes() * weights_size,
         cuda::MemcpyKind::HostToDevice
     ).is_ok());
 
@@ -174,11 +147,11 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     let mut offset = ptr::null_mut();
     let offset_size = num_features;
 
-    assert!(cuda::cudaMalloc(&mut offset, offset_type.size() * offset_size).is_ok());
+    assert!(cuda::cudaMalloc(&mut offset, offset_type.size_in_bytes() * offset_size).is_ok());
     assert!(cuda::cudaMemcpy(
         offset,
         vec! [T::from(0.0); offset_size].as_ptr() as *const c_void,
-        offset_type.size() * offset_size,
+        offset_type.size_in_bytes() * offset_size,
         cuda::MemcpyKind::HostToDevice
     ).is_ok());
 
@@ -187,33 +160,40 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     let mut output = ptr::null_mut();
     let output_size = BATCH_SIZE * num_features * 361;
 
-    assert!(cuda::cudaMalloc(&mut output, data_type.size() * output_size).is_ok());
+    assert!(cuda::cudaMalloc(&mut output, data_type.size_in_bytes() * output_size).is_ok());
 
     // run the benchmark
-    bencher.iter(move || {
-        let c_0: f32 = 0.0;
-        let c_1: f32 = 1.0;
+    let conv_bias_act = cudnn::ConvolutionBiasActivation::new(
+        &handle,
+        1.0,
+        in_desc,
+        filter_desc,
+        conv_desc,
+        0.0,
+        offset_desc,
+        relu,
+        out_desc
+    )?;
 
-        assert!(cudnn::cudnnConvolutionBiasActivationForward(
-            handle,
-            &c_1,
-            inout_desc, input,
-            filter_desc, weights,
-            conv_desc,
-            conv_algo,
-            workspace, workspace_size,
-            &c_0,
-            inout_desc, output,
-            offset_desc, offset,
-            relu,
-            inout_desc, output
-        ).is_ok());
+    bencher.iter(move || {
+        conv_bias_act.forward(
+            &handle,
+            input,
+            weights,
+            workspace,
+            fwd_algo_perf.memory(),
+            output,
+            offset,
+            output
+        ).unwrap();
     });
 
     assert!(cuda::cudaFree(input).is_ok());
     assert!(cuda::cudaFree(output).is_ok());
     assert!(cuda::cudaFree(offset).is_ok());
     assert!(cuda::cudaFree(weights).is_ok());
+
+    Ok(())
 }
 
 /// The number of channels to use in *all* benchmarks.
@@ -252,23 +232,22 @@ fn supports_f16() -> bool {
 // -------- 32-bit floating point --------
 
 #[bench]
-fn f32_winograd(b: &mut Bencher) {
+fn f32_compute_type_f32(b: &mut Bencher) {
     unsafe {
         bench_conv::<f32>(
             b,
             NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Float, cudnn::DataType::Float,
-            cudnn::ConvolutionFwdAlgo::Winograd,
             cudnn::DataType::Float
-        );
+        ).unwrap();
     }
 }
 
 // -------- 16-bit floating point --------
 
 #[bench]
-fn f16_winogradnonfused_nchw(b: &mut Bencher) {
+fn f16_nchw_compute_type_f32(b: &mut Bencher) {
     if !supports_f16() { return }
 
     unsafe {
@@ -277,14 +256,13 @@ fn f16_winogradnonfused_nchw(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::ConvolutionFwdAlgo::WinogradNonFused,
-            cudnn::DataType::Half
-        );
+            cudnn::DataType::Float
+        ).unwrap();
     }
 }
 
 #[bench]
-fn f16_implicitprecompgemm_nhwc(b: &mut Bencher) {
+fn f16_nhwc_compute_type_f32(b: &mut Bencher) {
     if !supports_f16() { return }
 
     unsafe {
@@ -293,14 +271,13 @@ fn f16_implicitprecompgemm_nhwc(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
-            cudnn::DataType::Half
-        );
+            cudnn::DataType::Float
+        ).unwrap();
     }
 }
 
 #[bench]
-fn f16_implicitprecompgemm_nchw(b: &mut Bencher) {
+fn f16_nchw_compute_type_f16(b: &mut Bencher) {
     if !supports_f16() { return }
 
     unsafe {
@@ -309,74 +286,30 @@ fn f16_implicitprecompgemm_nchw(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
             cudnn::DataType::Half
-        );
-    }
-}
-
-// -------- 16-bit pseudo floating point --------
-
-#[bench]
-fn p16_winograd_nchw(b: &mut Bencher) {
-    unsafe {
-        bench_conv::<f16>(
-            b,
-            NUM_FEATURES,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::ConvolutionFwdAlgo::Winograd,
-            cudnn::DataType::Float
-        );
+        ).unwrap();
     }
 }
 
 #[bench]
-fn p16_winogradnonfused_nchw(b: &mut Bencher) {
-    unsafe {
-        bench_conv::<f16>(
-            b,
-            NUM_FEATURES,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::ConvolutionFwdAlgo::WinogradNonFused,
-            cudnn::DataType::Float
-        );
-    }
-}
+fn f16_nhwc_compute_type_f16(b: &mut Bencher) {
+    if !supports_f16() { return }
 
-#[bench]
-fn p16_implicitprecompgemm_nchw(b: &mut Bencher) {
-    unsafe {
-        bench_conv::<f16>(
-            b,
-            NUM_FEATURES,
-            cudnn::TensorFormat::NCHW,
-            cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
-            cudnn::DataType::Float
-        );
-    }
-}
-
-#[bench]
-fn p16_implicitprecompgemm_nhwc(b: &mut Bencher) {
     unsafe {
         bench_conv::<f16>(
             b,
             NUM_FEATURES,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
-            cudnn::DataType::Float
-        );
+            cudnn::DataType::Half
+        ).unwrap();
     }
 }
 
 // -------- 8-bit signed integer --------
 
 #[bench]
-fn i8_implicitprecompgemm_nhwc(b: &mut Bencher) {
+fn i8_nhwc(b: &mut Bencher) {
     if !supports_i8() { return }
 
     unsafe {
@@ -385,40 +318,37 @@ fn i8_implicitprecompgemm_nhwc(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Int8, cudnn::DataType::Float,
-            cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
             cudnn::DataType::Int32
-        );
+        ).unwrap();
     }
 }
 
 #[bench]
-fn i8x4_implicitprecompgemm_nhwcvectc(b: &mut Bencher) {
+fn i8x4_nhwcvectc(b: &mut Bencher) {
     if !supports_i8() { return }
 
     unsafe {
         bench_conv::<q8>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::TensorFormat::NCHW_VECT_C,
             cudnn::DataType::Int8x4, cudnn::DataType::Float,
-            cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
             cudnn::DataType::Int32
-        );
+        ).unwrap();
     }
 }
 
 #[bench]
-fn i8x32_implicitprecompgemm_nhwcvectc(b: &mut Bencher) {
+fn i8x32_nhwcvectc(b: &mut Bencher) {
     if !supports_i8() { return }
 
     unsafe {
         bench_conv::<q8>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NCHWVECTC,
+            cudnn::TensorFormat::NCHW_VECT_C,
             cudnn::DataType::Int8x32, cudnn::DataType::Float,
-            cudnn::ConvolutionFwdAlgo::ImplicitPrecompGemm,
             cudnn::DataType::Int32
-        );
+        ).unwrap();
     }
 }

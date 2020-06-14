@@ -25,5 +25,5 @@ pub enum ConvolutionFwdAlgo {
     FFT = 4,
     FFTTiling = 5,
     Winograd = 6,
-    WinogradFused = 7
+    WinogradNonFused = 7
 }

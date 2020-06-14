@@ -28,3 +28,19 @@ pub enum DataType {
     Uint8x4 = 7,
     Int8x32 = 8,
 }
+
+impl DataType {
+    pub fn size_in_bytes(self) -> usize {
+        match self {
+            DataType::Float => 4,
+            DataType::Double => 8,
+            DataType::Half => 2,
+            DataType::Int8 => 1,
+            DataType::Int32 => 4,
+            DataType::Int8x4 => 1,
+            DataType::Uint8 => 1,
+            DataType::Uint8x4 => 1,
+            DataType::Int8x32 => 1
+        }
+    }
+}

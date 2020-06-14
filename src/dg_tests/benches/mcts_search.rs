@@ -59,9 +59,9 @@ fn lee_sedol_alphago_4_78(b: &mut Bencher) {
     b.iter(move || {
         let server = mcts::predict::RandomPredictor::default();
 
-        mcts::predict::<_, _, StandardSearch>(
+        mcts::predict::<_, _>(
             &server,
-            Some(4),
+            Box::new(StandardSearch::default()),
             RolloutLimit::new(40),
             None,
             &original_board,
