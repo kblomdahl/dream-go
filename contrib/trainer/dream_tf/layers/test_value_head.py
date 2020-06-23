@@ -67,12 +67,7 @@ class ValueHeadTest(unittest.TestCase, TestUtils):
                 logits=logits
             )
 
-            for i, step in enumerate(steps):
-                if i > 0:
-                    if steps[i-1]['loss'] < 1e-4:
-                        self.assertLessEqual(step['loss'], steps[i-1]['loss'])
-                    else:
-                        self.assertLess(step['loss'], steps[i-1]['loss'])
+            self.assertDecreasing([step['loss'] for step in steps])
 
 if __name__ == '__main__':
     unittest.main()
