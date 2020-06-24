@@ -36,7 +36,7 @@ def main(max_count):
     elements = []
 
     for line in sys.stdin:
-        for match in re.finditer(r"([BW])\[([a-z]*)\]", line):
+        for match in re.finditer(r";([BW])\[([a-z]*)\]", line):
             if match.group(2):  # not pass
                 x = LETTERS.index(match.group(2)[0])
                 y = LETTERS.index(match.group(2)[1])
