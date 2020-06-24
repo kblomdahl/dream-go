@@ -1,10 +1,11 @@
-.idea
-rls/
-target/
-.vscode/
+/.cargo
+/.idea
+/rls/
+/target/
+/.vscode/
 *~
 *.log
 *.iml
+/*.sgf
 dream_go
 dream_go.json
-
