@@ -31,21 +31,23 @@ def value_head(x, mode, params):
     """
     The value head attached after the residual blocks as described by DeepMind:
 
-    1. A convolution of 1 filter of kernel size 5 × 5 with stride 1
+    1. A convolution of 8 filter of kernel size 3 × 3 with stride 1
     2. Batch normalisation
-    3. A global average pooling layer
+    3. A global average pooling layer (including channels)
     4. A tanh non-linearity outputting a scalar in the range [-1, 1]
     """
     init_op = orthogonal_initializer()
     zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
+    num_samples = 8
 
-    conv_1 = tf.get_variable('conv_1', (5, 5, num_channels, 1), tf.float32, init_op, constraint=normalize_constraint, regularizer=l2_regularizer, use_resource=True)
+    conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_samples), tf.float32, init_op, constraint=normalize_constraint, regularizer=l2_regularizer, use_resource=True)
 
     def _forward(x, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """
         y = batch_norm(conv2d(x, conv_1), conv_1, mode, params, is_recomputing=is_recomputing)
-        y = tf.reduce_mean(y, [1, 2], keepdims=False)
+        y = tf.reduce_mean(y, [1, 2, 3], keepdims=True)
+        y = tf.reshape(y, [-1, 1])
 
         return tf.cast(tf.nn.tanh(y), tf.float32)
 

@@ -182,22 +182,6 @@ fn create_dense_descriptor(batch_size: i32, size: i32) -> Result<cudnn2::TensorD
     )
 }
 
-/// Returns a `FilterDescriptor` for a five wide and high filter for the given
-/// `num_outputs` and `num_inputs` features.
-/// 
-/// # Arguments
-/// 
-/// * `num_outputs` -
-/// * `num_inputs` -
-/// 
-fn create_filter_descriptor_5x5(num_outputs: i32, num_inputs: i32) -> Result<cudnn2::FilterDescriptor, cudnn2::Status> {
-    cudnn2::FilterDescriptor::new(
-        cudnn2::DataType::Half,
-        cudnn2::TensorFormat::NHWC,
-        &[num_outputs, num_inputs, 5, 5]
-    )
-}
-
 /// Returns a `FilterDescriptor` for a three wide and high filter for the given
 /// `num_outputs` and `num_inputs` features.
 /// 
@@ -230,17 +214,6 @@ fn create_filter_descriptor_1x1(num_outputs: i32, num_inputs: i32) -> Result<cud
     )
 }
 
-/// Returns a `ConvolutionDescriptor` for a five wide and high filter.
-fn create_convolution_descriptor_5x5() -> Result<cudnn2::ConvolutionDescriptor, cudnn2::Status> {
-    cudnn2::ConvolutionDescriptor::new(
-        &[2, 2],
-        &[1, 1],
-        &[1, 1],
-        cudnn2::ConvolutionMode::CrossCorrelation,
-        if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-    )
-}
-
 /// Returns a `ConvolutionDescriptor` for a three wide and high filter.
 fn create_convolution_descriptor_3x3() -> Result<cudnn2::ConvolutionDescriptor, cudnn2::Status> {
     cudnn2::ConvolutionDescriptor::new(
@@ -264,17 +237,6 @@ fn create_convolution_descriptor_1x1_float() -> Result<cudnn2::ConvolutionDescri
     )
 }
 
-/// Returns a `ConvolutionDescriptor` for a one wide and high filter.
-fn create_convolution_descriptor_1x1() -> Result<cudnn2::ConvolutionDescriptor, cudnn2::Status> {
-    cudnn2::ConvolutionDescriptor::new(
-        &[0, 0],
-        &[1, 1],
-        &[1, 1],
-        cudnn2::ConvolutionMode::CrossCorrelation,
-        if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
-    )
-}
-
 /// Returns a `ConvolutionBiasActivation` for a three wide and high
 /// convolution, add bias, and activation operation for the given
 /// `batch_size`, `num_outputs`, and `num_inputs`.
@@ -286,7 +248,7 @@ fn create_convolution_descriptor_1x1() -> Result<cudnn2::ConvolutionDescriptor, 
 /// * `num_outputs` -
 /// * `num_inputs` - 
 /// 
-fn create_convolution_bias_5x5(
+fn create_convolution_bias_3x3(
     handle: &cudnn2::Handle,
     batch_size: i32,
     num_outputs: i32,
@@ -300,8 +262,8 @@ fn create_convolution_bias_5x5(
         handle,
         alpha[0],
         create_tensor_descriptor(batch_size, num_inputs)?,
-        create_filter_descriptor_5x5(num_outputs, num_inputs)?,
-        create_convolution_descriptor_5x5()?,
+        create_filter_descriptor_3x3(num_outputs, num_inputs)?,
+        create_convolution_descriptor_3x3()?,
         alpha[1],
         create_offset_descriptor(num_outputs)?,
         cudnn2::ActivationDescriptor::identity()?,
@@ -336,40 +298,6 @@ fn create_convolution_bias_activation_3x3(
         create_tensor_descriptor(batch_size, num_inputs)?,
         create_filter_descriptor_3x3(num_outputs, num_inputs)?,
         create_convolution_descriptor_3x3()?,
-        alpha[1],
-        create_offset_descriptor(num_outputs)?,
-        cudnn2::ActivationDescriptor::relu()?,
-        create_tensor_descriptor(batch_size, num_outputs)?
-    )
-}
-
-/// Returns a `ConvolutionBiasActivation` for a one wide and high
-/// convolution, add bias, and activation operation for the given
-/// `batch_size`, `num_outputs`, and `num_inputs`.
-/// 
-/// # Arguments
-/// 
-/// * `handle` -
-/// * `batch_size` -
-/// * `num_outputs` -
-/// * `num_inputs` - 
-/// 
-fn create_convolution_bias_activation_1x1(
-    handle: &cudnn2::Handle,
-    batch_size: i32,
-    num_outputs: i32,
-    num_inputs: i32,
-    alpha: &[f32]
-) -> Result<cudnn2::ConvolutionBiasActivation, cudnn2::Status>
-{
-    debug_assert_eq!(alpha.len(), 2);
-
-    cudnn2::ConvolutionBiasActivation::new(
-        handle,
-        alpha[0],
-        create_tensor_descriptor(batch_size, num_inputs)?,
-        create_filter_descriptor_1x1(num_outputs, num_inputs)?,
-        create_convolution_descriptor_1x1()?,
         alpha[1],
         create_offset_descriptor(num_outputs)?,
         cudnn2::ActivationDescriptor::relu()?,
@@ -501,7 +429,7 @@ fn create_global_avg_pooling(n: i32, num_channels: i32, alpha: [f32; 2]) -> Resu
             cudnn2::IndicesType::_32
         )?,
         create_tensor_descriptor(n, num_channels)?,
-        create_dense_descriptor(n, num_channels)?,
+        create_dense_descriptor(n, 1)?,
         alpha
     )
 }
@@ -556,8 +484,8 @@ impl Builder {
         let handle_dnn: cudnn2::Handle = cudnn2::Handle::new()?;
         let c_up = unsafe { Rc::new(UpLayer::new(&handle_dnn, batch_size as i32, &self.tensors)?) };
         let c_residual = unsafe { self.get_residual_layers(&handle_dnn, batch_size)? };
-        let c_value = unsafe { Rc::new(ValueLayer::new(&handle_dnn, batch_size as i32, 3 + c_residual.len(), &self.tensors)?) };
-        let c_policy = unsafe { Rc::new(PolicyLayer::new(&handle_dnn, batch_size as i32, 3 + c_residual.len(), &self.tensors)?) };
+        let c_value = unsafe { Rc::new(ValueLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?) };
+        let c_policy = unsafe { Rc::new(PolicyLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?) };
 
         Ok(Workspace {
             batch_size: batch_size,
@@ -799,8 +727,8 @@ impl ValueLayer {
             .unwrap_or(DEFAULT_NUM_CHANNELS);
 
         Ok(ValueLayer {
-            conv_1: create_convolution_bias_5x5(handle, n, 1, num_channels, &[1.0, 0.0])?,
-            reduce_mean: create_global_avg_pooling(n, 1, [1.0, 0.0])?,
+            conv_1: create_convolution_bias_3x3(handle, n, 8, num_channels, &[1.0, 0.0])?,
+            reduce_mean: create_global_avg_pooling(n, 8, [1.0, 0.0])?,
             tanh: create_dense_tanh(cudnn2::ActivationDescriptor::tanh()?, n, 1, [1.0, 0.0])?,
             count: i
         })
@@ -828,7 +756,7 @@ impl ValueLayer {
         offset_1.copy_to_device(device_id, *workspace.value_stream)?;
 
         // perform the forward convolution
-        let value_1 = slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 361, *workspace.value_stream)?;
+        let value_1 = slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 8 * 361, *workspace.value_stream)?;
 
         self.conv_1.forward(
             &workspace.handle,
@@ -840,7 +768,7 @@ impl ValueLayer {
             *value_1
         )?;
 
-        load_output::<T::Output>(output_set, output_map, Output::ValueDown, *value_1, workspace.batch_size * 361, *workspace.value_stream)?;
+        load_output::<T::Output>(output_set, output_map, Output::ValueDown, *value_1, workspace.batch_size * 8 * 361, *workspace.value_stream)?;
 
         // perform the global average pooling
         let value_2 = slots.get_slot(Slot::Value_2, size_of::<T::Output>() * workspace.batch_size * 1, *workspace.value_stream)?;
@@ -890,12 +818,13 @@ impl PolicyLayer {
         let num_channels = tensors.get("num_channels:0")
             .map(|x| { x.as_i32() })
             .unwrap_or(DEFAULT_NUM_CHANNELS);
+        let num_samples = 8;
         let tau = 1.0 / *config::SOFTMAX_TEMPERATURE;
 
         Ok(PolicyLayer {
-            conv_1: create_convolution_bias_activation_1x1(handle, n, 4, num_channels, &[1.0, 0.0])?,
-            linear_2: create_dense_bias(handle, n, 362, 1444, &[tau, 0.0])?,
-            transpose: create_dense_transpose(362, 1444)?,
+            conv_1: create_convolution_bias_activation_3x3(handle, n, num_samples, num_channels, &[1.0, 0.0])?,
+            linear_2: create_dense_bias(handle, n, 362, 361 * num_samples, &[tau, 0.0])?,
+            transpose: create_dense_transpose(362, 361 * num_samples)?,
             softmax: create_softmax(n, 362)?,
             scale_tau: cudnn2::Scale::new(create_offset_descriptor(362)?, tau)?,
             count: i,
@@ -945,7 +874,7 @@ impl PolicyLayer {
         }
 
         // perform the forward convolution
-        let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 1444, *workspace.policy_stream)?;
+        let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 8 * 361, *workspace.policy_stream)?;
 
         self.conv_1.forward(
             &workspace.handle,
@@ -957,7 +886,7 @@ impl PolicyLayer {
             *policy_1
         )?;
 
-        load_output::<T::Output>(output_set, output_map, Output::PolicyDown, *policy_1, workspace.batch_size * 1444, *workspace.policy_stream)?;
+        load_output::<T::Output>(output_set, output_map, Output::PolicyDown, *policy_1, workspace.batch_size * 8 * 361, *workspace.policy_stream)?;
 
         // perform the feed-forward linear layers
         let policy_2 = slots.get_slot(Slot::Policy_2, size_of::<T::Output>() * workspace.batch_size * 362, *workspace.policy_stream)?;
