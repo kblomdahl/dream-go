@@ -68,7 +68,8 @@ impl<'a, R: AllRegions<'a>, B: AllBlocks<'a>> Benson<'a, R, B> {
 
         out.mark_all_blocks();
         out.mark_all_regions();
-        while out.remove_non_alive_blocks() || out.remove_non_surrounded_regions() {
+        out.remove_non_vital_regions();
+        while out.remove_non_alive_blocks() | out.remove_non_surrounded_regions() {
             // pass
         }
 
@@ -126,7 +127,26 @@ impl<'a, R: AllRegions<'a>, B: AllBlocks<'a>> Benson<'a, R, B> {
 
             is_healthy
         });
+
         regions.len() < original_len
+    }
+
+    /// Remove from R all enclosed regions that are not vital to at least one
+    /// block in X.
+    fn remove_non_vital_regions(&mut self) {
+        let blocks = &self.blocks;
+        let points = &mut self.points;
+        let regions = &mut self.regions;
+
+        regions.retain(|r| {
+            let is_vital = blocks.iter().any(|b| is_vital(r, b));
+
+            if !is_vital {
+                mark_points(points, r.points(), PointStatus::None);
+            }
+
+            is_vital
+        });
     }
 
     /// Returns if the given `point` is part of an unconditionally alive block

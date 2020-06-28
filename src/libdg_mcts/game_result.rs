@@ -14,7 +14,7 @@
 
 use dg_go::utils::score::{Score, StoneStatus};
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
-use dg_go::{Board, Color};
+use dg_go::{Board, Color, Point};
 
 use std::fmt;
 
@@ -33,8 +33,9 @@ impl fmt::Display for GameResult {
                 write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[{:.1}]RE[{}+Resign]{})", iso8601, board.komi(), winner, sgf)
             },
             GameResult::Ended(ref sgf, ref board) => {
-                let winner = get_winner_as_sgf(board);
-                let territory = get_territory_as_sgf(board);
+                let status_list = board.get_stone_status(&board);
+                let winner = get_winner_as_sgf(board, &status_list);
+                let territory = get_territory_as_sgf(&status_list);
 
                 write!(fmt, "(;GM[1]FF[4]DT[{}]SZ[19]RU[Chinese]KM[{:.1}]RE[{}]{}{})", iso8601, board.komi(), winner, sgf, territory)
             }
@@ -47,17 +48,17 @@ impl fmt::Display for GameResult {
 /// 
 /// # Arguments
 /// 
-/// * `board` - 
+/// * `status_list` - 
 /// 
-fn get_territory_as_sgf(board: &Board) -> String {
+fn get_territory_as_sgf(status_list: &Vec<(Point, Vec<StoneStatus>)>) -> String {
     let mut black = String::new();
     let mut white = String::new();
 
-    for (point, statuses) in board.get_stone_status(&board) {
+    for (point, statuses) in status_list {
         if statuses.contains(&StoneStatus::WhiteTerritory) {
-            white += &format!("[{}]", CGoban::to_sgf(point));
+            white += &format!("[{}]", CGoban::to_sgf(*point));
         } else if statuses.contains(&StoneStatus::BlackTerritory) {
-            black += &format!("[{}]", CGoban::to_sgf(point));
+            black += &format!("[{}]", CGoban::to_sgf(*point));
         }
     }
 
@@ -76,11 +77,11 @@ fn get_territory_as_sgf(board: &Board) -> String {
 /// # Arguments
 /// 
 /// * `board` - 
+/// * `status_list` - 
 /// 
-fn get_winner_as_sgf(board: &Board) -> String {
-    let (black, white) = board.get_score();
-    let black = black as f32;
-    let white = white as f32 + board.komi();
+fn get_winner_as_sgf(board: &Board, status_list: &Vec<(Point, Vec<StoneStatus>)>) -> String {
+    let black = status_list.iter().filter(|(_, statuses)| statuses.contains(&StoneStatus::BlackTerritory)).count() as f32;
+    let white = status_list.iter().filter(|(_, statuses)| statuses.contains(&StoneStatus::WhiteTerritory)).count() as f32 + board.komi();
 
     if black > white {
         format!("B+{:.1}", black - white)
