@@ -117,6 +117,7 @@ impl Ptr {
             )
         };
 
+        stream.synchronize()?;
         error.into_result(out)
     }
 }
