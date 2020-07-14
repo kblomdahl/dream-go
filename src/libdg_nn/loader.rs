@@ -101,7 +101,7 @@ impl<R: BufRead> Iterator for JsonEntryIter<R> {
             if key == "s" {
                 let array = b85::decode::<f32, f32>(&value).unwrap();
 
-                tensor.scale = array[0];
+                tensor.set_scale(array[0]);
             } else if key == "v" {
                 match tensor.set_host(b85::decode::<f16, f16>(&value).unwrap()) {
                     Ok(()) => (),
@@ -183,7 +183,7 @@ mod tests {
         let out = out.unwrap();
 
         assert_eq!(out.len(), 1, "{:?}", out.keys().map(|x| x.clone()).collect::<Vec<String>>());
-        assert_eq!(out["11v_value/linear_2/offset:0"].scale, 0.13704996);
-        assert_eq!(out["11v_value/linear_2/offset:0"].size_in_bytes, 4);
+        assert_eq!(out["11v_value/linear_2/offset:0"].scale(), 0.13704996);
+        assert_eq!(out["11v_value/linear_2/offset:0"].size_in_bytes(), 4);
     }
 }

@@ -100,6 +100,22 @@ impl Ptr {
         error.into_result(())
     }
 
+    pub fn copy_from_ptr(&mut self, src: &Ptr, size_in_bytes: usize, stream: &Stream) -> Result<(), Error> {
+        debug_assert!(size_in_bytes <= self.size_in_bytes);
+
+        let error = unsafe {
+            cudaMemcpyAsync(
+                self.dev_ptr,
+                src.as_ptr(),
+                size_in_bytes,
+                cudaMemcpyKind_t::DeviceToDevice,
+                **stream
+            )
+        };
+
+        error.into_result(())
+    }
+
     pub fn size_in_bytes(&self) -> usize {
         self.size_in_bytes
     }

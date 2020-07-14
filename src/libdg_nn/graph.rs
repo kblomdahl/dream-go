@@ -632,7 +632,7 @@ impl ResidualLayer {
             self.scale_offset.forward(&workspace.handle, offset_2.get().as_ptr())?;
         }
 
-        debug_assert!(offset_1.size_in_elements == offset_2.size_in_elements);
+        debug_assert!(offset_1.size_in_elements() == offset_2.size_in_elements());
 
         // perform the forward convolution (1)
         let workspace_r = cuda2::malloc(self.conv_1.fwd_algo_perf().memory(), allocator)?;
@@ -807,7 +807,7 @@ impl PolicyLayer {
         let offset_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1/offset:0", self.count)];
         let workspace_p_size = self.conv_1.fwd_algo_perf().memory()
             .max(self.linear_2.fwd_algo_perf().memory())
-            .max(weights_2.size_in_bytes);
+            .max(weights_2.size_in_bytes());
         let workspace_p = cuda2::malloc(workspace_p_size, allocator)?;
 
         offset_1.copy_to_device(&workspace.policy_stream)?;
@@ -822,13 +822,7 @@ impl PolicyLayer {
                 workspace_p.as_ptr()
             )?;
 
-            check!(cuda::cudaMemcpyAsync(
-                weights_2.get().as_ptr(),
-                workspace_p.as_ptr(),
-                weights_2.size_in_bytes,
-                cuda::MemcpyKind::DeviceToDevice,
-                *workspace.policy_stream
-            ))?;
+            weights_2.get().copy_from_ptr(&workspace_p, weights_2.size_in_bytes(), &workspace.policy_stream)?;
         }
 
         // perform the forward convolution

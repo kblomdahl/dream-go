@@ -22,20 +22,20 @@ use super::Error;
 /// device, and meta information about a tensor.
 pub struct Tensor {
     /// The unscaled tensor in host-memory as raw (untyped) bytes.
-    pub host: Vec<u8>,
+    host: Vec<u8>,
 
     /// The scaled tensor in device memory as the type given in
     /// `dtype`, or null if not applicable.
-    pub ptr: PerDevice<Mutex<Ptr>>,
+    ptr: PerDevice<Mutex<Ptr>>,
 
     /// The size of this tensor in bytes.
-    pub size_in_bytes: usize,
+    size_in_bytes: usize,
 
     /// The size of this tensor in the number of elements.
-    pub size_in_elements: usize,
+    size_in_elements: usize,
 
     /// The scale of this tensor,
-    pub scale: f32
+    scale: f32
 }
 
 impl Default for Tensor {
@@ -53,6 +53,23 @@ impl Default for Tensor {
 impl Tensor {
     pub fn get(&self) -> MutexGuard<Ptr> {
         self.ptr.lock().unwrap()
+    }
+
+    pub fn size_in_bytes(&self) -> usize {
+        self.size_in_bytes
+    }
+
+    pub fn size_in_elements(&self) -> usize {
+        self.size_in_elements
+    }
+
+    #[cfg(test)]
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+
+    pub fn set_scale(&mut self, scale: f32) {
+        self.scale = scale;
     }
 
     pub fn set_host<T: Sized>(&mut self, data: Vec<T>) -> Result<(), Error> {
