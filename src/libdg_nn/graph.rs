@@ -23,7 +23,6 @@ use dg_cuda::cudnn as cudnn2;
 use dg_go::utils::features::{FEATURE_SIZE, NUM_FEATURES};
 use dg_utils::types::f16;
 use dg_utils::config;
-use super::devices::get_current_device;
 use super::ffi::cuda;
 use super::output_map::*;
 use super::tensor::Tensor;
@@ -548,12 +547,11 @@ impl UpLayer {
     {
         workspace.handle.set_stream(&workspace.tower_stream)?;
 
-        let device_id = get_current_device()?;
         let weights = &workspace.tensors["01_upsample/conv_1:0"];
         let offset = &workspace.tensors["01_upsample/conv_1/offset:0"];
 
-        weights.copy_to_device(device_id, *workspace.tower_stream)?;
-        offset.copy_to_device(device_id, *workspace.tower_stream)?;
+        weights.copy_to_device(&workspace.tower_stream)?;
+        offset.copy_to_device(&workspace.tower_stream)?;
 
         // perform the forward convolution
         let workspace_1 = cuda2::malloc(self.up.fwd_algo_perf().memory(), allocator)?;
@@ -562,10 +560,10 @@ impl UpLayer {
         self.up.forward(
             &workspace.handle,
             input.as_ptr(),
-            weights.get(device_id),
+            weights.get().as_ptr(),
             workspace_1.as_ptr(), workspace_1.size_in_bytes(),
             output.as_ptr(),
-            offset.get(device_id),
+            offset.get().as_ptr(),
             output.as_ptr()
         )?;
 
@@ -622,17 +620,16 @@ impl ResidualLayer {
     {
         workspace.handle.set_stream(&workspace.tower_stream)?;
 
-        let device_id = get_current_device()?;
         let weights_1 = &workspace.tensors[&format!("{:02}_residual/conv_1:0", self.count)];
         let weights_2 = &workspace.tensors[&format!("{:02}_residual/conv_2:0", self.count)];
         let offset_1 = &workspace.tensors[&format!("{:02}_residual/conv_1/offset:0", self.count)];
         let offset_2 = &workspace.tensors[&format!("{:02}_residual/conv_2/offset:0", self.count)];
 
-        weights_1.copy_to_device(device_id, *workspace.tower_stream)?;
-        weights_2.copy_to_device(device_id, *workspace.tower_stream)?;
-        offset_1.copy_to_device(device_id, *workspace.tower_stream)?;
-        if offset_2.copy_to_device(device_id, *workspace.tower_stream)? {
-            self.scale_offset.forward(&workspace.handle, offset_2.get(device_id))?;
+        weights_1.copy_to_device(&workspace.tower_stream)?;
+        weights_2.copy_to_device(&workspace.tower_stream)?;
+        offset_1.copy_to_device(&workspace.tower_stream)?;
+        if offset_2.copy_to_device(&workspace.tower_stream)? {
+            self.scale_offset.forward(&workspace.handle, offset_2.get().as_ptr())?;
         }
 
         debug_assert!(offset_1.size_in_elements == offset_2.size_in_elements);
@@ -644,20 +641,20 @@ impl ResidualLayer {
         self.conv_1.forward(
             &workspace.handle,
             input.as_ptr(),
-            weights_1.get(device_id),
+            weights_1.get().as_ptr(),
             workspace_r.as_ptr(), workspace_r.size_in_bytes(),
             residual_2.as_ptr(),
-            offset_1.get(device_id),
+            offset_1.get().as_ptr(),
             residual_2.as_ptr()
         )?;
 
         self.conv_2.forward(
             &workspace.handle,
             residual_2.as_ptr(),
-            weights_2.get(device_id),
+            weights_2.get().as_ptr(),
             workspace_r.as_ptr(), workspace_r.size_in_bytes(),
             input.as_ptr(),
-            offset_2.get(device_id),
+            offset_2.get().as_ptr(),
             input.as_ptr()
         )?;
 
@@ -708,12 +705,11 @@ impl ValueLayer {
     {
         workspace.handle.set_stream(&workspace.value_stream)?;
 
-        let device_id = get_current_device()?;
         let weights_1 = &workspace.tensors[&format!("{:02}v_value/conv_1:0", self.count)];
         let offset_1 = &workspace.tensors[&format!("{:02}v_value/conv_1/offset:0", self.count)];
 
-        weights_1.copy_to_device(device_id, *workspace.value_stream)?;
-        offset_1.copy_to_device(device_id, *workspace.value_stream)?;
+        weights_1.copy_to_device(&workspace.value_stream)?;
+        offset_1.copy_to_device(&workspace.value_stream)?;
 
         // perform the forward convolution
         let workspace_v_size = self.conv_1.fwd_algo_perf().memory()
@@ -724,10 +720,10 @@ impl ValueLayer {
         self.conv_1.forward(
             &workspace.handle,
             input.as_ptr(),
-            weights_1.get(device_id),
+            weights_1.get().as_ptr(),
             workspace_v.as_ptr(), workspace_v.size_in_bytes(),
             value_1.as_ptr(),
-            offset_1.get(device_id),
+            offset_1.get().as_ptr(),
             value_1.as_ptr()
         )?;
 
@@ -805,7 +801,6 @@ impl PolicyLayer {
     {
         workspace.handle.set_stream(&workspace.policy_stream)?;
 
-        let device_id = get_current_device()?;
         let weights_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1:0", self.count)];
         let weights_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1:0", self.count)];
         let offset_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1/offset:0", self.count)];
@@ -815,20 +810,20 @@ impl PolicyLayer {
             .max(weights_2.size_in_bytes);
         let workspace_p = cuda2::malloc(workspace_p_size, allocator)?;
 
-        offset_1.copy_to_device(device_id, *workspace.policy_stream)?;
-        if offset_2.copy_to_device(device_id, *workspace.policy_stream)? {
-            self.scale_tau.forward(&workspace.handle, offset_2.get(device_id))?;
+        offset_1.copy_to_device(&workspace.policy_stream)?;
+        if offset_2.copy_to_device(&workspace.policy_stream)? {
+            self.scale_tau.forward(&workspace.handle, offset_2.get().as_ptr())?;
         }
-        weights_1.copy_to_device(device_id, *workspace.policy_stream)?;
-        if weights_2.copy_to_device(device_id, *workspace.policy_stream)? {
+        weights_1.copy_to_device(&workspace.policy_stream)?;
+        if weights_2.copy_to_device(&workspace.policy_stream)? {
             self.transpose.forward(
                 &workspace.handle,
-                weights_2.get(device_id),
+                weights_2.get().as_ptr(),
                 workspace_p.as_ptr()
             )?;
 
             check!(cuda::cudaMemcpyAsync(
-                weights_2.get(device_id),
+                weights_2.get().as_ptr(),
                 workspace_p.as_ptr(),
                 weights_2.size_in_bytes,
                 cuda::MemcpyKind::DeviceToDevice,
@@ -842,10 +837,10 @@ impl PolicyLayer {
         self.conv_1.forward(
             &workspace.handle,
             input.as_ptr(),
-            weights_1.get(device_id),
+            weights_1.get().as_ptr(),
             workspace_p.as_ptr(), workspace_p.size_in_bytes(),
             policy_1.as_ptr(),
-            offset_1.get(device_id),
+            offset_1.get().as_ptr(),
             policy_1.as_ptr()
         )?;
 
@@ -858,10 +853,10 @@ impl PolicyLayer {
         self.linear_2.forward(
             &workspace.handle,
             policy_1.as_ptr(),
-            weights_2.get(device_id),
+            weights_2.get().as_ptr(),
             workspace_p.as_ptr(), workspace_p.size_in_bytes(),
             policy_2.as_ptr(),
-            offset_2.get(device_id),
+            offset_2.get().as_ptr(),
             policy_2.as_ptr()
         )?;
 

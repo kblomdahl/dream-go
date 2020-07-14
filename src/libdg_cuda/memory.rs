@@ -41,6 +41,12 @@ pub struct Ptr {
     size_in_bytes: usize
 }
 
+impl Default for Ptr {
+    fn default() -> Self {
+        Self { dev_ptr: ptr::null_mut(), size_in_bytes: 0 }
+    }
+}
+
 impl Drop for Ptr {
     fn drop(&mut self) {
         unsafe { cudaFree(self.dev_ptr); }
@@ -66,6 +72,15 @@ impl Ptr {
 
     pub fn as_ptr(&self) -> *mut c_void {
         self.dev_ptr
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.dev_ptr.is_null()
+    }
+
+    pub fn resize(&mut self, size_in_bytes: usize) -> Result<(), Error> {
+        *self = Self::new(size_in_bytes)?;
+        Ok(())
     }
 
     pub fn copy_from_slice<T: Sized>(&mut self, data: &[T], stream: &Stream) -> Result<(), Error> {

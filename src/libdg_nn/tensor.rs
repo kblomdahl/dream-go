@@ -12,24 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicPtr, Ordering};
 use std::mem::size_of;
-use std::ptr;
-use libc::c_void;
+use std::sync::{Mutex, MutexGuard};
 
-use super::devices::MAX_DEVICES;
-use super::ffi::cuda;
+use dg_cuda::{PerDevice, Ptr, Stream};
 use super::Error;
 
 /// A data structure with interior mutability that store the host,
 /// device, and meta information about a tensor.
 pub struct Tensor {
     /// The unscaled tensor in host-memory as raw (untyped) bytes.
-    pub host: *mut c_void,
+    pub host: Vec<u8>,
 
     /// The scaled tensor in device memory as the type given in
     /// `dtype`, or null if not applicable.
-    pub ptr: [AtomicPtr<c_void>; MAX_DEVICES],
+    pub ptr: PerDevice<Mutex<Ptr>>,
 
     /// The size of this tensor in bytes.
     pub size_in_bytes: usize,
@@ -41,34 +38,11 @@ pub struct Tensor {
     pub scale: f32
 }
 
-impl Drop for Tensor {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.host.is_null() {
-                cuda::cudaFreeHost(self.host);
-            }
-
-            for i in 0..MAX_DEVICES {
-                let ptr = self.ptr[i].load(Ordering::Relaxed);
-
-                if !ptr.is_null() {
-                    cuda::cudaFree(ptr);
-                }
-            }
-        }
-    }
-}
-
 impl Default for Tensor {
     fn default() -> Tensor {
         Tensor {
-            host: ptr::null_mut(),
-            ptr: [
-                AtomicPtr::new(ptr::null_mut()), AtomicPtr::new(ptr::null_mut()),
-                AtomicPtr::new(ptr::null_mut()), AtomicPtr::new(ptr::null_mut()),
-                AtomicPtr::new(ptr::null_mut()), AtomicPtr::new(ptr::null_mut()),
-                AtomicPtr::new(ptr::null_mut()), AtomicPtr::new(ptr::null_mut()),
-            ],
+            host: vec! [],
+            ptr: PerDevice::new().unwrap(),
             size_in_bytes: 0,
             size_in_elements: 0,
             scale: 1.0
@@ -77,67 +51,45 @@ impl Default for Tensor {
 }
 
 impl Tensor {
-    pub fn get(&self, device_id: i32) -> *mut c_void {
-        self.ptr[device_id as usize].load(Ordering::Relaxed)
+    pub fn get(&self) -> MutexGuard<Ptr> {
+        self.ptr.lock().unwrap()
     }
 
     pub fn set_host<T: Sized>(&mut self, data: Vec<T>) -> Result<(), Error> {
         unsafe {
-            if !self.host.is_null() {
-                check!(cuda::cudaFreeHost(self.host))?;
-            }
+            let (raw_ptr, length, capacity) = data.into_raw_parts();
 
-            self.size_in_bytes = size_of::<T>() * data.len();
-            self.size_in_elements = data.len();
-
-            check!(cuda::cudaMallocHost(&mut self.host, self.size_in_bytes))?;
-
-            ptr::copy_nonoverlapping(
-                data.as_ptr() as *const c_void,
-                self.host,
-                self.size_in_bytes
-            );
+            self.size_in_bytes = size_of::<T>() * length;
+            self.size_in_elements = length;
+            self.host = Vec::from_raw_parts(raw_ptr as *mut _, self.size_in_bytes, capacity);
 
             Ok(())
         }
     }
 
     pub unsafe fn as_f32(&self) -> f32 {
-        *(self.host as *const f32)
+        *(self.host.as_ptr() as *const f32)
     }
 
     pub unsafe fn as_i32(&self) -> i32 {
-        *(self.host as *const i32)
+        *(self.host.as_ptr() as *const i32)
     }
 
-    pub unsafe fn copy_to_device(&self, device_id: i32, stream: cuda::Stream) -> Result<bool, Error> {
-        let device_id = device_id as usize;
+    pub unsafe fn copy_to_device(&self, stream: &Stream) -> Result<bool, Error> {
+        let mut ptr = self.ptr.lock().unwrap();
 
-        if self.ptr[device_id].load(Ordering::Relaxed).is_null() {
-            let mut ptr = ptr::null_mut();
-            let padded_size_in_bytes = if self.size_in_bytes % 32 == 0 {
-                self.size_in_bytes
-            } else {
-                self.size_in_bytes + (32 - self.size_in_bytes % 32)
-            };
+        if ptr.is_null() {
+            let padded_size_in_bytes =
+                if self.size_in_bytes % 32 == 0 {
+                    self.size_in_bytes
+                } else {
+                    self.size_in_bytes + (32 - self.size_in_bytes % 32)
+                };
 
-            check!(cuda::cudaMalloc(&mut ptr, padded_size_in_bytes))?;
-            check!(cuda::cudaMemcpyAsync(
-                ptr,
-                self.host,
-                self.size_in_bytes,
-                cuda::MemcpyKind::HostToDevice,
-                stream
-            ))?;
+            ptr.resize(padded_size_in_bytes)?;
+            ptr.copy_from_slice(&self.host, &stream)?;
 
-            if !self.ptr[device_id].compare_and_swap(ptr::null_mut(), ptr, Ordering::SeqCst).is_null() {
-                check!(cuda::cudaStreamSynchronize(stream))?;  // wait for copy
-                check!(cuda::cudaFree(ptr))?;
-
-                Ok(false)
-            } else {
-                Ok(true)
-            }
+            Ok(true)
         } else {
             Ok(false)
         }

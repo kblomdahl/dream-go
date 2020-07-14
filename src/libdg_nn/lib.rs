@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![feature(test)]
+#![feature(vec_into_raw_parts)]
 
 extern crate dg_cuda;
 extern crate dg_go;
