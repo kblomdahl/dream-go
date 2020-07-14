@@ -73,6 +73,12 @@ impl Drop for Stream {
     }
 }
 
+impl Default for Stream {
+    fn default() -> Self {
+        Self { stream: ptr::null() }
+    }
+}
+
 impl Stream {
     pub fn new() -> Result<Self, Error> {
         let mut out = Self { stream: ptr::null_mut() };

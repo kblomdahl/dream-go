@@ -29,7 +29,6 @@ mod loader;
 mod network;
 mod output_map;
 mod profiler;
-mod slots;
 mod tensor;
 
 pub use self::error::Error;

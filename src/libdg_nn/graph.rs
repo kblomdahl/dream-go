@@ -18,8 +18,6 @@ use std::ptr;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use libc::c_void;
-
 use dg_cuda as cuda2;
 use dg_cuda::cudnn as cudnn2;
 use dg_go::utils::features::{FEATURE_SIZE, NUM_FEATURES};
@@ -27,7 +25,6 @@ use dg_utils::types::f16;
 use dg_utils::config;
 use super::devices::get_current_device;
 use super::ffi::cuda;
-use super::slots::*;
 use super::output_map::*;
 use super::tensor::Tensor;
 use super::Error;
@@ -58,34 +55,6 @@ impl InferenceType for f32 {
     fn as_f32(self) -> f32 { self }
 }
 
-/// Copy the value of the given tensor from the device to the host.
-///
-/// # Arguments
-///
-/// * `ptr` - the memory address on the device
-/// * `num_elements` - the number of elements to copy
-/// * `stream` - the stream to execute the copy on
-///
-unsafe fn load_to_host<T: InferenceType>(
-    ptr: *const c_void,
-    num_elements: usize,
-    stream: cuda::Stream
-) -> Result<Vec<f32>, Error>
-{
-    let mut host = vec! [T::default(); num_elements];
-
-    check!(cuda::cudaMemcpyAsync(
-        host.as_mut_ptr() as *mut c_void,
-        ptr,
-        size_of::<T>() * num_elements,
-        cuda::MemcpyKind::DeviceToHost,
-        stream
-    ))?;
-    check!(cuda::cudaStreamSynchronize(stream))?;
-
-    Ok(host.into_iter().map(|x| x.as_f32()).collect())
-}
-
 /// If the given output `output` is in the set of requested outputs, then
 /// loads the given pointers from the device to the host, and then adds it
 /// to the output map.
@@ -99,21 +68,21 @@ unsafe fn load_to_host<T: InferenceType>(
 /// * `num_elements`-
 /// * `stream` -
 ///
-unsafe fn load_output<T: InferenceType>(
+unsafe fn load_output<A: cuda2::Allocator, T: InferenceType>(
     output_set: &OutputSet,
     output_map: &mut OutputMap<Vec<f32>>,
     output: Output,
-    device_ptr: *const c_void,
-    num_elements: usize,
-    stream: cuda::Stream
+    ptr: &cuda2::SmartPtr<A>,
+    stream: &cuda2::Stream
 ) -> Result<(), Error>
 {
     if let Some(key) = output_set.contains(output) {
-        output_map.put(key, load_to_host::<T>(
-            device_ptr,
-            num_elements,
-            stream
-        )?);
+        output_map.put(
+            key,
+            ptr.to_vec::<T::Output>(&stream)?.iter()
+                .map(|x| x.as_f32())
+                .collect()
+        );
     }
 
     Ok(())
@@ -462,14 +431,14 @@ fn create_dense_tanh(
 
 pub struct Builder {
     tensors: Arc<HashMap<String, Tensor>>,
-    slots: Slots
+    allocator: cuda2::PerDevice<cuda2::Concurrent<cuda2::Sticky<cuda2::Native>>>,
 }
 
 impl Builder {
     pub fn new(tensors: HashMap<String, Tensor>) -> Builder {
         Builder {
             tensors: Arc::new(tensors),
-            slots: Slots::new()
+            allocator: cuda2::PerDevice::new().unwrap(),
         }
     }
 
@@ -490,8 +459,7 @@ impl Builder {
         Ok(Workspace {
             batch_size: batch_size,
             tensors: self.tensors.clone(),
-            slots: self.slots.clone(),
-            num_channels: c_residual[0].num_channels,
+            allocator: self.allocator.clone(),
 
             handle: handle_dnn,
 
@@ -534,8 +502,7 @@ impl Builder {
 pub struct Workspace {
     batch_size: usize,
     tensors: Arc<HashMap<String, Tensor>>,
-    slots: Slots,
-    num_channels: usize,
+    allocator: cuda2::Concurrent<cuda2::Sticky<cuda2::Native>>,
 
     handle: cudnn2::Handle,
     tower_finished: cuda2::Event,
@@ -572,12 +539,12 @@ impl UpLayer {
         })
     }
 
-    unsafe fn forward<'a, T: InferenceType>(
+    unsafe fn forward<'a, A: cuda2::Allocator + Clone, T: InferenceType>(
         &self,
         workspace: &mut Workspace,
-        slots: &'a SlotsGuard,
-        input: &SlotGuard<'a>
-    ) -> Result<SlotGuard<'a>, Error>
+        allocator: &mut A,
+        input: &cuda2::SmartPtr<A>
+    ) -> Result<cuda2::SmartPtr<A>, Error>
     {
         workspace.handle.set_stream(&workspace.tower_stream)?;
 
@@ -585,21 +552,21 @@ impl UpLayer {
         let weights = &workspace.tensors["01_upsample/conv_1:0"];
         let offset = &workspace.tensors["01_upsample/conv_1/offset:0"];
 
-        offset.copy_to_device(device_id, *workspace.tower_stream)?;
         weights.copy_to_device(device_id, *workspace.tower_stream)?;
+        offset.copy_to_device(device_id, *workspace.tower_stream)?;
 
         // perform the forward convolution
-        let workspace_1 = slots.get_slot(Slot::Workspace_1, self.up.fwd_algo_perf().memory(), *workspace.tower_stream)?;
-        let output = slots.get_slot(Slot::Residual_1, size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361, *workspace.tower_stream)?;
+        let workspace_1 = cuda2::malloc(self.up.fwd_algo_perf().memory(), allocator)?;
+        let output = cuda2::malloc(self.up.output().size_in_bytes()?, allocator)?;
 
         self.up.forward(
             &workspace.handle,
-            **input,
+            input.as_ptr(),
             weights.get(device_id),
-            *workspace_1, self.up.fwd_algo_perf().memory(),
-            *output,
+            workspace_1.as_ptr(), workspace_1.size_in_bytes(),
+            output.as_ptr(),
             offset.get(device_id),
-            *output
+            output.as_ptr()
         )?;
 
         Ok(output)
@@ -610,8 +577,6 @@ struct ResidualLayer {
     conv_1: cudnn2::ConvolutionBiasActivation,
     conv_2: cudnn2::ConvolutionBiasActivation,
     scale_offset: cudnn2::Scale,
-
-    num_channels: usize,
     count: usize,
 }
 
@@ -644,17 +609,16 @@ impl ResidualLayer {
             conv_1: create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[1.0, 0.0])?,
             conv_2: create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[gate_t, 1.0 - gate_t])?,
             scale_offset: cudnn2::Scale::new(create_offset_descriptor(num_channels)?, gate_t)?,
-            num_channels: num_channels as usize,
             count: i,
         }))
     }
 
-    unsafe fn forward<'a, T: InferenceType>(
+    unsafe fn forward<'a, A: cuda2::Allocator + Clone, T: InferenceType>(
         &self,
         workspace: &mut Workspace,
-        slots: &'a SlotsGuard,
-        input: SlotGuard<'a>
-    ) -> Result<SlotGuard<'a>, Error>
+        allocator: &mut A,
+        input: cuda2::SmartPtr<A>
+    ) -> Result<cuda2::SmartPtr<A>, Error>
     {
         workspace.handle.set_stream(&workspace.tower_stream)?;
 
@@ -674,28 +638,27 @@ impl ResidualLayer {
         debug_assert!(offset_1.size_in_elements == offset_2.size_in_elements);
 
         // perform the forward convolution (1)
-        let workspace_r = slots.get_slot(Slot::Workspace_r, self.conv_1.fwd_algo_perf().memory(), *workspace.tower_stream)?;
-        let residual_2_size = size_of::<T::Tower>() * workspace.batch_size * workspace.num_channels * 361;
-        let residual_2 = slots.get_slot(Slot::Residual_2, residual_2_size, *workspace.tower_stream)?;
+        let workspace_r = cuda2::malloc(self.conv_1.fwd_algo_perf().memory(), allocator)?;
+        let residual_2 = cuda2::malloc(self.conv_1.output().size_in_bytes()?, allocator)?;
 
         self.conv_1.forward(
             &workspace.handle,
-            *input,
+            input.as_ptr(),
             weights_1.get(device_id),
-            *workspace_r, self.conv_1.fwd_algo_perf().memory(),
-            *residual_2,
+            workspace_r.as_ptr(), workspace_r.size_in_bytes(),
+            residual_2.as_ptr(),
             offset_1.get(device_id),
-            *residual_2
+            residual_2.as_ptr()
         )?;
 
         self.conv_2.forward(
             &workspace.handle,
-            *residual_2,
+            residual_2.as_ptr(),
             weights_2.get(device_id),
-            *workspace_r, self.conv_2.fwd_algo_perf().memory(),
-            *input,
+            workspace_r.as_ptr(), workspace_r.size_in_bytes(),
+            input.as_ptr(),
             offset_2.get(device_id),
-            *input
+            input.as_ptr()
         )?;
 
         Ok(input)
@@ -734,60 +697,60 @@ impl ValueLayer {
         })
     }
 
-    unsafe fn forward<'a, T: InferenceType>(
+    unsafe fn forward<'a, A: cuda2::Allocator + Clone, T: InferenceType>(
         &self,
         workspace: &mut Workspace,
-        slots: &'a SlotsGuard,
+        allocator: &mut A,
         output_set: &OutputSet,
         output_map: &mut OutputMap<Vec<f32>>,
-        input: &SlotGuard<'a>
-    ) -> Result<SlotGuard<'a>, Error>
+        input: &cuda2::SmartPtr<A>
+    ) -> Result<cuda2::SmartPtr<A>, Error>
     {
         workspace.handle.set_stream(&workspace.value_stream)?;
 
         let device_id = get_current_device()?;
         let weights_1 = &workspace.tensors[&format!("{:02}v_value/conv_1:0", self.count)];
         let offset_1 = &workspace.tensors[&format!("{:02}v_value/conv_1/offset:0", self.count)];
-        let workspace_v_size = self.conv_1.fwd_algo_perf().memory()
-            .max(self.reduce_mean.size_in_bytes(&workspace.handle)?);
-        let workspace_v = slots.get_slot(Slot::Workspace_v, workspace_v_size, *workspace.value_stream)?;
 
         weights_1.copy_to_device(device_id, *workspace.value_stream)?;
         offset_1.copy_to_device(device_id, *workspace.value_stream)?;
 
         // perform the forward convolution
-        let value_1 = slots.get_slot(Slot::Value_1, size_of::<T::Output>() * workspace.batch_size * 8 * 361, *workspace.value_stream)?;
+        let workspace_v_size = self.conv_1.fwd_algo_perf().memory()
+            .max(self.reduce_mean.size_in_bytes(&workspace.handle)?);
+        let workspace_v = cuda2::malloc(workspace_v_size, allocator)?;
+        let value_1 = cuda2::malloc(self.conv_1.output().size_in_bytes()?, allocator)?;
 
         self.conv_1.forward(
             &workspace.handle,
-            **input,
+            input.as_ptr(),
             weights_1.get(device_id),
-            *workspace_v, self.conv_1.fwd_algo_perf().memory(),
-            *value_1,
+            workspace_v.as_ptr(), workspace_v.size_in_bytes(),
+            value_1.as_ptr(),
             offset_1.get(device_id),
-            *value_1
+            value_1.as_ptr()
         )?;
 
-        load_output::<T::Output>(output_set, output_map, Output::ValueDown, *value_1, workspace.batch_size * 8 * 361, *workspace.value_stream)?;
+        load_output::<_, T::Output>(output_set, output_map, Output::ValueDown, &value_1, &workspace.value_stream)?;
 
         // perform the global average pooling
-        let value_2 = slots.get_slot(Slot::Value_2, size_of::<T::Output>() * workspace.batch_size * 1, *workspace.value_stream)?;
+        let value_2 = cuda2::malloc(self.reduce_mean.output().size_in_bytes()?, allocator)?;
 
         self.reduce_mean.forward(
             &workspace.handle,
             ptr::null_mut(), 0,
-            *workspace_v, workspace_v_size,
-            *value_1,
-            *value_2
+            workspace_v.as_ptr(), workspace_v.size_in_bytes(),
+            value_1.as_ptr(),
+            value_2.as_ptr()
         )?;
 
-        load_output::<T::Output>(output_set, output_map, Output::ValueGemm, *value_2, workspace.batch_size * 1, *workspace.value_stream)?;
+        load_output::<_, T::Output>(output_set, output_map, Output::ValueGemm, &value_2, &workspace.value_stream)?;
 
         // perform the feed-forward linear layer (tanh)
         self.tanh.forward(
             &workspace.handle,
-            *value_2,
-            *value_2,
+            value_2.as_ptr(),
+            value_2.as_ptr()
         )?;
 
         Ok(value_2)
@@ -831,14 +794,14 @@ impl PolicyLayer {
         })
     }
 
-    unsafe fn forward<'a, T: InferenceType>(
+    unsafe fn forward<'a, A: cuda2::Allocator + Clone, T: InferenceType>(
         &self,
         workspace: &mut Workspace,
-        slots: &'a SlotsGuard,
+        allocator: &mut A,
         output_set: &OutputSet,
         output_map: &mut OutputMap<Vec<f32>>,
-        input: &SlotGuard<'a>
-    ) -> Result<SlotGuard<'a>, Error>
+        input: &cuda2::SmartPtr<A>
+    ) -> Result<cuda2::SmartPtr<A>, Error>
     {
         workspace.handle.set_stream(&workspace.policy_stream)?;
 
@@ -850,7 +813,7 @@ impl PolicyLayer {
         let workspace_p_size = self.conv_1.fwd_algo_perf().memory()
             .max(self.linear_2.fwd_algo_perf().memory())
             .max(weights_2.size_in_bytes);
-        let workspace_p = slots.get_slot(Slot::Workspace_p, workspace_p_size, *workspace.policy_stream)?;
+        let workspace_p = cuda2::malloc(workspace_p_size, allocator)?;
 
         offset_1.copy_to_device(device_id, *workspace.policy_stream)?;
         if offset_2.copy_to_device(device_id, *workspace.policy_stream)? {
@@ -861,12 +824,12 @@ impl PolicyLayer {
             self.transpose.forward(
                 &workspace.handle,
                 weights_2.get(device_id),
-                *workspace_p
+                workspace_p.as_ptr()
             )?;
 
             check!(cuda::cudaMemcpyAsync(
                 weights_2.get(device_id),
-                *workspace_p,
+                workspace_p.as_ptr(),
                 weights_2.size_in_bytes,
                 cuda::MemcpyKind::DeviceToDevice,
                 *workspace.policy_stream
@@ -874,36 +837,36 @@ impl PolicyLayer {
         }
 
         // perform the forward convolution
-        let policy_1 = slots.get_slot(Slot::Policy_1, size_of::<T::Output>() * workspace.batch_size * 8 * 361, *workspace.policy_stream)?;
+        let policy_1 = cuda2::malloc(self.conv_1.output().size_in_bytes()?, allocator)?;
 
         self.conv_1.forward(
             &workspace.handle,
-            **input,
+            input.as_ptr(),
             weights_1.get(device_id),
-            *workspace_p, self.conv_1.fwd_algo_perf().memory(),
-            *policy_1,
+            workspace_p.as_ptr(), workspace_p.size_in_bytes(),
+            policy_1.as_ptr(),
             offset_1.get(device_id),
-            *policy_1
+            policy_1.as_ptr()
         )?;
 
-        load_output::<T::Output>(output_set, output_map, Output::PolicyDown, *policy_1, workspace.batch_size * 8 * 361, *workspace.policy_stream)?;
+        load_output::<_, T::Output>(output_set, output_map, Output::PolicyDown, &policy_1, &workspace.policy_stream)?;
 
         // perform the feed-forward linear layers
-        let policy_2 = slots.get_slot(Slot::Policy_2, size_of::<T::Output>() * workspace.batch_size * 362, *workspace.policy_stream)?;
-        let policy_3 = slots.get_slot(Slot::Policy_3, size_of::<T::Output>() * workspace.batch_size * 362, *workspace.policy_stream)?;
+        let policy_2 = cuda2::malloc(self.linear_2.output().size_in_bytes()?, allocator)?;
+        let policy_3 = cuda2::malloc(self.linear_2.output().size_in_bytes()?, allocator)?;
 
         self.linear_2.forward(
             &workspace.handle,
-            *policy_1,
+            policy_1.as_ptr(),
             weights_2.get(device_id),
-            *workspace_p, self.linear_2.fwd_algo_perf().memory(),
-            *policy_2,
+            workspace_p.as_ptr(), workspace_p.size_in_bytes(),
+            policy_2.as_ptr(),
             offset_2.get(device_id),
-            *policy_2
+            policy_2.as_ptr()
         )?;
 
         // softmax activation
-        self.softmax.forward(&workspace.handle, *policy_2, *policy_3)?;
+        self.softmax.forward(&workspace.handle, policy_2.as_ptr(), policy_3.as_ptr())?;
 
         Ok(policy_3)
     }
@@ -927,38 +890,30 @@ pub fn forward<T: InferenceType>(
     debug_assert!(features.len() % FEATURE_SIZE == 0);
     debug_assert!(features.len() / FEATURE_SIZE == workspace.batch_size);
 
-    let slots = workspace.slots.lock()?;
+    let mut allocator = cuda2::Cloneable::new(cuda2::Sticky::new(workspace.allocator.clone()));
     let mut map = OutputMap::default();
 
     unsafe {
         workspace.handle.set_stream(&workspace.tower_stream)?;
 
         // copy all of the input features into a temporary workspace
-        let input = slots.get_slot(Slot::Input, size_of::<T>() * features.len(), *workspace.tower_stream)?;
-        let image_size = 361 * workspace.num_channels;
-
-        check!(cuda::cudaMemcpyAsync(
-            *input,
-            features.as_ptr() as *const c_void,
-            size_of::<T>() * features.len(),
-            cuda::MemcpyKind::HostToDevice,
-            *workspace.tower_stream
-        ))?;
+        let mut input = cuda2::malloc(size_of::<T>() * features.len(), &allocator)?;
+        input.copy_from_slice(&features, &workspace.tower_stream)?;
 
         // Upsample 32 -> 128 channels
-        let mut residual_1 = workspace.c_up.clone().forward::<T>(workspace, &slots, &input)?;
+        let mut residual_1 = workspace.c_up.clone().forward::<_, T>(workspace, &mut allocator, &input)?;
 
-        load_output::<T::Tower>(&outputs, &mut map, Output::Upsample, *residual_1, workspace.batch_size * image_size, *workspace.tower_stream)?;
+        load_output::<_, T::Tower>(&outputs, &mut map, Output::Upsample, &residual_1, &workspace.tower_stream)?;
 
         // residual blocks
         let num_residual = workspace.c_residual.len();
 
         for i in 0..num_residual {
-            let residual = workspace.c_residual[i].clone();
+            let residual = &workspace.c_residual[i];
             let output = ::std::mem::transmute(Output::Residual_00 as u8 + i as u8);
 
-            residual_1 = residual.forward::<T>(workspace, &slots, residual_1)?;
-            load_output::<T::Tower>(&outputs, &mut map, output, *residual_1, workspace.batch_size * image_size, *workspace.tower_stream)?;
+            residual_1 = residual.clone().forward::<_, T>(workspace, &mut allocator, residual_1)?;
+            load_output::<_, T::Tower>(&outputs, &mut map, output, &residual_1, &workspace.tower_stream)?;
         }
 
         workspace.tower_finished.record(&workspace.tower_stream)?;
@@ -967,11 +922,11 @@ pub fn forward<T: InferenceType>(
 
         // run the value and policy head, then wait for them to finish (if
         // they are requested)
-        let value = workspace.c_value.clone().forward::<T>(workspace, &slots, &outputs, &mut map, &residual_1)?;
-        let policy = workspace.c_policy.clone().forward::<T>(workspace, &slots, &outputs, &mut map, &residual_1)?;
+        let value = workspace.c_value.clone().forward::<_, T>(workspace, &mut allocator, &outputs, &mut map, &residual_1)?;
+        let policy = workspace.c_policy.clone().forward::<_, T>(workspace, &mut allocator, &outputs, &mut map, &residual_1)?;
 
-        load_output::<T::Output>(&outputs, &mut map, Output::Value, *value, workspace.batch_size, *workspace.value_stream)?;
-        load_output::<T::Output>(&outputs, &mut map, Output::Policy, *policy, workspace.batch_size * 362, *workspace.policy_stream)?;
+        load_output::<_, T::Output>(&outputs, &mut map, Output::Value, &value, &workspace.value_stream)?;
+        load_output::<_, T::Output>(&outputs, &mut map, Output::Policy, &policy, &workspace.policy_stream)?;
     }
 
     // pretty-print the tensor to stderr if logging is turned on

@@ -88,6 +88,10 @@ impl ReduceTensor {
         status.into_result(())
     }
 
+    pub fn output(&self) -> &TensorDescriptor {
+        &self.y
+    }
+
     pub fn size_in_bytes(&self, handle: &Handle) -> Result<usize, Status> {
         let mut out = 0;
         let status = unsafe {
