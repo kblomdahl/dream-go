@@ -426,6 +426,164 @@ fn create_dense_tanh(
     )
 }
 
+// -------- Convolution --------
+
+pub struct Conv2d {
+    conv_desc: cudnn2::ConvolutionBiasActivation,
+    filter: Tensor,
+    offset: Tensor
+}
+
+impl Conv2d {
+    fn new(
+        name: String,
+        conv_desc: cudnn2::ConvolutionBiasActivation,
+        tensors: &HashMap<String, Tensor>
+    ) -> Result<Self, Error>
+    {
+        Ok(Self {
+            conv_desc: conv_desc,
+            filter: tensors[&format!("{}:0", name)].clone(),
+            offset: tensors[&format!("{}/offset:0", name)].clone()
+        })
+    }
+
+    unsafe fn prepare(&self, handle: &cudnn2::Handle, stream: &cuda2::Stream) -> Result<bool, Error> {
+        handle.set_stream(stream)?;
+        if self.filter.copy_to_device(&stream)? && self.offset.copy_to_device(&stream)? {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    unsafe fn forward<A: cuda2::Allocator + Clone>(
+        &self,
+        handle: &cudnn2::Handle,
+        input: &cuda2::SmartPtr<A>,
+        allocator: &A,
+        stream: &cuda2::Stream
+    ) -> Result<cuda2::SmartPtr<A>, Error>
+    {
+        let workspace = cuda2::malloc(self.conv_desc.fwd_algo_perf().memory(), allocator)?;
+        let output = cuda2::malloc(self.conv_desc.output().size_in_bytes()?, allocator)?;
+
+        self.prepare(handle, stream)?;
+        self.conv_desc.forward(
+            handle,
+            input.as_ptr(),
+            self.filter.get().as_ptr(),
+            workspace.as_ptr(), workspace.size_in_bytes(),
+            output.as_ptr(),
+            self.offset.get().as_ptr(),
+            output.as_ptr()
+        )?;
+
+        Ok(output)
+    }
+
+    unsafe fn forward_skip<A: cuda2::Allocator + Clone>(
+        &self,
+        handle: &cudnn2::Handle,
+        input: &cuda2::SmartPtr<A>,
+        skip_input: &cuda2::SmartPtr<A>,
+        allocator: &A,
+        stream: &cuda2::Stream
+    ) -> Result<cuda2::SmartPtr<A>, Error>
+    {
+        let workspace = cuda2::malloc(self.conv_desc.fwd_algo_perf().memory(), allocator)?;
+        let output = cuda2::malloc(self.conv_desc.output().size_in_bytes()?, allocator)?;
+
+        self.prepare(handle, stream)?;
+        self.conv_desc.forward(
+            handle,
+            input.as_ptr(),
+            self.filter.get().as_ptr(),
+            workspace.as_ptr(), workspace.size_in_bytes(),
+            skip_input.as_ptr(),
+            self.offset.get().as_ptr(),
+            output.as_ptr()
+        )?;
+
+        Ok(output)
+    }
+}
+
+pub struct Dense {
+    transpose_filter: cudnn2::Transform,
+    conv_desc: cudnn2::ConvolutionBiasActivation,
+    filter: Tensor,
+    offset: Tensor,
+}
+
+impl Dense {
+    fn new(
+        name: String,
+        conv_desc: cudnn2::ConvolutionBiasActivation,
+        tensors: &HashMap<String, Tensor>
+    ) -> Result<Self, Error>
+    {
+        let num_outputs = conv_desc.output().shape()?[1];
+        let num_inputs = conv_desc.input().shape()?[1];
+
+        Ok(Self {
+            transpose_filter: create_dense_transpose(num_outputs, num_inputs)?,
+            conv_desc: conv_desc,
+            filter: tensors[&format!("{}:0", name)].clone(),
+            offset: tensors[&format!("{}/offset:0", name)].clone(),
+        })
+    }
+
+    unsafe fn prepare<A: cuda2::Allocator + Clone>(
+        &self,
+        handle: &cudnn2::Handle,
+        allocator: &A,
+        stream: &cuda2::Stream
+    ) -> Result<bool, Error> 
+    {
+        handle.set_stream(stream)?;
+        if self.filter.copy_to_device(&stream)? && self.offset.copy_to_device(&stream)? {
+            let temp = cuda2::malloc(self.filter.get().size_in_bytes(), allocator)?;
+
+            self.transpose_filter.forward(
+                handle,
+                self.filter.get().as_ptr(),
+                temp.as_ptr()
+            )?;
+            self.filter.set_device_ptr(temp.unwrap());
+
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    unsafe fn forward<A: cuda2::Allocator + Clone>(
+        &self,
+        handle: &cudnn2::Handle,
+        input: &cuda2::SmartPtr<A>,
+        allocator: &A,
+        stream: &cuda2::Stream
+    ) -> Result<cuda2::SmartPtr<A>, Error>
+    {
+        let workspace = cuda2::malloc(self.conv_desc.fwd_algo_perf().memory(), allocator)?;
+        let output = cuda2::malloc(self.conv_desc.output().size_in_bytes()?, allocator)?;
+
+        self.prepare(handle, allocator, stream)?;
+        self.conv_desc.forward(
+            handle,
+            input.as_ptr(),
+            self.filter.get().as_ptr(),
+            workspace.as_ptr(), workspace.size_in_bytes(),
+            output.as_ptr(),
+            self.offset.get().as_ptr(),
+            output.as_ptr()
+        )?;
+
+        Ok(output)
+    }
+}
+
 // -------- Graph --------
 
 pub struct Builder {
@@ -457,7 +615,6 @@ impl Builder {
 
         Ok(Workspace {
             batch_size: batch_size,
-            tensors: self.tensors.clone(),
             allocator: self.allocator.clone(),
 
             handle: handle_dnn,
@@ -500,7 +657,6 @@ impl Builder {
 
 pub struct Workspace {
     batch_size: usize,
-    tensors: Arc<HashMap<String, Tensor>>,
     allocator: cuda2::Concurrent<cuda2::Sticky<cuda2::Native>>,
 
     handle: cudnn2::Handle,
@@ -516,7 +672,7 @@ pub struct Workspace {
 }
 
 struct UpLayer {
-    up: cudnn2::ConvolutionBiasActivation,
+    up: Conv2d
 }
 
 impl UpLayer {
@@ -534,7 +690,7 @@ impl UpLayer {
             .unwrap_or(DEFAULT_NUM_CHANNELS);
 
         Ok(UpLayer {
-            up: create_convolution_bias_activation_3x3(handle, n, num_channels, NUM_FEATURES as i32, &[1.0, 0.0])?
+            up: Conv2d::new("01_upsample/conv_1".into(), create_convolution_bias_activation_3x3(handle, n, num_channels, NUM_FEATURES as i32, &[1.0, 0.0])?, tensors)?
         })
     }
 
@@ -545,37 +701,14 @@ impl UpLayer {
         input: &cuda2::SmartPtr<A>
     ) -> Result<cuda2::SmartPtr<A>, Error>
     {
-        workspace.handle.set_stream(&workspace.tower_stream)?;
-
-        let weights = &workspace.tensors["01_upsample/conv_1:0"];
-        let offset = &workspace.tensors["01_upsample/conv_1/offset:0"];
-
-        weights.copy_to_device(&workspace.tower_stream)?;
-        offset.copy_to_device(&workspace.tower_stream)?;
-
-        // perform the forward convolution
-        let workspace_1 = cuda2::malloc(self.up.fwd_algo_perf().memory(), allocator)?;
-        let output = cuda2::malloc(self.up.output().size_in_bytes()?, allocator)?;
-
-        self.up.forward(
-            &workspace.handle,
-            input.as_ptr(),
-            weights.get().as_ptr(),
-            workspace_1.as_ptr(), workspace_1.size_in_bytes(),
-            output.as_ptr(),
-            offset.get().as_ptr(),
-            output.as_ptr()
-        )?;
-
-        Ok(output)
+        self.up.forward(&workspace.handle, input, allocator, &workspace.tower_stream)
     }
 }
 
 struct ResidualLayer {
-    conv_1: cudnn2::ConvolutionBiasActivation,
-    conv_2: cudnn2::ConvolutionBiasActivation,
-    scale_offset: cudnn2::Scale,
-    count: usize,
+    conv_1: Conv2d,
+    conv_2: Conv2d,
+    scale_offset: cudnn2::Scale
 }
 
 impl ResidualLayer {
@@ -604,10 +737,9 @@ impl ResidualLayer {
         let gate_t = alpha.map(|t| t.as_f32()).unwrap_or(0.5);
 
         Ok(Some(ResidualLayer {
-            conv_1: create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[1.0, 0.0])?,
-            conv_2: create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[gate_t, 1.0 - gate_t])?,
-            scale_offset: cudnn2::Scale::new(create_offset_descriptor(num_channels)?, gate_t)?,
-            count: i,
+            conv_1: Conv2d::new(format!("{:02}_residual/conv_1", i), create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[1.0, 0.0])?, tensors)?,
+            conv_2: Conv2d::new(format!("{:02}_residual/conv_2", i), create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[gate_t, 1.0 - gate_t])?, tensors)?,
+            scale_offset: cudnn2::Scale::new(create_offset_descriptor(num_channels)?, gate_t)?
         }))
     }
 
@@ -618,56 +750,19 @@ impl ResidualLayer {
         input: cuda2::SmartPtr<A>
     ) -> Result<cuda2::SmartPtr<A>, Error>
     {
-        workspace.handle.set_stream(&workspace.tower_stream)?;
-
-        let weights_1 = &workspace.tensors[&format!("{:02}_residual/conv_1:0", self.count)];
-        let weights_2 = &workspace.tensors[&format!("{:02}_residual/conv_2:0", self.count)];
-        let offset_1 = &workspace.tensors[&format!("{:02}_residual/conv_1/offset:0", self.count)];
-        let offset_2 = &workspace.tensors[&format!("{:02}_residual/conv_2/offset:0", self.count)];
-
-        weights_1.copy_to_device(&workspace.tower_stream)?;
-        weights_2.copy_to_device(&workspace.tower_stream)?;
-        offset_1.copy_to_device(&workspace.tower_stream)?;
-        if offset_2.copy_to_device(&workspace.tower_stream)? {
-            self.scale_offset.forward(&workspace.handle, offset_2.get().as_ptr())?;
+        if self.conv_2.prepare(&workspace.handle, &workspace.tower_stream)? {
+            self.scale_offset.forward(&workspace.handle, self.conv_2.offset.get().as_ptr())?;
         }
 
-        debug_assert!(offset_1.size_in_elements() == offset_2.size_in_elements());
-
-        // perform the forward convolution (1)
-        let workspace_r = cuda2::malloc(self.conv_1.fwd_algo_perf().memory(), allocator)?;
-        let residual_2 = cuda2::malloc(self.conv_1.output().size_in_bytes()?, allocator)?;
-
-        self.conv_1.forward(
-            &workspace.handle,
-            input.as_ptr(),
-            weights_1.get().as_ptr(),
-            workspace_r.as_ptr(), workspace_r.size_in_bytes(),
-            residual_2.as_ptr(),
-            offset_1.get().as_ptr(),
-            residual_2.as_ptr()
-        )?;
-
-        self.conv_2.forward(
-            &workspace.handle,
-            residual_2.as_ptr(),
-            weights_2.get().as_ptr(),
-            workspace_r.as_ptr(), workspace_r.size_in_bytes(),
-            input.as_ptr(),
-            offset_2.get().as_ptr(),
-            input.as_ptr()
-        )?;
-
-        Ok(input)
+        let y = self.conv_1.forward(&workspace.handle, &input, allocator, &workspace.tower_stream)?;
+        self.conv_2.forward_skip(&workspace.handle, &y, &input, allocator, &workspace.tower_stream)
     }
 }
 
 struct ValueLayer {
-    conv_1: cudnn2::ConvolutionBiasActivation,
+    conv_1: Conv2d,
     reduce_mean: cudnn2::ReduceTensor,
     tanh: cudnn2::Activation,
-
-    count: usize
 }
 
 impl ValueLayer {
@@ -687,10 +782,9 @@ impl ValueLayer {
             .unwrap_or(DEFAULT_NUM_CHANNELS);
 
         Ok(ValueLayer {
-            conv_1: create_convolution_bias_3x3(handle, n, 8, num_channels, &[1.0, 0.0])?,
+            conv_1: Conv2d::new(format!("{:02}v_value/conv_1", i), create_convolution_bias_3x3(handle, n, 8, num_channels, &[1.0, 0.0])?, tensors)?,
             reduce_mean: create_global_avg_pooling(n, 8, [1.0, 0.0])?,
-            tanh: create_dense_tanh(cudnn2::ActivationDescriptor::tanh()?, n, 1, [1.0, 0.0])?,
-            count: i
+            tanh: create_dense_tanh(cudnn2::ActivationDescriptor::tanh()?, n, 1, [1.0, 0.0])?
         })
     }
 
@@ -705,27 +799,10 @@ impl ValueLayer {
     {
         workspace.handle.set_stream(&workspace.value_stream)?;
 
-        let weights_1 = &workspace.tensors[&format!("{:02}v_value/conv_1:0", self.count)];
-        let offset_1 = &workspace.tensors[&format!("{:02}v_value/conv_1/offset:0", self.count)];
-
-        weights_1.copy_to_device(&workspace.value_stream)?;
-        offset_1.copy_to_device(&workspace.value_stream)?;
-
         // perform the forward convolution
-        let workspace_v_size = self.conv_1.fwd_algo_perf().memory()
-            .max(self.reduce_mean.size_in_bytes(&workspace.handle)?);
+        let workspace_v_size = self.reduce_mean.size_in_bytes(&workspace.handle)?;
         let workspace_v = cuda2::malloc(workspace_v_size, allocator)?;
-        let value_1 = cuda2::malloc(self.conv_1.output().size_in_bytes()?, allocator)?;
-
-        self.conv_1.forward(
-            &workspace.handle,
-            input.as_ptr(),
-            weights_1.get().as_ptr(),
-            workspace_v.as_ptr(), workspace_v.size_in_bytes(),
-            value_1.as_ptr(),
-            offset_1.get().as_ptr(),
-            value_1.as_ptr()
-        )?;
+        let value_1 = self.conv_1.forward(&workspace.handle, input, allocator, &workspace.value_stream)?;
 
         load_output::<_, T::Output>(output_set, output_map, Output::ValueDown, &value_1, &workspace.value_stream)?;
 
@@ -743,23 +820,17 @@ impl ValueLayer {
         load_output::<_, T::Output>(output_set, output_map, Output::ValueGemm, &value_2, &workspace.value_stream)?;
 
         // perform the feed-forward linear layer (tanh)
-        self.tanh.forward(
-            &workspace.handle,
-            value_2.as_ptr(),
-            value_2.as_ptr()
-        )?;
+        self.tanh.forward(&workspace.handle, value_2.as_ptr(), value_2.as_ptr())?;
 
         Ok(value_2)
     }
 }
 
 struct PolicyLayer {
-    conv_1: cudnn2::ConvolutionBiasActivation,
-    linear_2: cudnn2::ConvolutionBiasActivation,
-    transpose: cudnn2::Transform,
+    conv_1: Conv2d,
+    linear_2: Dense,
     softmax: cudnn2::Softmax,
     scale_tau: cudnn2::Scale,
-    count: usize,
 }
 
 impl PolicyLayer {
@@ -781,12 +852,10 @@ impl PolicyLayer {
         let tau = 1.0 / *config::SOFTMAX_TEMPERATURE;
 
         Ok(PolicyLayer {
-            conv_1: create_convolution_bias_activation_3x3(handle, n, num_samples, num_channels, &[1.0, 0.0])?,
-            linear_2: create_dense_bias(handle, n, 362, 361 * num_samples, &[tau, 0.0])?,
-            transpose: create_dense_transpose(362, 361 * num_samples)?,
+            conv_1: Conv2d::new(format!("{:02}p_policy/conv_1", i), create_convolution_bias_activation_3x3(handle, n, num_samples, num_channels, &[1.0, 0.0])?, tensors)?,
+            linear_2: Dense::new(format!("{:02}p_policy/linear_1", i), create_dense_bias(handle, n, 362, 361 * num_samples, &[tau, 0.0])?, tensors)?,
             softmax: create_softmax(n, 362)?,
             scale_tau: cudnn2::Scale::new(create_offset_descriptor(362)?, tau)?,
-            count: i,
         })
     }
 
@@ -799,60 +868,18 @@ impl PolicyLayer {
         input: &cuda2::SmartPtr<A>
     ) -> Result<cuda2::SmartPtr<A>, Error>
     {
-        workspace.handle.set_stream(&workspace.policy_stream)?;
-
-        let weights_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1:0", self.count)];
-        let weights_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1:0", self.count)];
-        let offset_1 = &workspace.tensors[&format!("{:02}p_policy/conv_1/offset:0", self.count)];
-        let offset_2 = &workspace.tensors[&format!("{:02}p_policy/linear_1/offset:0", self.count)];
-        let workspace_p_size = self.conv_1.fwd_algo_perf().memory()
-            .max(self.linear_2.fwd_algo_perf().memory())
-            .max(weights_2.size_in_bytes());
-        let workspace_p = cuda2::malloc(workspace_p_size, allocator)?;
-
-        offset_1.copy_to_device(&workspace.policy_stream)?;
-        if offset_2.copy_to_device(&workspace.policy_stream)? {
-            self.scale_tau.forward(&workspace.handle, offset_2.get().as_ptr())?;
-        }
-        weights_1.copy_to_device(&workspace.policy_stream)?;
-        if weights_2.copy_to_device(&workspace.policy_stream)? {
-            self.transpose.forward(
-                &workspace.handle,
-                weights_2.get().as_ptr(),
-                workspace_p.as_ptr()
-            )?;
-
-            weights_2.get().copy_from_ptr(&workspace_p, weights_2.size_in_bytes(), &workspace.policy_stream)?;
+        if self.linear_2.prepare(&workspace.handle, allocator, &workspace.policy_stream)? {
+            self.scale_tau.forward(&workspace.handle, self.linear_2.offset.get().as_ptr())?;
         }
 
         // perform the forward convolution
-        let policy_1 = cuda2::malloc(self.conv_1.output().size_in_bytes()?, allocator)?;
-
-        self.conv_1.forward(
-            &workspace.handle,
-            input.as_ptr(),
-            weights_1.get().as_ptr(),
-            workspace_p.as_ptr(), workspace_p.size_in_bytes(),
-            policy_1.as_ptr(),
-            offset_1.get().as_ptr(),
-            policy_1.as_ptr()
-        )?;
+        let policy_1 = self.conv_1.forward(&workspace.handle, input, allocator, &workspace.policy_stream)?;
 
         load_output::<_, T::Output>(output_set, output_map, Output::PolicyDown, &policy_1, &workspace.policy_stream)?;
 
         // perform the feed-forward linear layers
-        let policy_2 = cuda2::malloc(self.linear_2.output().size_in_bytes()?, allocator)?;
-        let policy_3 = cuda2::malloc(self.linear_2.output().size_in_bytes()?, allocator)?;
-
-        self.linear_2.forward(
-            &workspace.handle,
-            policy_1.as_ptr(),
-            weights_2.get().as_ptr(),
-            workspace_p.as_ptr(), workspace_p.size_in_bytes(),
-            policy_2.as_ptr(),
-            offset_2.get().as_ptr(),
-            policy_2.as_ptr()
-        )?;
+        let policy_2 = self.linear_2.forward(&workspace.handle, &policy_1, allocator, &workspace.policy_stream)?;
+        let policy_3 = cuda2::malloc(policy_2.size_in_bytes(), allocator)?;
 
         // softmax activation
         self.softmax.forward(&workspace.handle, policy_2.as_ptr(), policy_3.as_ptr())?;

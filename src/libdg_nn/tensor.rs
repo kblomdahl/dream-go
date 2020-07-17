@@ -13,20 +13,21 @@
 // limitations under the License.
 
 use std::mem::size_of;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use dg_cuda::{PerDevice, Ptr, Stream};
 use super::Error;
 
 /// A data structure with interior mutability that store the host,
 /// device, and meta information about a tensor.
+#[derive(Clone)]
 pub struct Tensor {
     /// The unscaled tensor in host-memory as raw (untyped) bytes.
-    host: Vec<u8>,
+    host: Arc<Vec<u8>>,
 
     /// The scaled tensor in device memory as the type given in
     /// `dtype`, or null if not applicable.
-    ptr: PerDevice<Mutex<Ptr>>,
+    ptr: Arc<PerDevice<Mutex<Ptr>>>,
 
     /// The size of this tensor in bytes.
     size_in_bytes: usize,
@@ -41,8 +42,8 @@ pub struct Tensor {
 impl Default for Tensor {
     fn default() -> Tensor {
         Tensor {
-            host: vec! [],
-            ptr: PerDevice::new().unwrap(),
+            host: Arc::new(vec! []),
+            ptr: Arc::new(PerDevice::new().unwrap()),
             size_in_bytes: 0,
             size_in_elements: 0,
             scale: 1.0
@@ -55,12 +56,9 @@ impl Tensor {
         self.ptr.lock().unwrap()
     }
 
+    #[cfg(test)]
     pub fn size_in_bytes(&self) -> usize {
         self.size_in_bytes
-    }
-
-    pub fn size_in_elements(&self) -> usize {
-        self.size_in_elements
     }
 
     #[cfg(test)]
@@ -78,7 +76,7 @@ impl Tensor {
 
             self.size_in_bytes = size_of::<T>() * length;
             self.size_in_elements = length;
-            self.host = Vec::from_raw_parts(raw_ptr as *mut _, self.size_in_bytes, capacity);
+            self.host = Arc::new(Vec::from_raw_parts(raw_ptr as *mut _, self.size_in_bytes, capacity));
 
             Ok(())
         }
@@ -92,7 +90,7 @@ impl Tensor {
         *(self.host.as_ptr() as *const i32)
     }
 
-    pub unsafe fn copy_to_device(&self, stream: &Stream) -> Result<bool, Error> {
+    pub fn copy_to_device(&self, stream: &Stream) -> Result<bool, Error> {
         let mut ptr = self.ptr.lock().unwrap();
 
         if ptr.is_null() {
@@ -110,5 +108,11 @@ impl Tensor {
         } else {
             Ok(false)
         }
+    }
+
+    pub fn set_device_ptr(&self, new_ptr: Ptr) {
+        let mut ptr = self.ptr.lock().unwrap();
+
+        *ptr = new_ptr;
     }
 }

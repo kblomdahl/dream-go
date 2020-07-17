@@ -183,7 +183,15 @@ impl<'a, A: Allocator> DerefMut for SmartPtr<A> {
 
 impl<'a, A: Allocator> Drop for SmartPtr<A> {
     fn drop(&mut self) {
-        self.allocator.free(self.ptr.take().unwrap())
+        if let Some(ptr) = self.ptr.take() {
+            self.allocator.free(ptr);
+        }
+    }
+}
+
+impl<A: Allocator> SmartPtr<A> {
+    pub fn unwrap(mut self) -> Ptr {
+        self.ptr.take().unwrap()
     }
 }
 
