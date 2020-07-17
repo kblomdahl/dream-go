@@ -448,7 +448,7 @@ impl Conv2d {
         })
     }
 
-    unsafe fn prepare(&self, handle: &cudnn2::Handle, stream: &cuda2::Stream) -> Result<bool, Error> {
+    fn prepare(&self, handle: &cudnn2::Handle, stream: &cuda2::Stream) -> Result<bool, Error> {
         handle.set_stream(stream)?;
         if self.filter.copy_to_device(&stream)? && self.offset.copy_to_device(&stream)? {
             Ok(true)
@@ -457,7 +457,7 @@ impl Conv2d {
         }
     }
 
-    unsafe fn forward<A: cuda2::Allocator + Clone>(
+    fn forward<A: cuda2::Allocator + Clone>(
         &self,
         handle: &cudnn2::Handle,
         input: &cuda2::SmartPtr<A>,
@@ -482,7 +482,7 @@ impl Conv2d {
         Ok(output)
     }
 
-    unsafe fn forward_skip<A: cuda2::Allocator + Clone>(
+    fn forward_skip<A: cuda2::Allocator + Clone>(
         &self,
         handle: &cudnn2::Handle,
         input: &cuda2::SmartPtr<A>,
@@ -534,7 +534,7 @@ impl Dense {
         })
     }
 
-    unsafe fn prepare<A: cuda2::Allocator + Clone>(
+    fn prepare<A: cuda2::Allocator + Clone>(
         &self,
         handle: &cudnn2::Handle,
         allocator: &A,
@@ -558,7 +558,7 @@ impl Dense {
         }
     }
 
-    unsafe fn forward<A: cuda2::Allocator + Clone>(
+    fn forward<A: cuda2::Allocator + Clone>(
         &self,
         handle: &cudnn2::Handle,
         input: &cuda2::SmartPtr<A>,
@@ -577,6 +577,48 @@ impl Dense {
             workspace.as_ptr(), workspace.size_in_bytes(),
             output.as_ptr(),
             self.offset.get().as_ptr(),
+            output.as_ptr()
+        )?;
+
+        Ok(output)
+    }
+}
+
+// -------- Global pooling --------
+
+pub struct GlobalPooling {
+    reduce_tensor: cudnn2::ReduceTensor
+}
+
+impl GlobalPooling {
+    fn new(reduce_tensor: cudnn2::ReduceTensor) -> Result<Self, Error> {
+        Ok(Self {
+            reduce_tensor
+        })
+    }
+
+    fn prepare(&self, handle: &cudnn2::Handle, stream: &cuda2::Stream) -> Result<(), Error> {
+        handle.set_stream(stream)?;
+        Ok(())
+    }
+
+    fn forward<A: cuda2::Allocator + Clone>(
+        &self,
+        handle: &cudnn2::Handle,
+        input: &cuda2::SmartPtr<A>,
+        allocator: &A,
+        stream: &cuda2::Stream
+    ) -> Result<cuda2::SmartPtr<A>, Error>
+    {
+        let workspace = cuda2::malloc(self.reduce_tensor.size_in_bytes(handle)?, allocator)?;
+        let output = cuda2::malloc(self.reduce_tensor.output().size_in_bytes()?, allocator)?;
+
+        self.prepare(handle, stream)?;
+        self.reduce_tensor.forward(
+            handle,
+            ptr::null_mut(), 0,
+            workspace.as_ptr(), workspace.size_in_bytes(),
+            input.as_ptr(),
             output.as_ptr()
         )?;
 
@@ -761,7 +803,7 @@ impl ResidualLayer {
 
 struct ValueLayer {
     conv_1: Conv2d,
-    reduce_mean: cudnn2::ReduceTensor,
+    reduce_mean: GlobalPooling,
     tanh: cudnn2::Activation,
 }
 
@@ -783,7 +825,7 @@ impl ValueLayer {
 
         Ok(ValueLayer {
             conv_1: Conv2d::new(format!("{:02}v_value/conv_1", i), create_convolution_bias_3x3(handle, n, 8, num_channels, &[1.0, 0.0])?, tensors)?,
-            reduce_mean: create_global_avg_pooling(n, 8, [1.0, 0.0])?,
+            reduce_mean: GlobalPooling::new(create_global_avg_pooling(n, 8, [1.0, 0.0])?)?,
             tanh: create_dense_tanh(cudnn2::ActivationDescriptor::tanh()?, n, 1, [1.0, 0.0])?
         })
     }
@@ -800,22 +842,12 @@ impl ValueLayer {
         workspace.handle.set_stream(&workspace.value_stream)?;
 
         // perform the forward convolution
-        let workspace_v_size = self.reduce_mean.size_in_bytes(&workspace.handle)?;
-        let workspace_v = cuda2::malloc(workspace_v_size, allocator)?;
         let value_1 = self.conv_1.forward(&workspace.handle, input, allocator, &workspace.value_stream)?;
 
         load_output::<_, T::Output>(output_set, output_map, Output::ValueDown, &value_1, &workspace.value_stream)?;
 
         // perform the global average pooling
-        let value_2 = cuda2::malloc(self.reduce_mean.output().size_in_bytes()?, allocator)?;
-
-        self.reduce_mean.forward(
-            &workspace.handle,
-            ptr::null_mut(), 0,
-            workspace_v.as_ptr(), workspace_v.size_in_bytes(),
-            value_1.as_ptr(),
-            value_2.as_ptr()
-        )?;
+        let value_2 = self.reduce_mean.forward(&workspace.handle, &value_1, allocator, &workspace.value_stream)?;
 
         load_output::<_, T::Output>(output_set, output_map, Output::ValueGemm, &value_2, &workspace.value_stream)?;
 
