@@ -52,6 +52,13 @@ impl Default for Tensor {
 }
 
 impl Tensor {
+    #[cfg(test)]
+    pub fn from_vec<T: Sized>(data: Vec<T>) -> Result<Self, Error> {
+        let mut out = Self::default();
+        out.set_host(data)?;
+        Ok(out)
+    }
+
     pub fn get(&self) -> MutexGuard<Ptr> {
         self.ptr.lock().unwrap()
     }
@@ -82,12 +89,16 @@ impl Tensor {
         }
     }
 
-    pub unsafe fn as_f32(&self) -> f32 {
-        *(self.host.as_ptr() as *const f32)
+    pub fn as_f32(&self) -> f32 {
+        unsafe {
+            *(self.host.as_ptr() as *const f32)
+        }
     }
 
-    pub unsafe fn as_i32(&self) -> i32 {
-        *(self.host.as_ptr() as *const i32)
+    pub fn as_i32(&self) -> i32 {
+        unsafe {
+            *(self.host.as_ptr() as *const i32)
+        }
     }
 
     pub fn copy_to_device(&self, stream: &Stream) -> Result<bool, Error> {

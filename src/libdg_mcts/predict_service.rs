@@ -20,7 +20,7 @@ use super::parallel;
 use dg_go::utils::features::{FEATURE_SIZE};
 use super::predict::Predictor;
 use dg_nn::devices::{DEVICES, set_current_device};
-use dg_nn::{self as nn, Network, Output, OutputSet, Workspace};
+use dg_nn::{self as nn, Network, Workspace};
 use dg_utils::types::f16;
 use dg_utils::config;
 
@@ -85,14 +85,9 @@ impl PredictState {
     /// * `features_list` - 
     /// 
     fn forward_once(workspace: &mut Workspace, features_list: &[f16]) -> Result<(Vec<f32>, Vec<Vec<f32>>), nn::Error> {
-        let mut outputs = nn::forward(
-            workspace,
-            features_list,
-            OutputSet::default().with(Output::Policy).with(Output::Value)
-        )?;
-
-        let value_list = outputs.take(Output::Value);
-        let policy_list = outputs.take(Output::Policy).chunks(362)
+        let outputs = nn::forward(workspace, features_list)?;
+        let value_list = outputs.value().clone();
+        let policy_list = outputs.policy().chunks(362)
             .map(|p| p.to_vec())
             .collect();
 
