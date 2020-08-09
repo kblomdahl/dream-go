@@ -51,7 +51,7 @@ def _parse(is_deterministic):
     return __do_parse
 
 
-def _illegal_policy(features, labels):
+def _legal_policy(features, labels):
     return tf.greater(tf.reduce_sum(labels['boost']), 0.0)
 
 
@@ -151,7 +151,7 @@ def get_dataset(files, is_deterministic=False):
         else:
             dataset = tf.data.TextLineDataset(files)
         dataset = dataset.map(_parse(is_deterministic), num_parallel_calls=num_parallel_calls)
-        dataset = dataset.filter(_illegal_policy)
+        dataset = dataset.filter(_legal_policy)
 
         return dataset
 

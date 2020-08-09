@@ -84,7 +84,7 @@ class TestUtils(object):
                     for _ in range(iter)
                 ]
 
-    def assertDecreasing(self, steps, threshold=-1e-8):
+    def assertDecreasing(self, steps, threshold=0):
         p = \
             np.polyfit(
                 np.arange(len(steps)),

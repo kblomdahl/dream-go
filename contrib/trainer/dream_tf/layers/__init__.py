@@ -34,7 +34,7 @@ def normalize_constraint(x):
     out_dims = x.shape[-1]
     x_f = tf.reshape(x, (-1, out_dims))
     n = tf.norm(x_f, axis=0)
-    d = tf.clip_by_value(n, 0.001, tf.rsqrt(tf.cast(out_dims, tf.float32)))
+    d = tf.clip_by_value(n, 0.001, tf.math.rsqrt(tf.cast(out_dims, tf.float32)))
     x_n = x_f * d / n
 
     return tf.reshape(x_n, x.shape)
