@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use dg_cuda::cudnn as cudnn2;
+use dg_cuda::cudnn;
 
 use crate::tensor::Tensor;
 
@@ -41,10 +41,10 @@ pub fn get_num_channels(tensors: &HashMap<String, Tensor>) -> i32 {
 /// * `batch_size` -
 /// * `num_channels` -
 /// 
-pub fn create_tensor_descriptor(batch_size: i32, num_channels: i32) -> Result<cudnn2::TensorDescriptor, cudnn2::Status> {
-    cudnn2::TensorDescriptor::new(
-        cudnn2::TensorFormat::NHWC,
-        cudnn2::DataType::Half,
+pub fn create_tensor_descriptor(batch_size: i32, num_channels: i32) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+    cudnn::TensorDescriptor::new(
+        cudnn::TensorFormat::NHWC,
+        cudnn::DataType::Half,
         &[batch_size, num_channels, 19, 19]
     )
 }
@@ -56,10 +56,10 @@ pub fn create_tensor_descriptor(batch_size: i32, num_channels: i32) -> Result<cu
 /// 
 /// * `num_channels` -
 /// 
-pub fn create_offset_descriptor(num_channels: i32) -> Result<cudnn2::TensorDescriptor, cudnn2::Status> {
-    cudnn2::TensorDescriptor::new(
-        cudnn2::TensorFormat::NHWC,
-        cudnn2::DataType::Half,
+pub fn create_offset_descriptor(num_channels: i32) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+    cudnn::TensorDescriptor::new(
+        cudnn::TensorFormat::NHWC,
+        cudnn::DataType::Half,
         &[1, num_channels, 1, 1]
     )
 }
@@ -72,10 +72,10 @@ pub fn create_offset_descriptor(num_channels: i32) -> Result<cudnn2::TensorDescr
 /// * `batch_size` -
 /// * `size` -
 /// 
-pub fn create_dense_descriptor(batch_size: i32, size: i32) -> Result<cudnn2::TensorDescriptor, cudnn2::Status> {
-    cudnn2::TensorDescriptor::new(
-        cudnn2::TensorFormat::NHWC,
-        cudnn2::DataType::Half,
+pub fn create_dense_descriptor(batch_size: i32, size: i32) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+    cudnn::TensorDescriptor::new(
+        cudnn::TensorFormat::NHWC,
+        cudnn::DataType::Half,
         &[batch_size, size, 1, 1]
     )
 }

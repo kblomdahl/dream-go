@@ -17,8 +17,8 @@ use std::mem::size_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use dg_cuda as cuda2;
-use dg_cuda::cudnn as cudnn2;
+use dg_cuda as cuda;
+use dg_cuda::cudnn;
 use dg_go::utils::features::{FEATURE_SIZE};
 use dg_utils::types::f16;
 use crate::layers::{PolicyLayer, ResidualLayer, UpLayer, ValueLayer};
@@ -30,14 +30,14 @@ use crate::Error;
 
 pub struct Builder {
     tensors: Arc<HashMap<String, Tensor>>,
-    allocator: cuda2::PerDevice<cuda2::Concurrent<cuda2::Sticky<cuda2::Native>>>,
+    allocator: cuda::PerDevice<cuda::Concurrent<cuda::Sticky<cuda::Native>>>,
 }
 
 impl Builder {
     pub fn new(tensors: HashMap<String, Tensor>) -> Builder {
         Builder {
             tensors: Arc::new(tensors),
-            allocator: cuda2::PerDevice::new().unwrap(),
+            allocator: cuda::PerDevice::new().unwrap(),
         }
     }
 
@@ -49,7 +49,7 @@ impl Builder {
     /// * `batch_size` -
     ///
     pub fn get_workspace(&self, batch_size: usize) -> Result<Workspace, Error> {
-        let handle_dnn: cudnn2::Handle = cudnn2::Handle::new()?;
+        let handle_dnn: cudnn::Handle = cudnn::Handle::new()?;
         let c_up = Rc::new(UpLayer::new(&handle_dnn, batch_size as i32, &self.tensors)?);
         let c_residual = self.get_residual_layers(&handle_dnn, batch_size)?;
         let c_value = Rc::new(ValueLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?);
@@ -61,11 +61,11 @@ impl Builder {
 
             handle: handle_dnn,
 
-            tower_finished: cuda2::Event::new()?,
+            tower_finished: cuda::Event::new()?,
 
-            tower_stream: cuda2::Stream::new()?,
-            policy_stream: cuda2::Stream::new()?,
-            value_stream: cuda2::Stream::new()?,
+            tower_stream: cuda::Stream::new()?,
+            policy_stream: cuda::Stream::new()?,
+            value_stream: cuda::Stream::new()?,
 
             c_up: c_up,
             c_value: c_value,
@@ -76,7 +76,7 @@ impl Builder {
 
     fn get_residual_layers(
         &self,
-        handle_dnn: &cudnn2::Handle,
+        handle_dnn: &cudnn::Handle,
         batch_size: usize
     ) -> Result<Vec<Rc<ResidualLayer>>, Error>
     {
@@ -99,13 +99,13 @@ impl Builder {
 
 pub struct Workspace {
     batch_size: usize,
-    allocator: cuda2::Concurrent<cuda2::Sticky<cuda2::Native>>,
+    allocator: cuda::Concurrent<cuda::Sticky<cuda::Native>>,
 
-    handle: cudnn2::Handle,
-    tower_finished: cuda2::Event,
-    tower_stream: cuda2::Stream,
-    policy_stream: cuda2::Stream,
-    value_stream: cuda2::Stream,
+    handle: cudnn::Handle,
+    tower_finished: cuda::Event,
+    tower_stream: cuda::Stream,
+    policy_stream: cuda::Stream,
+    value_stream: cuda::Stream,
 
     c_up: Rc<UpLayer>,
     c_value: Rc<ValueLayer>,
@@ -125,10 +125,10 @@ pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap,
     debug_assert!(features.len() % FEATURE_SIZE == 0);
     debug_assert!(features.len() / FEATURE_SIZE == workspace.batch_size);
 
-    let mut allocator = cuda2::Cloneable::new(cuda2::Sticky::new(workspace.allocator.clone()));
+    let mut allocator = cuda::Cloneable::new(cuda::Sticky::new(workspace.allocator.clone()));
 
     // copy all of the input features into a temporary workspace
-    let mut input = cuda2::malloc(size_of::<f16>() * features.len(), &allocator)?;
+    let mut input = cuda::malloc(size_of::<f16>() * features.len(), &allocator)?;
     input.copy_from_slice(&features, &workspace.tower_stream)?;
 
     // Upsample 32 -> 128 channels

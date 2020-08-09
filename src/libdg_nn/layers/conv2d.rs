@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_cuda::cudnn as cudnn2;
-use dg_cuda as cuda2;
+use dg_cuda::cudnn;
+use dg_cuda as cuda;
 use std::collections::HashMap;
 
 use crate::tensor::Tensor;
@@ -22,7 +22,7 @@ use crate::layers::{create_tensor_descriptor, create_offset_descriptor};
 use crate::Error;
 
 pub struct Conv2d {
-    conv_desc: cudnn2::ConvolutionBiasActivation,
+    conv_desc: cudnn::ConvolutionBiasActivation,
     filter: Tensor,
     offset: Tensor
 }
@@ -31,7 +31,7 @@ pub struct Conv2dBuilder {
     batch_size: i32,
     filter_shape: [i32; 4],
     alpha: [f32; 2],
-    act_desc: Option<cudnn2::ActivationDescriptor>,
+    act_desc: Option<cudnn::ActivationDescriptor>,
     filter: Option<Tensor>,
     offset: Option<Tensor>,
 }
@@ -65,44 +65,44 @@ impl Conv2dBuilder {
         self
     }
 
-    pub fn with_activation(mut self, act_desc: cudnn2::ActivationDescriptor) -> Self {
+    pub fn with_activation(mut self, act_desc: cudnn::ActivationDescriptor) -> Self {
         self.act_desc = Some(act_desc);
         self
     }
 
-    fn create_convolution_descriptor(&self) -> Result<cudnn2::ConvolutionDescriptor, cudnn2::Status> {
+    fn create_convolution_descriptor(&self) -> Result<cudnn::ConvolutionDescriptor, cudnn::Status> {
         let filter_size = self.filter_shape[2];
 
-        cudnn2::ConvolutionDescriptor::new(
+        cudnn::ConvolutionDescriptor::new(
             &[filter_size / 2, filter_size / 2], // padding
             &[1, 1], // stride
             &[1, 1], // dilation
-            cudnn2::ConvolutionMode::CrossCorrelation,
-            if has_true_half() { cudnn2::DataType::Half } else { cudnn2::DataType::Float }
+            cudnn::ConvolutionMode::CrossCorrelation,
+            if has_true_half() { cudnn::DataType::Half } else { cudnn::DataType::Float }
         )
     }
 
-    fn create_filter_descriptor(&self) -> Result<cudnn2::FilterDescriptor, cudnn2::Status> {
-        cudnn2::FilterDescriptor::new(
-            cudnn2::DataType::Half,
-            cudnn2::TensorFormat::NHWC,
+    fn create_filter_descriptor(&self) -> Result<cudnn::FilterDescriptor, cudnn::Status> {
+        cudnn::FilterDescriptor::new(
+            cudnn::DataType::Half,
+            cudnn::TensorFormat::NHWC,
             &self.filter_shape
         )
     }
 
-    fn create_activation_descriptor(&mut self) -> Result<cudnn2::ActivationDescriptor, cudnn2::Status> {
+    fn create_activation_descriptor(&mut self) -> Result<cudnn::ActivationDescriptor, cudnn::Status> {
         if let Some(act) = self.act_desc.take() {
             Ok(act)
         } else {
-            cudnn2::ActivationDescriptor::relu()
+            cudnn::ActivationDescriptor::relu()
         }
     }
 
-    fn create_convolution_bias_activation(&mut self, handle: &cudnn2::Handle) -> Result<cudnn2::ConvolutionBiasActivation, cudnn2::Status> {
+    fn create_convolution_bias_activation(&mut self, handle: &cudnn::Handle) -> Result<cudnn::ConvolutionBiasActivation, cudnn::Status> {
         let num_inputs = self.filter_shape[1];
         let num_outputs = self.filter_shape[0];
 
-        cudnn2::ConvolutionBiasActivation::new(
+        cudnn::ConvolutionBiasActivation::new(
             handle,
             self.alpha[0],
             create_tensor_descriptor(self.batch_size, num_inputs)?,
@@ -115,7 +115,7 @@ impl Conv2dBuilder {
         )
     }
 
-    pub fn build(mut self, handle: &cudnn2::Handle) -> Result<Conv2d, cudnn2::Status> {
+    pub fn build(mut self, handle: &cudnn::Handle) -> Result<Conv2d, cudnn::Status> {
         Ok(Conv2d {
             conv_desc: self.create_convolution_bias_activation(handle)?,
             filter: self.filter.take().expect("no filter given"),
@@ -133,7 +133,7 @@ impl Conv2d {
         &self.offset
     }
 
-    pub fn prepare(&self, handle: &cudnn2::Handle, stream: &cuda2::Stream) -> Result<bool, Error> {
+    pub fn prepare(&self, handle: &cudnn::Handle, stream: &cuda::Stream) -> Result<bool, Error> {
         handle.set_stream(stream)?;
         if self.filter.copy_to_device(&stream)? && self.offset.copy_to_device(&stream)? {
             Ok(true)
@@ -142,16 +142,16 @@ impl Conv2d {
         }
     }
 
-    pub fn forward<A: cuda2::Allocator + Clone>(
+    pub fn forward<A: cuda::Allocator + Clone>(
         &self,
-        handle: &cudnn2::Handle,
-        input: &cuda2::SmartPtr<A>,
+        handle: &cudnn::Handle,
+        input: &cuda::SmartPtr<A>,
         allocator: &A,
-        stream: &cuda2::Stream
-    ) -> Result<cuda2::SmartPtr<A>, Error>
+        stream: &cuda::Stream
+    ) -> Result<cuda::SmartPtr<A>, Error>
     {
-        let workspace = cuda2::malloc(self.conv_desc.fwd_algo_perf().memory(), allocator)?;
-        let output = cuda2::malloc(self.conv_desc.output().size_in_bytes()?, allocator)?;
+        let workspace = cuda::malloc(self.conv_desc.fwd_algo_perf().memory(), allocator)?;
+        let output = cuda::malloc(self.conv_desc.output().size_in_bytes()?, allocator)?;
 
         self.prepare(handle, stream)?;
         self.conv_desc.forward(
@@ -167,17 +167,17 @@ impl Conv2d {
         Ok(output)
     }
 
-    pub fn forward_skip<A: cuda2::Allocator + Clone>(
+    pub fn forward_skip<A: cuda::Allocator + Clone>(
         &self,
-        handle: &cudnn2::Handle,
-        input: &cuda2::SmartPtr<A>,
-        skip_input: &cuda2::SmartPtr<A>,
+        handle: &cudnn::Handle,
+        input: &cuda::SmartPtr<A>,
+        skip_input: &cuda::SmartPtr<A>,
         allocator: &A,
-        stream: &cuda2::Stream
-    ) -> Result<cuda2::SmartPtr<A>, Error>
+        stream: &cuda::Stream
+    ) -> Result<cuda::SmartPtr<A>, Error>
     {
-        let workspace = cuda2::malloc(self.conv_desc.fwd_algo_perf().memory(), allocator)?;
-        let output = cuda2::malloc(self.conv_desc.output().size_in_bytes()?, allocator)?;
+        let workspace = cuda::malloc(self.conv_desc.fwd_algo_perf().memory(), allocator)?;
+        let output = cuda::malloc(self.conv_desc.output().size_in_bytes()?, allocator)?;
 
         self.prepare(handle, stream)?;
         self.conv_desc.forward(
@@ -197,7 +197,7 @@ impl Conv2d {
 /// Returns true if the current device supports `f16` (in a
 /// sensible way).
 fn has_true_half() -> bool {
-    let (version_major, version_minor) = cuda2::Device::default().compute_capability().unwrap();
+    let (version_major, version_minor) = cuda::Device::default().compute_capability().unwrap();
 
     (version_major == 6 && version_minor == 0) ||
         (version_major == 6 && version_minor == 2) ||

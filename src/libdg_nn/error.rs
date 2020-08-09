@@ -12,28 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_cuda as cuda2;
-use dg_cuda::cudnn as cudnn2;
+use dg_cuda as cuda;
+use dg_cuda::cudnn;
 
 #[derive(Debug)]
 pub enum Error {
-    CuDNN2(cudnn2::Status),
-    Cuda2(cuda2::Error),
+    CuDNN(cudnn::Status),
+    Cuda(cuda::Error),
     MissingWeights
 }
 
-impl From<cuda2::Error> for Error {
-    fn from(s: cuda2::Error) -> Error {
+impl From<cuda::Error> for Error {
+    fn from(s: cuda::Error) -> Error {
         match s {
-            other => Error::Cuda2(other)
+            other => Error::Cuda(other)
         }
     }
 }
 
-impl From<cudnn2::Status> for Error {
-    fn from(s: cudnn2::Status) -> Error {
+impl From<cudnn::Status> for Error {
+    fn from(s: cudnn::Status) -> Error {
         match s {
-            other => Error::CuDNN2(other)
+            other => Error::CuDNN(other)
         }
     }
 }

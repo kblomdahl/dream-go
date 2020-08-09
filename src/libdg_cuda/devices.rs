@@ -52,15 +52,15 @@ impl Device {
         Self { device_id }
     }
 
-    pub fn len() -> Result<i32, Error> {
+    pub fn len() -> Result<usize, Error> {
         let mut device_count = 0;
         let status = unsafe { cudaGetDeviceCount(&mut device_count) };
-        status.into_result(device_count)
+        status.into_result(device_count as usize)
     }
 
     pub fn all() -> Result<Vec<Device>, Error> {
         let device_count = Self::len()?;
-        Ok((0..device_count).map(|i| Device::new(i)).collect())
+        Ok((0..device_count).map(|i| Device::new(i as i32)).collect())
     }
 
     pub fn id(&self) -> i32 {

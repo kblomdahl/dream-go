@@ -26,6 +26,8 @@ pub trait Allocator {
     fn free(&mut self, ptr: Ptr);
 }
 
+// -------- Native --------
+
 #[derive(Clone, Default)]
 pub struct Native {
     // pass
@@ -46,6 +48,8 @@ impl Allocator for Native {
         drop(ptr);
     }
 }
+
+// -------- Sticky --------
 
 pub struct Sticky<A: Allocator> {
     allocator: A,
@@ -92,6 +96,8 @@ impl<A: Allocator> Allocator for Sticky<A> {
     }
 }
 
+// -------- Concurrent --------
+
 pub struct Concurrent<A: Allocator> {
     allocator: Arc<Mutex<A>>
 }
@@ -123,6 +129,8 @@ impl<A: Allocator> Allocator for Concurrent<A> {
         self.allocator.lock().unwrap().free(ptr)
     }
 }
+
+// -------- Cloneable --------
 
 pub struct Cloneable<A: Allocator> {
     allocator: Rc<RefCell<A>>
@@ -162,6 +170,8 @@ impl<A: Allocator> Allocator for Cloneable<A> {
     }
 }
 
+// -------- SmartPtr --------
+
 pub struct SmartPtr<A: Allocator> {
     allocator: A,
     ptr: Option<Ptr>
@@ -195,6 +205,8 @@ impl<A: Allocator> SmartPtr<A> {
     }
 }
 
+// -------- malloc --------
+
 pub fn malloc<'a, A: Allocator + Clone>(
     size_in_bytes: usize,
     allocator: &A
@@ -205,6 +217,8 @@ pub fn malloc<'a, A: Allocator + Clone>(
 
     Ok(SmartPtr { allocator, ptr })
 }
+
+// -------- tests --------
 
 #[cfg(test)]
 mod tests {

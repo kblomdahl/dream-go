@@ -12,26 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_cuda::cudnn as cudnn2;
-use dg_cuda as cuda2;
+use dg_cuda::cudnn;
+use dg_cuda as cuda;
 use std::ptr;
 
 use crate::layers::{create_tensor_descriptor, create_dense_descriptor};
 use crate::Error;
 
 pub struct GlobalPooling {
-    reduce_tensor: cudnn2::ReduceTensor
+    reduce_tensor: cudnn::ReduceTensor
 }
 
 pub struct GlobalPoolingBuilder {
     batch_size: i32,
     alpha: [f32; 2],
     num_channels: i32,
-    reduce_op: cudnn2::ReduceTensorOp
+    reduce_op: cudnn::ReduceTensorOp
 }
 
 impl GlobalPoolingBuilder {
-    pub fn new(batch_size: i32, num_channels: i32, reduce_op: cudnn2::ReduceTensorOp) -> Self {
+    pub fn new(batch_size: i32, num_channels: i32, reduce_op: cudnn::ReduceTensorOp) -> Self {
         Self {
             batch_size: batch_size,
             alpha: [1.0, 0.0],
@@ -40,18 +40,18 @@ impl GlobalPoolingBuilder {
         }
     }
 
-    fn create_reduce_tensor_descriptor(&self) -> Result<cudnn2::ReduceTensorDescriptor, cudnn2::Status> {
-        cudnn2::ReduceTensorDescriptor::new(
+    fn create_reduce_tensor_descriptor(&self) -> Result<cudnn::ReduceTensorDescriptor, cudnn::Status> {
+        cudnn::ReduceTensorDescriptor::new(
             self.reduce_op,
-            cudnn2::DataType::Float,
-            cudnn2::NanPropagation::NotPropagateNaN,
-            cudnn2::ReduceTensorIndices::NoIndices,
-            cudnn2::IndicesType::_32
+            cudnn::DataType::Float,
+            cudnn::NanPropagation::NotPropagateNaN,
+            cudnn::ReduceTensorIndices::NoIndices,
+            cudnn::IndicesType::_32
         )
     }
 
-    fn create_reduce_tensor(&self) -> Result<cudnn2::ReduceTensor, cudnn2::Status> {
-        cudnn2::ReduceTensor::new(
+    fn create_reduce_tensor(&self) -> Result<cudnn::ReduceTensor, cudnn::Status> {
+        cudnn::ReduceTensor::new(
             self.create_reduce_tensor_descriptor()?,
             create_tensor_descriptor(self.batch_size, self.num_channels)?,
             create_dense_descriptor(self.batch_size, 1)?,
@@ -59,7 +59,7 @@ impl GlobalPoolingBuilder {
         )
     }
 
-    pub fn build(self) -> Result<GlobalPooling, cudnn2::Status> {
+    pub fn build(self) -> Result<GlobalPooling, cudnn::Status> {
         Ok(GlobalPooling {
             reduce_tensor: self.create_reduce_tensor()?
         })
@@ -67,25 +67,25 @@ impl GlobalPoolingBuilder {
 }
 
 impl GlobalPooling {
-    pub fn new(batch_size: i32, num_channels: i32, reduce_op: cudnn2::ReduceTensorOp) -> GlobalPoolingBuilder {
+    pub fn new(batch_size: i32, num_channels: i32, reduce_op: cudnn::ReduceTensorOp) -> GlobalPoolingBuilder {
         GlobalPoolingBuilder::new(batch_size, num_channels, reduce_op)
     }
 
-    pub fn prepare(&self, handle: &cudnn2::Handle, stream: &cuda2::Stream) -> Result<(), Error> {
+    pub fn prepare(&self, handle: &cudnn::Handle, stream: &cuda::Stream) -> Result<(), Error> {
         handle.set_stream(stream)?;
         Ok(())
     }
 
-    pub fn forward<A: cuda2::Allocator + Clone>(
+    pub fn forward<A: cuda::Allocator + Clone>(
         &self,
-        handle: &cudnn2::Handle,
-        input: &cuda2::SmartPtr<A>,
+        handle: &cudnn::Handle,
+        input: &cuda::SmartPtr<A>,
         allocator: &A,
-        stream: &cuda2::Stream
-    ) -> Result<cuda2::SmartPtr<A>, Error>
+        stream: &cuda::Stream
+    ) -> Result<cuda::SmartPtr<A>, Error>
     {
-        let workspace = cuda2::malloc(self.reduce_tensor.size_in_bytes(handle)?, allocator)?;
-        let output = cuda2::malloc(self.reduce_tensor.output().size_in_bytes()?, allocator)?;
+        let workspace = cuda::malloc(self.reduce_tensor.size_in_bytes(handle)?, allocator)?;
+        let output = cuda::malloc(self.reduce_tensor.output().size_in_bytes()?, allocator)?;
 
         self.prepare(handle, stream)?;
         self.reduce_tensor.forward(

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_cuda::cudnn as cudnn2;
-use dg_cuda as cuda2;
+use dg_cuda::cudnn;
+use dg_cuda as cuda;
 use std::collections::HashMap;
 
 use crate::tensor::Tensor;
@@ -21,8 +21,8 @@ use crate::layers::{create_dense_descriptor, create_offset_descriptor};
 use crate::Error;
 
 pub struct Dense {
-    transpose_filter: cudnn2::Transform,
-    conv_desc: cudnn2::ConvolutionBiasActivation,
+    transpose_filter: cudnn::Transform,
+    conv_desc: cudnn::ConvolutionBiasActivation,
     filter: Tensor,
     offset: Tensor,
 }
@@ -31,7 +31,7 @@ pub struct DenseBuilder {
     batch_size: i32,
     shape: [i32; 2],
     alpha: [f32; 2],
-    act_desc: Option<cudnn2::ActivationDescriptor>,
+    act_desc: Option<cudnn::ActivationDescriptor>,
     filter: Option<Tensor>,
     offset: Option<Tensor>,
 }
@@ -71,23 +71,23 @@ impl DenseBuilder {
         self
     }
 
-    pub fn with_activation(mut self, act_desc: cudnn2::ActivationDescriptor) -> Self {
+    pub fn with_activation(mut self, act_desc: cudnn::ActivationDescriptor) -> Self {
         self.act_desc = Some(act_desc);
         self
     }
 
-    fn create_transpose_filter(&self) -> Result<cudnn2::Transform, cudnn2::Status> {
+    fn create_transpose_filter(&self) -> Result<cudnn::Transform, cudnn::Status> {
         let num_outputs = self.shape[0];
         let num_inputs = self.shape[1];
 
-        cudnn2::Transform::new(
-            cudnn2::TensorDescriptor::new_ex(
-                cudnn2::DataType::Half,
+        cudnn::Transform::new(
+            cudnn::TensorDescriptor::new_ex(
+                cudnn::DataType::Half,
                 &[num_outputs, num_inputs, 1, 1],
                 &[1, num_outputs, 1, 1],
             )?,
-            cudnn2::TensorDescriptor::new_ex(
-                cudnn2::DataType::Half,
+            cudnn::TensorDescriptor::new_ex(
+                cudnn::DataType::Half,
                 &[num_outputs, num_inputs, 1, 1],
                 &[num_inputs, 1, 1, 1],
             )?,
@@ -95,23 +95,23 @@ impl DenseBuilder {
         )
     }
 
-    fn create_activation_descriptor(&mut self) -> Result<cudnn2::ActivationDescriptor, cudnn2::Status> {
+    fn create_activation_descriptor(&mut self) -> Result<cudnn::ActivationDescriptor, cudnn::Status> {
         if let Some(act_desc) = self.act_desc.take() {
             Ok(act_desc)
         } else {
-            cudnn2::ActivationDescriptor::relu()
+            cudnn::ActivationDescriptor::relu()
         }
     }
 
     /// Returns a `ConvolutionDescriptor` for a one wide and high filter using a
     /// 32-bit compute type.
-    fn create_convolution_descriptor(&self) -> Result<cudnn2::ConvolutionDescriptor, cudnn2::Status> {
-        cudnn2::ConvolutionDescriptor::new(
+    fn create_convolution_descriptor(&self) -> Result<cudnn::ConvolutionDescriptor, cudnn::Status> {
+        cudnn::ConvolutionDescriptor::new(
             &[0, 0],
             &[1, 1],
             &[1, 1],
-            cudnn2::ConvolutionMode::CrossCorrelation,
-            cudnn2::DataType::Float
+            cudnn::ConvolutionMode::CrossCorrelation,
+            cudnn::DataType::Float
         )
     }
 
@@ -123,22 +123,22 @@ impl DenseBuilder {
     /// * `num_outputs` -
     /// * `num_inputs` -
     /// 
-    fn create_filter_descriptor(&self) -> Result<cudnn2::FilterDescriptor, cudnn2::Status> {
+    fn create_filter_descriptor(&self) -> Result<cudnn::FilterDescriptor, cudnn::Status> {
         let num_outputs = self.shape[0];
         let num_inputs = self.shape[1];
 
-        cudnn2::FilterDescriptor::new(
-            cudnn2::DataType::Half,
-            cudnn2::TensorFormat::NCHW,
+        cudnn::FilterDescriptor::new(
+            cudnn::DataType::Half,
+            cudnn::TensorFormat::NCHW,
             &[num_outputs, num_inputs, 1, 1]
         )
     }
 
-    fn create_dense_convolution_bias_activation(&mut self, handle: &cudnn2::Handle) -> Result<cudnn2::ConvolutionBiasActivation, cudnn2::Status> {
+    fn create_dense_convolution_bias_activation(&mut self, handle: &cudnn::Handle) -> Result<cudnn::ConvolutionBiasActivation, cudnn::Status> {
         let num_outputs = self.shape[0];
         let num_inputs = self.shape[1];
 
-        cudnn2::ConvolutionBiasActivation::new(
+        cudnn::ConvolutionBiasActivation::new(
             handle,
             self.alpha[0],
             create_dense_descriptor(self.batch_size, num_inputs)?,
@@ -151,7 +151,7 @@ impl DenseBuilder {
         )
     }
 
-    pub fn build(mut self, handle: &cudnn2::Handle) -> Result<Dense, cudnn2::Status> {
+    pub fn build(mut self, handle: &cudnn::Handle) -> Result<Dense, cudnn::Status> {
         Ok(Dense {
             conv_desc: self.create_dense_convolution_bias_activation(handle)?,
             transpose_filter: self.create_transpose_filter()?,
@@ -170,16 +170,16 @@ impl Dense {
         &self.offset
     }
 
-    pub fn prepare<A: cuda2::Allocator + Clone>(
+    pub fn prepare<A: cuda::Allocator + Clone>(
         &self,
-        handle: &cudnn2::Handle,
+        handle: &cudnn::Handle,
         allocator: &A,
-        stream: &cuda2::Stream
+        stream: &cuda::Stream
     ) -> Result<bool, Error> 
     {
         handle.set_stream(stream)?;
         if self.filter.copy_to_device(&stream)? && self.offset.copy_to_device(&stream)? {
-            let temp = cuda2::malloc(self.filter.get().size_in_bytes(), allocator)?;
+            let temp = cuda::malloc(self.filter.get().size_in_bytes(), allocator)?;
 
             self.transpose_filter.forward(
                 handle,
@@ -194,16 +194,16 @@ impl Dense {
         }
     }
 
-    pub fn forward<A: cuda2::Allocator + Clone>(
+    pub fn forward<A: cuda::Allocator + Clone>(
         &self,
-        handle: &cudnn2::Handle,
-        input: &cuda2::SmartPtr<A>,
+        handle: &cudnn::Handle,
+        input: &cuda::SmartPtr<A>,
         allocator: &A,
-        stream: &cuda2::Stream
-    ) -> Result<cuda2::SmartPtr<A>, Error>
+        stream: &cuda::Stream
+    ) -> Result<cuda::SmartPtr<A>, Error>
     {
-        let workspace = cuda2::malloc(self.conv_desc.fwd_algo_perf().memory(), allocator)?;
-        let output = cuda2::malloc(self.conv_desc.output().size_in_bytes()?, allocator)?;
+        let workspace = cuda::malloc(self.conv_desc.fwd_algo_perf().memory(), allocator)?;
+        let output = cuda::malloc(self.conv_desc.output().size_in_bytes()?, allocator)?;
 
         self.prepare(handle, allocator, stream)?;
         self.conv_desc.forward(
@@ -232,9 +232,9 @@ mod tests {
         Tensor::from_vec(data.iter().map(|&x| f16::from(x)).collect())
     }
 
-    fn create_ptr<A: cuda2::Allocator + Clone>(data: &[f32], allocator: &A) -> Result<cuda2::SmartPtr<A>, Error> {
-        let stream = cuda2::Stream::default();
-        let mut output = cuda2::malloc(size_of::<f16>() * data.len(), allocator)?;
+    fn create_ptr<A: cuda::Allocator + Clone>(data: &[f32], allocator: &A) -> Result<cuda::SmartPtr<A>, Error> {
+        let stream = cuda::Stream::default();
+        let mut output = cuda::malloc(size_of::<f16>() * data.len(), allocator)?;
         output.copy_from_slice(&data.iter().map(|&x| f16::from(x)).collect::<Vec<_>>(), &stream)?;
         
         Ok(output)
@@ -255,7 +255,7 @@ mod tests {
         let offset = create_tensor(&[
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         ]);
-        let handle = cudnn2::Handle::new().unwrap();
+        let handle = cudnn::Handle::new().unwrap();
         let matmul = Dense::new(1, [8, 8])
             .with_filter(filter.unwrap())
             .with_offset(offset.unwrap())
@@ -263,8 +263,8 @@ mod tests {
             .unwrap();
 
         //
-        let stream = cuda2::Stream::default();
-        let allocator = cuda2::Native::default();
+        let stream = cuda::Stream::default();
+        let allocator = cuda::Native::default();
         let input = create_ptr(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &allocator).unwrap();
         let output = matmul.forward(&handle, &input, &allocator, &stream).unwrap();
 
@@ -278,17 +278,17 @@ mod tests {
     fn matmul_identity_1x8() {
         let filter = create_tensor(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
         let offset = create_tensor(&[-36.0]);
-        let handle = cudnn2::Handle::new().unwrap();
+        let handle = cudnn::Handle::new().unwrap();
         let matmul = Dense::new(1, [1, 8])
             .with_filter(filter.unwrap())
             .with_offset(offset.unwrap())
-            .with_activation(cudnn2::ActivationDescriptor::identity().unwrap())
+            .with_activation(cudnn::ActivationDescriptor::identity().unwrap())
             .build(&handle)
             .unwrap();
 
         //
-        let stream = cuda2::Stream::default();
-        let allocator = cuda2::Native::default();
+        let stream = cuda::Stream::default();
+        let allocator = cuda::Native::default();
         let input = create_ptr(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &allocator).unwrap();
         let output = matmul.forward(&handle, &input, &allocator, &stream).unwrap();
 

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_cuda::cudnn as cudnn2;
-use dg_cuda as cuda2;
+use dg_cuda::cudnn;
+use dg_cuda as cuda;
 use std::collections::HashMap;
 
 use crate::layers::{Conv2d, create_offset_descriptor, get_num_channels};
@@ -23,7 +23,7 @@ use crate::Error;
 pub struct ResidualLayer {
     conv_1: Conv2d,
     conv_2: Conv2d,
-    scale_offset: cudnn2::Scale
+    scale_offset: cudnn::Scale
 }
 
 impl ResidualLayer {
@@ -37,7 +37,7 @@ impl ResidualLayer {
     /// * `i` - The index of the layer.
     /// * `tensors` -
     ///
-    pub fn new(handle: &cudnn2::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<Option<ResidualLayer>, Error> {
+    pub fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<Option<ResidualLayer>, Error> {
         let weights_1 = tensors.get(&format!("{:02}_residual/conv_1:0", i));
         let weights_2 = tensors.get(&format!("{:02}_residual/conv_2:0", i));
         let alpha = tensors.get(&format!("{:02}_residual/alpha:0", i));
@@ -57,17 +57,17 @@ impl ResidualLayer {
                         .with_alpha([gate_t, 1.0 - gate_t])
                         .with_tensors(tensors, &format!("{:02}_residual/conv_2", i))
                         .build(handle)?,
-            scale_offset: cudnn2::Scale::new(create_offset_descriptor(num_channels)?, gate_t)?
+            scale_offset: cudnn::Scale::new(create_offset_descriptor(num_channels)?, gate_t)?
         }))
     }
 
-    pub fn forward<'a, A: cuda2::Allocator + Clone>(
+    pub fn forward<'a, A: cuda::Allocator + Clone>(
         &self,
-        handle: &cudnn2::Handle,
-        input: cuda2::SmartPtr<A>,
+        handle: &cudnn::Handle,
+        input: cuda::SmartPtr<A>,
         allocator: &mut A,
-        stream: &cuda2::Stream,
-    ) -> Result<cuda2::SmartPtr<A>, Error>
+        stream: &cuda::Stream,
+    ) -> Result<cuda::SmartPtr<A>, Error>
     {
         if self.conv_2.prepare(handle, stream)? {
             self.scale_offset.forward(&handle, self.conv_2.offset().get().as_ptr())?;

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_cuda::cudnn as cudnn2;
-use dg_cuda as cuda2;
+use dg_cuda::cudnn;
+use dg_cuda as cuda;
 use dg_go::utils::features::NUM_FEATURES;
 use std::collections::HashMap;
 
@@ -34,7 +34,7 @@ impl UpLayer {
     /// * `n` - The number of images.
     /// * `tensors` -
     ///
-    pub fn new(handle: &cudnn2::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> Result<UpLayer, Error> {
+    pub fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> Result<UpLayer, Error> {
         let num_channels = get_num_channels(tensors);
 
         Ok(UpLayer {
@@ -44,13 +44,13 @@ impl UpLayer {
         })
     }
 
-    pub fn forward<'a, A: cuda2::Allocator + Clone>(
+    pub fn forward<'a, A: cuda::Allocator + Clone>(
         &self,
-        handle: &cudnn2::Handle,
-        input: &cuda2::SmartPtr<A>,
+        handle: &cudnn::Handle,
+        input: &cuda::SmartPtr<A>,
         allocator: &mut A,
-        stream: &cuda2::Stream
-    ) -> Result<cuda2::SmartPtr<A>, Error>
+        stream: &cuda::Stream
+    ) -> Result<cuda::SmartPtr<A>, Error>
     {
         self.up.forward(handle, input, allocator, stream)
     }

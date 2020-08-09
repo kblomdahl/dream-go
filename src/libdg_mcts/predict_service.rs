@@ -220,8 +220,7 @@ impl parallel::ServiceImpl for PredictState {
     type Response = Option<(f32, Vec<f32>)>;
 
     fn get_thread_count() -> usize {
-        let devices = Device::all().expect("Could not find any compatible devices");
-        let num_devices = devices.len();
+        let num_devices = Device::len().expect("Could not find any compatible devices");
         let num_busy = *config::NUM_THREADS / *config::BATCH_SIZE;
 
         ::std::cmp::max(2 * num_devices, num_busy)

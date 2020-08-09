@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_cuda::cudnn as cudnn2;
-use dg_cuda as cuda2;
+use dg_cuda::cudnn;
+use dg_cuda as cuda;
 use std::collections::HashMap;
 
 use crate::tensor::Tensor;
@@ -23,7 +23,7 @@ use crate::Error;
 pub struct ValueLayer {
     conv_1: Conv2d,
     reduce_mean: GlobalPooling,
-    tanh: cudnn2::Activation,
+    tanh: cudnn::Activation,
 }
 
 impl ValueLayer {
@@ -37,15 +37,15 @@ impl ValueLayer {
     /// * `i` - The index of the layer.
     /// * `tensors` -
     ///
-    pub fn new(handle: &cudnn2::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<ValueLayer, Error> {
+    pub fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<ValueLayer, Error> {
         let num_channels = get_num_channels(tensors);
 
         Ok(ValueLayer {
             conv_1: Conv2d::new(n, [8, num_channels, 3, 3])
-                        .with_activation(cudnn2::ActivationDescriptor::identity()?)
+                        .with_activation(cudnn::ActivationDescriptor::identity()?)
                         .with_tensors(tensors, &format!("{:02}v_value/conv_1", i))
                         .build(handle)?,
-            reduce_mean: GlobalPooling::new(n, 8, cudnn2::ReduceTensorOp::Avg)
+            reduce_mean: GlobalPooling::new(n, 8, cudnn::ReduceTensorOp::Avg)
                         .build()?,
             tanh: Self::create_dense_tanh(n, 1)?
         })
@@ -62,22 +62,22 @@ impl ValueLayer {
     fn create_dense_tanh(
         batch_size: i32,
         num_elements: i32,
-    ) -> Result<cudnn2::Activation, cudnn2::Status> {
-        cudnn2::Activation::new(
-            cudnn2::ActivationDescriptor::tanh()?, 
+    ) -> Result<cudnn::Activation, cudnn::Status> {
+        cudnn::Activation::new(
+            cudnn::ActivationDescriptor::tanh()?, 
             create_dense_descriptor(batch_size, num_elements)?,
             create_dense_descriptor(batch_size, num_elements)?,
             [1.0, 0.0]
         )
     }
 
-    pub fn forward<'a, A: cuda2::Allocator + Clone>(
+    pub fn forward<'a, A: cuda::Allocator + Clone>(
         &self,
-        handle: &cudnn2::Handle,
-        input: &cuda2::SmartPtr<A>,
+        handle: &cudnn::Handle,
+        input: &cuda::SmartPtr<A>,
         allocator: &mut A,
-        stream: &cuda2::Stream
-    ) -> Result<cuda2::SmartPtr<A>, Error>
+        stream: &cuda::Stream
+    ) -> Result<cuda::SmartPtr<A>, Error>
     {
         // perform the forward convolution
         let value_1 = self.conv_1.forward(handle, input, allocator, stream)?;
