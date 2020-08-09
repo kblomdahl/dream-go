@@ -107,6 +107,11 @@ impl<K: Clone + Hash + Eq, V: Clone> LruCache<K, V> {
         }
     }
 
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     fn get(&mut self, key: &K) -> Option<&V> {
         let key_ref = KeyRef { inner: key };
 
@@ -223,6 +228,8 @@ mod tests {
         for i in 0..20000 {
             lru.insert(&i, i);
         }
+
+        assert_eq!(lru.len(), 1000);
     }
 
     #[test]
