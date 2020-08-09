@@ -23,13 +23,14 @@ use dg_cuda::cudnn as cudnn2;
 use dg_go::utils::features::{FEATURE_SIZE, NUM_FEATURES};
 use dg_utils::types::f16;
 use dg_utils::config;
-use super::ffi::cuda;
-use super::output_map::*;
-use super::tensor::Tensor;
-use super::Error;
+use crate::ffi::cuda;
+use crate::layers::ResidualLayer;
+use crate::output_map::*;
+use crate::tensor::Tensor;
+use crate::Error;
 
 /// The number of channels to assume if not given in the network weights file.
-const DEFAULT_NUM_CHANNELS: i32 = 128;
+pub const DEFAULT_NUM_CHANNELS: i32 = 128;
 
 // -------- InferenceType --------
 
@@ -126,7 +127,7 @@ fn create_tensor_descriptor(batch_size: i32, num_channels: i32) -> Result<cudnn2
 /// 
 /// * `num_channels` -
 /// 
-fn create_offset_descriptor(num_channels: i32) -> Result<cudnn2::TensorDescriptor, cudnn2::Status> {
+pub fn create_offset_descriptor(num_channels: i32) -> Result<cudnn2::TensorDescriptor, cudnn2::Status> {
     cudnn2::TensorDescriptor::new(
         cudnn2::TensorFormat::NHWC,
         cudnn2::DataType::Half,
@@ -250,7 +251,7 @@ fn create_convolution_bias_3x3(
 /// * `num_outputs` -
 /// * `num_inputs` - 
 /// 
-fn create_convolution_bias_activation_3x3(
+pub fn create_convolution_bias_activation_3x3(
     handle: &cudnn2::Handle,
     batch_size: i32,
     num_outputs: i32,
@@ -431,11 +432,11 @@ fn create_dense_tanh(
 pub struct Conv2d {
     conv_desc: cudnn2::ConvolutionBiasActivation,
     filter: Tensor,
-    offset: Tensor
+    pub offset: Tensor
 }
 
 impl Conv2d {
-    fn new(
+    pub fn new(
         name: String,
         conv_desc: cudnn2::ConvolutionBiasActivation,
         tensors: &HashMap<String, Tensor>
@@ -448,7 +449,7 @@ impl Conv2d {
         })
     }
 
-    fn prepare(&self, handle: &cudnn2::Handle, stream: &cuda2::Stream) -> Result<bool, Error> {
+    pub fn prepare(&self, handle: &cudnn2::Handle, stream: &cuda2::Stream) -> Result<bool, Error> {
         handle.set_stream(stream)?;
         if self.filter.copy_to_device(&stream)? && self.offset.copy_to_device(&stream)? {
             Ok(true)
@@ -457,7 +458,7 @@ impl Conv2d {
         }
     }
 
-    fn forward<A: cuda2::Allocator + Clone>(
+    pub fn forward<A: cuda2::Allocator + Clone>(
         &self,
         handle: &cudnn2::Handle,
         input: &cuda2::SmartPtr<A>,
@@ -482,7 +483,7 @@ impl Conv2d {
         Ok(output)
     }
 
-    fn forward_skip<A: cuda2::Allocator + Clone>(
+    pub fn forward_skip<A: cuda2::Allocator + Clone>(
         &self,
         handle: &cudnn2::Handle,
         input: &cuda2::SmartPtr<A>,
@@ -701,9 +702,9 @@ pub struct Workspace {
     batch_size: usize,
     allocator: cuda2::Concurrent<cuda2::Sticky<cuda2::Native>>,
 
-    handle: cudnn2::Handle,
+    pub handle: cudnn2::Handle,
     tower_finished: cuda2::Event,
-    tower_stream: cuda2::Stream,
+    pub tower_stream: cuda2::Stream,
     policy_stream: cuda2::Stream,
     value_stream: cuda2::Stream,
 
@@ -744,60 +745,6 @@ impl UpLayer {
     ) -> Result<cuda2::SmartPtr<A>, Error>
     {
         self.up.forward(&workspace.handle, input, allocator, &workspace.tower_stream)
-    }
-}
-
-struct ResidualLayer {
-    conv_1: Conv2d,
-    conv_2: Conv2d,
-    scale_offset: cudnn2::Scale
-}
-
-impl ResidualLayer {
-    /// Create a layer that takes the final output of the residual block and
-    /// transforms it into a scalar value.
-    ///
-    /// # Arguments
-    ///
-    /// * `handle` - The cuDNN handle
-    /// * `n` - The number of images.
-    /// * `i` - The index of the layer.
-    /// * `tensors` -
-    ///
-    unsafe fn new(handle: &cudnn2::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<Option<ResidualLayer>, Error> {
-        let weights_1 = tensors.get(&format!("{:02}_residual/conv_1:0", i));
-        let weights_2 = tensors.get(&format!("{:02}_residual/conv_2:0", i));
-        let alpha = tensors.get(&format!("{:02}_residual/alpha:0", i));
-
-        if weights_1.is_none() || weights_2.is_none() {
-            return Ok(None);
-        }
-
-        let num_channels = tensors.get("num_channels:0")
-            .map(|x| { x.as_i32() })
-            .unwrap_or(DEFAULT_NUM_CHANNELS);
-        let gate_t = alpha.map(|t| t.as_f32()).unwrap_or(0.5);
-
-        Ok(Some(ResidualLayer {
-            conv_1: Conv2d::new(format!("{:02}_residual/conv_1", i), create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[1.0, 0.0])?, tensors)?,
-            conv_2: Conv2d::new(format!("{:02}_residual/conv_2", i), create_convolution_bias_activation_3x3(handle, n, num_channels, num_channels, &[gate_t, 1.0 - gate_t])?, tensors)?,
-            scale_offset: cudnn2::Scale::new(create_offset_descriptor(num_channels)?, gate_t)?
-        }))
-    }
-
-    unsafe fn forward<'a, A: cuda2::Allocator + Clone, T: InferenceType>(
-        &self,
-        workspace: &mut Workspace,
-        allocator: &mut A,
-        input: cuda2::SmartPtr<A>
-    ) -> Result<cuda2::SmartPtr<A>, Error>
-    {
-        if self.conv_2.prepare(&workspace.handle, &workspace.tower_stream)? {
-            self.scale_offset.forward(&workspace.handle, self.conv_2.offset.get().as_ptr())?;
-        }
-
-        let y = self.conv_1.forward(&workspace.handle, &input, allocator, &workspace.tower_stream)?;
-        self.conv_2.forward_skip(&workspace.handle, &y, &input, allocator, &workspace.tower_stream)
     }
 }
 
@@ -960,7 +907,7 @@ pub fn forward<T: InferenceType>(
             let residual = &workspace.c_residual[i];
             let output = ::std::mem::transmute(Output::Residual_00 as u8 + i as u8);
 
-            residual_1 = residual.clone().forward::<_, T>(workspace, &mut allocator, residual_1)?;
+            residual_1 = residual.clone().forward::<_, T>(&workspace.handle, residual_1, &mut allocator, &workspace.tower_stream)?;
             load_output::<_, T::Tower>(&outputs, &mut map, output, &residual_1, &workspace.tower_stream)?;
         }
 
