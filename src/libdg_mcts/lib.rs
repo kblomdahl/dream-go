@@ -17,6 +17,7 @@
 
 extern crate crossbeam_channel;
 extern crate crossbeam_utils;
+extern crate dg_cuda;
 extern crate dg_go;
 extern crate dg_nn;
 extern crate dg_utils;
@@ -64,7 +65,6 @@ use self::options::{SearchOptions, ScoringSearch};
 use self::time_control::TimeStrategy;
 use self::tree::ProbeResult;
 use self::predict::Predictor;
-use dg_nn::Profiler;
 use dg_utils::config;
 use dg_utils::types::f16;
 use self::asm::sum_finite_f32;
@@ -448,9 +448,7 @@ pub fn predict<T, P>(
     where T: TimeStrategy + Clone + Send + 'static,
           P: Predictor + 'static
 {
-    Profiler::with(move || {
-        predict_aux::<T, _>(server, options, time_control, starting_tree, starting_point, starting_color)
-    })
+    predict_aux::<T, _>(server, options, time_control, starting_tree, starting_point, starting_color)
 }
 
 /// Returns a weighted random komi between `-7.5` to `7.5`, with the most common

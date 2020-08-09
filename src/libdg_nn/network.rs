@@ -18,8 +18,8 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use super::devices::{get_current_device, set_current_device};
-use super::ffi::cuda;
+use dg_cuda::Device;
+
 use super::{Error, graph, loader};
 
 type WorkspaceQueue = Mutex<Vec<graph::Workspace>>;
@@ -108,8 +108,8 @@ impl Network {
     /// * `batch_size` -
     /// 
     pub fn get_workspace(&self, batch_size: usize) -> Result<WorkspaceGuard, Error> {
-        let device_id = get_current_device()?;
-        let key = (batch_size, device_id);
+        let device = Device::default();
+        let key = (batch_size, device.id());
         let mut workspaces = self.workspaces.lock().unwrap();
         let candidates = workspaces.entry(key).or_insert_with(|| Box::new(Mutex::new(vec! [])));
         let candidates_ptr = &mut **candidates as *mut WorkspaceQueue;
@@ -133,19 +133,23 @@ impl Network {
     pub fn synchronize(&self) {
         let mut workspaces = self.workspaces.lock().unwrap();
 
-        unsafe {
-            cuda::cudaDeviceSynchronize();  // this should be allowed to fail
+        let status = Device::synchronize();  // this should be allowed to fail
+        if let Err(err) = status {
+            eprintln!("Error: {:?}", err);
+        }
 
-            let original_device_id = get_current_device().expect("Failed to get the current device");
+        let original_device = Device::default();
 
-            for ((_batch_size, device_id), value) in workspaces.drain() {
-                set_current_device(device_id).expect("Failed to set the device for the current thread");
-                cuda::cudaDeviceSynchronize();  // this should be allowed to fail
-
-                drop(value);
+        for ((_batch_size, device_id), value) in workspaces.drain() {
+            Device::new(device_id).set_current().expect("Failed to set the device for the current thread");
+            let status = Device::synchronize();  // this should be allowed to fail
+            if let Err(err) = status {
+                eprintln!("Error: {:?}", err);
             }
 
-            set_current_device(original_device_id).expect("Failed to set the device for the current thread");
+            drop(value);
         }
+
+        original_device.set_current().expect("Failed to set the device for the current thread");
     }
 }

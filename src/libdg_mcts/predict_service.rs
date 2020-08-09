@@ -17,9 +17,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use super::parallel;
-use dg_go::utils::features::{FEATURE_SIZE};
 use super::predict::Predictor;
-use dg_nn::devices::{DEVICES, set_current_device};
+use dg_cuda::Device;
+use dg_go::utils::features::{FEATURE_SIZE};
 use dg_nn::{self as nn, Network, Workspace};
 use dg_utils::types::f16;
 use dg_utils::config;
@@ -220,16 +220,18 @@ impl parallel::ServiceImpl for PredictState {
     type Response = Option<(f32, Vec<f32>)>;
 
     fn get_thread_count() -> usize {
-        let num_devices = DEVICES.len();
+        let devices = Device::all().expect("Could not find any compatible devices");
+        let num_devices = devices.len();
         let num_busy = *config::NUM_THREADS / *config::BATCH_SIZE;
 
         ::std::cmp::max(2 * num_devices, num_busy)
     }
 
     fn setup_thread(index: usize) {
-        let device_id = DEVICES[index % DEVICES.len()];
+        let devices = Device::all().expect("Could not find any compatible devices");
+        let device = &devices[index % devices.len()];
 
-        set_current_device(device_id).expect("Failed to set the device for the current thread");
+        device.set_current().expect("Failed to set the device for the current thread")
     }
 
     fn check_sleep(state: MutexGuard<Self::State>) {

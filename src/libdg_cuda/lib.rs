@@ -20,12 +20,14 @@ extern crate libc;
 
 pub mod cudnn;
 mod allocator;
+mod devices;
 mod error;
 mod memory;
 mod stream;
 mod per_device;
 
 pub use self::allocator::*;
+pub use self::devices::*;
 pub use self::error::*;
 pub use self::memory::*;
 pub use self::stream::*;

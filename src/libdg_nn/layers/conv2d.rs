@@ -17,7 +17,6 @@ use dg_cuda::cudnn as cudnn2;
 use dg_cuda as cuda2;
 use std::collections::HashMap;
 
-use crate::ffi::*;
 use crate::tensor::Tensor;
 use crate::layers::{create_tensor_descriptor, create_offset_descriptor};
 use crate::Error;
@@ -198,13 +197,7 @@ impl Conv2d {
 /// Returns true if the current device supports `f16` (in a
 /// sensible way).
 fn has_true_half() -> bool {
-    let mut version_major: i32 = 0;
-    let mut version_minor: i32 = 0;
-
-    unsafe {
-        assert!(cuda::cudaDeviceGetAttribute(&mut version_major, cuda::DeviceAttr::ComputeCapabilityMajor, 0).is_ok());
-        assert!(cuda::cudaDeviceGetAttribute(&mut version_minor, cuda::DeviceAttr::ComputeCapabilityMinor, 0).is_ok());
-    }
+    let (version_major, version_minor) = cuda2::Device::default().compute_capability().unwrap();
 
     (version_major == 6 && version_minor == 0) ||
         (version_major == 6 && version_minor == 2) ||
