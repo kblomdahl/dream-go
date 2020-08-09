@@ -19,12 +19,11 @@ extern crate dg_nn;
 extern crate test;
 extern crate libc;
 
-use std::ptr;
 use test::Bencher;
-use libc::{c_void};
+use std::mem::size_of;
 
+use dg_cuda as cuda;
 use dg_cuda::cudnn;
-use dg_nn::ffi::*;
 use dg_utils::types::*;
 
 #[derive(Clone, Copy)]
@@ -66,6 +65,8 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     where f32: From<T>
 {
     let handle: cudnn::Handle = cudnn::Handle::new()?;
+    let stream = cuda::Stream::default();
+    let allocator = cuda::Native::default();
     const BATCH_SIZE: usize = 16;
 
     // the a input description that match the given configuration
@@ -108,7 +109,6 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
 
     // figure out how large of a workspace we need given the convolution
     // configuration.
-    let mut workspace = ptr::null_mut();
     let fwd_algo_perf = cudnn::ConvolutionFwdAlgoPerf::new(
         &handle,
         &in_desc,
@@ -116,51 +116,27 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
         &conv_desc,
         &out_desc
     )?;
-
-    assert!(cuda::cudaMalloc(&mut workspace, fwd_algo_perf.memory()).is_ok());
+    let workspace = cuda::malloc(fwd_algo_perf.memory(), &allocator).unwrap();
 
     // allocate the `input` array and initialize it with ones.
-    let mut input = ptr::null_mut();
     let input_size = BATCH_SIZE * num_features * 19 * 19;
-
-    assert!(cuda::cudaMalloc(&mut input, in_desc.size_in_bytes()?).is_ok());
-    assert!(cuda::cudaMemcpy(
-        input,
-        vec! [T::from(1.0); input_size].as_ptr() as *const c_void,
-        in_desc.size_in_bytes()?,
-        cuda::MemcpyKind::HostToDevice
-    ).is_ok());
+    let mut input = cuda::malloc(size_of::<T>() * input_size, &allocator).unwrap();
+    input.copy_from_slice(&vec! [T::from(1.0); input_size], &stream).unwrap();
 
     // allocate the `weights` array and fill it with 0.1's.
-    let mut weights = ptr::null_mut();
     let weights_size = num_features * num_features * 3 * 3;
-
-    assert!(cuda::cudaMalloc(&mut weights, data_type.size_in_bytes() * weights_size).is_ok());
-    assert!(cuda::cudaMemcpy(
-        weights,
-        vec! [T::from(0.1); weights_size].as_ptr() as *const c_void,
-        data_type.size_in_bytes() * weights_size,
-        cuda::MemcpyKind::HostToDevice
-    ).is_ok());
+    let mut weights = cuda::malloc(size_of::<T>() * weights_size, &allocator).unwrap();
+    weights.copy_from_slice(&vec! [T::from(0.1); weights_size], &stream).unwrap();
 
     // allocate the `offset` array and initialize it with zeros.
-    let mut offset = ptr::null_mut();
     let offset_size = num_features;
-
-    assert!(cuda::cudaMalloc(&mut offset, offset_type.size_in_bytes() * offset_size).is_ok());
-    assert!(cuda::cudaMemcpy(
-        offset,
-        vec! [T::from(0.0); offset_size].as_ptr() as *const c_void,
-        offset_type.size_in_bytes() * offset_size,
-        cuda::MemcpyKind::HostToDevice
-    ).is_ok());
+    let mut offset = cuda::malloc(size_of::<T>() * offset_size, &allocator).unwrap();
+    offset.copy_from_slice(&vec! [T::from(0.0); offset_size], &stream).unwrap();
 
     // allocate the `output` array, but leave it uninitialized since
     // we will never read into it until after the convolution.
-    let mut output = ptr::null_mut();
     let output_size = BATCH_SIZE * num_features * 361;
-
-    assert!(cuda::cudaMalloc(&mut output, data_type.size_in_bytes() * output_size).is_ok());
+    let output = cuda::malloc(size_of::<T>() * output_size, &allocator).unwrap();
 
     // run the benchmark
     let conv_bias_act = cudnn::ConvolutionBiasActivation::new(
@@ -178,20 +154,15 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     bencher.iter(move || {
         conv_bias_act.forward(
             &handle,
-            input,
-            weights,
-            workspace,
+            input.as_ptr(),
+            weights.as_ptr(),
+            workspace.as_ptr(),
             fwd_algo_perf.memory(),
-            output,
-            offset,
-            output
+            output.as_ptr(),
+            offset.as_ptr(),
+            output.as_ptr()
         ).unwrap();
     });
-
-    assert!(cuda::cudaFree(input).is_ok());
-    assert!(cuda::cudaFree(output).is_ok());
-    assert!(cuda::cudaFree(offset).is_ok());
-    assert!(cuda::cudaFree(weights).is_ok());
 
     Ok(())
 }
@@ -201,13 +172,7 @@ const NUM_FEATURES: usize = 192;
 
 /// Returns true if the current device supports `i8`.
 fn supports_i8() -> bool {
-    let mut version_major: i32 = 0;
-    let mut version_minor: i32 = 0;
-
-    unsafe {
-        assert!(cuda::cudaDeviceGetAttribute(&mut version_major, cuda::DeviceAttr::ComputeCapabilityMajor, 0).is_ok());
-        assert!(cuda::cudaDeviceGetAttribute(&mut version_minor, cuda::DeviceAttr::ComputeCapabilityMinor, 0).is_ok());
-    }
+    let (version_major, version_minor) = cuda::Device::default().compute_capability().unwrap();
 
     (version_major == 6 && version_minor >= 1) ||
     (version_major >= 7 && version_minor >= 0)
@@ -216,13 +181,7 @@ fn supports_i8() -> bool {
 /// Returns true if the current device supports `f16` (in a
 /// sensible way).
 fn supports_f16() -> bool {
-    let mut version_major: i32 = 0;
-    let mut version_minor: i32 = 0;
-
-    unsafe {
-        assert!(cuda::cudaDeviceGetAttribute(&mut version_major, cuda::DeviceAttr::ComputeCapabilityMajor, 0).is_ok());
-        assert!(cuda::cudaDeviceGetAttribute(&mut version_minor, cuda::DeviceAttr::ComputeCapabilityMinor, 0).is_ok());
-    }
+    let (version_major, version_minor) = cuda::Device::default().compute_capability().unwrap();
 
     (version_major == 6 && version_minor == 0) ||
     (version_major == 6 && version_minor == 2) ||

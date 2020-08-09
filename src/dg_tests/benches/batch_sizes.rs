@@ -52,13 +52,7 @@ fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
         }).collect::<Vec<_>>();
 
         b.iter(move || {
-            forward(
-                &mut workspace,
-                &features,
-                OutputSet::default()
-                    .with(Output::Policy)
-                    .with(Output::Value)
-            )
+            forward(&mut workspace, &features)
         });
     });
 }
