@@ -1,5 +1,5 @@
 FROM dream_go/base:latest
-FROM nvcr.io/nvidia/tensorflow:18.12-py3
+FROM nvcr.io/nvidia/tensorflow:20.02-tf1-py3
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install -q -r /tmp/requirements.txt
 RUN mkdir -p /app /app/data /app/models
