@@ -40,6 +40,7 @@ class InputFnTest(unittest.TestCase):
         self.assertEqual(labels['policy'].as_list(), [None, 362])
         self.assertEqual(labels['next_policy'].as_list(), [None, 362])
         self.assertEqual(labels['ownership'].as_list(), [None, 361])
+        self.assertEqual(labels['has_ownership'].as_list(), [None, 1])
         self.assertEqual(labels['komi'].as_list(), [None, 1])
 
     def test_data_type(self):
@@ -51,6 +52,7 @@ class InputFnTest(unittest.TestCase):
         self.assertEqual(labels['policy'], tf.float32)
         self.assertEqual(labels['next_policy'], tf.float32)
         self.assertEqual(labels['ownership'], tf.float32)
+        self.assertEqual(labels['has_ownership'], tf.float32)
         self.assertEqual(labels['komi'], tf.float32)
 
 if __name__ == '__main__':

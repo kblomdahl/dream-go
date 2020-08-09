@@ -87,6 +87,7 @@ class SgfToFeaturesOp : public OpKernel {
             Tensor* ownership_tensor;
             Tensor* komi_tensor;
             Tensor* boost_tensor;
+            Tensor* has_ownership_tensor;
 
             OP_REQUIRES_OK(
                 context,
@@ -151,6 +152,14 @@ class SgfToFeaturesOp : public OpKernel {
                 )
             );
 
+            OP_REQUIRES_OK(
+                context,
+                context->allocate_output(
+                    7,
+                    TensorShape({1}),
+                    &has_ownership_tensor
+                )
+            );
 
             if (status == 0) {
                 // copy the features
@@ -224,9 +233,14 @@ class SgfToFeaturesOp : public OpKernel {
 
                 // set ownership
                 auto ownership = ownership_tensor->flat<float>();
+                auto has_ownership = has_ownership_tensor->flat<float>();
 
+                has_ownership(0) = 0.0;
                 for (auto i = 0; i < 361; ++i) {
                     ownership(i) = example->ownership[i];
+                    if (example->ownership[i] != 0.0) {
+                        has_ownership(0) = 1.0;
+                    }
                 }
 
                 // set komi
@@ -253,6 +267,7 @@ class SgfToFeaturesOp : public OpKernel {
                 auto ownership = ownership_tensor->flat<float>();
                 auto komi = komi_tensor->flat<float>();
                 auto boost = boost_tensor->flat<float>();
+                auto has_ownership = has_ownership_tensor->flat<float>();
 
                 for (auto i = 0; i < 362; ++i) {
                     policy(i) = 0.0;
@@ -266,6 +281,7 @@ class SgfToFeaturesOp : public OpKernel {
                 winner(0) = 0.0;
                 komi(0) = 0.0;
                 boost(0) = 0.0;
+                has_ownership(0) = 0.0;
             }
 
             free(example);
@@ -281,6 +297,7 @@ REGISTER_OP("SgfToFeatures")
     .Output("ownership: float32")
     .Output("komi: float32")
     .Output("boost: float32")
+    .Output("has_ownership: float32")
     .SetShapeFn([](InferenceContext* c) {
         std::vector<DimensionHandle> dims;
         dims.emplace_back(c->MakeDim(19));
@@ -294,6 +311,7 @@ REGISTER_OP("SgfToFeatures")
         c->set_output(4, c->MakeShape({361})); // ownership
         c->set_output(5, c->MakeShape({1})); // komi
         c->set_output(6, c->MakeShape({1})); // boost
+        c->set_output(7, c->MakeShape({1})); // has_ownership
 
         return Status::OK();
     });

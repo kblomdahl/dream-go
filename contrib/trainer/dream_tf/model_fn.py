@@ -69,7 +69,7 @@ def model_fn(features, labels, mode, params):
         loss_unboosted = 0.25 * check_numerics(loss_policy, 'loss_policy') \
                          + 0.25 * check_numerics(loss_next_policy, 'loss_next_policy') \
                          + 1.00 * check_numerics(loss_value, 'loss_value') * labels['boost'] \
-                         + 1.00 * check_numerics(loss_ownership, 'loss_ownership')
+                         + 1.00 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership']
 
         loss = tf.reduce_mean(loss_unboosted) + 1e-4 * loss_reg
         tf.add_to_collection(LOSS, loss_unboosted)

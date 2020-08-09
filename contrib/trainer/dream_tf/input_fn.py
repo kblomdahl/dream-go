@@ -28,7 +28,7 @@ dream_go_module = tf.load_op_library('libdg_tf.so')
 
 def _parse(is_deterministic):
     def __do_parse(line):
-        features, policy, next_policy, value, ownership, komi, boost = dream_go_module.sgf_to_features(line)
+        features, policy, next_policy, value, ownership, komi, boost, has_ownership = dream_go_module.sgf_to_features(line)
 
         labels = {
             'boost': tf.reshape(boost, [1]),
@@ -36,6 +36,7 @@ def _parse(is_deterministic):
             'policy': tf.reshape(policy, [362]),
             'next_policy': tf.reshape(next_policy, [362]),
             'ownership': tf.reshape(ownership, [361]),
+            'has_ownership': tf.reshape(has_ownership, [1]),
             'komi': tf.reshape(komi, [1])
         }
 
