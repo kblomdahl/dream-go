@@ -223,7 +223,6 @@ impl Dense {
 #[cfg(test)]
 mod tests {
     use std::mem::size_of;
-
     use dg_utils::types::f16;
 
     use super::*;

@@ -40,12 +40,13 @@ pub fn get_num_channels(tensors: &HashMap<String, Tensor>) -> i32 {
 /// 
 /// * `batch_size` -
 /// * `num_channels` -
+/// * `width_height` -
 /// 
-pub fn create_tensor_descriptor(batch_size: i32, num_channels: i32) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+pub fn create_tensor_descriptor(batch_size: i32, num_channels: i32, width_height: i32) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
     cudnn::TensorDescriptor::new(
         cudnn::TensorFormat::NHWC,
         cudnn::DataType::Half,
-        &[batch_size, num_channels, 19, 19]
+        &[batch_size, num_channels, width_height, width_height]
     )
 }
 

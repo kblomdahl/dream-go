@@ -29,6 +29,7 @@ pub struct Conv2d {
 
 pub struct Conv2dBuilder {
     batch_size: i32,
+    width_height: i32,
     filter_shape: [i32; 4],
     alpha: [f32; 2],
     act_desc: Option<cudnn::ActivationDescriptor>,
@@ -46,6 +47,7 @@ impl Conv2dBuilder {
 
         Self {
             batch_size: batch_size,
+            width_height: 19,
             filter_shape: filter,
             alpha: [1.0, 0.0],
             act_desc: None,
@@ -57,6 +59,24 @@ impl Conv2dBuilder {
     pub fn with_tensors(mut self, tensors: &HashMap<String, Tensor>, name: &str) -> Self {
         self.filter = Some(tensors.get(&format!("{}:0", name)).cloned().expect("no filter available"));
         self.offset = Some(tensors.get(&format!("{}/offset:0", name)).cloned().expect("no offset available"));
+        self
+    }
+
+    #[cfg(test)]
+    pub fn with_width_height(mut self, width_height: i32) -> Self {
+        self.width_height = width_height;
+        self
+    }
+
+    #[cfg(test)]
+    pub fn with_filter(mut self, filter: Tensor) -> Self {
+        self.filter = Some(filter);
+        self
+    }
+
+    #[cfg(test)]
+    pub fn with_offset(mut self, offset: Tensor) -> Self {
+        self.offset = Some(offset);
         self
     }
 
@@ -105,13 +125,13 @@ impl Conv2dBuilder {
         cudnn::ConvolutionBiasActivation::new(
             handle,
             self.alpha[0],
-            create_tensor_descriptor(self.batch_size, num_inputs)?,
+            create_tensor_descriptor(self.batch_size, num_inputs, self.width_height)?,
             self.create_filter_descriptor()?,
             self.create_convolution_descriptor()?,
             self.alpha[1],
             create_offset_descriptor(num_outputs)?,
             self.create_activation_descriptor()?,
-            create_tensor_descriptor(self.batch_size, num_outputs)?
+            create_tensor_descriptor(self.batch_size, num_outputs, self.width_height)?
         )
     }
 
@@ -206,5 +226,60 @@ fn has_true_half() -> bool {
 
 #[cfg(test)]
 mod tests {
-    // pass
+    use std::mem::size_of;
+    use dg_utils::types::f16;
+    use super::*;
+
+    fn create_tensor(data: &[f32]) -> Result<Tensor, Error> {
+        Tensor::from_vec(data.iter().map(|&x| f16::from(x)).collect())
+    }
+
+    fn create_ptr<A: cuda::Allocator + Clone>(data: &[f32], allocator: &A) -> Result<cuda::SmartPtr<A>, Error> {
+        let stream = cuda::Stream::default();
+        let mut output = cuda::malloc(size_of::<f16>() * data.len(), allocator)?;
+        output.copy_from_slice(&data.iter().map(|&x| f16::from(x)).collect::<Vec<_>>(), &stream)?;
+        
+        Ok(output)
+    }
+
+    #[test]
+    fn pick_middle_and_sum() {
+        let handle = cudnn::Handle::new().unwrap();
+        let filter = create_tensor(&[
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        ]).unwrap();
+        let offset = create_tensor(&[
+            0.0, 0.0
+        ]).unwrap();
+        let conv2d = Conv2d::new(1, [2, 1, 3, 3])
+            .with_filter(filter)
+            .with_offset(offset)
+            .with_width_height(3)
+            .build(&handle)
+            .unwrap();
+
+        //
+        let stream = cuda::Stream::default();
+        let allocator = cuda::Native::default();
+        let input = create_ptr(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], &allocator).unwrap();
+        let output = conv2d.forward(&handle, &input, &allocator, &stream).unwrap();
+
+        assert_eq!(
+            vec! [
+                 1.0, 12.0,
+                 2.0, 21.0,
+                 3.0, 16.0,
+                 4.0, 27.0,
+                 5.0, 45.0,
+                 6.0, 33.0,
+                 7.0, 24.0,
+                 8.0, 39.0,
+                 9.0, 28.0
+            ],
+            output.to_vec::<f16>(&stream)
+                .unwrap()
+                .into_iter().map(|x| f32::from(x)).collect::<Vec<_>>()
+        )
+    }
 }

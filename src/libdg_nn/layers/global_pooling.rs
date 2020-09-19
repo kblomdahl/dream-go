@@ -53,7 +53,7 @@ impl GlobalPoolingBuilder {
     fn create_reduce_tensor(&self) -> Result<cudnn::ReduceTensor, cudnn::Status> {
         cudnn::ReduceTensor::new(
             self.create_reduce_tensor_descriptor()?,
-            create_tensor_descriptor(self.batch_size, self.num_channels)?,
+            create_tensor_descriptor(self.batch_size, self.num_channels, 19)?,
             create_dense_descriptor(self.batch_size, 1)?,
             self.alpha
         )
