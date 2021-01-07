@@ -21,7 +21,7 @@
 import numpy as np
 import tensorflow as tf
 
-from . import conv2d, normalize_constraint, l2_regularizer, cast_to_compute_type
+from . import conv2d, matmul, normalize_constraint, l2_regularizer, cast_to_compute_type
 from ..hooks.dump import DUMP_OPS
 from .batch_norm import batch_norm
 from .recompute_grad import recompute_grad
@@ -41,7 +41,7 @@ def policy_head(x, mode, params):
     """
     init_op = orthogonal_initializer()
     num_channels = params['num_channels']
-    num_samples = 8
+    num_samples = params['num_samples']
 
     conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_samples), tf.float32, init_op, constraint=normalize_constraint, regularizer=l2_regularizer, use_resource=True)
     linear_1 = tf.get_variable('linear_1', (361 * num_samples, 362), tf.float32, init_op, regularizer=l2_regularizer, use_resource=True)
@@ -56,7 +56,7 @@ def policy_head(x, mode, params):
         y = tf.nn.relu(y)
 
         y = tf.reshape(y, (-1, 361 * num_samples))
-        y = tf.matmul(y, cast_to_compute_type(linear_1)) + cast_to_compute_type(offset_1)
+        y = matmul(y, linear_1, offset_1)
 
         return tf.cast(y, tf.float32)
 
@@ -128,4 +128,4 @@ def policy_offset_op(shape, dtype=None, partition_info=None):
         -6.85545e+00, -6.88249e+00, -6.88945e+00, -6.88525e+00, -6.88876e+00, -6.86828e+00,
         -6.83631e+00, -6.75981e+00, -6.76317e+00, -6.74771e+00, -6.86408e+00, -6.90874e+00,
         -7.91371e+00, -6.27113e+00
-])
+    ])

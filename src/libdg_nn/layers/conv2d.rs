@@ -33,6 +33,7 @@ pub struct Conv2dBuilder {
     filter_shape: [i32; 4],
     alpha: [f32; 2],
     act_desc: Option<cudnn::ActivationDescriptor>,
+    compute_type: cudnn::DataType,
     filter: Option<Tensor>,
     offset: Option<Tensor>,
 }
@@ -51,6 +52,7 @@ impl Conv2dBuilder {
             filter_shape: filter,
             alpha: [1.0, 0.0],
             act_desc: None,
+            compute_type: if has_true_half() { cudnn::DataType::Half } else { cudnn::DataType::Float },
             filter: None,
             offset: None
         }
@@ -59,6 +61,11 @@ impl Conv2dBuilder {
     pub fn with_tensors(mut self, tensors: &HashMap<String, Tensor>, name: &str) -> Self {
         self.filter = Some(tensors.get(&format!("{}:0", name)).cloned().expect("no filter available"));
         self.offset = Some(tensors.get(&format!("{}/offset:0", name)).cloned().expect("no offset available"));
+        self
+    }
+
+    pub fn with_compute_type(mut self, compute_type: cudnn::DataType) -> Self {
+        self.compute_type = compute_type;
         self
     }
 
@@ -98,7 +105,7 @@ impl Conv2dBuilder {
             &[1, 1], // stride
             &[1, 1], // dilation
             cudnn::ConvolutionMode::CrossCorrelation,
-            if has_true_half() { cudnn::DataType::Half } else { cudnn::DataType::Float }
+            self.compute_type
         )
     }
 

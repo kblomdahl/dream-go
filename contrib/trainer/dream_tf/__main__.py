@@ -65,6 +65,7 @@ def parse_args():
     opt_group = parser.add_argument_group(title='model configuration')
     opt_group.add_argument('--num-channels', nargs=1, type=int, metavar='N', help='the number of channels per residual block')
     opt_group.add_argument('--num-blocks', nargs=1, type=int, metavar='N', help='the number of residual blocks')
+    opt_group.add_argument('--num-samples', nargs=1, type=int, metavar='N', help='the number of global average pooling samples')
     opt_group.add_argument('--mask', nargs=1, metavar='M', help='mask to multiply features with')
 
     op_group = parser.add_mutually_exclusive_group(required=True)
@@ -116,6 +117,19 @@ def get_num_blocks(args, model_dir):
         return None
 
 
+def get_num_samples(args, model_dir):
+    """ Returns the number of samples to use when constructing the model. """
+    if args.num_samples:
+        return args.num_samples[0]
+
+    try:
+        return tf.train.load_variable(model_dir, 'num_samples')
+    except tf.errors.NotFoundError:
+        return None
+    except tf.errors.InvalidArgumentError:
+        return None
+
+
 def main():
     args = parse_args()
     model_dir = args.model[0] if args.model else None
@@ -137,7 +151,8 @@ def main():
         'test_batches': args.test_batches if args.test_batches else 10,
 
         'num_channels': get_num_channels(args, model_dir) or 128,
-        'num_blocks': get_num_blocks(args, model_dir) or 9
+        'num_blocks': get_num_blocks(args, model_dir) or 9,
+        'num_samples': get_num_samples(args, model_dir) or 8
     }
 
     config = tf.estimator.RunConfig(

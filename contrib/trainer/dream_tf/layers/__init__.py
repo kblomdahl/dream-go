@@ -54,6 +54,14 @@ def conv2d(x, weights):
     """ Shortcut for `tf.nn.conv2d` """
     return tf.nn.conv2d(x, cast_to_compute_type(weights), (1, 1, 1, 1), 'SAME', True, 'NHWC')
 
+def matmul(x, weights, offset=None):
+    """ Shortcut for `tf.matmul` """
+    y = tf.matmul(x, cast_to_compute_type(weights))
+
+    if offset is not None:
+        return y + cast_to_compute_type(offset)
+    else:
+        return y
 
 def cast_to_compute_type(var):
     """ Returns the given variable as the current compute type """

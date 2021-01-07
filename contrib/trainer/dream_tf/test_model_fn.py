@@ -47,7 +47,8 @@ class ModelFnTest(unittest.TestCase):
         return {
             'num_blocks': 6,
             'num_channels': 64,
-            'learning_rate': 1e-4
+            'learning_rate': 1e-4,
+            "num_samples": 8
         }
 
     def tearDown(self):

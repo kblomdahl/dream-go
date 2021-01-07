@@ -29,6 +29,7 @@ class ResidualBlockTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 1
         self.num_channels = 128
+        self.num_samples = 8
         self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
         np.random.seed(12345)
         tf.set_random_seed(67890)
@@ -39,7 +40,8 @@ class ResidualBlockTest(unittest.TestCase, TestUtils):
     @property
     def params(self):
         return {
-            "num_channels": self.num_channels
+            "num_channels": self.num_channels,
+            "num_samples": self.num_samples
         }
 
     def test_shape(self):

@@ -17,13 +17,13 @@ use dg_cuda as cuda;
 use std::collections::HashMap;
 
 use crate::tensor::Tensor;
-use crate::layers::{Conv2d, GlobalPooling, create_dense_descriptor, get_num_channels};
+use crate::layers::{Conv2d, Dense, get_num_channels};
 use crate::Error;
+use dg_utils::types::f16;
 
 pub struct ValueLayer {
     conv_1: Conv2d,
-    reduce_mean: GlobalPooling,
-    tanh: cudnn::Activation,
+    linear_2: Dense
 }
 
 impl ValueLayer {
@@ -39,36 +39,19 @@ impl ValueLayer {
     ///
     pub fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<ValueLayer, Error> {
         let num_channels = get_num_channels(tensors);
+        let num_samples = 2;
 
         Ok(ValueLayer {
-            conv_1: Conv2d::new(n, [8, num_channels, 3, 3])
-                        .with_activation(cudnn::ActivationDescriptor::identity()?)
+            conv_1: Conv2d::new(n, [num_samples, num_channels, 3, 3])
+                        .with_activation(cudnn::ActivationDescriptor::relu()?)
+                        .with_compute_type(cudnn::DataType::Float)
                         .with_tensors(tensors, &format!("{:02}v_value/conv_1", i))
                         .build(handle)?,
-            reduce_mean: GlobalPooling::new(n, 8, cudnn::ReduceTensorOp::Avg)
-                        .build()?,
-            tanh: Self::create_dense_tanh(n, 1)?
+            linear_2: Dense::new(n, [1, 361*num_samples])
+                        .with_activation(cudnn::ActivationDescriptor::tanh()?)
+                        .with_tensors(tensors, &format!("{:02}v_value/linear_2", i))
+                        .build(handle)?
         })
-    }
-
-    /// Returns an `Activation` structure that performs an element-wise tanh
-    /// activation on the entire tensor.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `batch_size` - 
-    /// * `num_elements` - 
-    /// 
-    fn create_dense_tanh(
-        batch_size: i32,
-        num_elements: i32,
-    ) -> Result<cudnn::Activation, cudnn::Status> {
-        cudnn::Activation::new(
-            cudnn::ActivationDescriptor::tanh()?, 
-            create_dense_descriptor(batch_size, num_elements)?,
-            create_dense_descriptor(batch_size, num_elements)?,
-            [1.0, 0.0]
-        )
     }
 
     pub fn forward<'a, A: cuda::Allocator + Clone>(
@@ -82,12 +65,7 @@ impl ValueLayer {
         // perform the forward convolution
         let value_1 = self.conv_1.forward(handle, input, allocator, stream)?;
 
-        // perform the global average pooling
-        let value_2 = self.reduce_mean.forward(handle, &value_1, allocator, stream)?;
-
-        // perform the feed-forward linear layer (tanh)
-        self.tanh.forward(handle, value_2.as_ptr(), value_2.as_ptr())?;
-
-        Ok(value_2)
+        // perform the linear feed-forward layer with the final tanh activation
+        self.linear_2.forward(handle, &value_1, allocator, stream)
     }
 }

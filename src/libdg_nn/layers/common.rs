@@ -21,6 +21,9 @@ use crate::tensor::Tensor;
 /// The number of channels to assume if not given in the network weights file.
 pub const DEFAULT_NUM_CHANNELS: i32 = 128;
 
+/// The number of samples to assume if not given in the network weights file.
+pub const DEFAULT_NUM_SAMPLES: i32 = 8;
+
 /// Returns the number of channels to in each layer of the graph.
 /// 
 /// # Arguments
@@ -31,6 +34,19 @@ pub fn get_num_channels(tensors: &HashMap<String, Tensor>) -> i32 {
     tensors.get("num_channels:0")
         .map(|x| { x.as_i32() })
         .unwrap_or(DEFAULT_NUM_CHANNELS)
+}
+
+/// Returns the number of samples to use internally in the policy & value
+/// head.
+/// 
+/// # Arguments
+/// 
+/// * `tensors` -
+/// 
+pub fn get_num_samples(tensors: &HashMap<String, Tensor>) -> i32 {
+    tensors.get("num_samples:0")
+        .map(|x| { x.as_i32() })
+        .unwrap_or(DEFAULT_NUM_SAMPLES)
 }
 
 /// Returns a `TensorDescriptor` for an feature tensor for the given

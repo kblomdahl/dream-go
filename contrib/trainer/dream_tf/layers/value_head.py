@@ -18,9 +18,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import numpy as np
 import tensorflow as tf
 
-from . import conv2d, normalize_constraint, l2_regularizer, cast_to_compute_type
+from . import conv2d, matmul, normalize_constraint, l2_regularizer, cast_to_compute_type
 from ..hooks.dump import DUMP_OPS
 from .batch_norm import batch_norm
 from .recompute_grad import recompute_grad
@@ -33,22 +34,32 @@ def value_head(x, mode, params):
 
     1. A convolution of 8 filter of kernel size 3 × 3 with stride 1
     2. Batch normalisation
-    3. A global average pooling layer (including channels)
-    4. A tanh non-linearity outputting a scalar in the range [-1, 1]
+    3. A relu non-linearity
+    4. A fully connected linear layer that outputs a vector of size 1
+    5. A tanh non-linearity outputting a scalar in the range [-1, 1]
     """
     init_op = orthogonal_initializer()
-    zeros_op = tf.zeros_initializer()
     num_channels = params['num_channels']
-    num_samples = 8
+    num_samples = 2
 
     conv_1 = tf.get_variable('conv_1', (3, 3, num_channels, num_samples), tf.float32, init_op, constraint=normalize_constraint, regularizer=l2_regularizer, use_resource=True)
+    linear_2 = tf.get_variable('linear_2', (361 * num_samples, 1), tf.float32, init_op, use_resource=True)
+    offset_2 = tf.get_variable('linear_2/offset', (1,), tf.float32, value_offset_op, use_resource=True)
+
+    tf.add_to_collection(DUMP_OPS, [linear_2, linear_2, 'f2'])
+    tf.add_to_collection(DUMP_OPS, [offset_2, offset_2, 'f2'])
 
     def _forward(x, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """
         y = batch_norm(conv2d(x, conv_1), conv_1, mode, params, is_recomputing=is_recomputing)
-        y = tf.reduce_mean(y, [1, 2, 3], keepdims=True)
-        y = tf.reshape(y, [-1, 1])
+        y = tf.nn.relu(y)
+        z = tf.reshape(y, [-1, 361 * num_samples])
+        z = tf.nn.tanh(matmul(z, linear_2, offset_2))
 
-        return tf.cast(tf.nn.tanh(y), tf.float32)
+        return tf.cast(z, tf.float32), tf.cast(tf.reshape(y, [-1, 361, 2]), tf.float32)
 
-    return recompute_grad(_forward)(x)
+    return _forward(x)
+
+
+def value_offset_op(shape, dtype=None, partition_info=None):
+    return np.array([-0.00502319782])

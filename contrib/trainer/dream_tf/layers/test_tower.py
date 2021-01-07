@@ -24,10 +24,11 @@ import unittest
 from . import NUM_FEATURES
 from .tower import tower
 
-class ResidualBlockTest(unittest.TestCase):
+class TowerTest(unittest.TestCase):
     def setUp(self):
         self.batch_size = 2048
         self.num_channels = 128
+        self.num_samples = 8
         self.num_blocks = 6
         self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, NUM_FEATURES])
 
@@ -38,12 +39,14 @@ class ResidualBlockTest(unittest.TestCase):
     def params(self):
         return {
             "num_blocks": self.num_blocks,
-            "num_channels": self.num_channels
+            "num_channels": self.num_channels,
+            "num_samples": self.num_samples
         }
 
     def test_shape(self):
-        v, p, pn, o, y = tower(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+        v, vo, p, pn, o, y = tower(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
         self.assertEqual(v.shape, [self.batch_size, 1])
+        self.assertEqual(vo.shape, [self.batch_size, 361, self.num_samples])
         self.assertEqual(p.shape, [self.batch_size, 362])
         self.assertEqual(pn.shape, [self.batch_size, 362])
         self.assertEqual(o.shape, [self.batch_size, 361])

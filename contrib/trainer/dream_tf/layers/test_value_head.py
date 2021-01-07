@@ -29,6 +29,7 @@ class ValueHeadTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 1
         self.num_channels = 128
+        self.num_samples = 8
         self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
         np.random.seed(12345)
         tf.set_random_seed(67890)
@@ -39,24 +40,23 @@ class ValueHeadTest(unittest.TestCase, TestUtils):
     @property
     def params(self):
         return {
-            "num_channels": self.num_channels
+            "num_channels": self.num_channels,
+            "num_samples": self.num_samples
         }
 
     def test_shape(self):
-        self.assertEqual(
-            value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params).shape,
-            [self.batch_size, 1]
-        )
+        value_hat, value_ownership_hat = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+        self.assertEqual(value_hat.shape, [self.batch_size, 1])
+        self.assertEqual(value_ownership_hat.shape, [self.batch_size, 361, self.num_samples])
 
     def test_data_type(self):
-        self.assertEqual(
-            value_head(self.x,tf.estimator.ModeKeys.TRAIN, self.params).dtype,
-            tf.float32
-        )
+        value_hat, value_ownership_hat = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+        self.assertEqual(value_hat.dtype, tf.float32)
+        self.assertEqual(value_ownership_hat.dtype, tf.float32)
 
     def test_fit(self):
         with tf.device('/cpu:0'):
-            logits = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+            logits, _ = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
             steps = self.fit_regression(
                 inputs= \
                     np.random.random([1, 19, 19, self.num_channels])

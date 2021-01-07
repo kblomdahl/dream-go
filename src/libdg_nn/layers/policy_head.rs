@@ -19,7 +19,7 @@ use dg_cuda as cuda;
 use dg_utils::config;
 
 use crate::tensor::Tensor;
-use crate::layers::{Conv2d, Dense, create_dense_descriptor, create_offset_descriptor, get_num_channels};
+use crate::layers::{Conv2d, Dense, create_dense_descriptor, create_offset_descriptor, get_num_channels, get_num_samples};
 use crate::Error;
 
 pub struct PolicyLayer {
@@ -42,12 +42,13 @@ impl PolicyLayer {
     ///
     pub fn new(handle: &cudnn::Handle, n: i32, i: usize, tensors: &HashMap<String, Tensor>) -> Result<PolicyLayer, Error> {
         let num_channels = get_num_channels(tensors);
-        let num_samples = 8;
+        let num_samples = get_num_samples(tensors);
         let tau = 1.0 / *config::SOFTMAX_TEMPERATURE;
 
         Ok(PolicyLayer {
             conv_1: Conv2d::new(n, [num_samples, num_channels, 3, 3])
                         .with_tensors(tensors, &format!("{:02}p_policy/conv_1", i))
+                        .with_compute_type(cudnn::DataType::Float)
                         .build(handle)?,
             linear_2: Dense::new(n, [362, 361*num_samples])
                         .with_alpha([tau, 0.0])

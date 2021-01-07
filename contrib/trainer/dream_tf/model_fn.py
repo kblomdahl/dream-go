@@ -28,7 +28,7 @@ from .layers.ownership_head import ownership_loss
 dream_go_module = tf.load_op_library('libdg_tf.so')
 
 def model_fn(features, labels, mode, params):
-    value_hat, policy_hat, next_policy_hat, ownership_hat, tower_hat = tower(features, mode, params)
+    value_hat, value_ownership_hat, policy_hat, next_policy_hat, ownership_hat, tower_hat = tower(features, mode, params)
 
     if labels:
         # determine the loss for each of the components:
@@ -66,8 +66,13 @@ def model_fn(features, labels, mode, params):
             inputs=tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         )
 
-        loss_unboosted = 0.25 * check_numerics(loss_policy, 'loss_policy') \
-                         + 0.25 * check_numerics(loss_next_policy, 'loss_next_policy') \
+        # normalize and sum the individual losses such that the expected value
+        # of each loss is the same according to the cross entropy formula:
+        #
+        #     -1.0 / log (1 / num_classes)
+        #
+        loss_unboosted = 0.12 * check_numerics(loss_policy, 'loss_policy') \
+                         + 0.12 * check_numerics(loss_next_policy, 'loss_next_policy') \
                          + 1.00 * check_numerics(loss_value, 'loss_value') * labels['boost'] \
                          + 1.00 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership']
 
@@ -83,7 +88,7 @@ def model_fn(features, labels, mode, params):
             tf.add_to_collection(LEARNING_RATE, learning_rate)
 
             global_step = tf.train.get_global_step()
-            optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
+            adam_optimizer = tf.train.AdamOptimizer(learning_rate)
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
 
             with tf.control_dependencies(update_ops):
@@ -97,7 +102,7 @@ def model_fn(features, labels, mode, params):
                 )
 
                 gradients = [grad / loss_scale for grad in gradients]
-                train_op = optimizer.apply_gradients(zip(gradients, variables), global_step)
+                train_op = adam_optimizer.apply_gradients(zip(gradients, variables), global_step)
 
             # during training it is very useful to plot the norm of the gradients at
             # each tensor so that we can detect the cause of any exploding gradients
@@ -129,6 +134,8 @@ def model_fn(features, labels, mode, params):
 
         tf.summary.image('value/predictions', to_heat_image(tf.ones([19, 19]) * value_hat[0, 0]))
         tf.summary.image('value/labels', to_heat_image(tf.ones([19, 19]) * labels['value'][0, 0]))
+        for i in range(2):
+            tf.summary.image('value/ownership/' + str(i), to_heat_image(tf.reshape(value_ownership_hat[0, :, i], [19, 19])))
         tf.summary.image('ownership/predictions', to_heat_image(tf.reshape(ownership_hat[0, :], [19, 19])))
         tf.summary.image('ownership/labels', to_heat_image(tf.reshape(labels['ownership'][0, :], [19, 19])))
         tf.summary.image('policy/predictions', to_heat_image(tf.reshape(tf.nn.softmax(policy_hat[0, :361]), [19, 19])))
@@ -181,6 +188,7 @@ def model_fn(features, labels, mode, params):
     predictions = {
         'features': features,
         'value': value_hat,
+        'value_ownership': value_ownership_hat,
         'ownership': ownership_hat,
         'policy': tf.nn.softmax(policy_hat),
         'next_policy': tf.nn.softmax(next_policy_hat),
