@@ -21,7 +21,7 @@ use libc::{c_void, c_double};
 #[allow(non_camel_case_types)]
 pub type cudnnActivationDescriptor_t = *const c_void;
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_ops_infer")]
 extern {
     fn cudnnCreateActivationDescriptor(activation_desc: *mut cudnnActivationDescriptor_t) -> cudnnStatus_t;
     fn cudnnDestroyActivationDescriptor(activation_desc: cudnnActivationDescriptor_t) -> cudnnStatus_t;

@@ -16,7 +16,7 @@ use crate::cudnn::*;
 
 use libc::{c_void, size_t};
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_ops_infer")]
 extern {
     fn cudnnReduceTensor(
         handle: cudnnHandle_t,

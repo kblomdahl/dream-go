@@ -21,7 +21,7 @@ use libc::{c_void, c_int};
 #[allow(non_camel_case_types)]
 pub type cudnnFilterDescriptor_t = *const c_void;
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_ops_infer")]
 extern {
     fn cudnnCreateFilterDescriptor(filter_desc: *mut cudnnFilterDescriptor_t) -> cudnnStatus_t;
     fn cudnnDestroyFilterDescriptor(filter_desc: cudnnFilterDescriptor_t) -> cudnnStatus_t;

@@ -16,7 +16,7 @@ use crate::cudnn::*;
 
 use libc::{c_void, size_t};
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_cnn_infer")]
 extern {
     fn cudnnConvolutionBiasActivationForward(
         handle: cudnnHandle_t,

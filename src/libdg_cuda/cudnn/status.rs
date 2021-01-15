@@ -19,7 +19,7 @@ use libc::c_char;
 #[allow(non_camel_case_types)]
 pub(super) type cudnnStatus_t = Status;
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_ops_infer")]
 extern {
     fn cudnnGetErrorString(status: cudnnStatus_t) -> *const c_char;
 }

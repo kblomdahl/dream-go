@@ -16,7 +16,7 @@ use crate::cudnn::*;
 
 use libc::c_int;
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_ops_infer")]
 extern {
     fn cudnnGetProperty(property: c_int, value: *mut c_int) -> cudnnStatus_t;
 }

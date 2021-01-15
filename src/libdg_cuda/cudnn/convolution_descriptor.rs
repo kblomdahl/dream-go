@@ -21,7 +21,7 @@ use libc::{c_int, c_void};
 #[allow(non_camel_case_types)]
 pub type cudnnConvolutionDescriptor_t = *const c_void;
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_cnn_infer")]
 extern {
     fn cudnnCreateConvolutionDescriptor(conv_desc: *mut cudnnConvolutionDescriptor_t) -> cudnnStatus_t;
     fn cudnnDestroyConvolutionDescriptor(conv_desc: cudnnConvolutionDescriptor_t) -> cudnnStatus_t;

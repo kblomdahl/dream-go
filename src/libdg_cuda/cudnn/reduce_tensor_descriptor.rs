@@ -21,7 +21,7 @@ use libc::c_void;
 #[allow(non_camel_case_types)]
 pub type cudnnReduceTensorDescriptor_t = *const c_void;
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_ops_infer")]
 extern {
     fn cudnnCreateReduceTensorDescriptor(reduce_tensor_desc: *mut cudnnReduceTensorDescriptor_t) -> cudnnStatus_t;
     fn cudnnDestroyReduceTensorDescriptor(reduce_tensor_desc: cudnnReduceTensorDescriptor_t) -> cudnnStatus_t;

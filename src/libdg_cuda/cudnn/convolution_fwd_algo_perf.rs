@@ -19,7 +19,7 @@ use libc::{c_float, c_int, size_t};
 #[allow(non_camel_case_types)]
 pub type cudnnConvolutionFwdAlgoPerf_t = ConvolutionFwdAlgoPerf;
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_cnn_infer")]
 extern {
     fn cudnnGetConvolutionForwardAlgorithm_v7(
         handle: cudnnHandle_t,

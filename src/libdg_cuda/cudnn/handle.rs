@@ -22,7 +22,7 @@ use std::ptr;
 #[allow(non_camel_case_types)]
 pub type cudnnHandle_t = *const c_void;
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_ops_infer")]
 extern {
     fn cudnnCreate(handle: *const cudnnHandle_t) -> cudnnStatus_t;
     fn cudnnDestroy(handle: cudnnHandle_t) -> cudnnStatus_t;

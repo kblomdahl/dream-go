@@ -16,7 +16,7 @@ use crate::cudnn::*;
 
 use libc::{c_void};
 
-#[link(name = "cudnn")]
+#[link(name = "cudnn_ops_infer")]
 extern {
     fn cudnnTransformTensor(
         handle: cudnnHandle_t,
