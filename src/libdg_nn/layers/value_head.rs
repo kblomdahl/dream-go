@@ -17,13 +17,13 @@ use dg_cuda as cuda;
 use std::collections::HashMap;
 
 use crate::tensor::Tensor;
-use crate::layers::{Conv2d, Dense, get_num_channels};
+use crate::layers::{Conv2d, Dense, create_dense_descriptor, get_num_channels};
 use crate::Error;
-use dg_utils::types::f16;
 
 pub struct ValueLayer {
     conv_1: Conv2d,
-    linear_2: Dense
+    linear_2: Dense,
+    tanh: cudnn::Activation
 }
 
 impl ValueLayer {
@@ -48,10 +48,20 @@ impl ValueLayer {
                         .with_tensors(tensors, &format!("{:02}v_value/conv_1", i))
                         .build(handle)?,
             linear_2: Dense::new(n, [1, 361*num_samples])
-                        .with_activation(cudnn::ActivationDescriptor::tanh()?)
+                        .with_activation(cudnn::ActivationDescriptor::identity()?)
                         .with_tensors(tensors, &format!("{:02}v_value/linear_2", i))
-                        .build(handle)?
+                        .build(handle)?,
+            tanh: Self::create_tanh_activation(n)?
         })
+    }
+
+    fn create_tanh_activation(n: i32) -> Result<cudnn::Activation, cudnn::Status> {
+        cudnn::Activation::new(
+            cudnn::ActivationDescriptor::tanh()?,
+            create_dense_descriptor(n, 1)?,
+            create_dense_descriptor(n, 1)?,
+            [1.0, 0.0]
+        )
     }
 
     pub fn forward<'a, A: cuda::Allocator + Clone>(
@@ -65,7 +75,11 @@ impl ValueLayer {
         // perform the forward convolution
         let value_1 = self.conv_1.forward(handle, input, allocator, stream)?;
 
-        // perform the linear feed-forward layer with the final tanh activation
-        self.linear_2.forward(handle, &value_1, allocator, stream)
+        // perform the linear feed-forward layer without the final activation
+        // in the convolution since it's bugged :'(
+        let value_2 = self.linear_2.forward(handle, &value_1, allocator, stream)?;
+        self.tanh.forward(handle, value_2.as_ptr(), value_2.as_ptr())?;
+
+        Ok(value_2)
     }
 }

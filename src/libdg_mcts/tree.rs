@@ -1429,6 +1429,8 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> ProbeResult<NodeTrace
 /// * `prior` -
 ///
 pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32>) {
+    debug_assert!(value >= 0.0 && value <= 1.0);
+
     if let Some(&(node, _, index)) = trace.last() {
         let mut next = Box::new(Node::new(color, value, prior));
         if index == 361 {

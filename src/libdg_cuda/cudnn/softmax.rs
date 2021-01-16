@@ -51,6 +51,10 @@ impl Softmax {
         Ok(Self { mode, x, y, alpha })
     }
 
+    pub fn output(&self) -> &TensorDescriptor {
+        &self.y
+    }
+
     pub fn forward(
         &self,
         handle: &Handle,
