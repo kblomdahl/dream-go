@@ -4,10 +4,12 @@ stderr_to_log = True
 
 from glob import glob
 from os.path import basename
+from os import getcwd
 import re
+import subprocess
 
 """ The directory that contains all engines to match against each other """
-DIST = '/app/engines/'
+DIST = './engines/'
 
 """ The number of rollouts to instruct each engine to use """
 ROLLOUTS = 3200
@@ -43,11 +45,34 @@ def dream_go(bin, num_rollout):
 
     # make it output the _correct_ name from the GTP `name` command
     environ = {'DG_NAME': basename(bin)}
-    command = [bin, '--no-ponder', '--num-rollout', str(num_rollout)]
+
+    # build the docker container, and run the command from within the
+    # container. This allows us to have **completely** different environments
+    # for each engine.
+    command = [
+        'docker',
+        'run',
+        '--rm',  # do not keep container around
+        '-i',  # interactive terminal
+        '--sig-proxy=true',  # proxy all received signals
+        '-v',  # mount 'engines' directory
+        getcwd() + '/engines:/app/engines'
+    ]
+
+    for key, value in environ.items():
+        command += ['-e', key + '=' + str(value)]
+
+    command += [
+        subprocess.check_output('docker build -q -f ' + str(bin) + '.dockerfile .', shell=True).strip(),
+        '/app/' + bin,
+        '--no-ponder',
+        '--num-rollout',
+        str(num_rollout)
+    ]
 
     return Player(
         command,
-        cwd=DIST,
+        cwd=None,
         environ=environ,
         is_reliable_scorer=True,
         startup_gtp_commands=[
@@ -64,6 +89,8 @@ for bin in glob(DIST + '/*'):
     name = basename(bin)
 
     if re.match(r'.*\.json', name):
+        pass
+    elif re.match(r'.*\.dockerfile', name):
         pass
     elif re.match(r'^dg-v050', name):
         players[name] = dream_go_v050(bin, ROLLOUTS)
