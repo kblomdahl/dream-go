@@ -72,7 +72,7 @@ if __name__ == '__main__':
             '--num-rollout', '800',
             '--num-threads', '64',
             '--batch-size', '16'
-        ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
         with multiprocessing.Pool() as pool:
             def add_game_record(x):

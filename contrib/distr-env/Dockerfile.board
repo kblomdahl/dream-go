@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/tensorflow:20.02-tf1-py3
+FROM tensorflow/tensorflow:1.15.5-gpu-py3
 RUN mkdir -p /app /app/models
 
 EXPOSE 6006

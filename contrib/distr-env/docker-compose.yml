@@ -14,7 +14,7 @@ services:
       args:
         - GIT_REV
     environment:
-      - NVIDIA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=1
     volumes:
       - ./data:/app/data:cached
       - ./models:/app/models:delegated

@@ -23,7 +23,11 @@ if not bucket:
 def get_most_recent_model():
     try:
         most_recent_file = max(
-            [blob for blob in bucket.list_blobs(prefix='models/') if blob.size > 0],
+            [
+                blob
+                for blob in bucket.list_blobs(prefix='models/')
+                if blob.size > 0 and not '/eval/' in blob.name
+            ],
             key=lambda blob: ((blob.metadata or {}).get('elo', 0.0), blob.time_created)
         )
 
@@ -66,11 +70,12 @@ def copy_most_recent_model():
             )
 
             if not blob_already_exists(blob, dest_file):
-                makedirs(dirname(dest_file), exist_ok=True)
-                with open(dest_file, 'wb') as file:
-                    print('.', end='', flush=True)
+                if isfile(dest_file):
+                    makedirs(dirname(dest_file), exist_ok=True)
+                    with open(dest_file, 'wb') as file:
+                        print('.', end='', flush=True)
 
-                    blob.download_to_file(file)
+                        blob.download_to_file(file)
 
         print()
 
@@ -111,8 +116,8 @@ def wait_until_all_models_rated():
         sleep(600)  # 10 minutes
 
 def copy_most_recent_games():
-    """ Download the 100,000 most recent games, each file should
-    contain 1,000 game records. So we need to download the 100
+    """ Download the 200,000 most recent games, each file should
+    contain 1,000 game records. So we need to download the 200
     most recent files. """
 
     files = []
@@ -141,10 +146,11 @@ def upload_next_model(next_model):
     """ Upload the specified model to google storage. """
 
     for src_file in glob('models/*{}/*'.format(next_model)):
-        print('Uploading', src_file)
+        if isfile(src_file):
+            print('Uploading', src_file)
 
-        blob = bucket.blob(src_file)
-        blob.upload_from_filename(filename=src_file)
+            blob = bucket.blob(src_file)
+            blob.upload_from_filename(filename=src_file)
 
 def upload_next_network(next_model, data, args=None):
     """ Upload the specified network to google storage. """

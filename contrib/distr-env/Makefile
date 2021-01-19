@@ -9,7 +9,7 @@ clean:
 
 # -------- Staging --------
 
-TRAIN=requirements.txt dream_tf
+TRAIN=requirements.txt dream_tf libdg_tf
 
 staging: .staging .staging/code $(WORKER:%=.staging/worker/%) $(TRAIN:%=.staging/train/%)
 

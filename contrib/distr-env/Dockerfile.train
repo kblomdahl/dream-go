@@ -1,5 +1,5 @@
 FROM dream_go/base:latest
-FROM nvcr.io/nvidia/tensorflow:20.02-tf1-py3
+FROM tensorflow/tensorflow:1.15.5-gpu-py3
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install -q -r /tmp/requirements.txt
 RUN mkdir -p /app /app/data /app/models
@@ -14,6 +14,9 @@ RUN pip install -q -r /app/requirements.txt
 ARG GIT_REV
 ENV GOOGLE_APPLICATION_CREDENTIALS /app/google-storage-auth.json
 ENV GIT_REV $GIT_REV
+ENV LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/usr/local/lib/python3.6/dist-packages/tensorflow_core"
+ENV LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/app/libdg_tf"
+ENV LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/app"
 
 WORKDIR /app
 CMD /app/run_train.py

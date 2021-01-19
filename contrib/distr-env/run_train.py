@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 import petname
 import subprocess
@@ -12,7 +12,7 @@ next_model = petname.Generate(3, '_')
 
 if best_model:
     args = [
-        '/usr/bin/python',
+        '/usr/bin/python3',
         '-m', 'dream_tf',
         '--start', '--warm-start', best_model,
         '--steps', '40960000',
@@ -20,26 +20,29 @@ if best_model:
     ] + copy_most_recent_games()
 else:
     args = [
-        '/usr/bin/python',
+        '/usr/bin/python3',
         '-m', 'dream_tf',
         '--start',
         '--name', next_model
     ] + copy_most_recent_games()
 
-proc = subprocess.run(args, stderr=subprocess.DEVNULL)
+proc = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 if proc.returncode != 0:
+    print(proc.stdout)
     quit(proc.returncode)
 
 upload_next_model(next_model)
 
 # dump the network weights from the trained model
 proc = subprocess.run([
-    '/usr/bin/python',
+    '/usr/bin/python3',
     '-m', 'dream_tf',
     '--dump'
-], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 if proc.returncode != 0:
+    print(proc.stderr)
+    print(proc.stdout)
     quit(proc.returncode)
 
 upload_next_network(next_model, proc.stdout, args=args)
