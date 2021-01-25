@@ -293,11 +293,7 @@ impl Player {
     /// 
     fn is_good_candidate(&self, value: f32, policy: &[f32]) -> bool {
         value >= -0.80 && value <= 0.80 && {
-            let skewness = skewness(policy);
-            let distance = (skewness - 12.0).abs();
-            let distance = if distance < 0.5 { 0.5 } else { distance };
-
-            thread_rng().gen::<f32>() < 0.05 / distance
+            thread_rng().gen::<f32>() < 0.05
         }
     }
 
