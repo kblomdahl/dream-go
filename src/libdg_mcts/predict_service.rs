@@ -228,6 +228,9 @@ impl parallel::ServiceImpl for PredictState {
 
     fn setup_thread(index: usize) {
         let devices = Device::all().expect("Could not find any compatible devices");
+        if devices.len() == 0 {
+            panic!("Could not find any compatible devices");
+        }
         let device = &devices[index % devices.len()];
 
         device.set_current().expect("Failed to set the device for the current thread")
