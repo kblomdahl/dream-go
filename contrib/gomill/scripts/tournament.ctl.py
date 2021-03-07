@@ -3,7 +3,7 @@ record_games = True
 stderr_to_log = True
 
 from glob import glob
-from os.path import basename
+from os.path import basename, isdir
 from os import getcwd
 import re
 import subprocess
@@ -14,8 +14,11 @@ DIST = './engines/'
 """ The number of rollouts to instruct each engine to use """
 ROLLOUTS = 3200
 
-""" The number of matchups between each engine """
+""" The maximum number of matchups between each engine """
 NUM_GAMES = 50
+
+""" The number of games to aim for playing in total """
+TOTAL_NUM_GAMES = 200
 
 
 def leela(num_rollout):
@@ -28,9 +31,9 @@ def leela(num_rollout):
         ]
     )
 
-def dream_go_v050(bin, num_rollout):
+def dream_go_v050(path, num_rollout):
     environ = {'BATCH_SIZE': '16', 'NUM_ITER': str(num_rollout)}
-    command = [bin]
+    command = [path + '/dream_go']
 
     return Player(
         command,
@@ -40,11 +43,11 @@ def dream_go_v050(bin, num_rollout):
         startup_gtp_commands=[]
     )
 
-def dream_go(bin, num_rollout):
+def dream_go(path, num_rollout):
     """ Returns an player that use Dream Go with the given binary """
 
     # make it output the _correct_ name from the GTP `name` command
-    environ = {'DG_NAME': basename(bin)}
+    environ = {'DG_NAME': basename(path)}
 
     # build the docker container, and run the command from within the
     # container. This allows us to have **completely** different environments
@@ -56,15 +59,15 @@ def dream_go(bin, num_rollout):
         '-i',  # interactive terminal
         '--sig-proxy=true',  # proxy all received signals
         '-v',  # mount 'engines' directory
-        getcwd() + '/engines:/app/engines'
+        getcwd() + '/' + path + ':/app/engine'
     ]
 
     for key, value in environ.items():
         command += ['-e', key + '=' + str(value)]
 
     command += [
-        subprocess.check_output('docker build -q -f ' + str(bin) + '.dockerfile .', shell=True).strip(),
-        '/app/' + bin,
+        subprocess.check_output('docker build -q ' + path, shell=True).strip(),
+        '/app/engine/dream_go',
         '--no-ponder',
         '--num-rollout',
         str(num_rollout)
@@ -85,17 +88,14 @@ players = {
     #'leela': leela(ROLLOUTS),
 }
 
-for bin in glob(DIST + '/*'):
-    name = basename(bin)
+for path in glob(DIST + '/*'):
+    name = basename(path)
 
-    if re.match(r'.*\.json', name):
-        pass
-    elif re.match(r'.*\.dockerfile', name):
-        pass
-    elif re.match(r'^dg-v050', name):
-        players[name] = dream_go_v050(bin, ROLLOUTS)
-    else:
-        players[name] = dream_go(bin, ROLLOUTS)
+    if isdir(path):
+        if re.match(r'^dg-v050', name):
+            players[name] = dream_go_v050(bin, ROLLOUTS)
+        else:
+            players[name] = dream_go(path, ROLLOUTS)
 
 #
 # Setup the gomill configuration
@@ -104,8 +104,10 @@ board_size = 19
 komi = 7.5
 
 names = list([name for name in players.keys()])
+number_of_matchups = len(names) * (len(names) - 1)
+number_of_games = max(5, min(NUM_GAMES, TOTAL_NUM_GAMES // number_of_matchups))
 matchups = list([
-    Matchup(name_1, name_2, alternating=True, number_of_games=NUM_GAMES)
+    Matchup(name_1, name_2, alternating=True, number_of_games=number_of_games)
     for (i, name_1) in enumerate(names)
     for name_2 in names
         if name_2 not in names[:i+1]

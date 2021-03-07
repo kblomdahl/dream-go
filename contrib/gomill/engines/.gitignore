@@ -1,3 +1,4 @@
 !.gitignore
+!download_from_gs.sh
 *
 
