@@ -29,6 +29,10 @@ use std::mem::ManuallyDrop;
 use std::intrinsics::{atomic_xadd, atomic_xsub, atomic_cxchg};
 use std::ptr;
 
+/// The minimum number of visits to use the lower-confidence bound instead
+/// of number of probes during search to pick the "best" child.
+const MIN_LCB_VISITS: i32 = 80;
+
 /// An implementation of the _Polynomial UCT_ as suggested in the AlphaGo Zero
 /// paper [1].
 ///
@@ -1211,7 +1215,7 @@ impl Node {
     pub fn best(&self, temperature: f32) -> (f32, usize) {
         if temperature <= 9e-2 { // greedy
             let max_i = self.children.nonzero()
-                .max_by(|&a, &b| compare_children(self, a, b, 80))
+                .max_by(|&a, &b| compare_children(self, a, b, MIN_LCB_VISITS))
                 .unwrap_or(361);
 
             (self.with(max_i, |child| child.value()), max_i)
@@ -1606,7 +1610,9 @@ impl<'a> Iterator for GreedyPath<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<usize> {
-        let max_i = self.current.children.argmax_count();
+        let max_i = self.current.children.nonzero()
+            .max_by(|&a, &b| compare_children(self.current, a, b, MIN_LCB_VISITS))
+            .unwrap_or(361);
 
         if self.current.with(max_i, |child| child.count()) < self.threshold {
             None
@@ -1630,7 +1636,7 @@ pub struct ToPretty<'a> {
 impl<'a> fmt::Display for ToPretty<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         let mut children = self.root.children.nonzero().collect::<Vec<usize>>();
-        children.sort_by(|&a, &b| compare_children(self.root, b, a, 80));
+        children.sort_by(|&a, &b| compare_children(self.root, b, a, MIN_LCB_VISITS));
 
         if !self.verbose {
             children.truncate(10);
@@ -1891,4 +1897,3 @@ mod tests {
         unsafe { unsafe_undo_trace() }
     }
 }
-
