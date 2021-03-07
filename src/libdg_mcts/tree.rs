@@ -520,8 +520,8 @@ impl BigChildrenImpl {
     /// * `small` - the node to initialize from
     /// * `value` - the initial _value_ to use for any children not in `small`
     ///
-    unsafe fn from_small(small: &SmallChildrenImpl, value: f32) -> BigChildrenImpl {
-        let mut big = BigChildrenImpl {
+    unsafe fn from_small(small: &SmallChildrenImpl, value: f32) -> Self {
+        let mut big = Self {
             count: [0; 368],
             vcount: [0; 368],
             value: [value; 368],
@@ -636,8 +636,8 @@ impl SmallChildrenImpl {
     ///
     /// * `value` - the initial _value_ for any child
     ///
-    fn with_value(value: f32) -> SmallChildrenImpl {
-        SmallChildrenImpl {
+    fn with_value(value: f32) -> Self {
+        Self {
             count: [0; SMALL_SIZE],
             vcount: [0; SMALL_SIZE],
             value: [value; SMALL_SIZE],

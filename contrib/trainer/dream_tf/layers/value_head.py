@@ -21,7 +21,7 @@
 import numpy as np
 import tensorflow as tf
 
-from . import conv2d, matmul, normalize_constraint, l2_regularizer, cast_to_compute_type
+from . import conv2d, matmul, normalize_constraint, l2_regularizer
 from ..hooks.dump import DUMP_OPS
 from .batch_norm import batch_norm
 from .recompute_grad import recompute_grad
