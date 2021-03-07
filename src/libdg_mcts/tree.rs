@@ -33,16 +33,16 @@ use std::ptr;
 /// of number of probes during search to pick the "best" child.
 const MIN_LCB_VISITS: i32 = 80;
 
-/// An implementation of the _Polynomial UCT_ as suggested in the AlphaGo Zero
-/// paper [1].
+/// An implementation of the selection heuristic as suggested in the AlphaGo
+/// Zero paper [1].
 ///
 /// [1] https://www.nature.com/articles/nature24270
 #[derive(Clone)]
-pub struct PUCT;
+pub struct UCT;
 
-impl PUCT {
+impl UCT {
     #[inline(always)]
-    unsafe fn get_big_impl(node: &Node, big: &BigChildrenImpl, value: &mut [f32]) {
+    unsafe fn get_impl<C: Children>(node: &Node, child: &C, value: &mut [f32]) {
         use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
 
         let n = node.total_count + node.vtotal_count;
@@ -51,7 +51,7 @@ impl PUCT {
         let uct_exp_sqrt_n = fmul_fast(uct_exp, sqrt_n);
 
         for i in 0..362 {
-            let count = big.count[i] + big.vcount[i] as i32;
+            let count = child.total_count(i);
             let prior = node.prior[i];
             let value_ = value[i];
             let exp_bonus = fdiv_fast(uct_exp_sqrt_n, (1 + count) as f32);
@@ -62,41 +62,8 @@ impl PUCT {
 
     #[allow(unused_attributes)]
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn get_big_avx2(node: &Node, big: &BigChildrenImpl, value: &mut [f32]) {
-        PUCT::get_big_impl(node, big, value);
-    }
-
-    #[inline(always)]
-    unsafe fn get_small_impl(node: &Node, small: &SmallChildrenImpl, value: &mut [f32]) {
-        debug_assert!(SMALL_SIZE == 8);
-
-        use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
-
-        let n = node.total_count + node.vtotal_count;
-        let sqrt_n = ((1 + n) as f32).sqrt();
-        let uct_exp = config::get_uct_exp(n);
-        let uct_exp_sqrt_n = fmul_fast(uct_exp, sqrt_n);
-
-        for i in 0..362 {
-            let other = small.find_index_fast(i);
-            let prior = node.prior[i];
-            let value_ = value[i];
-
-            if let Ok(other) = other {
-                let count = small.count[other] + small.vcount[other] as i32;
-                let exp_bonus = fdiv_fast(uct_exp_sqrt_n, (1 + count) as f32);
-
-                value[i] = fadd_fast(value_, fmul_fast(prior, exp_bonus));
-            } else {
-                value[i] = fadd_fast(value_, fmul_fast(prior, uct_exp_sqrt_n));
-            }
-        }
-    }
-
-    #[allow(unused_attributes)]
-    #[target_feature(enable = "avx,avx2")]
-    unsafe fn get_small_avx2(node: &Node, small: &SmallChildrenImpl, value: &mut [f32]) {
-        PUCT::get_small_impl(node, small, value);
+    unsafe fn get_avx2<C: Children>(node: &Node, child: &C, value: &mut [f32]) {
+        UCT::get_impl(node, child, value);
     }
 
     /// Update the trace backwards with the given value (and color).
@@ -156,15 +123,15 @@ impl PUCT {
         if is_x86_feature_detected!("avx2") {
             unsafe {
                 match node.children {
-                    ChildrenImpl::Small(ref small) => PUCT::get_small_avx2(node, small, value),
-                    ChildrenImpl::Big(ref big) => PUCT::get_big_avx2(node, big, value),
+                    ChildrenImpl::Small(ref small) => UCT::get_avx2(node, &**small, value),
+                    ChildrenImpl::Big(ref big) => UCT::get_avx2(node, &**big, value),
                 }
             }
         } else {
             unsafe {
                 match node.children {
-                    ChildrenImpl::Small(ref small) => PUCT::get_small_impl(node, small, value),
-                    ChildrenImpl::Big(ref big) => PUCT::get_big_impl(node, big, value),
+                    ChildrenImpl::Small(ref small) => UCT::get_impl(node, &**small, value),
+                    ChildrenImpl::Big(ref big) => UCT::get_impl(node, &**big, value),
                 }
             }
         }
@@ -172,14 +139,14 @@ impl PUCT {
 }
 
 /// An implementation of the First-Play Urgency.
-struct FPU;
+pub struct FPU;
 
 impl FPU {
-    unsafe fn apply_big_impl(value: &mut [f32], big: &BigChildrenImpl, fpu_reduce: f32) {
+    unsafe fn apply_impl<C: Children>(value: &mut [f32], child: &C, fpu_reduce: f32) {
         use std::intrinsics::fsub_fast;
 
         for i in 0..368 {
-            let count = big.count[i] + big.vcount[i] as i32;
+            let count = child.total_count(i);
 
             if count == 0 {
                 value[i] = max(0.0, fsub_fast(value[i], fpu_reduce));
@@ -188,29 +155,8 @@ impl FPU {
     }
 
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn apply_big_avx2(value: &mut [f32], big: &BigChildrenImpl, fpu_reduce: f32) {
-        FPU::apply_big_impl(value, big, fpu_reduce)
-    }
-
-    unsafe fn apply_small_impl(value: &mut [f32], small: &SmallChildrenImpl, fpu_reduce: f32) {
-        use std::arch::x86_64::*;
-        use std::intrinsics::fsub_fast;
-
-        let indices = _mm_loadu_si128(&small.indices as *const i16 as *const _);
-
-        for i in 0..362 {
-            let eq = _mm_cmpeq_epi16(indices, _mm_set1_epi16(i as i16));
-            let eq = _mm_movemask_epi8(eq) as u32;
-
-            if eq == 0 || small.count[_mm_tzcnt_32(eq) as usize / 2] == 0 {
-                value[i] = max(0.0, fsub_fast(value[i], fpu_reduce));
-            }
-        }
-    }
-
-    #[target_feature(enable = "avx,avx2")]
-    unsafe fn apply_small_avx2(value: &mut [f32], small: &SmallChildrenImpl, fpu_reduce: f32) {
-        FPU::apply_small_impl(value, small, fpu_reduce)
+    unsafe fn apply_avx2<C: Children>(value: &mut [f32], child: &C, fpu_reduce: f32) {
+        FPU::apply_impl(value, child, fpu_reduce)
     }
 
     /// Apply the first play urgency reduction to all elements in `value` if `count`
@@ -219,33 +165,15 @@ impl FPU {
     /// # Arguments
     ///
     /// * `value` - the value of each element
-    /// * `big` - The children storage as a big node.
+    /// * `child` - The children storage
     /// * `fpu_reduce` - the reduction to apply
     ///
     #[inline(always)]
-    fn apply_big(value: &mut [f32], big: &BigChildrenImpl, fpu_reduce: f32) {
+    pub fn apply<C: Children>(value: &mut [f32], child: &C, fpu_reduce: f32) {
         if is_x86_feature_detected!("avx2") {
-            unsafe { FPU::apply_big_avx2(value, big, fpu_reduce) }
+            unsafe { FPU::apply_avx2(value, child, fpu_reduce) }
         } else {
-            unsafe { FPU::apply_big_impl(value, big, fpu_reduce) }
-        }
-    }
-
-    /// Apply the first play urgency reduction to all elements in `value` if `count`
-    /// is zero.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - the value of each element
-    /// * `small` - The children storage as a small node.
-    /// * `fpu_reduce` - the reduction to apply
-    ///
-    #[inline(always)]
-    fn apply_small(value: &mut [f32], small: &SmallChildrenImpl, fpu_reduce: f32) {
-        if is_x86_feature_detected!("avx2") {
-            unsafe { FPU::apply_small_avx2(value, small, fpu_reduce) }
-        } else {
-            unsafe { FPU::apply_small_impl(value, small, fpu_reduce) }
+            unsafe { FPU::apply_impl(value, child, fpu_reduce) }
         }
     }
 }
@@ -529,6 +457,16 @@ impl ChildMut {
     }
 }
 
+pub trait Children {
+    fn count(&self, index: usize) -> i32;
+
+    fn virtual_count(&self, index: usize) -> i32;
+
+    fn total_count(&self, index: usize) -> i32 {
+        self.count(index) + self.virtual_count(index)
+    }
+}
+
 /// A dense representation of a `Node`.
 #[repr(align(64))]
 pub struct BigChildrenImpl {
@@ -552,6 +490,16 @@ pub struct BigChildrenImpl {
 
     /// The sub-tree that each edge points towards.
     ptr: [*mut Node; 362]
+}
+
+impl Children for BigChildrenImpl {
+    fn count(&self, index: usize) -> i32 {
+        self.count[index]
+    }
+
+    fn virtual_count(&self, index: usize) -> i32 {
+        self.vcount[index] as i32
+    }
 }
 
 impl Drop for BigChildrenImpl {
@@ -643,6 +591,32 @@ pub struct SmallChildrenImpl {
 
     /// Indices of the children stored in this node.
     indices: [i16; SMALL_SIZE]
+}
+
+impl Children for SmallChildrenImpl {
+    fn count(&self, index: usize) -> i32 {
+        if let Ok(i) = unsafe { self.find_index_fast(index) } {
+            self.count[i]
+        } else {
+            0
+        }
+    }
+
+    fn virtual_count(&self, index: usize) -> i32 {
+        if let Ok(i) = unsafe { self.find_index_fast(index) } {
+            self.vcount[i] as i32
+        } else {
+            0
+        }
+    }
+
+    fn total_count(&self, index: usize) -> i32 {
+        if let Ok(i) = unsafe { self.find_index_fast(index) } {
+            self.count[i] + self.vcount[i] as i32
+        } else {
+            0
+        }
+    }
 }
 
 impl Drop for SmallChildrenImpl {
@@ -1132,7 +1106,7 @@ impl Node {
         }
 
         let mut uct = self.children.value(self.initial_value);
-        PUCT::get(self, &mut uct);
+        UCT::get(self, &mut uct);
 
         for i in children {
             // do not output nodes that has not been visited to reduce the
@@ -1295,8 +1269,8 @@ impl Node {
             let fpu_reduce = config::get_fpu_reduce(self.total_count + self.vtotal_count);
 
             match self.children {
-                ChildrenImpl::Big(ref big) => FPU::apply_big(&mut value, big, fpu_reduce),
-                ChildrenImpl::Small(ref small) => FPU::apply_small(&mut value, small, fpu_reduce)
+                ChildrenImpl::Big(ref big) => FPU::apply(&mut value, &**big, fpu_reduce),
+                ChildrenImpl::Small(ref small) => FPU::apply(&mut value, &**small, fpu_reduce)
             }
         }
 
@@ -1306,7 +1280,7 @@ impl Node {
             value[i] = ::std::f32::NEG_INFINITY;
         }
 
-        PUCT::get(self, &mut value);
+        UCT::get(self, &mut value);
 
         // greedy selection based on the maximum ucb1 value, failing if someone else
         // is already expanding the node we want to expand.
@@ -1459,7 +1433,7 @@ pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32
         }
     }
 
-    PUCT::update(trace, color, value);
+    UCT::update(trace, color, value);
 }
 
 /// Compare two children of an MCTS node such that the better candiate is bigger
