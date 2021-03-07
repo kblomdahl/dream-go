@@ -31,7 +31,7 @@ mod vertex;
 
 use self::vertex::*;
 use self::ponder_service::PonderService;
-use dg_mcts::options::{ScoringSearch, StandardSearch};
+use dg_mcts::options::{SearchOptions, ScoringSearch, StandardSearch};
 use dg_mcts::tree::GreedyPath;
 
 /// List containing all implemented commands, this is used to implement
@@ -59,6 +59,14 @@ impl GenMoveMode {
 
     fn is_regression(&self) -> bool {
         *self == GenMoveMode::Regression
+    }
+
+    fn search_strategy(&self) -> Box<dyn SearchOptions> {
+        if self.is_cleanup() {
+            Box::new(ScoringSearch::default())
+        } else {
+            Box::new(StandardSearch::default())
+        }
     }
 }
 
@@ -342,7 +350,7 @@ impl Gtp {
 
                 mcts::predict(
                     &service.lock().clone_to_static(),
-                    Box::new(StandardSearch::default()),
+                    mode.search_strategy(),
                     time_control::ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods),
                     search_tree,
                     &board,
@@ -351,7 +359,7 @@ impl Gtp {
             } else {
                 mcts::predict(
                     &service.lock().clone_to_static(),
-                    Box::new(StandardSearch::default()),
+                    mode.search_strategy(),
                     time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
                     search_tree,
                     &board,
