@@ -68,6 +68,7 @@ impl MovingAverage {
 /// 
 /// * `values` - 
 /// 
+#[allow(dead_code)]
 fn skewness(values: &[f32]) -> f32 {
     let recip_len = (values.len() as f32).recip();
     let mean = sum_finite_f32(values) * recip_len;
@@ -156,6 +157,17 @@ impl Played {
             prior_point,
         }
     }
+
+    /// Returns a normalized win rate that always refects the probability
+    /// that black will win.add_valid_candidates(
+    /// 
+    fn normalized_win_rate(&self) -> f32 {
+        if self.to_move == Color::Black {
+            2.0 * self.value - 1.0
+        } else {
+            -2.0 * self.value + 1.0
+        }
+    }
 }
 
 impl Display for Played {
@@ -171,18 +183,14 @@ impl Display for Played {
         }
 
         if self.num_rollout <= 1 {
-            Ok(())
+            write!(f, "V[{:.4}]", self.normalized_win_rate())
         } else {
             write!(
                 f,
                 "TV[{}]P[{}]V[{:.4}]",
                 self.num_rollout,
                 b85::encode(&self.softmax),
-                if self.to_move == Color::Black {
-                    2.0 * self.value - 1.0
-                } else {
-                    -2.0 * self.value + 1.0
-                }
+                self.normalized_win_rate()
             )
         }
     }
@@ -291,7 +299,7 @@ impl Player {
     /// * `value` -
     /// * `policy` -
     /// 
-    fn is_good_candidate(&self, value: f32, policy: &[f32]) -> bool {
+    fn is_good_candidate(&self, value: f32, _policy: &[f32]) -> bool {
         value >= -0.80 && value <= 0.80 && {
             thread_rng().gen::<f32>() < 0.05
         }
@@ -539,7 +547,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", Played::from_forward(Color::Black, Point::new(0, 0), 0.5, policy)),
-            ";B[aa]".to_string()
+            ";B[aa]V[0.0000]".to_string()
         );
     }
 
@@ -570,7 +578,7 @@ mod tests {
     fn played_pass() {
         assert_eq!(
             format!("{}", Played::pass(Color::Black)),
-            ";B[]".to_string()
+            ";B[]V[-1.0000]".to_string()
         );
     }
 }
