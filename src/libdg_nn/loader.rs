@@ -43,7 +43,7 @@ fn skip_until<R: BufRead>(buf_read: &mut R, stop: u8) -> Vec<u8> {
             let available = match buf_read.fill_buf() {
                 Ok(n) => n,
                 Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
-                Err(e) => panic!(e)
+                Err(e) => panic!("{}", e)
             };
 
             match memchr(stop, available) {

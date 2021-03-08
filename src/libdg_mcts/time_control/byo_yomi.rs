@@ -128,19 +128,23 @@ impl TimeStrategy for ByoYomi {
                 if count < 2 && expire_time_next > expire_time_init && predicate() {
                     // attempt to extend this time period, checking so that no
                     // one else has done it while we worked.
-                    let previous_value = self.expire_time.compare_and_swap(
+                    let previous_value = self.expire_time.compare_exchange_weak(
                         expire_time_init,
                         expire_time_next,
-                        Ordering::SeqCst
+                        Ordering::SeqCst,
+                        Ordering::Relaxed
                     );
 
-                    if previous_value == expire_time_init {
-                        self.count.fetch_add(1, Ordering::SeqCst);
+                    match previous_value {
+                        Ok(_) => {
+                            self.count.fetch_add(1, Ordering::SeqCst);
 
-                        return TimeStrategyResult::Extended;
-                    } else {
-                        // someone else changed the value, try again!
-                        expire_time_init = previous_value;
+                            return TimeStrategyResult::Extended;
+                        },
+                        Err(previous_value) => {
+                            // someone else changed the value, try again!
+                            expire_time_init = previous_value;
+                        }
                     }
                 } else {
                     return TimeStrategyResult::Expired;

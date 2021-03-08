@@ -42,8 +42,11 @@ impl Mutex {
     pub fn lock(&self) -> MutexGuard {
         let backoff = Backoff::new();
 
-        while !self.is_available.compare_and_swap(true, false, Ordering::Acquire) {
-            backoff.snooze();
+        loop {
+            match self.is_available.compare_exchange_weak(true, false, Ordering::Acquire, Ordering::Relaxed) {
+                Ok(_) => break,
+                _ => { backoff.snooze(); }
+            }
         }
 
         MutexGuard { is_available: &self.is_available }
