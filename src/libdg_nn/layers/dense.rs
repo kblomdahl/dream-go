@@ -186,7 +186,7 @@ impl Dense {
                 self.filter.get().as_ptr(),
                 temp.as_ptr()
             )?;
-            self.filter.set_device_ptr(temp.unwrap());
+            self.filter.set_device_ptr(&*temp, stream)?;
 
             Ok(true)
         } else {

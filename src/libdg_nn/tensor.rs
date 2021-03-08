@@ -63,7 +63,6 @@ impl Tensor {
         self.ptr.lock().unwrap()
     }
 
-    #[cfg(test)]
     pub fn size_in_bytes(&self) -> usize {
         self.size_in_bytes
     }
@@ -121,9 +120,11 @@ impl Tensor {
         }
     }
 
-    pub fn set_device_ptr(&self, new_ptr: Ptr) {
+    pub fn set_device_ptr(&self, new_ptr: &Ptr, stream: &Stream) -> Result<(), Error> {
         let mut ptr = self.ptr.lock().unwrap();
 
-        *ptr = new_ptr;
+        assert_eq!(ptr.size_in_bytes(), new_ptr.size_in_bytes());
+        ptr.copy_from_ptr(&new_ptr, self.size_in_bytes(), stream)?;
+        Ok(())
     }
 }
