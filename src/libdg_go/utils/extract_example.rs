@@ -242,9 +242,7 @@ fn copy_candidates_to(
     out: &mut Example
 ) -> c_int
 {
-    lazy_static! {
-        static ref EMPTY_POLICY: Vec<f32> = vec! [0.0; 362];
-    }
+    const EMPTY_POLICY: [f32; 362] = [0.0; 362];
 
     let winner =
         match get_winner_from_sgf(content) {
@@ -272,7 +270,7 @@ fn copy_candidates_to(
             out.policy.copy_from_slice(&b85::decode::<f16, f32>(policy).unwrap());
         },
         None => {
-            out.policy.copy_from_slice(&*EMPTY_POLICY);
+            out.policy.copy_from_slice(&EMPTY_POLICY);
         }
     };
 
@@ -282,7 +280,7 @@ fn copy_candidates_to(
             out.next_policy.copy_from_slice(&b85::decode::<f16, f32>(policy).unwrap());
         },
         None => {
-            out.next_policy.copy_from_slice(&*EMPTY_POLICY);
+            out.next_policy.copy_from_slice(&EMPTY_POLICY);
         }
     };
 
