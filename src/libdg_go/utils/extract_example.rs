@@ -210,7 +210,7 @@ fn choose_example(examples: &[Candidate], has_policy: bool) -> Option<usize> {
     for &i in &candidate_examples {
         let value =
             match examples[i].value {
-                Some(val) => 0.5 - (val - 0.5).abs(),
+                Some(val) => 0.6 - (val - 0.5).abs(),
                 None => 0.5,
             };
 
