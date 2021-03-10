@@ -54,7 +54,7 @@ impl UCT {
             let count = child.total_count(i);
             let prior = node.prior[i];
             let value_ = value[i];
-            let exp_bonus = fdiv_fast(uct_exp_sqrt_n, (1 + count) as f32);
+            let exp_bonus = if count == 0 { uct_exp_sqrt_n } else { fdiv_fast(uct_exp_sqrt_n, (1 + count) as f32) };
 
             value[i] = fadd_fast(value_, fmul_fast(prior, exp_bonus));
         }
