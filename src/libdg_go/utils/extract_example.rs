@@ -87,7 +87,7 @@ impl<'a> From<SgfEntry<'a>> for Candidate<'a> {
             index: m.point.to_packed_index(),
             color: m.color,
             policy: m.policy,
-            value: m.value
+            value: m.value.map(|v| (v + 1.0) / 2.0)
         }
     }
 }
