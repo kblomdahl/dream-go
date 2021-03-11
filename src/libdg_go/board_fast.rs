@@ -422,7 +422,7 @@ impl BoardFast {
         adjust
     }
 
-    /// Place a some of the given `color` at the given `index` on this board. This function
+    /// Place a some of the given `color` at the given `at_point` on this board. This function
     /// assume that the given move is valid.
     ///
     /// # Arguments
@@ -471,5 +471,69 @@ impl BoardFast {
         }
 
         hash
+    }
+
+    /// Returns the number of liberties that the given `color` and `at_point` would
+    /// have if it was placed on the board.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` -
+    /// * `at_point` -
+    ///
+    pub fn get_n_liberty_if_placed(&self, color: Color, at_point: Point) -> usize {
+        debug_assert!(self.is_valid(color, at_point));
+
+        let mut already_seen = [false; Point::MAX];
+        let mut num_liberties = 0;
+
+        // don't track the empty spot we will be occupying as a liberty
+        already_seen[at_point] = true;
+
+        // track all groups that would be captured by this play
+        let mut captured_groups = [Point::default(); 4];
+        let mut connected_groups = [Point::default(); 4];
+        let opposite = color.opposite();
+
+        for (i, other_point) in self.adjacent_to(at_point).enumerate() {
+            let value = self[other_point].color();
+
+            if value == Some(color) {
+                let head_point = self[other_point].head_point();
+
+                if !connected_groups.contains(&head_point) {
+                    connected_groups[i] = head_point;
+                }
+            } else if value == Some(opposite) {
+                let head_point = self[other_point].head_point();
+
+                if self.get_n_liberty(head_point) == 1 {
+                    captured_groups[i] = head_point;
+                    already_seen[other_point] = true;
+                    num_liberties += 1;
+                }
+            } else if value == None {
+                already_seen[other_point] = true;
+                num_liberties += 1;
+            }
+        }
+
+        // walk through connected groups, and add any adjacent point that belongs to captured groups
+        // or are empty
+        for &head_point in connected_groups.iter().filter(|&h| *h != Point::default()) {
+            for adjacent_point in self.adjacencies_of(head_point) {
+                if !already_seen[adjacent_point] {
+                    already_seen[adjacent_point] = true;
+
+                    if self[adjacent_point].color() == None {
+                        num_liberties += 1;
+                    } else if captured_groups.contains(&self[adjacent_point].head_point()) {
+                        num_liberties += 1;
+                    }
+                }
+            }
+        }
+
+        num_liberties
     }
 }

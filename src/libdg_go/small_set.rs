@@ -89,7 +89,7 @@ impl<'a> Iterator for SmallIter64<'a> {
 
 #[cfg(test)]
 mod tests {
-    use small_set::*;
+    use super::*;
     use test::Bencher;
 
     #[test]

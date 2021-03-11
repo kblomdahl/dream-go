@@ -262,17 +262,13 @@ fn get_num_liberties(board: &BoardFast, at_point: Point) -> usize {
 /// * `index` - the index of the stone to pretend place
 ///
 fn get_num_liberties_if(board: &BoardFast, color: Color, at_point: Point) -> usize {
-    let mut other = board.clone();
-    other.place(color, at_point);
-    other.get_n_liberty(at_point)
-
-    // track all groups that would be captured by this play
-    // walk through group itself and count liberties, and adjacent point that belongs to captured groups
+    board.get_n_liberty_if_placed(color, at_point)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test::Bencher;
 
     #[test]
     fn check_features_chw() {
@@ -291,8 +287,38 @@ mod tests {
     }
 
     #[test]
-    fn check_get_num_liberties_if() {
-        let mut board = BoardFast::new(0.5);
-        board.place();
+    fn check_get_num_liberties_if_1() {
+        let mut board = BoardFast::new();
+        board.place(Color::Black, Point::new(0, 1));
+        board.place(Color::Black, Point::new(1, 0));
+        board.place(Color::White, Point::new(1, 1));
+        board.place(Color::White, Point::new(2, 0));
+
+        assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(0, 0)), 1);
+        assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(2, 1)), 4);
+        assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(0, 2)), 2);
+        assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(9, 9)), 4);
+
+        board.place(Color::White, Point::new(0, 2));
+        assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(0, 0)), 2);
+    }
+
+    #[bench]
+    fn bench_get_num_liberties_if(b: &mut Bencher) {
+        let mut board = BoardFast::new();
+        board.place(Color::Black, Point::new(1, 0));
+        board.place(Color::Black, Point::new(1, 1));
+        board.place(Color::Black, Point::new(1, 2));
+        board.place(Color::Black, Point::new(0, 2));
+        board.place(Color::White, Point::new(0, 1));
+        board.place(Color::White, Point::new(2, 0));
+        board.place(Color::White, Point::new(2, 1));
+        board.place(Color::White, Point::new(2, 2));
+        board.place(Color::White, Point::new(0, 3));
+        board.place(Color::White, Point::new(1, 3));
+
+        b.iter(|| {
+            assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(0, 0)), 3);
+        });
     }
 }
