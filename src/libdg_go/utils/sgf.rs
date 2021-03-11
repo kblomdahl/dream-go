@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use ::{Board, Color, Point};
+use ::{DEFAULT_KOMI, Board, Color, Point};
 use memchr::memchr;
+use regex::Regex;
 
 static SGF_LETTERS: [char; 26] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
@@ -298,6 +299,74 @@ impl<'a> Iterator for Sgf<'a> {
     }
 }
 
+/// Returns the komi of the given SGF, as parsed by a simple regular expression.
+///
+/// # Arguments
+///
+/// * - `content` -
+///
+pub fn get_komi_from_sgf(content: &str) -> Result<f32, i32> {
+    lazy_static! {
+        static ref KOMI: Regex = Regex::new(r"KM\[([^\]]*)\]").unwrap();
+    }
+
+    if let Some(caps) = KOMI.captures(&content) {
+        if caps[1] == *"0" || caps[1] == *"0.0" {
+            Ok(DEFAULT_KOMI)  // Fox sometimes output an empty komi
+        } else {
+            match caps[1].parse::<f32>() {
+                Ok(komi) => {
+                    if komi >= 100.0 {
+                        // Fox seems to sometimes output 550 instead of 5.5, etc.
+                        Ok(komi / 100.0)
+                    } else {
+                        Ok(komi)
+                    }
+                },
+                Err(_) => { return Err(-21); },
+            }
+        }
+    } else {
+        Ok(DEFAULT_KOMI)
+    }
+}
+
+/// Returns the winner of the given SGF, as parsed by a simple regular expression.
+///
+/// # Arguments
+///
+/// * - `content` -
+///
+pub fn get_winner_from_sgf(content: &str) -> Result<Color, i32> {
+    lazy_static! {
+        static ref WINNER: Regex = Regex::new(r"RE\[([^\]]+)\]").unwrap();
+    }
+
+    if let Some(caps) = WINNER.captures(&content) {
+        match caps[1].chars().nth(0) {
+            Some('B') => Ok(Color::Black),
+            Some('W') => Ok(Color::White),
+            _ => Err(-22)
+        }
+    } else {
+        Err(-22)
+    }
+}
+
+/// Returns if the given SGF has given score.
+///
+/// # Arguments
+///
+/// * `content` -
+///
+pub fn is_scored(content: &str) -> bool {
+    lazy_static! {
+        static ref SCORED: Regex = Regex::new(r"RE\[[BW]\+[0-9\.]+\]").unwrap();
+    }
+
+    SCORED.is_match(content)
+}
+
 #[cfg(test)]
 mod tests {
     use test::{black_box, Bencher};
@@ -432,5 +501,35 @@ DT[2018-12-03]RE[W+R]TM[60]LT[]LC[1]GK[1]
 
             assert_eq!(count, 242);
         })
+    }
+
+    #[test]
+    fn komi_is() {
+        assert_eq!(get_komi_from_sgf(&"(;GM[1]KM[0])"), Ok(DEFAULT_KOMI));
+        assert_eq!(get_komi_from_sgf(&"(;GM[1]KM[7.5])"), Ok(7.5));
+        assert_eq!(get_komi_from_sgf(&"(;GM[1]KM[6.5])"), Ok(6.5));
+        assert_eq!(get_komi_from_sgf(&"(;GM[1]KM[5.5])"), Ok(5.5));
+        assert_eq!(get_komi_from_sgf(&"(;GM[1]KM[0.5])"), Ok(0.5));
+    }
+
+    #[test]
+    fn resign_is_not_scored() {
+        assert!(!is_scored(&"(;GM[1]RE[B+R])"));
+    }
+
+    #[test]
+    fn scored_is_scored() {
+        assert!(is_scored(&"(;GM[1]RE[B+1.5])"));
+        assert!(is_scored(&"(;GM[1]RE[W+1.5])"));
+    }
+
+    #[test]
+    fn black_is_winner() {
+        assert_eq!(get_winner_from_sgf(&"(;GM[1]RE[B+0.5])"), Ok(Color::Black));
+    }
+
+    #[test]
+    fn white_is_winner() {
+        assert_eq!(get_winner_from_sgf(&"(;GM[1]RE[W+0.5])"), Ok(Color::White));
     }
 }

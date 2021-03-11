@@ -19,6 +19,7 @@ use regex::Regex;
 
 #[derive(PartialEq)]
 pub enum Procedure {
+    Reanalyze(Vec<String>),
     SelfPlay(usize, bool),
     Gtp,
     Help
@@ -92,6 +93,10 @@ lazy_static! {
     /// The main producedure to run during this execution.
     pub static ref PROCEDURE: Procedure = if has_opt("--help") {
         Procedure::Help
+    } else if has_opt("--reanalyze") {
+        Procedure::Reanalyze(
+            get_args()
+        )
     } else if has_opt("--self-play") {
         Procedure::SelfPlay(
             get_opt("--self-play").unwrap_or(1),

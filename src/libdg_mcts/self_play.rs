@@ -89,10 +89,10 @@ fn skewness(values: &[f32]) -> f32 {
 
 /// A move that has been played in the game, together with the meta-data about
 /// why we're playing this move.
-struct Played {
+pub struct Played {
     to_move: Color,
     point: Point,
-    value: f32,
+    value: Option<f32>,
     num_rollout: usize,
     explain: String,
     softmax: Vec<f32>,
@@ -100,11 +100,11 @@ struct Played {
 }
 
 impl Played {
-    fn pass(to_move: Color) -> Self {
+    pub fn fixed(to_move: Color, point: Point) -> Self {
         Self {
             to_move: to_move,
-            point: Point::default(),
-            value: 0.0,
+            point: point,
+            value: None,
             num_rollout: 0,
             explain: String::new(),
             softmax: vec! [],
@@ -112,7 +112,19 @@ impl Played {
         }
     }
 
-    fn from_mcts(
+    pub fn pass(to_move: Color) -> Self {
+        Self {
+            to_move: to_move,
+            point: Point::default(),
+            value: None,
+            num_rollout: 0,
+            explain: String::new(),
+            softmax: vec! [],
+            prior_point: Point::default()
+        }
+    }
+
+    pub fn from_mcts(
         to_move: Color,
         point: Point,
         value: f32,
@@ -124,6 +136,7 @@ impl Played {
         let softmax = tree.softmax();
         let explain = tree::to_pretty(tree).to_string();
         let num_rollout = tree.size();
+        let value = Some(value);
 
         Self {
             to_move,
@@ -136,7 +149,7 @@ impl Played {
         }
     }
 
-    fn from_forward(
+    pub fn from_forward(
         to_move: Color,
         point: Point,
         value: f32,
@@ -146,6 +159,7 @@ impl Played {
         let prior_point = Point::default();
         let explain = String::new();
         let num_rollout = 1;
+        let value = Some(value);
 
         Self {
             to_move,
@@ -159,14 +173,15 @@ impl Played {
     }
 
     /// Returns a normalized win rate that always refects the probability
-    /// that black will win.add_valid_candidates(
-    /// 
-    fn normalized_win_rate(&self) -> f32 {
-        if self.to_move == Color::Black {
-            2.0 * self.value - 1.0
-        } else {
-            -2.0 * self.value + 1.0
-        }
+    /// that black will win.
+    fn normalized_win_rate(&self) -> Option<f32> {
+        self.value.map(|value| {
+            if self.to_move == Color::Black {
+                2.0 * value - 1.0
+            } else {
+                -2.0 * value + 1.0
+            }
+        })
     }
 }
 
@@ -182,16 +197,19 @@ impl Display for Played {
             write!(f, "TR[{}]", CGoban::to_sgf(self.prior_point))?;
         }
 
-        if self.num_rollout <= 1 {
-            write!(f, "V[{:.4}]", self.normalized_win_rate())
-        } else {
+        if self.num_rollout > 1 {
             write!(
                 f,
-                "TV[{}]P[{}]V[{:.4}]",
+                "TV[{}]P[{}]",
                 self.num_rollout,
-                b85::encode(&self.softmax),
-                self.normalized_win_rate()
-            )
+                b85::encode(&self.softmax)
+            )?;
+        }
+
+        if let Some(value) = self.normalized_win_rate() {
+            write!(f, "V[{:.4}]", value)
+        } else {
+            Ok(())
         }
     }
 }
@@ -486,7 +504,6 @@ pub fn self_play(
         thread::spawn(move || {
             while processed.fetch_add(1, Ordering::SeqCst) < num_games {
                 if let Some(result) = self_play_one(&server, &num_workers, ex_it) {
-                    eprint!(".");
                     if sender.send(result).is_err() {
                         break
                     }
@@ -578,7 +595,15 @@ mod tests {
     fn played_pass() {
         assert_eq!(
             format!("{}", Played::pass(Color::Black)),
-            ";B[]V[-1.0000]".to_string()
+            ";B[]".to_string()
+        );
+    }
+
+    #[test]
+    fn played_fixed() {
+        assert_eq!(
+            format!("{}", Played::fixed(Color::Black, Point::new(0, 0))),
+            ";B[aa]".to_string()
         );
     }
 }

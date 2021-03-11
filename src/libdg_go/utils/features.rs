@@ -265,6 +265,9 @@ fn get_num_liberties_if(board: &BoardFast, color: Color, at_point: Point) -> usi
     let mut other = board.clone();
     other.place(color, at_point);
     other.get_n_liberty(at_point)
+
+    // track all groups that would be captured by this play
+    // walk through group itself and count liberties, and adjacent point that belongs to captured groups
 }
 
 #[cfg(test)]
@@ -285,5 +288,11 @@ mod tests {
             .get_features::<HWC, f32>(Color::Black, symmetry::Transform::Identity);
 
         assert_eq!(features.len(), FEATURE_SIZE);
+    }
+
+    #[test]
+    fn check_get_num_liberties_if() {
+        let mut board = BoardFast::new(0.5);
+        board.place();
     }
 }

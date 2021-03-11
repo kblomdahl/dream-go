@@ -38,8 +38,9 @@ mod global_cache;
 mod greedy_score;
 pub mod options;
 mod parallel;
-pub mod predict;
 pub mod predict_service;
+pub mod predict;
+mod reanalyze;
 mod self_play;
 pub mod tree;
 pub mod time_control;
@@ -49,6 +50,7 @@ pub mod time_control;
 pub use self::game_result::*;
 pub use self::greedy_score::*;
 pub use self::self_play::*;
+pub use self::reanalyze::*;
 
 /* -------- Code -------- */
 

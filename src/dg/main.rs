@@ -39,11 +39,13 @@ fn load_network() -> dg_nn::Network {
 
 /// Main function.
 fn main() {
-    match *config::PROCEDURE {
+    match &*config::PROCEDURE {
         Procedure::Help => {
             println!("Usage: ./dream-go [options]");
             println!();
             println!("  --self-play <n>          Extract a dataset from self-play containing n examples");
+            println!("  --reanalyze <sgf...>     Extract a dataset by reanalyzing examples in the provided SGF");
+            println!("                           files");
             println!("  --ex-it                  When combined with --policy-play perform search on some partial");
             println!("                           policies");
             println!("  --gtp                    Run GTP client (default)");
@@ -61,10 +63,20 @@ fn main() {
             println!("  --no-resign              Do not allow the engine to resign in games");
         },
 
-        Procedure::SelfPlay(n, ex_it) => {
-            let (receiver, _server) = dg_mcts::self_play(load_network(), n, ex_it);
+        Procedure::Reanalyze(files) => {
+            let (receiver, _server) = dg_mcts::reanalyze(load_network(), files);
 
             for result in receiver.iter() {
+                eprint!(".");
+                println!("{}", result);
+            }
+        },
+
+        Procedure::SelfPlay(n, ex_it) => {
+            let (receiver, _server) = dg_mcts::self_play(load_network(), *n, *ex_it);
+
+            for result in receiver.iter() {
+                eprint!(".");
                 println!("{}", result);
             }
         },
