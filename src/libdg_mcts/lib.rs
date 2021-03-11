@@ -87,8 +87,8 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
     let mut value = 0.0f32;
 
     // find out which symmetries has already been calculated, and which ones has not
-    let mut new_requests = vec! [];
-    let mut new_symmetries = vec! [];
+    let mut new_requests = Vec::with_capacity(8);
+    let mut new_symmetries = Vec::with_capacity(8);
 
     for &t in &symmetry::ALL {
         if let Some((other_value, other_policy)) = global_cache::get_or_insert(board, to_move, t, || { None }) {

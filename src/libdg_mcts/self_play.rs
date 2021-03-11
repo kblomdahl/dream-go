@@ -28,7 +28,7 @@ use options::{StandardSearch, ScoringSearch};
 use rand::{Rng, thread_rng};
 use std::fmt::{self, Display, Formatter};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{sync_channel, Receiver};
 use std::sync::Arc;
 use std::thread;
 use ordered_float::OrderedFloat;
@@ -470,10 +470,10 @@ pub fn self_play(
 ) -> (Receiver<GameResult>, predict_service::PredictService)
 {
     let server = predict_service::service(network);
-    let (sender, receiver) = channel();
 
     // spawn the worker threads that generate the self-play games
     let num_parallel = ::std::cmp::min(num_games, *config::NUM_GAMES);
+    let (sender, receiver) = sync_channel(3 * num_parallel);
     let num_workers = Arc::new(AtomicUsize::new(num_parallel));
     let processed = Arc::new(AtomicUsize::new(0));
 

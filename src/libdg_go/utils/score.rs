@@ -149,7 +149,7 @@ impl Score for Board {
         let cleaned = clear_board(finished, &benson_black, &benson_white);
         let distance_black = get_territory_distance(&cleaned.inner, Color::Black);
         let distance_white = get_territory_distance(&cleaned.inner, Color::White);
-        let mut status_list = vec! [];
+        let mut status_list = Vec::with_capacity(361);
 
         for point in Point::all() {
             if self.inner[point].color() == Some(Color::White) {

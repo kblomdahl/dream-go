@@ -1346,7 +1346,7 @@ pub unsafe fn undo(trace: NodeTrace, undo_expanding: bool) {
 /// * `board` - the board to update with the traversed moves
 ///
 pub unsafe fn probe(root: &mut Node, board: &mut Board) -> ProbeResult<NodeTrace> {
-    let mut trace = vec! [];
+    let mut trace = Vec::with_capacity(16);
     let mut current = root;
 
     loop {
