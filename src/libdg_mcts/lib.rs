@@ -172,12 +172,12 @@ fn create_initial_policy(options: &dyn SearchOptions, board: &Board, to_move: Co
     let policy_checker = options.policy_checker(board, to_move);
 
     for point in Point::all() {
-        if policy_checker.is_policy_candidate(point) {
+        if policy_checker.is_policy_candidate(board, point) {
             policy[point.to_packed_index()] = 0.0;
         }
     }
 
-    if policy_checker.is_policy_candidate(Point::default()) {
+    if policy_checker.is_policy_candidate(board, Point::default()) {
         policy[361] = 0.0;
     }
 

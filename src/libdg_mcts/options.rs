@@ -21,9 +21,10 @@ pub trait PolicyChecker {
     ///
     /// # Arguments
     ///
+    /// * `board` -
     /// * `point` -
     ///
-    fn is_policy_candidate(&self, point: Point) -> bool;
+    fn is_policy_candidate(&self, board: &Board, point: Point) -> bool;
 }
 
 pub trait SearchOptions {
@@ -44,21 +45,18 @@ pub trait SearchOptions {
 }
 
 pub struct StandardPolicyChecker {
-    board: Board,
     to_move: Color
 }
 
 impl StandardPolicyChecker {
-    fn new(board: &Board, to_move: Color) -> Self {
-        let board = board.clone();
-
-        Self { board, to_move }
+    fn new(to_move: Color) -> Self {
+        Self { to_move }
     }
 }
 
 impl PolicyChecker for StandardPolicyChecker {
-    fn is_policy_candidate(&self, point: Point) -> bool {
-        point == Point::default() || self.board.is_valid(self.to_move, point)
+    fn is_policy_candidate(&self, board: &Board, point: Point) -> bool {
+        point == Point::default() || board.is_valid(self.to_move, point)
     }
 }
 
@@ -80,8 +78,8 @@ impl Default for StandardSearch {
 }
 
 impl SearchOptions for StandardSearch {
-    fn policy_checker(&self, board: &Board, to_move: Color) -> Box<dyn PolicyChecker> {
-        Box::new(StandardPolicyChecker::new(board, to_move))
+    fn policy_checker(&self, _board: &Board, to_move: Color) -> Box<dyn PolicyChecker> {
+        Box::new(StandardPolicyChecker::new(to_move))
     }
 
     fn deterministic(&self) -> bool {
@@ -95,7 +93,6 @@ impl SearchOptions for StandardSearch {
 
 pub struct ScoringPolicyChecker {
     is_valid: [bool; Point::MAX],
-    board: Board,
     to_move: Color
 }
 
@@ -105,7 +102,6 @@ impl ScoringPolicyChecker {
         let benson_white = BensonImpl::new(board, Color::White);
         let mut out = Self {
             is_valid: [false; Point::MAX],
-            board: board.clone(),
             to_move: to_move
         };
 
@@ -118,11 +114,11 @@ impl ScoringPolicyChecker {
 }
 
 impl PolicyChecker for ScoringPolicyChecker {
-    fn is_policy_candidate(&self, point: Point) -> bool {
+    fn is_policy_candidate(&self, board: &Board, point: Point) -> bool {
         point != Point::default() &&
             self.is_valid[point] &&
-            self.board.is_valid(self.to_move, point) &&
-            !is_eye(&self.board, self.to_move, point)
+            board.is_valid(self.to_move, point) &&
+            !is_eye(&board, self.to_move, point)
     }
 }
 
