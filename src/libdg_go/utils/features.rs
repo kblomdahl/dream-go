@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use board_fast::*;
 use board::Board;
 use color::Color;
 use point::Point;
@@ -160,7 +159,7 @@ impl Features for Board {
             if self.inner[index].color() != None {
                 let start = if self.inner[index].color() == Some(to_move) { 5 } else { 21 };
                 let num_liberties = ::std::cmp::min(
-                    get_num_liberties(&self.inner, index),
+                    self.inner.get_n_liberty(index),
                     8
                 );
 
@@ -170,7 +169,7 @@ impl Features for Board {
             } else {
                 if self.inner.is_valid(to_move, index) {
                     let num_liberties = ::std::cmp::min(
-                        get_num_liberties_if(&self.inner, to_move, index),
+                        self.inner.get_n_liberty_if(to_move, index),
                         8
                     );
 
@@ -181,7 +180,7 @@ impl Features for Board {
 
                 if self.inner.is_valid(opponent, index) {
                     let num_liberties = ::std::cmp::min(
-                        get_num_liberties_if(&self.inner, opponent, index),
+                        self.inner.get_n_liberty_if(opponent, index),
                         8
                     );
 
@@ -238,37 +237,9 @@ impl Features for Board {
     }
 }
 
-/// Returns the number of liberties of the given group using any recorded
-/// value in `memoize` if available otherwise it is calculated. Any
-/// calculated value is written back to `memoize` for all strongly
-/// connected stones.
-///
-/// # Arguments
-///
-/// * `board` - 
-/// * `at_point` - the index of the group to check
-/// * `memoize` - cache of already calculated liberty counts
-///
-fn get_num_liberties(board: &BoardFast, at_point: Point) -> usize {
-    board.get_n_liberty(at_point)
-}
-
-/// Returns the number of liberties of the group connected to the given stone
-/// *if* it was played, will panic if the vertex is not empty.
-///
-/// # Arguments
-///
-/// * `color` - the color of the stone to pretend place
-/// * `index` - the index of the stone to pretend place
-///
-fn get_num_liberties_if(board: &BoardFast, color: Color, at_point: Point) -> usize {
-    board.get_n_liberty_if_placed(color, at_point)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test::Bencher;
 
     #[test]
     fn check_features_chw() {
@@ -284,41 +255,5 @@ mod tests {
             .get_features::<HWC, f32>(Color::Black, symmetry::Transform::Identity);
 
         assert_eq!(features.len(), FEATURE_SIZE);
-    }
-
-    #[test]
-    fn check_get_num_liberties_if_1() {
-        let mut board = BoardFast::new();
-        board.place(Color::Black, Point::new(0, 1));
-        board.place(Color::Black, Point::new(1, 0));
-        board.place(Color::White, Point::new(1, 1));
-        board.place(Color::White, Point::new(2, 0));
-
-        assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(0, 0)), 1);
-        assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(2, 1)), 4);
-        assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(0, 2)), 2);
-        assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(9, 9)), 4);
-
-        board.place(Color::White, Point::new(0, 2));
-        assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(0, 0)), 2);
-    }
-
-    #[bench]
-    fn bench_get_num_liberties_if(b: &mut Bencher) {
-        let mut board = BoardFast::new();
-        board.place(Color::Black, Point::new(1, 0));
-        board.place(Color::Black, Point::new(1, 1));
-        board.place(Color::Black, Point::new(1, 2));
-        board.place(Color::Black, Point::new(0, 2));
-        board.place(Color::White, Point::new(0, 1));
-        board.place(Color::White, Point::new(2, 0));
-        board.place(Color::White, Point::new(2, 1));
-        board.place(Color::White, Point::new(2, 2));
-        board.place(Color::White, Point::new(0, 3));
-        board.place(Color::White, Point::new(1, 3));
-
-        b.iter(|| {
-            assert_eq!(get_num_liberties_if(&board, Color::White, Point::new(0, 0)), 3);
-        });
     }
 }

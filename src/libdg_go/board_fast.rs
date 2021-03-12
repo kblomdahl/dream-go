@@ -481,7 +481,7 @@ impl BoardFast {
     /// * `color` -
     /// * `at_point` -
     ///
-    pub fn get_n_liberty_if_placed(&self, color: Color, at_point: Point) -> usize {
+    pub fn get_n_liberty_if(&self, color: Color, at_point: Point) -> usize {
         debug_assert!(self.is_valid(color, at_point));
 
         let mut already_seen = [false; Point::MAX];
@@ -490,7 +490,8 @@ impl BoardFast {
         // don't track the empty spot we will be occupying as a liberty
         already_seen[at_point] = true;
 
-        // track all groups that would be captured by this play
+        // track all adjacent groups / immediate liberties that the played stone
+        // is connected to or will capture.
         let mut captured_groups = [Point::default(); 4];
         let mut connected_groups = [Point::default(); 4];
         let opposite = color.opposite();
@@ -537,3 +538,44 @@ impl BoardFast {
         num_liberties
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test::Bencher;
+
+    #[test]
+    fn check_get_n_liberty_if() {
+        let mut board = BoardFast::new();
+        board.place(Color::Black, Point::new(0, 1));
+        board.place(Color::Black, Point::new(1, 0));
+        board.place(Color::White, Point::new(1, 1));
+        board.place(Color::White, Point::new(2, 0));
+
+        assert_eq!(board.get_n_liberty_if(Color::White, Point::new(0, 0)), 1);
+        assert_eq!(board.get_n_liberty_if(Color::White, Point::new(2, 1)), 4);
+        assert_eq!(board.get_n_liberty_if(Color::White, Point::new(0, 2)), 2);
+        assert_eq!(board.get_n_liberty_if(Color::White, Point::new(9, 9)), 4);
+
+        board.place(Color::White, Point::new(0, 2));
+        assert_eq!(board.get_n_liberty_if(Color::White, Point::new(0, 0)), 2);
+    }
+
+    #[bench]
+    fn bench_get_n_liberty_if(b: &mut Bencher) {
+        let mut board = BoardFast::new();
+        board.place(Color::Black, Point::new(1, 0));
+        board.place(Color::Black, Point::new(1, 1));
+        board.place(Color::Black, Point::new(1, 2));
+        board.place(Color::Black, Point::new(0, 2));
+        board.place(Color::White, Point::new(0, 1));
+        board.place(Color::White, Point::new(2, 0));
+        board.place(Color::White, Point::new(2, 1));
+        board.place(Color::White, Point::new(2, 2));
+        board.place(Color::White, Point::new(0, 3));
+        board.place(Color::White, Point::new(1, 3));
+
+        b.iter(|| {
+            assert_eq!(board.get_n_liberty_if(Color::White, Point::new(0, 0)), 3);
+        });
+    }}
