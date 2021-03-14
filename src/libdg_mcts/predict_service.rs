@@ -258,13 +258,15 @@ impl parallel::ServiceImpl for PredictState {
     }
 }
 
-impl Clone for PredictGuard<'_> {
+impl<T: parallel::ServiceImpl + 'static> Clone for parallel::ServiceGuard<'_, T> {
     fn clone(&self) -> Self {
         self.clone_to_static()
     }
 }
 
-impl Predictor for PredictGuard<'_> {
+impl<T> Predictor for parallel::ServiceGuard<'_, T>
+    where T: parallel::ServiceImpl<Request=PredictRequest, Response=Option<(f32, Vec<f32>)>> + Send + 'static
+{
     fn predict(&self, features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
         self.send(PredictRequest::Ask(features))
             .expect("predict_service could not provide a response")

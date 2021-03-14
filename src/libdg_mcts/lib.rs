@@ -38,7 +38,7 @@ mod game_result;
 mod global_cache;
 mod greedy_score;
 pub mod options;
-mod parallel;
+pub mod parallel;
 pub mod predict_service;
 pub mod predict;
 mod reanalyze;

@@ -171,6 +171,7 @@ name = "dream_go"
 version = "0.6.3"
 dependencies = [
  "cpu-time",
+ "crossbeam-channel",
  "dg_go",
  "dg_mcts",
  "dg_nn",

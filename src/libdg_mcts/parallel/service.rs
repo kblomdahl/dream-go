@@ -189,7 +189,6 @@ impl<I: ServiceImpl + 'static> Service<I> {
     }
 }
 
-#[derive(Clone)]
 pub struct ServiceGuard<'a, I: ServiceImpl> {
     _owner: ::std::marker::PhantomData<&'a ()>,
 

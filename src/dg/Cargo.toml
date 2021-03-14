@@ -11,6 +11,7 @@ path = "main.rs"
 
 [dependencies]
 cpu-time = "1.0"
+crossbeam-channel = "0.4"
 dg_go = { path = "../libdg_go"}
 dg_mcts = { path = "../libdg_mcts"}
 dg_nn = { path = "../libdg_nn"}

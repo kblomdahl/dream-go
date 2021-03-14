@@ -13,6 +13,7 @@
 // limitations under the License.
 #![feature(test)]
 
+extern crate crossbeam_channel;
 extern crate cpu_time;
 extern crate dg_go;
 extern crate dg_mcts;
@@ -22,6 +23,7 @@ extern crate dg_utils;
 extern crate regex;
 #[cfg(test)] extern crate test;
 
+mod bench;
 mod gtp;
 
 use dg_utils::config::{self, Procedure};
@@ -48,6 +50,7 @@ fn main() {
             println!("                           files");
             println!("  --ex-it                  When combined with --policy-play perform search on some partial");
             println!("                           policies");
+            println!("  --bench <sgf...>         Run benchmarks on the board positions in the provided SGF");
             println!("  --gtp                    Run GTP client (default)");
             println!();
             println!("Advanced options:");
@@ -61,6 +64,20 @@ fn main() {
             println!("  --tt                     Play using Tromp-Taylor rules");
             println!("  --no-ponder              Do not think in the background during idle time");
             println!("  --no-resign              Do not allow the engine to resign in games");
+        },
+
+        Procedure::Benchmark => {
+            let network = load_network();
+
+            for sgf_file in config::get_args() {
+                println!("{}:", sgf_file);
+                println!("  sgf:               {:.4} per second", bench::SgfBenchmark::new(&network).evaluate(&sgf_file));
+                println!("  feature:           {:.4} per second", bench::FeatureBenchmark::new(&network).evaluate(&sgf_file));
+                println!("  batch_size {}", *config::BATCH_SIZE);
+                println!("    forward:         {:.4} per second", bench::ForwardBenchmark::new(&network).evaluate(&sgf_file));
+                println!("    predict_service: {:.4} per second", bench::PredictBenchmark::new(&network).evaluate(&sgf_file));
+                println!("  mcts:              {:.4} per second", bench::MctsBenchmark::new(&network).evaluate(&sgf_file));
+            }
         },
 
         Procedure::Reanalyze(files) => {
