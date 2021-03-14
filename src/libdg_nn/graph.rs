@@ -21,6 +21,7 @@ use dg_cuda as cuda;
 use dg_cuda::cudnn;
 use dg_go::utils::features::{FEATURE_SIZE};
 use dg_utils::types::f16;
+use dg_utils::per_thread::PerThread;
 use crate::layers::{PolicyLayer, ResidualLayer, UpLayer, ValueLayer};
 use crate::output_map::*;
 use crate::tensor::Tensor;
@@ -30,7 +31,7 @@ use crate::Error;
 
 pub struct Builder {
     tensors: Arc<HashMap<String, Tensor>>,
-    allocator: cuda::PerDevice<cuda::Concurrent<cuda::Sticky<cuda::Native>>>,
+    allocator: cuda::PerDevice<PerThread<cuda::Cloneable<cuda::Sticky<cuda::Native>>>>,
 }
 
 impl Builder {
@@ -99,7 +100,7 @@ impl Builder {
 
 pub struct Workspace {
     batch_size: usize,
-    allocator: cuda::Concurrent<cuda::Sticky<cuda::Native>>,
+    allocator: PerThread<cuda::Cloneable<cuda::Sticky<cuda::Native>>>,
 
     handle: cudnn::Handle,
     tower_finished: cuda::Event,
@@ -125,14 +126,14 @@ pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap,
     debug_assert!(features.len() % FEATURE_SIZE == 0);
     debug_assert!(features.len() / FEATURE_SIZE == workspace.batch_size);
 
-    let mut allocator = cuda::Cloneable::new(cuda::Sticky::new(workspace.allocator.clone()));
+    let allocator = &mut workspace.allocator.get().clone();
 
     // copy all of the input features into a temporary workspace
-    let mut input = cuda::malloc(size_of::<f16>() * features.len(), &allocator)?;
+    let mut input = cuda::malloc(size_of::<f16>() * features.len(), allocator)?;
     input.copy_from_slice(&features, &workspace.tower_stream)?;
 
-    // Upsample 32 -> 128 channels
-    let mut residual_1 = workspace.c_up.clone().forward(&workspace.handle, &input, &mut allocator, &workspace.tower_stream)?;
+    // Upsample features to 128 channels
+    let mut residual_1 = workspace.c_up.clone().forward(&workspace.handle, &input, allocator, &workspace.tower_stream)?;
 
     // residual blocks
     let num_residual = workspace.c_residual.len();
@@ -140,7 +141,7 @@ pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap,
     for i in 0..num_residual {
         let residual = &workspace.c_residual[i];
 
-        residual_1 = residual.clone().forward(&workspace.handle, residual_1, &mut allocator, &workspace.tower_stream)?;
+        residual_1 = residual.clone().forward(&workspace.handle, residual_1, allocator, &workspace.tower_stream)?;
     }
 
     workspace.tower_finished.record(&workspace.tower_stream)?;
@@ -149,8 +150,8 @@ pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap,
 
     // run the value and policy head, then wait for them to finish (if
     // they are requested)
-    let value = workspace.c_value.clone().forward(&workspace.handle, &residual_1, &mut allocator, &workspace.value_stream)?;
-    let policy = workspace.c_policy.clone().forward(&workspace.handle, &residual_1, &mut allocator, &workspace.policy_stream)?;
+    let value = workspace.c_value.clone().forward(&workspace.handle, &residual_1, allocator, &workspace.value_stream)?;
+    let policy = workspace.c_policy.clone().forward(&workspace.handle, &residual_1, allocator, &workspace.policy_stream)?;
 
     Ok(OutputMap::new(
         value.to_vec::<f16>(&workspace.value_stream)?,

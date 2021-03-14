@@ -17,7 +17,6 @@ use crate::memory::*;
 
 use std::cell::{RefCell, Ref};
 use std::collections::btree_map::BTreeMap;
-use std::sync::{Arc, Mutex};
 use std::rc::Rc;
 use std::ops::{Deref, DerefMut};
 
@@ -93,40 +92,6 @@ impl<A: Allocator> Allocator for Sticky<A> {
 
     fn free(&mut self, ptr: Ptr) {
         self.ptrs.entry(ptr.size_in_bytes()).or_default().push(ptr);
-    }
-}
-
-// -------- Concurrent --------
-
-pub struct Concurrent<A: Allocator> {
-    allocator: Arc<Mutex<A>>
-}
-
-impl<A: Allocator> Clone for Concurrent<A> {
-    fn clone(&self) -> Self {
-        Self { allocator: Arc::clone(&self.allocator) }
-    }
-}
-
-impl<A: Allocator> Concurrent<A> {
-    pub fn new(allocator: A) -> Self {
-        Self { allocator: Arc::new(Mutex::new(allocator)) }
-    }
-}
-
-impl<A: Allocator + Default> Default for Concurrent<A> {
-    fn default() -> Self {
-        Self::new(A::default())
-    }
-}
-
-impl<A: Allocator> Allocator for Concurrent<A> {
-    fn alloc(&mut self, size_in_bytes: usize) -> Result<Ptr, Error> {
-        self.allocator.lock().unwrap().alloc(size_in_bytes)
-    }
-
-    fn free(&mut self, ptr: Ptr) {
-        self.allocator.lock().unwrap().free(ptr)
     }
 }
 

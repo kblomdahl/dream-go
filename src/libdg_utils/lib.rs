@@ -15,6 +15,7 @@
 #![feature(core_intrinsics, link_llvm_intrinsics)]
 #![feature(test)]
 
+extern crate dashmap;
 #[macro_use] extern crate lazy_static;
 extern crate regex;
 #[cfg(test)] extern crate test;
@@ -23,6 +24,7 @@ pub mod b85;
 pub mod config;
 pub mod lcb;
 pub mod types;
+pub mod per_thread;
 
 /// Returns the smallest of `x` and `y`.
 /// 
