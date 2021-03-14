@@ -17,6 +17,7 @@
 
 extern crate crossbeam_channel;
 extern crate crossbeam_utils;
+extern crate crossbeam_queue;
 extern crate dg_cuda;
 extern crate dg_go;
 extern crate dg_nn;

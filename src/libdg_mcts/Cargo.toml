@@ -16,6 +16,7 @@ trace-mcts = []  # dump all finished search tree's to stderr
 [dependencies]
 crossbeam-channel = "0.4"
 crossbeam-utils = "0.7"
+crossbeam-queue = "0.3"
 dg_cuda = { path = "../libdg_cuda" }
 dg_go = { path = "../libdg_go" }
 dg_nn = { path = "../libdg_nn" }

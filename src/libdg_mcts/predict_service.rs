@@ -236,14 +236,6 @@ impl parallel::ServiceImpl for PredictState {
         device.set_current().expect("Failed to set the device for the current thread")
     }
 
-    fn check_sleep(state: MutexGuard<Self::State>) {
-        let num_requests = state.sender_list.len();
-        let num_waiting = state.waiting_list.len();
-
-        assert_eq!(num_requests, 0, "we should never sleep with a pending request -- {}", num_requests);
-        assert_eq!(num_waiting, 0, "we should never sleep with a pending wait -- {}", num_waiting);
-    }
-
     fn process(
         state: &Mutex<Self::State>,
         mut state_lock: MutexGuard<Self::State>,
