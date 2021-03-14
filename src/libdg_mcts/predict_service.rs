@@ -64,9 +64,9 @@ impl PredictState {
         PredictState {
             network: network,
             running_count: AtomicUsize::new(0),
-            features_list: vec! [],
-            sender_list: vec! [],
-            waiting_list: vec! []
+            features_list: Vec::with_capacity(*config::BATCH_SIZE * FEATURE_SIZE),
+            sender_list: Vec::with_capacity(*config::BATCH_SIZE),
+            waiting_list: Vec::with_capacity(*config::BATCH_SIZE)
         }
     }
 

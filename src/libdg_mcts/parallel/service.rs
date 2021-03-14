@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use crossbeam_channel::{bounded, Sender};
@@ -81,7 +82,7 @@ pub struct ServiceState<I: ServiceImpl> {
 
     /// The queue of pending requests, and the channel to send the response
     /// over.
-    queue: Vec<(I::Request, Sender<I::Response>)>
+    queue: VecDeque<(I::Request, Sender<I::Response>)>
 }
 
 /// The worker thread that is responsible for receiving requests and dispatching
@@ -103,7 +104,7 @@ fn worker_thread<I: ServiceImpl>(
     let mut inner_lock = inner.lock().unwrap();
 
     loop {
-        if let Some((req, tx)) = inner_lock.queue.pop() {
+        if let Some((req, tx)) = inner_lock.queue.pop_front() {
             let state_lock = state.lock().unwrap();
             let has_more = !inner_lock.queue.is_empty();
             inner_lock.num_process += 1;
@@ -179,7 +180,7 @@ impl<I: ServiceImpl + 'static> Service<I> {
         let state = Arc::new(Mutex::new(initial_state));
         let inner = Arc::new((Mutex::new(ServiceState {
             num_process: 0,
-            queue: vec! [],
+            queue: VecDeque::new(),
             is_running: true
         }), Condvar::new()));
         let num_threads = num_threads.unwrap_or_else(I::get_thread_count);
@@ -243,7 +244,7 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
 
         if let Ok(mut inner_lock) = self.inner.0.lock() {
             if inner_lock.is_running {
-                inner_lock.queue.push((req, tx));
+                inner_lock.queue.push_back((req, tx));
                 self.inner.1.notify_one();
 
                 // get ride of the lock so that one of the service workers
@@ -273,7 +274,7 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
                 let responses = reqs.map(|req| {
                     let (tx, rx) = bounded(1);
 
-                    inner_lock.queue.push((req, tx));
+                    inner_lock.queue.push_back((req, tx));
                     rx
                 }).collect::<Vec<_>>();
 
@@ -310,9 +311,9 @@ mod tests {
     use test::Bencher;
     use super::*;
 
-    struct DoubleServiceImpl;
+    struct FakeServiceImpl;
 
-    impl ServiceImpl for DoubleServiceImpl {
+    impl ServiceImpl for FakeServiceImpl {
         type State = ();
         type Request = i32;
         type Response = i32;
@@ -336,7 +337,7 @@ mod tests {
 
     #[test]
     fn check_double_service() {
-        let double: Service<DoubleServiceImpl> = Service::new(None, ());
+        let double: Service<FakeServiceImpl> = Service::new(None, ());
         let double_lock = double.lock();
 
         assert_eq!(double_lock.send( 0), Some( 0));

@@ -1739,7 +1739,7 @@ mod tests {
                 break;
             }
 
-            assert!(choices.len() < 362);
+            assert!(choices.len() <= 362);
         }
     }
 
