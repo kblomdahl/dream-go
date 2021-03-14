@@ -134,6 +134,8 @@ dependencies = [
 name = "dg_nn"
 version = "0.0.0"
 dependencies = [
+ "crossbeam-channel",
+ "dashmap",
  "dg_cuda",
  "dg_go",
  "dg_utils",

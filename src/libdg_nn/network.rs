@@ -12,44 +12,68 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use crossbeam_channel::{self, Sender, Receiver};
+use dashmap::DashMap;
 use std::env;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use dg_cuda::Device;
+use dg_cuda::{Device, PerDevice};
 
 use super::{Error, graph, loader};
 
-type WorkspaceQueue = Mutex<Vec<graph::Workspace>>;
+#[derive(Clone)]
+struct WorkspaceQueue {
+    tx: Sender<graph::Workspace>,
+    rx: Receiver<graph::Workspace>
+}
+
+impl Default for WorkspaceQueue {
+    fn default() -> Self {
+        let (tx, rx) = crossbeam_channel::unbounded();
+
+        Self {
+            tx, rx
+        }
+    }
+}
+
+impl WorkspaceQueue {
+    pub fn push(&self, workspace: graph::Workspace) {
+        self.tx.send(workspace).expect("could not push `Workspace` to queue");
+    }
+
+    pub fn try_pop(&self) -> Option<graph::Workspace> {
+        self.rx.try_recv().ok()
+    }
+}
 
 /// Wrapper around a `Workspace` that when dropped returns it to the
 /// pool it was acquired from.
-pub struct WorkspaceGuard<'a> {
+pub struct WorkspaceGuard {
     workspace: Option<graph::Workspace>,
-    pool: *mut WorkspaceQueue,
-
-    lifetime: ::std::marker::PhantomData<&'a ()>
+    pool: WorkspaceQueue
 }
 
-impl<'a> Deref for WorkspaceGuard<'a> {
+impl Deref for WorkspaceGuard {
     type Target = graph::Workspace;
 
-    fn deref(&self) -> &Self::Target { self.workspace.as_ref().unwrap() }
+    fn deref(&self) -> &Self::Target {
+        self.workspace.as_ref().unwrap()
+    }
 }
 
-impl<'a> DerefMut for WorkspaceGuard<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target { self.workspace.as_mut().unwrap() }
+impl DerefMut for WorkspaceGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.workspace.as_mut().unwrap()
+    }
 }
 
-impl<'a> Drop for WorkspaceGuard<'a> {
+impl Drop for WorkspaceGuard {
     fn drop(&mut self) {
-        unsafe {
-            let workspace = self.workspace.take().unwrap();
-            let mut pool = (*self.pool).lock().unwrap();
-
-            pool.push(workspace);
+        if let Some(workspace) = self.workspace.take() {
+            self.pool.push(workspace);
         }
     }
 }
@@ -58,7 +82,7 @@ impl<'a> Drop for WorkspaceGuard<'a> {
 #[derive(Clone)]
 pub struct Network {
     builder: Arc<graph::Builder>,
-    workspaces: Arc<Mutex<HashMap<(usize, i32), Box<WorkspaceQueue>>>>
+    workspaces: Arc<PerDevice<DashMap<usize, WorkspaceQueue>>>
 }
 
 unsafe impl Send for Network { }  // this is safe because the Rc<...> is guarded by a Mutex and/or Arc
@@ -97,7 +121,7 @@ impl Network {
             .next()
             .map(|weights| Network {
                 builder: Arc::new(graph::Builder::new(weights)),
-                workspaces: Arc::new(Mutex::new(HashMap::new()))
+                workspaces: Arc::new(PerDevice::new().expect("could not create PerDevice<T>"))
             })
     }
 
@@ -108,46 +132,29 @@ impl Network {
     /// * `batch_size` -
     /// 
     pub fn get_workspace(&self, batch_size: usize) -> Result<WorkspaceGuard, Error> {
-        let device = Device::default();
-        let key = (batch_size, device.id());
-        let mut workspaces = self.workspaces.lock().unwrap();
-        let candidates = workspaces.entry(key).or_insert_with(|| Box::new(Mutex::new(vec! [])));
-        let candidates_ptr = &mut **candidates as *mut WorkspaceQueue;
-        let guard = match candidates.lock().unwrap().pop() {
-            Some(workspace) => WorkspaceGuard {
-                workspace: Some(workspace),
-                pool: candidates_ptr,
-                lifetime: ::std::marker::PhantomData::default()
-            },
-            None => WorkspaceGuard {
-                workspace: Some(self.builder.get_workspace(batch_size)?),
-                pool: candidates_ptr,
-                lifetime: ::std::marker::PhantomData::default()
-            }
-        };
+        let candidates = self.workspaces.entry(batch_size).or_default();
 
-        Ok(guard)
+        Ok(WorkspaceGuard {
+            pool: candidates.clone(),
+            workspace: match candidates.try_pop() {
+                None => Some(self.builder.get_workspace(batch_size)?),
+                x => x
+            }
+        })
     }
 
     /// Wait for all jobs on the current device to finish, and then drain all of the workspaces.
     pub fn synchronize(&self) {
-        let mut workspaces = self.workspaces.lock().unwrap();
-
-        let status = Device::synchronize();  // this should be allowed to fail
-        if let Err(err) = status {
-            eprintln!("Error: {:?}", err);
-        }
-
         let original_device = Device::default();
 
-        for ((_batch_size, device_id), value) in workspaces.drain() {
-            Device::new(device_id).set_current().expect("Failed to set the device for the current thread");
+        for device in Device::all().unwrap() {
+            device.set_current().expect("Failed to set the device for the current thread");
             let status = Device::synchronize();  // this should be allowed to fail
             if let Err(err) = status {
                 eprintln!("Error: {:?}", err);
             }
 
-            drop(value);
+            self.workspaces.clear();
         }
 
         original_device.set_current().expect("Failed to set the device for the current thread");

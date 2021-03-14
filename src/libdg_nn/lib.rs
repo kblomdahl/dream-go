@@ -14,6 +14,8 @@
 #![feature(test)]
 #![feature(vec_into_raw_parts)]
 
+extern crate crossbeam_channel;
+extern crate dashmap;
 extern crate dg_cuda;
 extern crate dg_go;
 extern crate dg_utils;
