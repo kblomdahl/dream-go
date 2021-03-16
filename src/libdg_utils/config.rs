@@ -193,7 +193,7 @@ lazy_static! {
     /// The number of virtual losses to add during async probes into the monte
     /// carlo search tree. A higher value avoids multiple probes exploring the
     /// same search tree.
-    pub static ref VLOSS_CNT: i32 = get_env("VLOSS_CNT").unwrap_or(2);
+    pub static ref VLOSS_CNT: i32 = get_env("VLOSS_CNT").unwrap_or(32);
 
     /// The UCT exploration rate.
     pub static ref UCT_EXP: Vec<(i32, f32)> = get_intp_list("UCT_EXP")

@@ -44,6 +44,9 @@ pub struct PredictState {
     /// The neural network weights
     network: Network,
 
+    /// The batch size to use
+    batch_size: usize,
+
     /// The number of requests that are being processed by the GPU at
     /// this moment
     running_count: AtomicUsize,
@@ -64,6 +67,7 @@ impl PredictState {
         PredictState {
             network: network,
             running_count: AtomicUsize::new(0),
+            batch_size: *config::BATCH_SIZE,
             features_list: Vec::with_capacity(*config::BATCH_SIZE * FEATURE_SIZE),
             sender_list: Vec::with_capacity(*config::BATCH_SIZE),
             waiting_list: Vec::with_capacity(*config::BATCH_SIZE)
@@ -181,7 +185,7 @@ impl PredictState {
     )
     {
         let num_requests = state_lock.sender_list.len();
-        let batch_size = *config::BATCH_SIZE;
+        let batch_size = state_lock.batch_size;
 
         if has_more {
             if num_requests >= batch_size {
