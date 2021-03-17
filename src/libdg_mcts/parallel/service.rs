@@ -15,7 +15,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
-use crossbeam_channel::{bounded, Sender};
+use crossbeam_channel::{bounded, Sender, Receiver};
 use crossbeam_queue::SegQueue;
 
 /// The implementation details of a service that is responsible for actually
@@ -216,6 +216,23 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
 
             // wait for a response
             rx.recv().ok()
+        } else {
+            None
+        }
+    }
+
+    /// Sends a request to the service and returns the response.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `req` -
+    /// 
+    pub fn send_async(&self, req: I::Request) -> Option<Receiver<I::Response>> {
+        let (tx, rx) = bounded(1);
+
+        if self.inner.is_running.load(Ordering::Acquire) {
+            self.inner.queue.push((req, tx));
+            Some(rx)
         } else {
             None
         }

@@ -312,6 +312,7 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
 
                         unsafe {
                             tree::insert(&trace, to_move, value, policy);
+                            server.wake();
                             break
                         }
                     } else {

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use crossbeam_channel::Sender;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use super::parallel;
@@ -37,7 +36,11 @@ pub enum PredictRequest {
 
     /// Indicate that a worker is waiting for some other thread to finish
     /// and should be awaken after the next batch of computations finish.
-    Wait
+    Wait,
+
+    /// Indicate that all workers that are currently asleep should be
+    /// awoken.
+    Wake,
 }
 
 pub struct PredictState {
@@ -49,10 +52,6 @@ pub struct PredictState {
 
     /// The batch size to use
     batch_size: usize,
-
-    /// The number of requests that are being processed by the GPU at
-    /// this moment
-    running_count: AtomicUsize,
 
     /// The features to get the value and policy for.
     features_list: Vec<f16>,
@@ -138,7 +137,7 @@ impl PredictState {
     }
 
     fn predict(
-        state: &Mutex<PredictState>,
+        _state: &Mutex<PredictState>,
         mut state_lock: MutexGuard<PredictState>,
         batch_size: usize
     )
@@ -148,10 +147,6 @@ impl PredictState {
         let features_list = state_lock.features_list.split_off(split_index * FEATURE_SIZE);
         let sender_list = state_lock.sender_list.split_off(split_index);
         let network = state_lock.network.clone();  // just a bunch of Arc<...> so cheap to clone
-
-        // keep track of the number of running evaluations so that we avoid
-        // running duplicate small evaluations instead of one large one
-        state_lock.running_count.fetch_add(1, Ordering::SeqCst);
         drop(state_lock);
 
         debug_assert!(features_list.len() == batch_size * FEATURE_SIZE);
@@ -164,28 +159,18 @@ impl PredictState {
             let response_iter = value_list.into_iter().zip(policy_list.into_iter());
 
             for (sender, response) in sender_list.into_iter().zip(response_iter) {
-                sender.send(Some(response)).expect("Failed to send predictor response");
+                sender.send(Some(response)).expect("could not send predictor response");
             }
         } else {
             for sender in sender_list.into_iter() {
-                sender.send(None).expect("Failed to send predictor response");
+                sender.send(None).expect("could not send predictor nil response");
             }
         }
-
-        // wake up all of the receivers that are waiting for something to change
-        let mut state_lock = state.lock().unwrap();
-
-        for waiting in state_lock.waiting_list.drain(0..) {
-            waiting.send(None).expect("Failed to send predictor response");
-        }
-
-        // decrease the number of running neural network evaluations
-        state_lock.running_count.fetch_sub(1, Ordering::SeqCst);
     }
 
     fn check(
         state: &Mutex<PredictState>,
-        mut state_lock: MutexGuard<PredictState>,
+        state_lock: MutexGuard<PredictState>,
         has_more: bool
     )
     {
@@ -209,13 +194,6 @@ impl PredictState {
             //      `has_more`, but the rest of the events are `Wait`
             //      events.
             PredictState::predict(state, state_lock, num_requests);
-        } else if state_lock.running_count.load(Ordering::SeqCst) == 0 {
-            // everything is asleep? probably a race condition between the
-            // pending message being sent and it being received. Just wake
-            // everything up and it should normalize.
-            for waiting in state_lock.waiting_list.drain(0..) {
-                waiting.send(None).expect("Failed to send predictor response");
-            }
         } else {
             // wait until the currently running request finish instead of
             // waking up any threads
@@ -260,6 +238,11 @@ impl parallel::ServiceImpl for PredictState {
             },
             PredictRequest::Wait => {
                 state_lock.waiting_list.push(sender);
+            },
+            PredictRequest::Wake => {
+                for waiting in state_lock.waiting_list.drain(0..) {
+                    waiting.send(None).expect("failed to send predictor wake-up signal");
+                }
             }
         };
 
@@ -285,6 +268,11 @@ impl<T> Predictor for parallel::ServiceGuard<'_, T>
         self.send_all(features_list.into_iter().map(|features| {
             PredictRequest::Ask(features)
         })).expect("predict_service could not provide a response")
+    }
+
+    fn wake(&self) {
+        self.send_async(PredictRequest::Wake)
+            .expect("predict_service could not provide a response");
     }
 
     fn synchronize(&self) {

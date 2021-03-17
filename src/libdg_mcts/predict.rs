@@ -31,6 +31,10 @@ pub trait Predictor : Clone + Send {
     ///
     fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>>;
 
+    /// Wake-up any threads that are sleeping right (`synchronize`) now
+    /// while waiting for new updates to the tree.
+    fn wake(&self);
+
     /// waits until all other predicts that are currently running in the
     /// background has finished.
     fn synchronize(&self);
@@ -62,6 +66,10 @@ impl Predictor for RandomPredictor {
 
     fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
         features_list.map(|features| self.predict(features)).collect()
+    }
+
+    fn wake(&self) {
+        // pass
     }
 
     fn synchronize(&self) {
@@ -96,6 +104,10 @@ impl Predictor for FakePredictor {
 
     fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
         features_list.map(|features| self.predict(features)).collect()
+    }
+
+    fn wake(&self) {
+        // pass
     }
 
     fn synchronize(&self) {
