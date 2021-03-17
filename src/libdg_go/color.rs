@@ -67,3 +67,14 @@ impl fmt::Display for Color {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_size() {
+        assert_eq!(::std::mem::size_of::<Color>(), 1);
+        assert_eq!(::std::mem::size_of::<Option<Color>>(), 1);
+    }
+}

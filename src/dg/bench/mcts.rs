@@ -30,7 +30,7 @@ pub struct MctsBenchmarkExecutor {
 
 impl BenchmarkExecutor for MctsBenchmarkExecutor {
     fn new(network: Network) -> Self {
-        let server = parallel::Service::new(None, PredictState::new(network));
+        let server = parallel::Service::new(None, PredictState::new(network, 1));
         let server_lock = server.lock().clone_to_static();
 
         Self {

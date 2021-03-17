@@ -28,7 +28,7 @@ pub type PredictGuard<'a> = parallel::ServiceGuard<'a, PredictState>;
 pub type PredictService = parallel::Service<PredictState>;
 
 pub fn service(network: Network) -> PredictService {
-    PredictService::new(None, PredictState::new(network))
+    PredictService::new(None, PredictState::new(network, 1))
 }
 
 pub enum PredictRequest {
@@ -43,6 +43,9 @@ pub enum PredictRequest {
 pub struct PredictState {
     /// The neural network weights
     network: Network,
+
+    /// The minimum allowed batch size
+    min_batch_size: usize,
 
     /// The batch size to use
     batch_size: usize,
@@ -63,10 +66,12 @@ pub struct PredictState {
 }
 
 impl PredictState {
-    pub fn new(network: Network) -> PredictState {
+    pub fn new(network: Network, min_batch_size: usize) -> PredictState {
+        debug_assert!(min_batch_size <= *config::BATCH_SIZE);
+
         PredictState {
             network: network,
-            running_count: AtomicUsize::new(0),
+            min_batch_size: min_batch_size,
             batch_size: *config::BATCH_SIZE,
             features_list: Vec::with_capacity(*config::BATCH_SIZE * FEATURE_SIZE),
             sender_list: Vec::with_capacity(*config::BATCH_SIZE),
@@ -195,7 +200,7 @@ impl PredictState {
                 // more requests are incoming, wait for them before trying to
                 // evaluate a batch
             }
-        } else if num_requests > 0 {
+        } else if num_requests >= state_lock.min_batch_size {
             assert!(num_requests <= batch_size);
 
             // immediately evaluate when we hit a barrier in order to:

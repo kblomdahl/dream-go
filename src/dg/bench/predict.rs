@@ -35,7 +35,7 @@ impl BenchmarkExecutor for PredictBenchmarkExecutor {
 
         Self {
             batch_size: batch_size,
-            server: parallel::Service::new(None, PredictState::new(network))
+            server: parallel::Service::new(None, PredictState::new(network, batch_size))
         }
     }
 
