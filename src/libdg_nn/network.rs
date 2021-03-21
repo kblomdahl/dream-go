@@ -90,25 +90,23 @@ unsafe impl Sync for Network { }  // this is safe because the Rc<...> is guarded
 
 impl Network {
     pub fn new() -> Option<Network> {
-        lazy_static! {
-            static ref PATHS: Vec<String> = vec! [
-                // check for a file named the same as the current executable, but
-                // with a `.json` extension.
-                env::current_exe().ok().and_then(|file| {
-                    let mut json = file.clone();
-                    json.set_extension("json");
-                    json.as_path().to_str().map(|s| s.to_string())
-                }).unwrap_or_else(|| "dream_go.json".to_string()),
+        let paths = vec! [
+            // check for a file named the same as the current executable, but
+            // with a `.json` extension.
+            env::current_exe().ok().and_then(|file| {
+                let mut json = file.clone();
+                json.set_extension("json");
+                json.as_path().to_str().map(|s| s.to_string())
+            }).unwrap_or_else(|| "dream_go.json".to_string()),
 
-                // hard-coded paths to make development and deployment easier
-                "dream_go.json".to_string(),
-                "models/dream_go.json".to_string(),
-                "/usr/share/dreamgo/dream_go.json".to_string(),
-                "/usr/share/dream_go/dream_go.json".to_string()
-            ];
-        }
+            // hard-coded paths to make development and deployment easier
+            "dream_go.json".to_string(),
+            "models/dream_go.json".to_string(),
+            "/usr/share/dreamgo/dream_go.json".to_string(),
+            "/usr/share/dream_go/dream_go.json".to_string()
+        ];
 
-        PATHS.iter()
+        paths.iter()
             .filter_map(|path| {
                 match loader::load(Path::new(path)) {
                     Ok(weights) => Some(weights),

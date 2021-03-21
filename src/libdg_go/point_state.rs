@@ -50,11 +50,9 @@ impl Vertex for u32 {
     }
 
     fn color(self) -> Option<Color> {
-        match self & 0x3 {
-            1 => Some(Color::Black),
-            2 => Some(Color::White),
-            _ => None,
-        }
+        const COLORS: [Option<Color>; 4] = [None, Some(Color::Black), Some(Color::White), None];
+
+        COLORS[(self & 0x3) as usize]
     }
 
     fn next_point(self) -> Point {

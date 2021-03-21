@@ -21,6 +21,5 @@ dashmap = "4.0"
 dg_cuda = { path = "../libdg_cuda" }
 dg_go = { path = "../libdg_go" }
 dg_utils = { path = "../libdg_utils" }
-lazy_static = "1.4"
 libc = "0.2"
 memchr = "2.3"

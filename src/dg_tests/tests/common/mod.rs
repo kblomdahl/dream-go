@@ -36,13 +36,13 @@ thread_local! {
 #[allow(dead_code)]
 pub fn playout_game(src: &str, max_moves: Option<usize>) -> Board {
     lazy_static! {
-        static ref LETTERS: [char; 26] = [
-            'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
-            'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
-            'w', 'x', 'y', 'z'
-        ];
         static ref MOVE: Regex = Regex::new(r";([BW])\[([a-z]*)\]").unwrap();
     }
+    const LETTERS: [char; 26] = [
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
+        'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
+        'w', 'x', 'y', 'z'
+    ];
 
     let mut board = Board::new(DEFAULT_KOMI);
     let mut count = 1;
@@ -79,12 +79,12 @@ pub fn playout_game(src: &str, max_moves: Option<usize>) -> Board {
 /// Loads the content of the given SGF file and return the board state after
 /// at most `max_moves` moves has been played. If the file contains an invalid
 /// SGF file, or invalid moves then this method will panic.
-/// 
+///
 /// # Argumnets
-/// 
+///
 /// * `filename` -
 /// * `max_moves` -
-/// 
+///
 #[allow(dead_code)]
 pub fn playout_file(filename: &str, max_moves: Option<usize>) -> Board {
     let mut file = File::open(filename).expect("file not found");

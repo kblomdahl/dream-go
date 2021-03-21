@@ -122,7 +122,6 @@ dependencies = [
  "dg_cuda",
  "dg_go",
  "dg_utils",
- "lazy_static",
  "libc",
  "memchr",
 ]

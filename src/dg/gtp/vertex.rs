@@ -65,8 +65,8 @@ impl str::FromStr for Vertex {
             let x = LETTERS.binary_search(&chars.next().unwrap());
             let y = chars.collect::<String>().parse::<usize>();
 
-            if y.is_ok() && x.is_ok() {
-                Ok(Vertex {x: x.unwrap(), y: y.unwrap() - 1})
+            if let (Ok(x), Ok(y)) = (x, y) {
+                Ok(Vertex {x: x, y: y - 1})
             } else {
                 Err(())
             }

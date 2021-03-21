@@ -19,7 +19,6 @@ extern crate dashmap;
 extern crate dg_cuda;
 extern crate dg_go;
 extern crate dg_utils;
-#[macro_use] extern crate lazy_static;
 extern crate libc;
 extern crate memchr;
 #[cfg(test)] extern crate test;

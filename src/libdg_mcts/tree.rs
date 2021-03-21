@@ -1080,11 +1080,9 @@ impl Node {
                 let j = children[i];
 
                 if j != 361 && self.with(j, |child| child.count()) > 0 {
-                    lazy_static! {
-                        static ref LABELS: Vec<&'static str> = vec! [
-                            "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"
-                        ];
-                    }
+                    const LABELS: [&'static str; 10] = [
+                        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"
+                    ];
 
                     write!(fmt, "LB[{}:{}]",
                         S::to_sgf(Point::from_packed_parts(j)),
