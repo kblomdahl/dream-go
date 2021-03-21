@@ -45,11 +45,11 @@ impl fmt::Display for GameResult {
 
 /// Returns the territory for both colors of the given board, according to
 /// TT-rules, as `TB` and `TW` properties.
-/// 
+///
 /// # Arguments
-/// 
-/// * `status_list` - 
-/// 
+///
+/// * `status_list` -
+///
 fn get_territory_as_sgf(status_list: &Vec<(Point, Vec<StoneStatus>)>) -> String {
     let mut black = String::new();
     let mut white = String::new();
@@ -73,12 +73,12 @@ fn get_territory_as_sgf(status_list: &Vec<(Point, Vec<StoneStatus>)>) -> String 
 
 /// Returns the winner of the given board, according to TT-rules, as an SGF
 /// property.
-/// 
+///
 /// # Arguments
-/// 
-/// * `board` - 
-/// * `status_list` - 
-/// 
+///
+/// * `board` -
+/// * `status_list` -
+///
 fn get_winner_as_sgf(board: &Board, status_list: &Vec<(Point, Vec<StoneStatus>)>) -> String {
     let black = status_list.iter().filter(|(_, statuses)| statuses.contains(&StoneStatus::BlackTerritory)).count() as f32;
     let white = status_list.iter().filter(|(_, statuses)| statuses.contains(&StoneStatus::WhiteTerritory)).count() as f32 + board.komi();

@@ -80,7 +80,7 @@ use self::parallel::global_rwlock;
 /// # Arguments
 ///
 /// * `server` - the server to use for predictions
-/// * `options` - 
+/// * `options` -
 /// * `board` - the board position to evaluate
 /// * `to_move` - the color to evaluate for
 ///
@@ -132,7 +132,7 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
 /// # Arguments
 ///
 /// * `server` - the workspace to use during the forward pass
-/// * `options` - 
+/// * `options` -
 /// * `board` - the board position
 /// * `to_move` - the current player
 ///
@@ -473,7 +473,7 @@ fn get_random_komi() -> f32 {
     } else if value < 0.9 {
         0.5
     } else {
-        let value: i32 = thread_rng().gen_range(-8, 8);
+        let value: i32 = thread_rng().gen_range(-8..8);
 
         value as f32 + 0.5
     }

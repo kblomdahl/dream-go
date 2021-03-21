@@ -61,7 +61,7 @@ impl Predictor for RandomPredictor {
         }
 
         normalize_finite_f32(&mut policy, total_policy);
-        Some((thread_rng().gen_range(-1.0, 1.0), policy))
+        Some((thread_rng().gen_range(-1.0..1.0), policy))
     }
 
     fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
