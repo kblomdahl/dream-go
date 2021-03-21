@@ -52,7 +52,7 @@ impl BenchmarkExecutor for PredictBenchmarkExecutor {
         }
 
         self.batch_size
-    }    
+    }
 }
 
 pub type PredictBenchmark = Benchmark<PredictBenchmarkExecutor>;

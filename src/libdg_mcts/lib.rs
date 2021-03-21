@@ -108,13 +108,13 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
     let new_responses = server.predict_all(new_requests.into_iter());
 
     for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
-        let (other_value, other_policy) = new_response?;
+        let new_response = new_response?;
         let (other_value, other_policy) = global_cache::get_or_insert(board, to_move, t, || {
             let mut identity_policy = initial_policy.clone();
-            add_valid_candidates(&mut identity_policy, other_policy, &indices, t);
+            add_valid_candidates(&mut identity_policy, new_response.policy(), &indices, t);
             normalize_policy(&mut identity_policy);
 
-            Some((0.5 + 0.5 * other_value, identity_policy))
+            Some((0.5 + 0.5 * new_response.value(), identity_policy))
         }).unwrap();
 
         for i in 0..362 { policy[i] += other_policy[i]; }
@@ -142,19 +142,14 @@ fn forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &Board,
     global_cache::get_or_insert(board, to_move, t, || {
         // run a forward pass through the network using this transformation
         // and when we are done undo it using the opposite.
-        let (value, original_policy) = server.predict(
-            board.get_features::<HWC, f16>(
-                to_move,
-                t
-            )
-        )?;
+        let response = server.predict(board.get_features::<HWC, f16>(to_move, t))?;
 
         // fix-up the potentially broken policy
         let (mut policy, indices) = create_initial_policy(options, board, to_move);
-        add_valid_candidates(&mut policy, original_policy, &indices, t);
+        add_valid_candidates(&mut policy, response.policy(), &indices, t);
         normalize_policy(&mut policy);
 
-        Some((0.5 + 0.5 * value, policy))
+        Some((0.5 + 0.5 * response.value(), policy))
     })
 }
 
@@ -483,6 +478,7 @@ fn get_random_komi() -> f32 {
 mod tests {
     use dg_go::{Board, Color};
     use dg_utils::types::f16;
+    use predict_service::PredictResponse;
     use super::*;
 
     use std::sync::Arc;
@@ -522,15 +518,24 @@ mod tests {
     struct NanPredictor;
 
     impl predict::Predictor for NanPredictor {
-        fn predict(&self, _features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
-            Some((0.0, vec! [::std::f32::NEG_INFINITY; 362]))
+        fn predict(&self, _features: Vec<f16>) -> Option<PredictResponse> {
+            Some(
+                PredictResponse::new(
+                    f16::from(0.0),
+                    vec! [f16::from(::std::f32::NEG_INFINITY); 362]
+                )
+            )
         }
 
-        fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
+        fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<PredictResponse>> {
             features_list.map(|features| self.predict(features)).collect()
         }
 
         fn synchronize(&self) {
+            // pass
+        }
+
+        fn wake(&self) {
             // pass
         }
     }

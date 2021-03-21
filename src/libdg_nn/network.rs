@@ -126,11 +126,11 @@ impl Network {
     }
 
     /// Returns a `Workspace` with the given batch size.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `batch_size` -
-    /// 
+    ///
     pub fn get_workspace(&self, batch_size: usize) -> Result<WorkspaceGuard, Error> {
         let candidates = self.workspaces.entry(batch_size).or_default();
 

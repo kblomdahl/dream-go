@@ -916,11 +916,11 @@ impl ChildrenImpl {
 }
 
 /// The result of selecting which is the next move:
-/// 
+///
 /// * `Conflict` - We tried to expand the same move as someone else.
 /// * `NoResult` - There were no valid moves to consider.
-/// * `Found` - 
-/// 
+/// * `Found` -
+///
 pub enum ProbeResult<T> {
     Conflict,
     NoResult,
@@ -1440,14 +1440,14 @@ pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32
 /// than a worse candidate. The algorithm will compare the LCB if both
 /// candidates has at least `min_lcb_visits` visit counts, otherwise fallback to
 /// comparing the visit count.
-/// 
+///
 /// # Arguments
-/// 
-/// * `node` - 
+///
+/// * `node` -
 /// * `a` -
 /// * `b` -
 /// * `min_lcb_visits` -
-/// 
+///
 fn compare_children(
     node: &Node,
     a: usize,

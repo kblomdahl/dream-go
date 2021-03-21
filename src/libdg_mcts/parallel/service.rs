@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use crossbeam_channel::{bounded, Sender, Receiver};
 use crossbeam_queue::SegQueue;
@@ -21,7 +21,7 @@ use crossbeam_queue::SegQueue;
 /// The implementation details of a service that is responsible for actually
 /// answering the requests. A service can be distributed over multiple threads,
 /// where all threads shares the same internal state.
-/// 
+///
 /// Because all worker threads share the same state you must implement interior
 /// mutability of the state using, for example, `Mutex` to ensure no two threads
 /// tries to mutate the state at the same time.
@@ -37,25 +37,25 @@ pub trait ServiceImpl {
 
     /// Setup the initial state of the current thread. This is the first
     /// function called for each worker thread.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `index` -
-    /// 
+    ///
     fn setup_thread(index: usize);
 
     /// Process a single request to this service. The response to the request
     /// should be send over the `resp` channel.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `state` - the state of the service
     /// * `state_lock` - the state of the service (acquired lock)
     /// * `req` - the request to process
     /// * `resp` - the channel to send the response to
     /// * `has_more` - whether there are no requests immedietly available after
     ///   this one. This number is only valid for the lifetime of `state_lock`.
-    /// 
+    ///
     fn process(
         state: &Mutex<Self::State>,
         state_lock: MutexGuard<Self::State>,
@@ -70,9 +70,6 @@ pub struct ServiceState<I: ServiceImpl> {
     /// Whether this service should still be running.
     is_running: AtomicBool,
 
-    /// The number of requests currently being processed.
-    num_process: AtomicUsize,
-
     /// The queue of pending requests, and the channel to send the response
     /// over.
     queue: SegQueue<(I::Request, Sender<I::Response>)>
@@ -81,14 +78,14 @@ pub struct ServiceState<I: ServiceImpl> {
 /// The worker thread that is responsible for receiving requests and dispatching
 /// them to the service implementation. This worker will terminate once the
 /// variable `is_running` is set to false and there are no pending requests.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `num_running` - the number of requests currently being processed
 /// * `is_running` - whether the service should be running
 /// * `state` - the state of the service
 /// * `queue` - the queue of requests
-/// 
+///
 fn worker_thread<I: ServiceImpl>(
     state: Arc<Mutex<I::State>>,
     inner: Arc<ServiceState<I>>
@@ -97,11 +94,8 @@ fn worker_thread<I: ServiceImpl>(
         if let Some((req, tx)) = inner.queue.pop() {
             let state_lock = state.lock().unwrap();
             let has_more = !inner.queue.is_empty();
-            inner.num_process.fetch_add(1, Ordering::AcqRel);
 
             I::process(&state, state_lock, req, tx, has_more);
-
-            inner.num_process.fetch_sub(1, Ordering::AcqRel);
         } else if !inner.is_running.load(Ordering::Acquire) {
             break
         }
@@ -140,16 +134,15 @@ impl<I: ServiceImpl> Drop for Service<I> {
 impl<I: ServiceImpl + 'static> Service<I> {
     /// Returns a new `Service` with the given number of working threads (or
     /// the default given by the service if `None`) and initial state.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `num_threads` -
     /// * `initial_state` -
-    /// 
+    ///
     pub fn new(num_threads: Option<usize>, initial_state: I::State) -> Service<I> {
         let state = Arc::new(Mutex::new(initial_state));
         let inner = Arc::new(ServiceState {
-            num_process: AtomicUsize::new(0),
             queue: SegQueue::new(),
             is_running: AtomicBool::new(true)
         });
@@ -203,11 +196,11 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
     }
 
     /// Sends a request to the service and returns the response.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `req` -
-    /// 
+    ///
     pub fn send(&self, req: I::Request) -> Option<I::Response> {
         let (tx, rx) = bounded(1);
 
@@ -222,11 +215,11 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
     }
 
     /// Sends a request to the service and returns the response.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `req` -
-    /// 
+    ///
     pub fn send_async(&self, req: I::Request) -> Option<Receiver<I::Response>> {
         let (tx, rx) = bounded(1);
 
@@ -240,11 +233,11 @@ impl<'a, I: ServiceImpl + 'static> ServiceGuard<'a, I> {
 
     /// Send all of the given requests to the service and returns the
     /// responses.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `reqs` -
-    /// 
+    ///
     pub fn send_all<E: Iterator<Item=I::Request>>(&self, reqs: E) -> Option<Vec<I::Response>> {
         if self.inner.is_running.load(Ordering::Acquire) {
             let responses = reqs.map(|req| {

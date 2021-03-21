@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_mcts::predict_service::{PredictState, PredictRequest};
+use dg_mcts::predict_service::{PredictState, PredictResponse, PredictRequest};
 use dg_mcts::parallel;
 
 use crossbeam_channel::Sender;
@@ -23,7 +23,7 @@ pub struct PredictState1;
 impl parallel::ServiceImpl for PredictState1 {
     type State = PredictState;
     type Request = PredictRequest;
-    type Response = Option<(f32, Vec<f32>)>;
+    type Response = Option<PredictResponse>;
 
     fn get_thread_count() -> usize {
         1

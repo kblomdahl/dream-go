@@ -12,29 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub struct OutputMap {
-    value: Vec<f32>,
-    policy: Vec<f32>,
+pub struct OutputMap<T: Sized> {
+    value: Vec<T>,
+    policy: Vec<T>,
 }
 
-impl OutputMap {
-    pub fn new<T: Sized>(
+impl<T: Sized> OutputMap<T> {
+    pub fn new(
         value: Vec<T>,
         policy: Vec<T>
     ) -> Self
-        where f32: From<T>
     {
-        Self {
-            value: value.into_iter().map(|x| f32::from(x)).collect(),
-            policy: policy.into_iter().map(|x| f32::from(x)).collect()
+        Self { value, policy }
+    }
+
+    pub fn unwrap(self) -> (Vec<T>, Vec<T>) {
+        match self {
+            OutputMap { value, policy } => (value, policy)
         }
-    }
-
-    pub fn value(&self) -> &Vec<f32> {
-        &self.value
-    }
-
-    pub fn policy(&self) -> &Vec<f32> {
-        &self.policy
     }
 }

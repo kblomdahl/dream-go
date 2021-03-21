@@ -121,7 +121,7 @@ pub struct Workspace {
 /// * `workspace` - the workspace for the current thread
 /// * `features` - the input features
 ///
-pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap, Error> {
+pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap<f16>, Error> {
     debug_assert!(features.len() % FEATURE_SIZE == 0);
     debug_assert!(features.len() / FEATURE_SIZE == workspace.batch_size);
 

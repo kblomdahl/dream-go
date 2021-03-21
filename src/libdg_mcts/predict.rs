@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use dg_utils::types::f16;
+use predict_service::PredictResponse;
 
 pub trait Predictor : Clone + Send {
     /// Returns the result of the given query.
@@ -21,7 +22,7 @@ pub trait Predictor : Clone + Send {
     ///
     /// * `features` - the features to query
     ///
-    fn predict(&self, features: Vec<f16>) -> Option<(f32, Vec<f32>)>;
+    fn predict(&self, features: Vec<f16>) -> Option<PredictResponse>;
 
     /// Returns the results of the given queries.
     ///
@@ -29,7 +30,7 @@ pub trait Predictor : Clone + Send {
     ///
     /// * `features_list` - the features to query over
     ///
-    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>>;
+    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<PredictResponse>>;
 
     /// Wake-up any threads that are sleeping right (`synchronize`) now
     /// while waiting for new updates to the tree.
@@ -46,10 +47,11 @@ pub trait Predictor : Clone + Send {
 pub struct RandomPredictor;
 
 impl Predictor for RandomPredictor {
-    fn predict(&self, _features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
+    fn predict(&self, _features: Vec<f16>) -> Option<PredictResponse> {
         use rand::{thread_rng, Rng};
         use super::asm::normalize_finite_f32;
 
+        let value = thread_rng().gen_range(-1.0..1.0);
         let mut policy = vec! [0.0; 368];
         let mut total_policy = 0.0;
 
@@ -61,10 +63,10 @@ impl Predictor for RandomPredictor {
         }
 
         normalize_finite_f32(&mut policy, total_policy);
-        Some((thread_rng().gen_range(-1.0..1.0), policy))
+        Some(PredictResponse::new(f16::from(value), policy.into_iter().map(|x| f16::from(x)).collect()))
     }
 
-    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
+    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<PredictResponse>> {
         features_list.map(|features| self.predict(features)).collect()
     }
 
@@ -83,26 +85,26 @@ impl Predictor for RandomPredictor {
 #[derive(Clone, Default)]
 pub struct FakePredictor {
     point: usize,
-    value: f32
+    value: f16
 }
 
 #[cfg(test)]
 impl FakePredictor {
     pub fn new(point: usize, value: f32) -> Self {
-        Self { point, value }
+        Self { point: point, value: f16::from(value) }
     }
 }
 
 #[cfg(test)]
 impl Predictor for FakePredictor {
-    fn predict(&self, _features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
-        let mut policy = vec! [0.0; 368];
-        policy[self.point] = 1.0;
+    fn predict(&self, _features: Vec<f16>) -> Option<PredictResponse> {
+        let mut policy = vec! [f16::from(0.0); 368];
+        policy[self.point] = f16::from(1.0);
 
-        Some((self.value, policy))
+        Some(PredictResponse::new(self.value, policy))
     }
 
-    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
+    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<PredictResponse>> {
         features_list.map(|features| self.predict(features)).collect()
     }
 

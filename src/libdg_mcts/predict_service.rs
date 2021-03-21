@@ -43,6 +43,25 @@ pub enum PredictRequest {
     Wake,
 }
 
+pub struct PredictResponse {
+    value: f16,
+    policy: Vec<f16>
+}
+
+impl PredictResponse {
+    pub fn new(value: f16, policy: Vec<f16>) -> Self {
+        Self { value, policy }
+    }
+
+    pub fn value(&self) -> f32 {
+        f32::from(self.value)
+    }
+
+    pub fn policy(&self) -> Vec<f32> {
+        self.policy.iter().map(|&x| f32::from(x)).collect()
+    }
+}
+
 pub struct PredictState {
     /// The neural network weights
     network: Network,
@@ -58,10 +77,10 @@ pub struct PredictState {
 
     /// The sender to response to each of the features in `features_list`
     /// over.
-    sender_list: Vec<Sender<Option<(f32, Vec<f32>)>>>,
+    sender_list: Vec<Sender<Option<PredictResponse>>>,
 
     /// All threads that want to get notified when something changed.
-    waiting_list: Vec<Sender<Option<(f32, Vec<f32>)>>>,
+    waiting_list: Vec<Sender<Option<PredictResponse>>>,
 }
 
 impl PredictState {
@@ -92,14 +111,18 @@ impl PredictState {
     /// * `workspace` -
     /// * `features_list` -
     ///
-    fn forward_once(workspace: &mut Workspace, features_list: &[f16]) -> Result<(Vec<f32>, Vec<Vec<f32>>), nn::Error> {
+    fn forward_once(workspace: &mut Workspace, features_list: &[f16]) -> Result<Vec<PredictResponse>, nn::Error> {
         let outputs = nn::forward(workspace, features_list)?;
-        let value_list = outputs.value().clone();
-        let policy_list = outputs.policy().chunks(362)
-            .map(|p| p.to_vec())
-            .collect();
+        let (value_list, policy_list) = outputs.unwrap();
+        let policy_iter = policy_list.chunks(362).map(|p| p.to_vec());
 
-        Ok((value_list, policy_list))
+        Ok(
+            value_list
+                .into_iter()
+                .zip(policy_iter)
+                .map(|(value, policy)| PredictResponse::new(value, policy))
+                .collect()
+        )
     }
 
     /// Run the `nn::forward` function for the given features and wrap the
@@ -112,7 +135,7 @@ impl PredictState {
     /// * `batch_size` -
     /// * `features_list` -
     ///
-    fn forward(network: &Network, batch_size: usize, features_list: &[f16]) -> Result<(Vec<f32>, Vec<Vec<f32>>), ()> {
+    fn forward(network: &Network, batch_size: usize, features_list: &[f16]) -> Result<Vec<PredictResponse>, ()> {
         let mut count = 0;
 
         loop {
@@ -154,11 +177,9 @@ impl PredictState {
 
         // perform the neural network predictions and then inform all of
         // the receivers
-        if let Ok((value_list, policy_list)) = PredictState::forward(&network, batch_size, &features_list) {
+        if let Ok(responses) = PredictState::forward(&network, batch_size, &features_list) {
             // send out our predictions to all of the receivers
-            let response_iter = value_list.into_iter().zip(policy_list.into_iter());
-
-            for (sender, response) in sender_list.into_iter().zip(response_iter) {
+            for (sender, response) in sender_list.into_iter().zip(responses.into_iter()) {
                 sender.send(Some(response)).expect("could not send predictor response");
             }
         } else {
@@ -204,7 +225,7 @@ impl PredictState {
 impl parallel::ServiceImpl for PredictState {
     type State = PredictState;
     type Request = PredictRequest;
-    type Response = Option<(f32, Vec<f32>)>;
+    type Response = Option<PredictResponse>;
 
     fn get_thread_count() -> usize {
         let num_devices = Device::len().expect("Could not find any compatible devices");
@@ -257,14 +278,14 @@ impl<T: parallel::ServiceImpl + 'static> Clone for parallel::ServiceGuard<'_, T>
 }
 
 impl<T> Predictor for parallel::ServiceGuard<'_, T>
-    where T: parallel::ServiceImpl<Request=PredictRequest, Response=Option<(f32, Vec<f32>)>> + Send + 'static
+    where T: parallel::ServiceImpl<Request=PredictRequest, Response=Option<PredictResponse>> + Send + 'static
 {
-    fn predict(&self, features: Vec<f16>) -> Option<(f32, Vec<f32>)> {
+    fn predict(&self, features: Vec<f16>) -> Option<PredictResponse> {
         self.send(PredictRequest::Ask(features))
             .expect("predict_service could not provide a response")
     }
 
-    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<(f32, Vec<f32>)>> {
+    fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<PredictResponse>> {
         self.send_all(features_list.into_iter().map(|features| {
             PredictRequest::Ask(features)
         })).expect("predict_service could not provide a response")
