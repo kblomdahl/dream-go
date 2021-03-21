@@ -86,12 +86,12 @@ impl PredictState {
     /// Run the `nn::forward` function for the given features and wrap the
     /// results into `Array` elements. This version assumes the neural network
     /// use `f32` weights.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `workspace` - 
-    /// * `features_list` - 
-    /// 
+    ///
+    /// * `workspace` -
+    /// * `features_list` -
+    ///
     fn forward_once(workspace: &mut Workspace, features_list: &[f16]) -> Result<(Vec<f32>, Vec<Vec<f32>>), nn::Error> {
         let outputs = nn::forward(workspace, features_list)?;
         let value_list = outputs.value().clone();

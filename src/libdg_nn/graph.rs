@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::mem::size_of;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use dg_cuda as cuda;
@@ -51,10 +50,10 @@ impl Builder {
     ///
     pub fn get_workspace(&self, batch_size: usize) -> Result<Workspace, Error> {
         let handle_dnn: cudnn::Handle = cudnn::Handle::new()?;
-        let c_up = Rc::new(UpLayer::new(&handle_dnn, batch_size as i32, &self.tensors)?);
+        let c_up = UpLayer::new(&handle_dnn, batch_size as i32, &self.tensors)?;
         let c_residual = self.get_residual_layers(&handle_dnn, batch_size)?;
-        let c_value = Rc::new(ValueLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?);
-        let c_policy = Rc::new(PolicyLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?);
+        let c_value = ValueLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?;
+        let c_policy = PolicyLayer::new(&handle_dnn, batch_size as i32, 2 + c_residual.len(), &self.tensors)?;
 
         Ok(Workspace {
             batch_size: batch_size,
@@ -79,15 +78,15 @@ impl Builder {
         &self,
         handle_dnn: &cudnn::Handle,
         batch_size: usize
-    ) -> Result<Vec<Rc<ResidualLayer>>, Error>
+    ) -> Result<Vec<ResidualLayer>, Error>
     {
-        let mut c_residual = vec! [];
+        let mut c_residual = Vec::with_capacity(20);
         let mut count = 2;
 
         loop {
             match ResidualLayer::new(handle_dnn, batch_size as i32, count, &self.tensors) {
                 Ok(None) => { break },
-                Ok(Some(layer)) => { c_residual.push(Rc::new(layer)) },
+                Ok(Some(layer)) => { c_residual.push(layer) },
                 Err(reason) => { return Err(reason) }
             }
 
@@ -108,10 +107,10 @@ pub struct Workspace {
     policy_stream: cuda::Stream,
     value_stream: cuda::Stream,
 
-    c_up: Rc<UpLayer>,
-    c_value: Rc<ValueLayer>,
-    c_policy: Rc<PolicyLayer>,
-    c_residual: Vec<Rc<ResidualLayer>>
+    c_up: UpLayer,
+    c_value: ValueLayer,
+    c_policy: PolicyLayer,
+    c_residual: Vec<ResidualLayer>
 }
 
 /// Returns the value and policy tensors obtained from a forward pass
@@ -133,7 +132,7 @@ pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap,
     input.copy_from_slice(&features, &workspace.tower_stream)?;
 
     // Upsample features to 128 channels
-    let mut residual_1 = workspace.c_up.clone().forward(&workspace.handle, &input, allocator, &workspace.tower_stream)?;
+    let mut residual_1 = workspace.c_up.forward(&workspace.handle, &input, allocator, &workspace.tower_stream)?;
 
     // residual blocks
     let num_residual = workspace.c_residual.len();
@@ -141,7 +140,7 @@ pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap,
     for i in 0..num_residual {
         let residual = &workspace.c_residual[i];
 
-        residual_1 = residual.clone().forward(&workspace.handle, residual_1, allocator, &workspace.tower_stream)?;
+        residual_1 = residual.forward(&workspace.handle, residual_1, allocator, &workspace.tower_stream)?;
     }
 
     workspace.tower_finished.record(&workspace.tower_stream)?;
@@ -150,8 +149,8 @@ pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap,
 
     // run the value and policy head, then wait for them to finish (if
     // they are requested)
-    let value = workspace.c_value.clone().forward(&workspace.handle, &residual_1, allocator, &workspace.value_stream)?;
-    let policy = workspace.c_policy.clone().forward(&workspace.handle, &residual_1, allocator, &workspace.policy_stream)?;
+    let value = workspace.c_value.forward(&workspace.handle, &residual_1, allocator, &workspace.value_stream)?;
+    let policy = workspace.c_policy.forward(&workspace.handle, &residual_1, allocator, &workspace.policy_stream)?;
 
     Ok(OutputMap::new(
         value.to_vec::<f16>(&workspace.value_stream)?,

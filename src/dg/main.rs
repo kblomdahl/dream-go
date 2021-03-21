@@ -13,8 +13,8 @@
 // limitations under the License.
 #![feature(test)]
 
-extern crate crossbeam_channel;
 extern crate cpu_time;
+extern crate crossbeam_channel;
 extern crate dg_go;
 extern crate dg_mcts;
 extern crate dg_nn;

@@ -245,7 +245,7 @@ mod tests {
         let stream = cuda::Stream::default();
         let mut output = cuda::malloc(size_of::<f16>() * data.len(), allocator)?;
         output.copy_from_slice(&data.iter().map(|&x| f16::from(x)).collect::<Vec<_>>(), &stream)?;
-        
+
         Ok(output)
     }
 
