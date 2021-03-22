@@ -38,12 +38,12 @@ struct Candidate {
 /// Collect all candidates (moves) from the provided SGF file assuming the
 /// given komi. If an error is encountered while parsing the SGF file a
 /// partial set of candidates may be returned.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `content` -
 /// * `komi` -
-/// 
+///
 fn collect_candidates_from_line(content: &str, komi: f32) -> Vec<Candidate> {
     let mut candidates = Vec::with_capacity(261);
 
@@ -63,12 +63,12 @@ fn collect_candidates_from_line(content: &str, komi: f32) -> Vec<Candidate> {
 }
 
 /// Reanalyze a given `candidate`.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `server` -
 /// * `candidate` -
-/// 
+///
 fn reanalyze_single_candidate<P: Predictor + 'static>(
     server: &P,
     candidate: &Candidate
@@ -91,11 +91,11 @@ fn reanalyze_single_candidate<P: Predictor + 'static>(
 
 /// If the provided `candidate` is a good candidate for reanalyzing then
 /// return `Some(candiate)`, otherwise `None` (for chaining purposes).
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `candidate` -
-/// 
+///
 fn is_good_candidate(candidate: &Candidate) -> Option<&Candidate> {
     if thread_rng().gen::<f32>() < 0.05 {
         Some(candidate)
@@ -106,12 +106,12 @@ fn is_good_candidate(candidate: &Candidate) -> Option<&Candidate> {
 
 /// Run the re-analyze proceedure on the provided SGF file and return
 /// a game result with the re-analyzed results embedded.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `server` -
 /// * `content` -
-/// 
+///
 fn reanalyze_single_line<P: Predictor + 'static>(
     server: &P,
     content: String
@@ -156,12 +156,12 @@ fn reanalyze_single_line<P: Predictor + 'static>(
 }
 
 /// Read each line in the provided file, and send it over the provided `channel`.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `file` -
-/// * `sender` - 
-/// 
+/// * `sender` -
+///
 fn parse_single_file(file: String, sender: crossbeam_channel::Sender<String>) {
     if let Ok(f) = File::open(file) {
         for line in BufReader::new(&f).lines() {
@@ -178,7 +178,7 @@ fn parse_single_file(file: String, sender: crossbeam_channel::Sender<String>) {
 /// them on the lines channel.
 ///
 /// # Arguments
-/// 
+///
 /// * `files` -
 ///
 fn spawn_file_workers(files: &[String]) -> crossbeam_channel::Receiver<String> {
@@ -198,7 +198,7 @@ pub fn reanalyze(
     files: &[String]
 ) -> (mpsc::Receiver<GameResult>, predict_service::PredictService)
 {
-    let server = predict_service::service(network);
+    let server = predict_service::PredictService::new(network);
     let lines = spawn_file_workers(files);
 
     // spawn the worker threads that generate the self-play games
@@ -206,9 +206,9 @@ pub fn reanalyze(
     let (sender, receiver) = mpsc::channel();
 
     for _ in 0..num_parallel {
-        let server = server.lock().clone_to_static();
         let sender = sender.clone();
         let lines = lines.clone();
+        let server = server.clone();
 
         thread::spawn(move || {
             for line in &lines {

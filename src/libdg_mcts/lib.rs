@@ -58,15 +58,15 @@ pub use self::reanalyze::*;
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use dg_go::utils::features::{HWC, Features};
+use dg_go::utils::features::{HWC, Features, FEATURE_SIZE};
 use dg_go::utils::symmetry;
 use dg_go::{Board, Color, Point};
 use self::options::{SearchOptions, ScoringSearch};
 use self::time_control::TimeStrategy;
-use self::tree::ProbeResult;
+use self::tree::{ProbeResult, NodeTrace};
 use self::predict::Predictor;
 use dg_utils::config;
 use dg_utils::types::f16;
@@ -90,25 +90,19 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
     let mut value = 0.0f32;
 
     // find out which symmetries has already been calculated, and which ones has not
-    let mut new_requests = Vec::with_capacity(8);
+    let mut new_requests = Vec::with_capacity(8 * FEATURE_SIZE);
     let mut new_symmetries = Vec::with_capacity(8);
 
     for &t in &symmetry::ALL {
-        if let Some((other_value, other_policy)) = global_cache::get_or_insert(board, to_move, t, || { None }) {
-            for i in 0..362 { policy[i] += other_policy[i]; }
-            value += other_value;
-        } else {
-            new_requests.push(board.get_features::<HWC, f16>(to_move, t));
-            new_symmetries.push(t);
-        }
+        new_requests.extend_from_slice(&board.get_features::<HWC, f16>(to_move, t));
+        new_symmetries.push(t);
     }
 
     // calculate any symmetries that were missing, add them to the cache, and then take the
     // average of them
-    let new_responses = server.predict_all(new_requests.into_iter());
+    let new_responses = server.predict(new_requests, 8);
 
     for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
-        let new_response = new_response?;
         let (other_value, other_policy) = global_cache::get_or_insert(board, to_move, t, || {
             let mut identity_policy = initial_policy.clone();
             add_valid_candidates(&mut identity_policy, new_response.policy(), &indices, t);
@@ -124,33 +118,6 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
     normalize_policy(&mut policy);
 
     Some((value * 0.125, policy))
-}
-
-/// Performs a forward pass through the neural network for the given board
-/// position using a random symmetry to increase entropy.
-///
-/// # Arguments
-///
-/// * `server` - the workspace to use during the forward pass
-/// * `options` -
-/// * `board` - the board position
-/// * `to_move` - the current player
-///
-fn forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>)> {
-    let t = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
-
-    global_cache::get_or_insert(board, to_move, t, || {
-        // run a forward pass through the network using this transformation
-        // and when we are done undo it using the opposite.
-        let response = server.predict(board.get_features::<HWC, f16>(to_move, t))?;
-
-        // fix-up the potentially broken policy
-        let (mut policy, indices) = create_initial_policy(options, board, to_move);
-        add_valid_candidates(&mut policy, response.policy(), &indices, t);
-        normalize_policy(&mut policy);
-
-        Some((0.5 + 0.5 * response.value(), policy))
-    })
 }
 
 /// Returns a initial accumulator policy where all illegal moves has been set
@@ -256,6 +223,65 @@ fn normalize_policy(policy: &mut Vec<f32>) {
     }
 }
 
+#[derive(Clone)]
+struct PredictBatcher {
+    ///
+    features_list: Vec<f16>,
+
+    ///
+    symmetries_list: Vec<symmetry::Transform>,
+
+    ///
+    traces_list: Vec<NodeTrace>,
+
+    ///
+    boards_list: Vec<Board>,
+
+    ///
+    batch_size: usize
+}
+
+impl PredictBatcher {
+    fn new() -> Self {
+        Self {
+            features_list: vec! [],
+            symmetries_list: vec! [],
+            traces_list: vec! [],
+            boards_list: vec! [],
+            batch_size: *config::BATCH_SIZE
+        }
+    }
+
+    fn push_and_get_batch(&mut self, features: Vec<f16>, board: Board, symmetry: symmetry::Transform, trace: NodeTrace) -> Option<(Vec<f16>, Vec<Board>, Vec<symmetry::Transform>, Vec<NodeTrace>)> {
+        self.features_list.extend_from_slice(&features);
+        self.symmetries_list.push(symmetry);
+        self.boards_list.push(board);
+        self.traces_list.push(trace);
+
+        if self.traces_list.len() >= self.batch_size {
+            Some(self.get_so_far())
+        } else {
+            None
+        }
+    }
+
+    fn get_so_far(&mut self) -> (Vec<f16>, Vec<Board>, Vec<symmetry::Transform>, Vec<NodeTrace>) {
+        let split_index =
+            if self.traces_list.len() >= self.batch_size {
+                self.traces_list.len() - self.batch_size
+            } else {
+                0
+            };
+
+            (
+            self.features_list.split_off(split_index * FEATURE_SIZE),
+            self.boards_list.split_off(split_index),
+            self.symmetries_list.split_off(split_index),
+            self.traces_list.split_off(split_index)
+        )
+    }
+}
+
 /// The shared variables between the master and each worker thread in the `predict` function.
 #[derive(Clone)]
 struct ThreadContext<T: TimeStrategy + Clone + Send> {
@@ -270,6 +296,9 @@ struct ThreadContext<T: TimeStrategy + Clone + Send> {
 
     /// Time control element
     time_strategy: T,
+
+    ///
+    predict_batch: Arc<Mutex<PredictBatcher>>
 }
 
 unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
@@ -291,42 +320,78 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
 
     global_rwlock::read_lock();
     while !time_control::is_done(root, &context.time_strategy) {
-        loop {
-            let mut board = context.starting_point.clone();
-            let trace = unsafe { tree::probe(root, &mut board) };
-            global_rwlock::read_unlock();
+        let mut board = context.starting_point.clone();
+        match unsafe { tree::probe(root, &mut board) } {
+            ProbeResult::Found(trace) => {
+                global_rwlock::read_unlock();
 
-            match trace {
-                ProbeResult::Found(trace) => {
-                    let &(_, color, _) = trace.last().unwrap();
-                    let to_move = color.opposite();
-                    let result = forward(&server, options, &board, to_move);
+                let t = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
+                let &(_, last_move, _) = trace.last().unwrap();
+                let features = board.get_features::<HWC, f16>(last_move.opposite(), t);
 
-                    if let Some((value, policy)) = result {
-                        global_rwlock::read_lock();
+                // add to the end of the queue
+                let batch = context.predict_batch.lock()
+                    .expect("could not acquire predict batch lock")
+                    .push_and_get_batch(features, board, t, trace);
+
+                // if queue is full then evaluate it
+                match batch {
+                    None => {},
+                    Some((features_list, boards_list, symmetries_list, traces_list)) => {
+                        let batch_size = traces_list.len();
+
+                        assert!(batch_size > 0);
+                        for (i, response) in server.predict(features_list, batch_size).iter().enumerate() {
+                            let &(_, last_move, _) = traces_list[i].last().unwrap();
+                            let to_move = last_move.opposite();
+                            let (mut policy, indices) = create_initial_policy(options, &boards_list[i], to_move);
+                            add_valid_candidates(&mut policy, response.policy(), &indices, symmetries_list[i]);
+                            normalize_policy(&mut policy);
+
+                            unsafe {
+                                global_rwlock::read_lock();
+                                tree::insert(&traces_list[i], to_move, 0.5 + 0.5 * response.value(), policy);
+                                global_rwlock::read_unlock();
+                            }
+                        }
+                    }
+                }
+
+                global_rwlock::read_lock();
+            },
+            ProbeResult::Conflict => {
+                global_rwlock::read_unlock();
+
+                let (features_list, boards_list, symmetries_list, traces_list) = context.predict_batch.lock()
+                    .expect("could not acquire predict batch lock")
+                    .get_so_far();
+                let batch_size = traces_list.len();
+
+                if batch_size > 0 {
+                    for (i, response) in server.predict(features_list, batch_size).iter().enumerate() {
+                        let &(_, last_move, _) = traces_list[i].last().unwrap();
+                        let to_move = last_move.opposite();
+                        let (mut policy, indices) = create_initial_policy(options, &boards_list[i], to_move);
+                        add_valid_candidates(&mut policy, response.policy(), &indices, symmetries_list[i]);
+                        normalize_policy(&mut policy);
 
                         unsafe {
-                            tree::insert(&trace, to_move, value, policy);
-                            server.wake();
-                            break
+                            global_rwlock::read_lock();
+                            tree::insert(&traces_list[i], to_move, 0.5 + 0.5 * response.value(), policy);
+                            global_rwlock::read_unlock();
                         }
-                    } else {
-                        unsafe { tree::undo(trace, true) };
-
-                        return  // unrecognized error
                     }
-                },
-                ProbeResult::Conflict => {
-                    server.synchronize();
-                    global_rwlock::read_lock();
-                },
-                ProbeResult::NoResult => {
-                    return;
+                } else {
+                    ::std::thread::yield_now();
                 }
+
+                global_rwlock::read_lock();
+            },
+            ProbeResult::NoResult => {
+                panic!();
             }
         }
     }
-    global_rwlock::read_unlock();
 }
 
 /// Predicts the _best_ next move according to the given neural network when applied
@@ -385,7 +450,8 @@ fn predict_aux<T, P>(
         root: Arc::new(UnsafeCell::new(starting_tree)),
         options: Arc::new(options),
         starting_point: starting_point.clone(),
-        time_strategy: time_strategy.clone()
+        time_strategy: time_strategy.clone(),
+        predict_batch: Arc::new(Mutex::new(PredictBatcher::new()))
     };
 
     if num_workers <= 1 {
@@ -503,7 +569,8 @@ mod tests {
             root: root.clone(),
             starting_point: Board::new(7.5),
             options: Arc::new(Box::new(StandardSearch::new(1))),
-            time_strategy: time_control::RolloutLimit::new(100)
+            time_strategy: time_control::RolloutLimit::new(100),
+            predict_batch: Arc::new(Mutex::new(PredictBatcher::new()))
         };
 
         for i in 0..362 {
@@ -518,25 +585,15 @@ mod tests {
     struct NanPredictor;
 
     impl predict::Predictor for NanPredictor {
-        fn predict(&self, _features: Vec<f16>) -> Option<PredictResponse> {
-            Some(
-                PredictResponse::new(
-                    f16::from(0.0),
-                    vec! [f16::from(::std::f32::NEG_INFINITY); 362]
-                )
-            )
-        }
-
-        fn predict_all<E: Iterator<Item=Vec<f16>>>(&self, features_list: E) -> Vec<Option<PredictResponse>> {
-            features_list.map(|features| self.predict(features)).collect()
-        }
-
-        fn synchronize(&self) {
-            // pass
-        }
-
-        fn wake(&self) {
-            // pass
+        fn predict(&self, _features: Vec<f16>, batch_size: usize) -> Vec<PredictResponse> {
+            (0..batch_size)
+                .map(|_| {
+                    PredictResponse::new(
+                        f16::from(0.0),
+                        vec! [f16::from(::std::f32::NEG_INFINITY); 362]
+                    )
+                })
+                .collect()
         }
     }
 

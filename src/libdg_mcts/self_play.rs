@@ -61,13 +61,13 @@ impl MovingAverage {
 
 /// Returns the skewness of the given vector as defined by Pearson's moment
 /// coefficient of skewness [1].
-/// 
+///
 /// [1] https://en.wikipedia.org/wiki/Skewness
-/// 
+///
 /// # Arguments
-/// 
-/// * `values` - 
-/// 
+///
+/// * `values` -
+///
 #[allow(dead_code)]
 fn skewness(values: &[f32]) -> f32 {
     let recip_len = (values.len() as f32).recip();
@@ -278,15 +278,15 @@ impl Player {
 
     /// Perform an expert iteration, replacing the stored search tree, but not
     /// sugggested move, in the played move.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `board` -
-    /// * `point` - 
+    /// * `point` -
     /// * `allow_pass` -
     /// * `server` -
     /// * `num_workers` -
-    /// 
+    ///
     fn ex_it<P: Predictor + 'static>(
         &mut self,
         board: &Board,
@@ -311,12 +311,12 @@ impl Player {
 
     /// Returns true if the given skewness of the policy indicates that this
     /// move is a good candidate for policy extraction.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `value` -
     /// * `policy` -
-    /// 
+    ///
     fn is_good_candidate(&self, value: f32, _policy: &[f32]) -> bool {
         value >= -0.80 && value <= 0.80 && {
             thread_rng().gen::<f32>() < 0.05
@@ -325,15 +325,15 @@ impl Player {
 
     /// Predict the best next move for the given board state. If `ex_it` is
     /// given then we will replace the stored policy with a full search tree.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `board` -
     /// * `allow_pass`  whether we are allowed to pass
-    /// * `ex_it` - 
-    /// * `server` - 
+    /// * `ex_it` -
+    /// * `server` -
     /// * `num_workers` -
-    /// 
+    ///
     fn predict<P: Predictor + 'static>(
         &mut self,
         board: &Board,
@@ -487,7 +487,7 @@ pub fn self_play(
     ex_it: bool
 ) -> (Receiver<GameResult>, predict_service::PredictService)
 {
-    let server = predict_service::service(network);
+    let server = predict_service::PredictService::new(network);
 
     // spawn the worker threads that generate the self-play games
     let num_parallel = ::std::cmp::min(num_games, *config::NUM_GAMES);
@@ -499,7 +499,7 @@ pub fn self_play(
         let num_workers = num_workers.clone();
         let processed = processed.clone();
         let sender = sender.clone();
-        let server = server.lock().clone_to_static();
+        let server = server.clone();
 
         thread::spawn(move || {
             while processed.fetch_add(1, Ordering::SeqCst) < num_games {

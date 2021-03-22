@@ -148,12 +148,12 @@ struct Gtp {
 impl Gtp {
     /// Parse the GTP command in the given string and returns our internal
     /// representation of the given command.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `id` -
     /// * `line` -
-    /// 
+    ///
     fn parse_command(id: Option<usize>, line: &str) -> Result<(Option<usize>, Command), &str> {
         let line = &line.to_lowercase();
 
@@ -278,11 +278,11 @@ impl Gtp {
 
     /// Parse the GTP command in the given string and returns our internal
     /// representation of the given command.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `line` -
-    /// 
+    ///
     fn parse_line(line: &str) -> Option<(Option<usize>, Command)> {
         let line = line.trim();
         let line = {
@@ -320,16 +320,16 @@ impl Gtp {
 
     /// Generate a move using the monte carlo tree search engine for the given
     /// color, using the stored search tree if available.
-    /// 
+    ///
     /// If the given `color` is not the players whose turn it is according to the
     /// search tree then the tree is fast-forwarded until it is that players turn.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `id` - the identifier of the command
     /// * `to_move` - the color to generate the move for
     /// * `mode` - determine whether this is a clean-up move
-    /// 
+    ///
     fn generate_move(&mut self, id: Option<usize>, to_move: Color, mode: &GenMoveMode) -> Option<Point> {
         let (main_time, byo_yomi_time, byo_yomi_periods) = self.time_settings[to_move as usize].remaining();
         let board = self.history.last().unwrap();
@@ -349,7 +349,7 @@ impl Gtp {
                     .unwrap_or(0);
 
                 mcts::predict(
-                    &service.lock().clone_to_static(),
+                    service,
                     mode.search_strategy(),
                     time_control::ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods),
                     search_tree,
@@ -358,7 +358,7 @@ impl Gtp {
                 )
             } else {
                 mcts::predict(
-                    &service.lock().clone_to_static(),
+                    service,
                     mode.search_strategy(),
                     time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
                     search_tree,
@@ -442,7 +442,7 @@ impl Gtp {
                 let mut board = board.clone();
                 let mut to_move = board.to_move();
                 let search_tree = match mcts::predict(
-                    &service.lock().clone_to_static(),
+                    service,
                     Box::new(ScoringSearch::default()),
                     time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
                     None,
@@ -465,7 +465,7 @@ impl Gtp {
 
                 // greedy rollout of the rest of the game
                 let (finished, _rollout) = mcts::greedy_score(
-                    &service.lock(),
+                    service,
                     &board,
                     to_move
                 );

@@ -63,15 +63,15 @@ impl TimeStrategy for PonderTimeControl {
 /// The worker that performs the pondering in the background. It will keep
 /// probing into the given `search_tree`, for the given board state and color
 /// until `is_running` is set to false.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `service` - the neural network service used for inference
 /// * `search_tree` - the search tree to probe into
 /// * `board` - the board state at the root of the search tree
 /// * `to_move` - the color of the player whose turn it is to play
 /// * `is_running` - the boolean used to determine when to terminate the search
-/// 
+///
 fn ponder_worker(
     service: PredictService,
     search_tree: Option<SearchTree>,
@@ -83,7 +83,7 @@ fn ponder_worker(
     let start_time = ProcessTime::now();
     let max_tree_size = (*config::NUM_ROLLOUT).user_defined_or(500_000);
     let result = mcts::predict(
-        &service.lock().clone_to_static(),
+        &service,
         Box::new(StandardSearch::default()),
         PonderTimeControl { is_running, max_tree_size },
         search_tree,
@@ -123,9 +123,9 @@ impl Drop for PonderService {
 impl PonderService {
     /// Returns a service that will ponder, starting from the given board
     /// position.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `board` - the initial board.
     ///
     pub fn new(board: Board) -> PonderService {
@@ -137,7 +137,7 @@ impl PonderService {
             is_running: is_running,
             worker: Some(thread::spawn(move || {
                 if let Some(network) = Network::new() {
-                    let service = mcts::predict_service::service(network);
+                    let service = PredictService::new(network);
 
                     ponder_worker(service, None, board, to_move, is_running_worker)
                 } else {
@@ -158,15 +158,15 @@ impl PonderService {
     /// Pauses the pondering and gives the caller access to the internal state
     /// through a callback. The pondering will be resumed as soon as the
     /// callback returns.
-    /// 
+    ///
     /// The callback gets the current `search_tree`, `board`, and `color` that
     /// is currently being pondered, and can control what the next ponder target
     /// will be with its return values.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `callback` - the callback to execute during the pause
-    /// 
+    ///
     pub fn service<F, T>(&mut self, callback: F) -> Result<T, &'static str>
         where F: FnOnce(&PredictService, SearchTree, (Board, Color)) -> (T, Option<SearchTree>, (Board, Color))
     {
@@ -209,12 +209,12 @@ impl PonderService {
 
     /// Plays the given move into the current _search tree_. Moving the search
     /// tree forward one turn.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `color` - the color of the move
     /// * `at_point` - `(x, y)` coordinates of the move, or `None` to pass.
-    /// 
+    ///
     pub fn forward(&mut self, color: Color, at_point: Option<Point>) {
         let _result = self.service(move |_service, search_tree, (board, to_move)| {
             let search_tree = if to_move != color {

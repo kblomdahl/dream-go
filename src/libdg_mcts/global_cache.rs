@@ -54,7 +54,7 @@ struct LruEntry<K: Clone, V: Clone> {
 
 /// Wrapper around `HashMap` that only keeps the most recently
 /// added or accessed elements.
-/// 
+///
 /// This is implemented as a double linked hashmap, where new elements
 /// are added or moves to the head when accessed and if the list becomes
 /// too large then the tail of the list is removed from the map.
@@ -168,15 +168,15 @@ struct BoardTuple {
 /// Retrieve the value and policy from the transposition table, if
 /// the `(board, color)`  tuple is not in the transposition table then
 /// it is computed from the given supplier.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `board` - the board to get from the table
 /// * `to_move` - the color to get from the table
 /// * `symmetry` - the symmetry to get from the table
 /// * `supplier` - a function that can be used to compute the value
 ///   and policy if they are missing from the table.
-/// 
+///
 pub fn get_or_insert<F>(
     board: &Board,
     to_move: Color,

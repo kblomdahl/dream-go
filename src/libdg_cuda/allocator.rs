@@ -18,6 +18,7 @@ use crate::memory::*;
 use std::cell::{RefCell, Ref};
 use std::collections::btree_map::BTreeMap;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::ops::{Deref, DerefMut};
 
 pub trait Allocator {
@@ -132,6 +133,42 @@ impl<A: Allocator> Allocator for Cloneable<A> {
 
     fn free(&mut self, ptr: Ptr) {
         self.allocator.borrow_mut().free(ptr)
+    }
+}
+
+// -------- Concurrent --------
+
+pub struct Concurrent<A: Allocator> {
+    allocator: Arc<Mutex<A>>
+}
+
+impl<A: Allocator + Default> Default for Concurrent<A> {
+    fn default() -> Self {
+        Self::new(A::default())
+    }
+}
+
+impl<A: Allocator> Clone for Concurrent<A> {
+    fn clone(&self) -> Self {
+        let allocator = Arc::clone(&self.allocator);
+
+        Self { allocator }
+    }
+}
+
+impl<A: Allocator> Concurrent<A> {
+    pub fn new(allocator: A) -> Self {
+        Self { allocator: Arc::new(Mutex::new(allocator)) }
+    }
+}
+
+impl<A: Allocator> Allocator for Concurrent<A> {
+    fn alloc(&mut self, size_in_bytes: usize) -> Result<Ptr, Error> {
+        self.allocator.lock().expect("could not acquire allocator").alloc(size_in_bytes)
+    }
+
+    fn free(&mut self, ptr: Ptr) {
+        self.allocator.lock().expect("could not acquire allocator").free(ptr)
     }
 }
 

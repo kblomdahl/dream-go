@@ -16,14 +16,10 @@ mod benchmark;
 mod feature;
 mod forward;
 mod mcts;
-mod predict_state1;
-mod predict;
 mod sgf;
 
 pub use self::benchmark::*;
 pub use self::feature::*;
 pub use self::forward::*;
 pub use self::mcts::*;
-pub use self::predict_state1::*;
-pub use self::predict::*;
 pub use self::sgf::*;

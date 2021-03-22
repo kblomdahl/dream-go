@@ -13,7 +13,4 @@
 // limitations under the License.
 
 pub mod global_rwlock;
-mod service;
 pub mod spin;
-
-pub use self::service::*;

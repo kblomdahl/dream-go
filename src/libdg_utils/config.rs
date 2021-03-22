@@ -143,7 +143,7 @@ lazy_static! {
 
     /// The total number of parallel probes to perform for every monte carlo
     /// search tree.
-    /// 
+    ///
     /// When trying to improve the GPU utilization you should prefer to
     /// increase the `NUM_GAMES` variable instead as that scaled much better.
     pub static ref NUM_THREADS: usize = {
@@ -221,11 +221,11 @@ pub fn get_description() -> String {
 }
 
 /// Returns true if any command-line argument with the given name is present.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `name` - the command-line arguments to check for
-/// 
+///
 pub fn has_opt(name: &str) -> bool {
     env::args().skip(1).any(|arg| arg == name)
 }
@@ -314,7 +314,7 @@ fn get_intp_value(points: &[(i32, f32)], x: i32) -> f32 {
 ///
 /// # Arguments
 ///
-/// * `visits` - 
+/// * `visits` -
 ///
 pub fn get_uct_exp(visits: i32) -> f32 {
     get_intp_value(&UCT_EXP, visits)
@@ -325,7 +325,7 @@ pub fn get_uct_exp(visits: i32) -> f32 {
 ///
 /// # Arguments
 ///
-/// * `visits` - 
+/// * `visits` -
 ///
 pub fn get_fpu_reduce(visits: i32) -> f32 {
     get_intp_value(&FPU_REDUCE, visits)

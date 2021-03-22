@@ -12,36 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bench::{Benchmark, BenchmarkExecutor, PredictState1};
+use bench::{Benchmark, BenchmarkExecutor};
 use dg_go::utils::sgf::SgfEntry;
 use dg_mcts::options::StandardSearch;
-use dg_mcts::parallel::{self, ServiceGuard};
-use dg_mcts::predict_service::PredictState;
+use dg_mcts::predict_service::PredictService;
 use dg_mcts::predict;
 use dg_mcts::time_control::RolloutLimit;
 use dg_nn::Network;
 use dg_utils::config;
 
 pub struct MctsBenchmarkExecutor {
-    #[allow(dead_code)]
-    server: parallel::Service<PredictState1>,
-    server_lock: ServiceGuard<'static, PredictState1>
+    server: PredictService
 }
 
 impl BenchmarkExecutor for MctsBenchmarkExecutor {
     fn new(network: Network) -> Self {
-        let server = parallel::Service::new(None, PredictState::new(network, 1));
-        let server_lock = server.lock().clone_to_static();
+        let server = PredictService::new(network);
 
-        Self {
-            server,
-            server_lock
-        }
+        Self { server }
     }
 
     fn call(&mut self, entry: SgfEntry) -> usize {
         let (_value, _, tree) = predict(
-            &self.server_lock,
+            &self.server,
             Box::new(StandardSearch::default()),
             RolloutLimit::new(usize::from(*config::NUM_ROLLOUT)),
             None,

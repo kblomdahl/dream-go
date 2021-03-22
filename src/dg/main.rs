@@ -71,12 +71,11 @@ fn main() {
 
             for sgf_file in config::get_args() {
                 println!("{}:", sgf_file);
-                println!("  sgf:               {:.4} per second", bench::SgfBenchmark::new(&network).evaluate(&sgf_file));
-                println!("  feature:           {:.4} per second", bench::FeatureBenchmark::new(&network).evaluate(&sgf_file));
+                println!("  sgf:       {:.4} per second", bench::SgfBenchmark::new(&network).evaluate(&sgf_file));
+                println!("  feature:   {:.4} per second", bench::FeatureBenchmark::new(&network).evaluate(&sgf_file));
                 println!("  batch_size {}", *config::BATCH_SIZE);
-                println!("    forward:         {:.4} per second", bench::ForwardBenchmark::new(&network).evaluate(&sgf_file));
-                println!("    predict_service: {:.4} per second", bench::PredictBenchmark::new(&network).evaluate(&sgf_file));
-                println!("  mcts:              {:.4} per second", bench::MctsBenchmark::new(&network).evaluate(&sgf_file));
+                println!("    forward: {:.4} per second", bench::ForwardBenchmark::new(&network).evaluate(&sgf_file));
+                println!("    mcts:    {:.4} per second", bench::MctsBenchmark::new(&network).evaluate(&sgf_file));
             }
         },
 
