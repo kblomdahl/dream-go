@@ -23,9 +23,6 @@ pub trait Predictor : Clone + Send {
     /// * `features` - the features to query
     ///
     fn predict(&self, features: Vec<f16>, batch_size: usize) -> Vec<PredictResponse>;
-
-    /// Reset any internal state for this predictor.
-    fn synchronize(&self);
 }
 
 /// An implementation of `Predictor` that returns completely random predictions. This
@@ -56,10 +53,6 @@ impl Predictor for RandomPredictor {
             })
             .collect()
     }
-
-    fn synchronize(&self) {
-        // pass
-    }
 }
 
 /// An implementation of `Predict` that always returns the given point as the
@@ -85,11 +78,7 @@ impl Predictor for FakePredictor {
         policy[self.point] = f16::from(1.0);
 
         (0..batch_size)
-            .map(|i| PredictResponse::new(self.value, policy.clone()))
+            .map(|_| PredictResponse::new(self.value, policy.clone()))
             .collect()
-    }
-
-    fn synchronize(&self) {
-        // pass
     }
 }

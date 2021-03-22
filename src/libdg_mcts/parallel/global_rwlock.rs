@@ -16,10 +16,7 @@ use crossbeam_utils::sync::{ShardedLock, ShardedLockReadGuard};
 use std::cell::RefCell;
 
 /// The state of the current thread, whether it is holding the read-lock or not.
-enum ThreadLockState {
-    None,
-    Read(ShardedLockReadGuard<'static, ()>)
-}
+type ThreadLockState = Option<ShardedLockReadGuard<'static, ()>>;
 
 lazy_static! {
     /// The global rw-lock
@@ -37,53 +34,51 @@ thread_local! {
 ///
 /// # Arguments
 ///
-/// * `f` - the function to execute inside of a _write lock_.
+/// * `callback` - the function to execute inside of a _write lock_.
 ///
-pub fn write<F: FnOnce()>(f: F) -> bool {
-    let was_reader = read_unlock();
-
-    {
-        let _guard = RWLOCK.write().unwrap();
-
-        f();
-    }
-
-    if was_reader {
-        read_lock()
-    } else {
-        false
-    }
-}
-
-/// Acquire a _read lock_ for the current thread. Returns `true` iff this thread did not already
-/// hold a _read lock_.
-pub fn read_lock() -> bool {
+pub fn write<F: FnOnce()>(callback: F) {
     LOCK_STATE.with(|state| {
-        let next_state = match *state.borrow() {
-            ThreadLockState::Read(ref _guard) => { return false },
-            ThreadLockState::None => {
-                ThreadLockState::Read(RWLOCK.read().unwrap())
+        let next_state = match state.borrow_mut().take() {
+            None => {
+                let _guard = RWLOCK.write();
+                return callback();
+            },
+            Some(guard) => {
+                drop(guard);
+                let guard = RWLOCK.write().expect("could not acquire write lock");
+                callback();
+                drop(guard);
+
+                Some(RWLOCK.read().expect("could not acquire read lock"))
             }
         };
 
         *state.borrow_mut() = next_state;
-        true
-    })
+    });
 }
 
-/// Release the _read lock_ for the current thread. Returns `true` iff this thread held the
-/// _read lock_.
-pub fn read_unlock() -> bool {
+/// Acquire and hold the read-lock for the duration of the execution of the given callback, once
+/// the callback has been executed release the read-lock.
+///
+/// # Arguments
+///
+/// * `callback` -
+///
+pub fn read<T, F: FnOnce() -> T>(callback: F) -> T {
     LOCK_STATE.with(|state| {
         let next_state = match *state.borrow() {
-            ThreadLockState::None => { return false },
-            ThreadLockState::Read(ref _guard) => {
-                ThreadLockState::None
+            Some(ref _guard) => {
+                return callback();
+            },
+            None => {
+                Some(RWLOCK.read().expect("could not acquire read lock"))
             }
         };
 
         *state.borrow_mut() = next_state;
-        true
+        let result = callback();
+        *state.borrow_mut() = None;
+        result
     })
 }
 
@@ -92,25 +87,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn promote_read() {
-        assert_eq!(read_lock(), true);
-        assert_eq!(write(|| { }), true);
-        assert_eq!(read_unlock(), true);
-    }
-
-    #[test]
     fn write_without_read() {
-        assert_eq!(write(|| { }), false);
+        write(|| { });
     }
 
     #[test]
-    fn register_already_registered() {
-        assert_eq!(read_lock(), true);
-        assert_eq!(read_lock(), false);
+    fn read_without_write() {
+        assert_eq!(read(|| { false }), false);
     }
 
     #[test]
-    fn unregister_not_registered() {
-        assert_eq!(read_unlock(), false);
+    fn read_with_write() {
+        assert_eq!(read(|| { write(|| {}) }), ());
     }
 }

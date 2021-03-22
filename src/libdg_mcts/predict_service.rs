@@ -57,10 +57,6 @@ impl Predictor for PredictService {
 
         result.expect("could not run neural network")
     }
-
-    fn synchronize(&self) {
-        self.network.synchronize();
-    }
 }
 
 pub struct PredictResponse {

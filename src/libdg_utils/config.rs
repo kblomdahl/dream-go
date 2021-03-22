@@ -139,7 +139,7 @@ lazy_static! {
     /// The maximum number of games to play in parallel during `SelfPlay`,
     /// `PolicyPlay`, and `Extract` (with expert iteration).
     pub static ref NUM_GAMES: usize = get_opt("--num-games")
-        .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 1 } else { 16 });
+        .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 1 } else { 8 });
 
     /// The total number of parallel probes to perform for every monte carlo
     /// search tree.
@@ -147,7 +147,7 @@ lazy_static! {
     /// When trying to improve the GPU utilization you should prefer to
     /// increase the `NUM_GAMES` variable instead as that scaled much better.
     pub static ref NUM_THREADS: usize = {
-        let num_threads = get_opt("--num-threads").unwrap_or(64);
+        let num_threads = get_opt("--num-threads").unwrap_or(16);
 
         assert!(
             num_threads >= *NUM_GAMES,
