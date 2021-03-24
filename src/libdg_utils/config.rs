@@ -139,7 +139,7 @@ lazy_static! {
     /// The maximum number of games to play in parallel during `SelfPlay`,
     /// `PolicyPlay`, and `Extract` (with expert iteration).
     pub static ref NUM_GAMES: usize = get_opt("--num-games")
-        .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 1 } else { 8 });
+        .unwrap_or_else(|| if *PROCEDURE == Procedure::Gtp { 1 } else { 2 });
 
     /// The total number of parallel probes to perform for every monte carlo
     /// search tree.

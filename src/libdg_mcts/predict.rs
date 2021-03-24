@@ -13,16 +13,39 @@
 // limitations under the License.
 
 use dg_utils::types::f16;
-use predict_service::PredictResponse;
+
+#[derive(Clone)]
+pub struct PredictResponse {
+    value: f16,
+    policy: Vec<f16>
+}
+
+impl PredictResponse {
+    pub fn new(value: f16, policy: Vec<f16>) -> Self {
+        Self { value, policy }
+    }
+
+    pub fn value(&self) -> f32 {
+        f32::from(self.value)
+    }
+
+    pub fn policy(&self) -> Vec<f32> {
+        self.policy.iter().map(|&x| f32::from(x)).collect()
+    }
+}
 
 pub trait Predictor : Clone + Send {
+    /// Returns the maximum number of parallel calls that should be made into
+    /// `predict`.
+    fn max_num_threads(&self) -> usize;
+
     /// Returns the result of the given query.
     ///
     /// # Arguments
     ///
     /// * `features` - the features to query
     ///
-    fn predict(&self, features: Vec<f16>, batch_size: usize) -> Vec<PredictResponse>;
+    fn predict(&self, features: &[f16], batch_size: usize) -> Vec<PredictResponse>;
 }
 
 /// An implementation of `Predictor` that returns completely random predictions. This
@@ -31,7 +54,11 @@ pub trait Predictor : Clone + Send {
 pub struct RandomPredictor;
 
 impl Predictor for RandomPredictor {
-    fn predict(&self, _features: Vec<f16>, batch_size: usize) -> Vec<PredictResponse> {
+    fn max_num_threads(&self) -> usize {
+        1
+    }
+
+    fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<PredictResponse> {
         use rand::{thread_rng, Rng};
         use super::asm::normalize_finite_f32;
 
@@ -73,7 +100,11 @@ impl FakePredictor {
 
 #[cfg(test)]
 impl Predictor for FakePredictor {
-    fn predict(&self, _features: Vec<f16>, batch_size: usize) -> Vec<PredictResponse> {
+    fn max_num_threads(&self) -> usize {
+        1
+    }
+
+    fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<PredictResponse> {
         let mut policy = vec! [f16::from(0.0); 368];
         policy[self.point] = f16::from(1.0);
 

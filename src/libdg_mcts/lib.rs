@@ -63,15 +63,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use dg_cuda::Device;
 use dg_go::utils::features::{HWC, Features, FEATURE_SIZE};
 use dg_go::utils::symmetry;
 use dg_go::{Board, Color, Point};
 use self::options::{SearchOptions, ScoringSearch};
 use self::time_control::TimeStrategy;
 use self::tree::{ProbeResult, NodeTrace};
-use self::predict::Predictor;
-use self::predict_service::PredictResponse;
+use self::predict::{Predictor, PredictResponse};
 use dg_utils::config;
 use dg_utils::types::f16;
 use self::asm::sum_finite_f32;
@@ -104,7 +102,7 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
 
     // calculate any symmetries that were missing, add them to the cache, and then take the
     // average of them
-    let new_responses = server.predict(new_requests, 8);
+    let new_responses = server.predict(&new_requests, new_symmetries.len());
 
     for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
         let (other_value, other_policy) = global_cache::get_or_insert(board, to_move, t, || {
@@ -227,76 +225,142 @@ fn normalize_policy(policy: &mut Vec<f32>) {
     }
 }
 
-enum EventDrive {
-    Predict(Vec<f16>, Board, symmetry::Transform, NodeTrace),
-    Insert(PredictResponse, Board, symmetry::Transform, NodeTrace)
+#[derive(Clone)]
+enum EventKind {
+    Predict(Vec<f16>),
+    Insert(PredictResponse),
+    Pending
 }
 
 #[derive(Clone)]
-struct PredictBatcher {
-    ///
-    features_list: Vec<f16>,
-
-    ///
-    symmetries_list: Vec<symmetry::Transform>,
-
-    ///
-    traces_list: Vec<NodeTrace>,
-
-    ///
-    boards_list: Vec<Board>,
-
-    ///
-    batch_size: usize
+struct Event {
+    kind: EventKind,
+    board: Board,
+    transformation: symmetry::Transform,
+    trace: NodeTrace
 }
 
-impl PredictBatcher {
-    fn new() -> Self {
+impl Event {
+    fn predict(board: Board, trace: NodeTrace) -> Self {
+        let transformation = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
+        let &(_, last_move, _) = trace.last().unwrap();
+        let features = board.get_features::<HWC, f16>(last_move.opposite(), transformation);
+        let kind = EventKind::Predict(features);
+
+        Self { kind, board, transformation, trace }
+    }
+
+    fn into_insert(mut self, response: PredictResponse) -> (EventKind, Event) {
+        let prev_kind = self.kind;
+        self.kind = EventKind::Insert(response);
+        (prev_kind, self)
+    }
+
+    fn into_pending(mut self) -> (EventKind, Event) {
+        let prev_kind = self.kind;
+        self.kind = EventKind::Pending;
+        (prev_kind, self)
+    }
+}
+
+struct Batch {
+    features: Vec<f16>,
+    events: Vec<Event>,
+    num_batches: Arc<AtomicUsize>
+}
+
+impl Batch {
+    fn new(features: Vec<f16>, events: Vec<Event>, num_batches: Arc<AtomicUsize>) -> Self {
+        Self { features, events, num_batches }
+    }
+
+    fn forward<P: Predictor>(self, server: &P) -> (Vec<Event>, Vec<PredictResponse>) {
+        let responses = server.predict(&self.features, self.events.len());
+        self.num_batches.fetch_sub(1, Ordering::Release);
+
+        (self.events, responses)
+    }
+}
+
+struct BatcherList {
+    /// The features gathered so far.
+    features: Vec<f16>,
+
+    /// The events gathered so far.
+    events: Vec<Event>,
+}
+
+impl BatcherList {
+    fn new(max_batch_size: usize) -> Self {
         Self {
-            features_list: vec! [],
-            symmetries_list: vec! [],
-            traces_list: vec! [],
-            boards_list: vec! [],
-            batch_size: *config::BATCH_SIZE
+            features: Vec::with_capacity(2 * max_batch_size * FEATURE_SIZE),
+            events: Vec::with_capacity(2 * max_batch_size)
+        }
+    }
+}
+
+#[derive(Clone)]
+struct Batcher {
+    /// The list of features and events gathered so far.
+    list: Arc<Mutex<BatcherList>>,
+
+    /// The number of batches "alive".
+    num_batches: Arc<AtomicUsize>,
+
+    /// The maximum size of a batch.
+    max_batch_size: usize,
+
+    /// The maximum number of allowed batches to be live at the same time.
+    max_batches: usize,
+}
+
+impl Batcher {
+    fn new(max_batches: usize) -> Self {
+        let max_batch_size = *config::BATCH_SIZE;
+
+        Self {
+            list: Arc::new(Mutex::new(BatcherList::new(max_batch_size))),
+            num_batches: Arc::new(AtomicUsize::new(0)),
+            max_batch_size: max_batch_size,
+            max_batches: max_batches
         }
     }
 
-    fn push_and_get_batch(&mut self, features: Vec<f16>, board: Board, symmetry: symmetry::Transform, trace: NodeTrace) -> Option<(Vec<f16>, Vec<Board>, Vec<symmetry::Transform>, Vec<NodeTrace>)> {
-        self.push(features, board, symmetry, trace);
-
-        if self.traces_list.len() >= self.batch_size {
-            self.get_so_far()
-        } else {
-            None
-        }
+    fn push(&self, event: Event, features: Vec<f16>) {
+        let mut list = self.list.lock().expect("could not acquire batch list lock");
+        list.features.extend_from_slice(&features);
+        list.events.push(event);
     }
 
-    fn push(&mut self, features: Vec<f16>, board: Board, symmetry: symmetry::Transform, trace: NodeTrace) {
-        self.features_list.extend_from_slice(&features);
-        self.symmetries_list.push(symmetry);
-        self.boards_list.push(board);
-        self.traces_list.push(trace);
+    fn push_and_get_batch(&self, event: Event, features: Vec<f16>) -> Option<Batch> {
+        self.push(event, features);
+        self.get_batch(self.max_batch_size)
     }
 
-    fn get_so_far(&mut self) -> Option<(Vec<f16>, Vec<Board>, Vec<symmetry::Transform>, Vec<NodeTrace>)> {
-        let split_index =
-            if self.traces_list.len() >= self.batch_size {
-                self.traces_list.len() - self.batch_size
-            } else {
-                0
-            };
+    fn get_batch(&self, min_batch_size: usize) -> Option<Batch> {
+        // check so that we're not at capacity already
+        let current = self.num_batches.load(Ordering::Relaxed);
 
-        if self.traces_list.len() == 0 {
+        if current >= self.max_batches {
             None
         } else {
-            Some(
-                (
-                    self.features_list.split_off(split_index * FEATURE_SIZE),
-                    self.boards_list.split_off(split_index),
-                    self.symmetries_list.split_off(split_index),
-                    self.traces_list.split_off(split_index)
+            // check so that we're not returning a batch if we've already reached the threshold
+            let mut list = self.list.lock().expect("could not acquire batch list lock");
+            let size = list.events.len();
+
+            if size >= min_batch_size && self.num_batches.compare_exchange_weak(current, current + 1, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+                let split_index = if size >= self.max_batch_size { size - self.max_batch_size } else { 0 };
+
+                Some(
+                    Batch::new(
+                        list.features.split_off(split_index * FEATURE_SIZE),
+                        list.events.split_off(split_index),
+                        self.num_batches.clone()
+                    )
                 )
-            )
+            } else {
+                None
+            }
         }
     }
 }
@@ -304,6 +368,9 @@ impl PredictBatcher {
 /// The shared variables between the master and each worker thread in the `predict` function.
 #[derive(Clone)]
 struct ThreadContext<T: TimeStrategy + Clone + Send> {
+    ///
+    event_queue: Arc<SegQueue<Event>>,
+
     /// The root of the monte carlo tree.
     root: Arc<UnsafeCell<tree::Node>>,
 
@@ -317,13 +384,10 @@ struct ThreadContext<T: TimeStrategy + Clone + Send> {
     time_strategy: T,
 
     ///
-    predict_batch: Arc<Mutex<PredictBatcher>>,
+    predict_batch: Batcher,
 
-    ///
-    event_queue: Arc<SegQueue<EventDrive>>,
-
-    ///
-    num_predict_running: Arc<AtomicUsize>
+    /// All threads that are currently parked while waiting for more work.
+    epoch: Arc<AtomicUsize>
 }
 
 unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
@@ -343,56 +407,31 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
     let root = unsafe { &mut *context.root.get() };
     let event_queue = &context.event_queue;
     let options = &**context.options;
-    let num_predict_running = &*context.num_predict_running;
-    let max_predict_running = 2 * Device::all().expect("").len();
 
-    while global_rwlock::read(|| !time_control::is_done(root, &context.time_strategy)) {
-        match event_queue.pop() {
+    while !global_rwlock::read(|| time_control::is_done(root, &context.time_strategy)) {
+        match event_queue.pop().map(|event| event.into_pending()) {
             None => {
                 // evaluate anything in the queue so far
-                let batch =
-                    {
-                        let num = num_predict_running.load(Ordering::Relaxed);
+                let event_responses = context.predict_batch
+                    .get_batch(1)
+                    .map(|batch| batch.forward(&server));
 
-                        if num < max_predict_running && num_predict_running.compare_exchange_weak(num, num + 1, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
-                            let result = context.predict_batch.lock()
-                                .expect("could not acquire predict batch lock")
-                                .get_so_far();
-
-                            match result {
-                                None => {
-                                    num_predict_running.fetch_sub(1, Ordering::Relaxed);
-                                    None
-                                },
-                                x => x
-                            }
-                        } else {
-                            None
-                        }
-                    };
-
-                if let Some((features_list, boards_list, symmetries_list, traces_list)) = batch {
-                    let responses = server.predict(features_list, traces_list.len());
-                    num_predict_running.fetch_sub(1, Ordering::Relaxed);
-
-                    for (((response, board), t), trace) in responses.into_iter().zip(boards_list.into_iter()).zip(symmetries_list.into_iter()).zip(traces_list.into_iter()) {
-                        event_queue.push(EventDrive::Insert(response, board, t, trace));
+                if let Some((events, responses)) = event_responses {
+                    for (event, response) in events.into_iter().zip(responses.into_iter()) {
+                        event_queue.push(event.into_insert(response).1);
                     }
                 } else {
-                    // Probe the board
+                    // probe the board if there has been an update since we last encountered
+                    // a conflict (or more than 1 ms has passed for deadlock reasons).
                     let mut board = context.starting_point.clone();
                     let probe = unsafe { global_rwlock::read(|| tree::probe(root, &mut board)) };
 
                     match probe {
                         ProbeResult::Found(trace) => {
-                            let t = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
-                            let &(_, last_move, _) = trace.last().unwrap();
-                            let features = board.get_features::<HWC, f16>(last_move.opposite(), t);
-
-                            event_queue.push(EventDrive::Predict(features, board, t, trace));
+                            event_queue.push(Event::predict(board, trace));
                         },
                         ProbeResult::Conflict => {
-                            ::std::thread::yield_now(); // do something bigger?
+                            thread::yield_now();
                         },
                         ProbeResult::NoResult => {
                             return;
@@ -400,33 +439,34 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
                     }
                 }
             },
-            Some(EventDrive::Predict(features, board, t, trace)) => {
+            Some((EventKind::Predict(features), event)) => {
                 // add to the end of the queue
-                let batch = context.predict_batch.lock()
-                    .expect("could not acquire predict batch lock")
-                    .push_and_get_batch(features, board, t, trace);
+                let event_responses = context.predict_batch
+                    .push_and_get_batch(event, features)
+                    .map(|batch| batch.forward(&server));
 
-                // if queue is full then evaluate it
-                if let Some((features_list, boards_list, symmetries_list, traces_list)) = batch {
-                    num_predict_running.fetch_add(1, Ordering::Relaxed);
-                    let responses = server.predict(features_list, traces_list.len());
-                    num_predict_running.fetch_sub(1, Ordering::Relaxed);
-
-                    for (((response, board), t), trace) in responses.into_iter().zip(boards_list.into_iter()).zip(symmetries_list.into_iter()).zip(traces_list.into_iter()) {
-                        event_queue.push(EventDrive::Insert(response, board, t, trace));
+                // if we got a batch back from the queue then evaluate it
+                if let Some((events, responses)) = event_responses {
+                    for (event, response) in events.into_iter().zip(responses.into_iter()) {
+                        event_queue.push(event.into_insert(response).1);
                     }
                 }
             },
-            Some(EventDrive::Insert(response, board, symmetry, trace)) => {
-                let &(_, last_move, _) = trace.last().unwrap();
+            Some((EventKind::Insert(response), event)) => {
+                let &(_, last_move, _) = event.trace.last().unwrap();
                 let to_move = last_move.opposite();
-                let (mut policy, indices) = create_initial_policy(options, &board, to_move);
-                add_valid_candidates(&mut policy, response.policy(), &indices, symmetry);
+                let (mut policy, indices) = create_initial_policy(options, &event.board, to_move);
+                add_valid_candidates(&mut policy, response.policy(), &indices, event.transformation);
                 normalize_policy(&mut policy);
 
                 unsafe {
-                    global_rwlock::read(|| tree::insert(&trace, to_move, 0.5 + 0.5 * response.value(), policy));
+                    global_rwlock::read(|| tree::insert(&event.trace, to_move, 0.5 + 0.5 * response.value(), policy));
                 }
+
+                context.epoch.fetch_add(1, Ordering::Release);
+            },
+            Some((EventKind::Pending, _)) => {
+                unreachable!();
             }
         }
     }
@@ -489,9 +529,9 @@ fn predict_aux<T, P>(
         options: Arc::new(options),
         starting_point: starting_point.clone(),
         time_strategy: time_strategy.clone(),
-        predict_batch: Arc::new(Mutex::new(PredictBatcher::new())),
+        predict_batch: Batcher::new(server.max_num_threads()),
         event_queue: Arc::new(SegQueue::new()),
-        num_predict_running: Arc::new(AtomicUsize::new(0))
+        epoch: Arc::new(AtomicUsize::new(0))
     };
 
     if num_workers <= 1 {
@@ -584,7 +624,6 @@ fn get_random_komi() -> f32 {
 mod tests {
     use dg_go::{Board, Color};
     use dg_utils::types::f16;
-    use predict_service::PredictResponse;
     use super::*;
 
     use std::sync::Arc;
@@ -610,9 +649,9 @@ mod tests {
             starting_point: Board::new(7.5),
             options: Arc::new(Box::new(StandardSearch::new(1))),
             time_strategy: time_control::RolloutLimit::new(100),
-            predict_batch: Arc::new(Mutex::new(PredictBatcher::new())),
+            predict_batch: Batcher::new(1),
             event_queue: Arc::new(SegQueue::new()),
-            num_predict_running: Arc::new(AtomicUsize::new(0))
+            epoch: Arc::new(AtomicUsize::new(0))
         };
 
         for i in 0..362 {
@@ -627,7 +666,11 @@ mod tests {
     struct NanPredictor;
 
     impl predict::Predictor for NanPredictor {
-        fn predict(&self, _features: Vec<f16>, batch_size: usize) -> Vec<PredictResponse> {
+        fn max_num_threads(&self) -> usize {
+            1
+        }
+
+        fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<PredictResponse> {
             (0..batch_size)
                 .map(|_| {
                     PredictResponse::new(
