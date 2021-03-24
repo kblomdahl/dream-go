@@ -29,6 +29,10 @@ impl PredictResponse {
         f32::from(self.value)
     }
 
+    pub fn winrate(&self) -> f32 {
+        0.5 * self.value() + 0.5
+    }
+
     pub fn policy(&self) -> Vec<f32> {
         self.policy.iter().map(|&x| f32::from(x)).collect()
     }

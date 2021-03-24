@@ -96,30 +96,43 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
     let mut new_symmetries = Vec::with_capacity(8);
 
     for &t in &symmetry::ALL {
-        new_requests.extend_from_slice(&board.get_features::<HWC, f16>(to_move, t));
-        new_symmetries.push(t);
+        if let Some(new_response) = global_cache::fetch(board, to_move, t) {
+            let mut new_policy = initial_policy.clone();
+            add_valid_candidates(&mut new_policy, new_response.policy(), &indices, t);
+            normalize_policy(&mut new_policy, 0.125);
+
+            value += new_response.winrate() * 0.125;
+            for i in 0..362 {
+                policy[i] += new_policy[i];
+            }
+        } else {
+            new_requests.extend_from_slice(&board.get_features::<HWC, f16>(to_move, t));
+            new_symmetries.push(t);
+        }
     }
 
     // calculate any symmetries that were missing, add them to the cache, and then take the
     // average of them
-    let new_responses = server.predict(&new_requests, new_symmetries.len());
+    let batch_size = new_symmetries.len();
 
-    for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
-        let (other_value, other_policy) = global_cache::get_or_insert(board, to_move, t, || {
-            let mut identity_policy = initial_policy.clone();
-            add_valid_candidates(&mut identity_policy, new_response.policy(), &indices, t);
-            normalize_policy(&mut identity_policy);
+    if batch_size > 0 {
+        let new_responses = server.predict(&new_requests, batch_size);
 
-            Some((0.5 + 0.5 * new_response.value(), identity_policy))
-        }).unwrap();
+        for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
+            global_cache::insert(board, to_move, t, &new_response);
 
-        for i in 0..362 { policy[i] += other_policy[i]; }
-        value += other_value;
+            let mut new_policy = initial_policy.clone();
+            add_valid_candidates(&mut new_policy, new_response.policy(), &indices, t);
+            normalize_policy(&mut new_policy, 0.125);
+
+            value += new_response.winrate() * 0.125;
+            for i in 0..362 {
+                policy[i] += new_policy[i];
+            }
+        }
     }
 
-    normalize_policy(&mut policy);
-
-    Some((value * 0.125, policy))
+    Some((value, policy))
 }
 
 /// Returns a initial accumulator policy where all illegal moves has been set
@@ -203,20 +216,21 @@ fn add_valid_candidates(
     }
 }
 
-/// Normalize the given vector so that its elements sums to `1.0`.
+/// Normalize the given vector so that its elements sums to `sum_to`.
 ///
 /// # Arguments
 ///
 /// * `policy` - the vector to normalize in-place
+/// * `sum_to` - the value that the elements should sum to
 ///
-fn normalize_policy(policy: &mut Vec<f32>) {
+fn normalize_policy(policy: &mut Vec<f32>, sum_to: f32) {
     // re-normalize the policy since we have modified its values
     let policy_sum: f32 = sum_finite_f32(&policy);
 
     if policy_sum < 1e-6 {  // do not divide by zero
-        dirichlet::add_ex(&mut policy[0..362], 0.03, 1.0);
+        dirichlet::add_ex(&mut policy[0..362], 0.03, sum_to);
     } else {
-        normalize_finite_f32(policy, policy_sum);
+        normalize_finite_f32(policy, policy_sum * sum_to);
     }
 
     // check for NaN
@@ -244,8 +258,14 @@ impl Event {
     fn predict(board: Board, trace: NodeTrace) -> Self {
         let transformation = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
         let &(_, last_move, _) = trace.last().unwrap();
-        let features = board.get_features::<HWC, f16>(last_move.opposite(), transformation);
-        let kind = EventKind::Predict(features);
+        let to_move = last_move.opposite();
+        let features = board.get_features::<HWC, f16>(to_move, transformation);
+        let kind =
+            if let Some(response) = global_cache::fetch(&board, to_move, transformation) {
+                EventKind::Insert(response)
+            } else {
+                EventKind::Predict(features)
+            };
 
         Self { kind, board, transformation, trace }
     }
@@ -458,10 +478,11 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
                 let to_move = last_move.opposite();
                 let (mut policy, indices) = create_initial_policy(options, &event.board, to_move);
                 add_valid_candidates(&mut policy, response.policy(), &indices, event.transformation);
-                normalize_policy(&mut policy);
+                normalize_policy(&mut policy, 1.0);
 
                 unsafe {
-                    global_rwlock::read(|| { tree::insert(&event.trace, to_move, 0.5 + 0.5 * response.value(), policy) });
+                    global_rwlock::read(|| { tree::insert(&event.trace, to_move, response.winrate(), policy) });
+                    global_cache::insert(&event.board, to_move, event.transformation, &response);
                 }
             },
             Some((EventKind::Pending, _)) => {

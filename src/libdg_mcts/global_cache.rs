@@ -17,6 +17,7 @@ use std::sync::Mutex;
 use std::hash::{Hash, Hasher};
 use std::ptr;
 
+use crate::predict::PredictResponse;
 use dg_go::utils::symmetry;
 use dg_go::{Board, Color};
 
@@ -156,65 +157,58 @@ impl<K: Clone + Hash + Eq, V: Clone> LruCache<K, V> {
     }
 }
 
-/* -------- get_or_insert -------- */
+/* -------- fetch -------- */
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct BoardTuple {
-    board: Board,
+    board: u64,
     to_move: Color,
     symmetry: symmetry::Transform
 }
 
-/// Retrieve the value and policy from the transposition table, if
-/// the `(board, color)`  tuple is not in the transposition table then
-/// it is computed from the given supplier.
+lazy_static! {
+    static ref TABLE: Mutex<LruCache<BoardTuple, PredictResponse>> = {
+        Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1))
+    };
+}
+
+/// Retrieve the value and policy from the transposition table.
 ///
 /// # Arguments
 ///
 /// * `board` - the board to get from the table
 /// * `to_move` - the color to get from the table
 /// * `symmetry` - the symmetry to get from the table
-/// * `supplier` - a function that can be used to compute the value
-///   and policy if they are missing from the table.
 ///
-pub fn get_or_insert<F>(
-    board: &Board,
-    to_move: Color,
-    symmetry: symmetry::Transform,
-    supplier: F
-) -> Option<(f32, Vec<f32>)>
-    where F: FnOnce() -> Option<(f32, Vec<f32>)>
-{
-    lazy_static! {
-        static ref TABLE: Mutex<LruCache<BoardTuple, (f32, Vec<f32>)>> = {
-            Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1))
-        };
-    }
-
+pub fn fetch(board: &Board, to_move: Color, symmetry: symmetry::Transform) -> Option<PredictResponse> {
     let key = BoardTuple {
-        board: board.clone(),
+        board: board.zobrist_hash(),
         to_move: to_move,
         symmetry: symmetry
     };
-    let existing = {
-        let mut table = TABLE.lock().unwrap();
 
-        table.get(&key).map(|&(value, ref policy)| {
-            (value, policy.clone())
-        })
+    let mut table = TABLE.lock().unwrap();
+    table.get(&key).cloned()
+}
+
+/// Adds the given value and policy to the transposition table.
+///
+/// # Arguments
+///
+/// * `board` - the board to add to the table
+/// * `to_move` - the color to add to the table
+/// * `symmetry` - the symmetry to add to the table
+/// * `response` - the response to add to the table
+///
+pub fn insert(board: &Board, to_move: Color, symmetry: symmetry::Transform, response: &PredictResponse) {
+    let key = BoardTuple {
+        board: board.zobrist_hash(),
+        to_move: to_move,
+        symmetry: symmetry
     };
 
-    if let Some((value, policy)) = existing {
-        Some((value, policy))
-    } else if let Some((value, policy)) = supplier() {
-        let mut table = TABLE.lock().unwrap();
-
-        table.insert(&key, (value, policy.clone()));
-
-        Some((value, policy))
-    } else {
-        None
-    }
+    let mut table = TABLE.lock().unwrap();
+    table.insert(&key, response.clone());
 }
 
 #[cfg(test)]

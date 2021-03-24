@@ -40,6 +40,8 @@ impl Predictor for PredictService {
     }
 
     fn predict(&self, features_list: &[f16], batch_size: usize) -> Vec<PredictResponse> {
+        assert!(batch_size > 0);
+
         let devices = Device::all().expect("could not find any compatible devices");
         let index = self.count.fetch_add(1, Ordering::Relaxed) % devices.len();
         devices[index].set_current().expect("could not set the device for the current thread");
