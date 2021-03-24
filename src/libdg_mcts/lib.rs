@@ -16,8 +16,8 @@
 #![feature(test)]
 
 extern crate crossbeam_channel;
+extern crate concurrent_queue;
 extern crate crossbeam_utils;
-extern crate crossbeam_queue;
 extern crate dg_cuda;
 extern crate dg_go;
 extern crate dg_nn;
@@ -55,7 +55,7 @@ pub use self::reanalyze::*;
 
 /* -------- Code -------- */
 
-use crossbeam_queue::SegQueue;
+use concurrent_queue::ConcurrentQueue;
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
@@ -339,7 +339,7 @@ impl Batcher {
 
     fn get_batch(&self, min_batch_size: usize) -> Option<Batch> {
         // check so that we're not at capacity already
-        let current = self.num_batches.load(Ordering::Relaxed);
+        let current = self.num_batches.load(Ordering::Acquire);
 
         if current >= self.max_batches {
             None
@@ -369,7 +369,7 @@ impl Batcher {
 #[derive(Clone)]
 struct ThreadContext<T: TimeStrategy + Clone + Send> {
     ///
-    event_queue: Arc<SegQueue<Event>>,
+    event_queue: Arc<ConcurrentQueue<Event>>,
 
     /// The root of the monte carlo tree.
     root: Arc<UnsafeCell<tree::Node>>,
@@ -383,11 +383,8 @@ struct ThreadContext<T: TimeStrategy + Clone + Send> {
     /// Time control element
     time_strategy: T,
 
-    ///
-    predict_batch: Batcher,
-
-    /// All threads that are currently parked while waiting for more work.
-    epoch: Arc<AtomicUsize>
+    /// Batched MCTS traces for evaluation.
+    predict_batch: Batcher
 }
 
 unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
@@ -405,11 +402,11 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
           P: Predictor
 {
     let root = unsafe { &mut *context.root.get() };
-    let event_queue = &context.event_queue;
+    let event_queue = context.event_queue.clone();
     let options = &**context.options;
 
-    while !global_rwlock::read(|| time_control::is_done(root, &context.time_strategy)) {
-        match event_queue.pop().map(|event| event.into_pending()) {
+    'outer: loop {
+        match event_queue.pop().map(|event| event.into_pending()).ok() {
             None => {
                 // evaluate anything in the queue so far
                 let event_responses = context.predict_batch
@@ -418,17 +415,21 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
 
                 if let Some((events, responses)) = event_responses {
                     for (event, response) in events.into_iter().zip(responses.into_iter()) {
-                        event_queue.push(event.into_insert(response).1);
+                        event_queue.push(event.into_insert(response).1).ok().expect("could not push to event queue");
                     }
                 } else {
+                    if global_rwlock::read(|| { time_control::is_done(root, &context.time_strategy) }) {
+                        break 'outer;
+                    }
+
                     // probe the board if there has been an update since we last encountered
                     // a conflict (or more than 1 ms has passed for deadlock reasons).
                     let mut board = context.starting_point.clone();
-                    let probe = unsafe { global_rwlock::read(|| tree::probe(root, &mut board)) };
+                    let probe = unsafe { global_rwlock::read(|| { tree::probe(root, &mut board) }) };
 
                     match probe {
                         ProbeResult::Found(trace) => {
-                            event_queue.push(Event::predict(board, trace));
+                            event_queue.push(Event::predict(board, trace)).ok().expect("could not push to event queue");
                         },
                         ProbeResult::Conflict => {
                             thread::yield_now();
@@ -448,7 +449,7 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
                 // if we got a batch back from the queue then evaluate it
                 if let Some((events, responses)) = event_responses {
                     for (event, response) in events.into_iter().zip(responses.into_iter()) {
-                        event_queue.push(event.into_insert(response).1);
+                        event_queue.push(event.into_insert(response).1).ok().expect("could not push to event queue");
                     }
                 }
             },
@@ -460,10 +461,8 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
                 normalize_policy(&mut policy);
 
                 unsafe {
-                    global_rwlock::read(|| tree::insert(&event.trace, to_move, 0.5 + 0.5 * response.value(), policy));
+                    global_rwlock::read(|| { tree::insert(&event.trace, to_move, 0.5 + 0.5 * response.value(), policy) });
                 }
-
-                context.epoch.fetch_add(1, Ordering::Release);
             },
             Some((EventKind::Pending, _)) => {
                 unreachable!();
@@ -530,8 +529,7 @@ fn predict_aux<T, P>(
         starting_point: starting_point.clone(),
         time_strategy: time_strategy.clone(),
         predict_batch: Batcher::new(server.max_num_threads()),
-        event_queue: Arc::new(SegQueue::new()),
-        epoch: Arc::new(AtomicUsize::new(0))
+        event_queue: Arc::new(ConcurrentQueue::unbounded())
     };
 
     if num_workers <= 1 {
@@ -650,8 +648,7 @@ mod tests {
             options: Arc::new(Box::new(StandardSearch::new(1))),
             time_strategy: time_control::RolloutLimit::new(100),
             predict_batch: Batcher::new(1),
-            event_queue: Arc::new(SegQueue::new()),
-            epoch: Arc::new(AtomicUsize::new(0))
+            event_queue: Arc::new(ConcurrentQueue::unbounded())
         };
 
         for i in 0..362 {
