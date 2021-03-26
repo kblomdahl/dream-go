@@ -13,17 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::hash::{Hash, Hasher};
 use std::ptr;
-
-use crate::predict::PredictResponse;
-use dg_go::utils::symmetry;
-use dg_go::{Board, Color};
-
-/// The maximum number of entries to be stored in the transposition table
-/// before we need to remove the least recently used one.
-const MAX_CACHE_SIZE: usize = 200_000;
 
 #[derive(Debug)]
 struct KeyRef<K: Hash + Eq> {
@@ -60,7 +51,7 @@ struct LruEntry<K: Clone, V: Clone> {
 /// are added or moves to the head when accessed and if the list becomes
 /// too large then the tail of the list is removed from the map.
 #[derive(Debug)]
-struct LruCache<K: Clone + Hash + Eq, V: Clone> {
+pub struct LruCache<K: Clone + Hash + Eq, V: Clone> {
     entries: HashMap<KeyRef<K>, Box<LruEntry<K, V>>>,
     capacity: usize,
     head: *mut LruEntry<K, V>,
@@ -99,7 +90,7 @@ macro_rules! detach {
 }
 
 impl<K: Clone + Hash + Eq, V: Clone> LruCache<K, V> {
-    fn with_capacity(cap: usize) -> LruCache<K, V> {
+    pub fn with_capacity(cap: usize) -> LruCache<K, V> {
         LruCache {
             entries: HashMap::with_capacity(cap),
             capacity: cap,
@@ -113,7 +104,7 @@ impl<K: Clone + Hash + Eq, V: Clone> LruCache<K, V> {
         self.entries.len()
     }
 
-    fn get(&mut self, key: &K) -> Option<&V> {
+    pub fn get(&mut self, key: &K) -> Option<&V> {
         let key_ref = KeyRef { inner: key };
 
         if let Some(entry) = self.entries.get_mut(&key_ref) {
@@ -128,7 +119,7 @@ impl<K: Clone + Hash + Eq, V: Clone> LruCache<K, V> {
         }
     }
 
-    fn insert(&mut self, key: &K, value: V) {
+    pub fn insert(&mut self, key: &K, value: V) {
         let key_ref = KeyRef { inner: key };
 
         if !self.entries.contains_key(&key_ref) {
@@ -155,60 +146,6 @@ impl<K: Clone + Hash + Eq, V: Clone> LruCache<K, V> {
             }
         }
     }
-}
-
-/* -------- fetch -------- */
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct BoardTuple {
-    board: u64,
-    to_move: Color,
-    symmetry: symmetry::Transform
-}
-
-lazy_static! {
-    static ref TABLE: Mutex<LruCache<BoardTuple, PredictResponse>> = {
-        Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1))
-    };
-}
-
-/// Retrieve the value and policy from the transposition table.
-///
-/// # Arguments
-///
-/// * `board` - the board to get from the table
-/// * `to_move` - the color to get from the table
-/// * `symmetry` - the symmetry to get from the table
-///
-pub fn fetch(board: &Board, to_move: Color, symmetry: symmetry::Transform) -> Option<PredictResponse> {
-    let key = BoardTuple {
-        board: board.zobrist_hash(),
-        to_move: to_move,
-        symmetry: symmetry
-    };
-
-    let mut table = TABLE.lock().unwrap();
-    table.get(&key).cloned()
-}
-
-/// Adds the given value and policy to the transposition table.
-///
-/// # Arguments
-///
-/// * `board` - the board to add to the table
-/// * `to_move` - the color to add to the table
-/// * `symmetry` - the symmetry to add to the table
-/// * `response` - the response to add to the table
-///
-pub fn insert(board: &Board, to_move: Color, symmetry: symmetry::Transform, response: &PredictResponse) {
-    let key = BoardTuple {
-        board: board.zobrist_hash(),
-        to_move: to_move,
-        symmetry: symmetry
-    };
-
-    let mut table = TABLE.lock().unwrap();
-    table.insert(&key, response.clone());
 }
 
 #[cfg(test)]

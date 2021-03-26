@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use dg_go::utils::symmetry;
+use dg_go::{Board, Color};
 use dg_utils::types::f16;
 
 #[derive(Clone)]
@@ -38,10 +40,38 @@ impl PredictResponse {
     }
 }
 
+pub trait PredictorCache : Clone + Send {
+    /// Retrieve the value and policy from the transposition table.
+    ///
+    /// # Arguments
+    ///
+    /// * `board` - the board to get from the table
+    /// * `to_move` - the color to get from the table
+    /// * `symmetry` - the symmetry to get from the table
+    ///
+    fn fetch(&self, board: &Board, to_move: Color, symmetry: symmetry::Transform) -> Option<PredictResponse>;
+
+    /// Adds the given value and policy to the transposition table.
+    ///
+    /// # Arguments
+    ///
+    /// * `board` - the board to add to the table
+    /// * `to_move` - the color to add to the table
+    /// * `symmetry` - the symmetry to add to the table
+    /// * `response` - the response to add to the table
+    ///
+    fn insert(&self, board: &Board, to_move: Color, symmetry: symmetry::Transform, response: PredictResponse);
+}
+
 pub trait Predictor : Clone + Send {
+    type Cache: PredictorCache;
+
     /// Returns the maximum number of parallel calls that should be made into
     /// `predict`.
     fn max_num_threads(&self) -> usize;
+
+    /// Returns the cache associated with this predictor.
+    fn cache(&self) -> &Self::Cache;
 
     /// Returns the result of the given query.
     ///
@@ -52,14 +82,35 @@ pub trait Predictor : Clone + Send {
     fn predict(&self, features: &[f16], batch_size: usize) -> Vec<PredictResponse>;
 }
 
+#[derive(Clone, Default)]
+pub struct NoCache;
+
+impl PredictorCache for NoCache {
+    fn fetch(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform) -> Option<PredictResponse> {
+        None
+    }
+
+    fn insert(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform, _response: PredictResponse) {
+        // pass
+    }
+}
+
 /// An implementation of `Predictor` that returns completely random predictions. This
 /// is useful for testing purposes.
 #[derive(Clone, Default)]
-pub struct RandomPredictor;
+pub struct RandomPredictor {
+    cache: NoCache
+}
 
 impl Predictor for RandomPredictor {
+    type Cache = NoCache;
+
     fn max_num_threads(&self) -> usize {
         1
+    }
+
+    fn cache(&self) -> &Self::Cache {
+        &self.cache
     }
 
     fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<PredictResponse> {
@@ -91,6 +142,7 @@ impl Predictor for RandomPredictor {
 #[cfg(test)]
 #[derive(Clone, Default)]
 pub struct FakePredictor {
+    cache: NoCache,
     point: usize,
     value: f16
 }
@@ -98,14 +150,20 @@ pub struct FakePredictor {
 #[cfg(test)]
 impl FakePredictor {
     pub fn new(point: usize, value: f32) -> Self {
-        Self { point: point, value: f16::from(value) }
+        Self { cache: NoCache::default(), point: point, value: f16::from(value) }
     }
 }
 
 #[cfg(test)]
 impl Predictor for FakePredictor {
+    type Cache = NoCache;
+
     fn max_num_threads(&self) -> usize {
         1
+    }
+
+    fn cache(&self) -> &Self::Cache {
+        &self.cache
     }
 
     fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<PredictResponse> {

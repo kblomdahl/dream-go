@@ -12,31 +12,97 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::predict::{Predictor, PredictResponse};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use predict::{Predictor, PredictorCache, PredictResponse};
+use lru_cache::LruCache;
+use dg_go::utils::symmetry::Transform;
+use dg_go::{Board, Color};
 use dg_cuda::Device;
 use dg_nn::{self as nn, Network};
 use dg_utils::types::f16;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::sync::Mutex;
+
+/// The maximum number of entries to be stored in the transposition table
+/// before we need to remove the least recently used one.
+const MAX_CACHE_SIZE: usize = 200_000;
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct BoardTuple {
+    board_hash: u64,
+    to_move: Color,
+    symmetry: Transform
+}
+
+impl BoardTuple {
+    fn new(board: &Board, to_move: Color, symmetry: Transform) -> Self {
+        Self {
+            board_hash: board.zobrist_hash(),
+            to_move: to_move,
+            symmetry: symmetry
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct PredictLruCache {
+    table: Arc<Mutex<LruCache<BoardTuple, PredictResponse>>>
+}
+
+impl PredictLruCache {
+    fn new() -> Self {
+        Self {
+            table: Arc::new(Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1)))
+        }
+    }
+}
+
+impl PredictorCache for PredictLruCache {
+    #[inline(always)]
+    fn fetch(&self, board: &Board, to_move: Color, symmetry: Transform) -> Option<PredictResponse> {
+        let key = BoardTuple::new(board, to_move, symmetry);
+
+        self.table.lock().expect("could not acquire cache table lock")
+            .get(&key)
+            .cloned()
+    }
+
+    #[inline(always)]
+    fn insert(&self, board: &Board, to_move: Color, symmetry: Transform, response: PredictResponse) {
+        let key = BoardTuple::new(board, to_move, symmetry);
+
+        self.table.lock().expect("could not acquire cache table lock")
+            .insert(&key, response);
+    }
+}
+
 #[derive(Clone)]
 pub struct PredictService {
+    cache: PredictLruCache,
     network: Network,
     count: Arc<AtomicUsize>
 }
 
 impl PredictService {
     pub fn new(network: Network) -> Self {
+        let cache = PredictLruCache::new();
         let count = Arc::new(AtomicUsize::new(0));
 
-        Self { network, count }
+        Self { cache, network, count }
     }
 }
 
 impl Predictor for PredictService {
+    type Cache = PredictLruCache;
+
     fn max_num_threads(&self) -> usize {
         let num_devices = Device::all().expect("could not find any compatible devices").len();
         2 * num_devices
+    }
+
+    fn cache(&self) -> &Self::Cache {
+        &self.cache
     }
 
     fn predict(&self, features_list: &[f16], batch_size: usize) -> Vec<PredictResponse> {

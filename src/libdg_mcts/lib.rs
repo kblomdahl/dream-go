@@ -35,7 +35,7 @@ pub mod asm;
 mod choose;
 mod dirichlet;
 mod game_result;
-mod global_cache;
+mod lru_cache;
 mod greedy_score;
 pub mod options;
 pub mod parallel;
@@ -69,7 +69,7 @@ use dg_go::{Board, Color, Point};
 use self::options::{SearchOptions, ScoringSearch};
 use self::time_control::TimeStrategy;
 use self::tree::{ProbeResult, NodeTrace};
-use self::predict::{Predictor, PredictResponse};
+use self::predict::{Predictor, PredictorCache, PredictResponse};
 use dg_utils::config;
 use dg_utils::types::f16;
 use self::asm::sum_finite_f32;
@@ -96,7 +96,7 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
     let mut new_symmetries = Vec::with_capacity(8);
 
     for &t in &symmetry::ALL {
-        if let Some(new_response) = global_cache::fetch(board, to_move, t) {
+        if let Some(new_response) = server.cache().fetch(board, to_move, t) {
             let mut new_policy = initial_policy.clone();
             add_valid_candidates(&mut new_policy, new_response.policy(), &indices, t);
             normalize_policy(&mut new_policy, 0.125);
@@ -119,8 +119,6 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
         let new_responses = server.predict(&new_requests, batch_size);
 
         for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
-            global_cache::insert(board, to_move, t, &new_response);
-
             let mut new_policy = initial_policy.clone();
             add_valid_candidates(&mut new_policy, new_response.policy(), &indices, t);
             normalize_policy(&mut new_policy, 0.125);
@@ -129,6 +127,7 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
             for i in 0..362 {
                 policy[i] += new_policy[i];
             }
+            server.cache().insert(board, to_move, t, new_response);
         }
     }
 
@@ -255,15 +254,15 @@ struct Event {
 }
 
 impl Event {
-    fn predict(board: Board, trace: NodeTrace) -> Self {
+    fn predict<P: Predictor>(server: &P, board: Board, trace: NodeTrace) -> Self {
         let transformation = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
         let &(_, last_move, _) = trace.last().unwrap();
         let to_move = last_move.opposite();
-        let features = board.get_features::<HWC, f16>(to_move, transformation);
         let kind =
-            if let Some(response) = global_cache::fetch(&board, to_move, transformation) {
+            if let Some(response) = server.cache().fetch(&board, to_move, transformation) {
                 EventKind::Insert(response)
             } else {
+                let features = board.get_features::<HWC, f16>(to_move, transformation);
                 EventKind::Predict(features)
             };
 
@@ -449,7 +448,7 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
 
                     match probe {
                         ProbeResult::Found(trace) => {
-                            event_queue.push(Event::predict(board, trace)).ok().expect("could not push to event queue");
+                            event_queue.push(Event::predict(&server, board, trace)).ok().expect("could not push to event queue");
                         },
                         ProbeResult::Conflict => {
                             thread::yield_now();
@@ -482,7 +481,7 @@ fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
 
                 unsafe {
                     global_rwlock::read(|| { tree::insert(&event.trace, to_move, response.winrate(), policy) });
-                    global_cache::insert(&event.board, to_move, event.transformation, &response);
+                    server.cache().insert(&event.board, to_move, event.transformation, response);
                 }
             },
             Some((EventKind::Pending, _)) => {
@@ -642,6 +641,7 @@ fn get_random_komi() -> f32 {
 #[cfg(test)]
 mod tests {
     use dg_go::{Board, Color};
+    use predict::NoCache;
     use dg_utils::types::f16;
     use super::*;
 
@@ -681,11 +681,19 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
-    struct NanPredictor;
+    struct NanPredictor {
+        cache: NoCache
+    }
 
     impl predict::Predictor for NanPredictor {
+        type Cache = NoCache;
+
         fn max_num_threads(&self) -> usize {
             1
+        }
+
+        fn cache(&self) -> &Self::Cache {
+            &self.cache
         }
 
         fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<PredictResponse> {
