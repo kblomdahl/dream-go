@@ -149,6 +149,7 @@ def main():
         'batch_size': args.batch_size[0] if args.batch_size else BATCH_SIZE,
         'learning_rate': 1e-4 if args.warm_start else 3e-4,
         'test_batches': args.test_batches if args.test_batches else 10,
+        'lz_weights': '0e9ea880fd3c4444695e8ff4b8a36310d2c03f7c858cadd37af3b76df1d1d15f',
 
         'num_channels': get_num_channels(args, model_dir) or 128,
         'num_blocks': get_num_blocks(args, model_dir) or 9,

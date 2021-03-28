@@ -35,6 +35,7 @@ class InputFnTest(unittest.TestCase):
         features, labels = self.dataset.output_shapes
 
         self.assertEqual(features.as_list(), [None, 19, 19, NUM_FEATURES])
+        self.assertEqual(labels['lz_features'].as_list(), [None, 19, 19, 18])
         self.assertEqual(labels['boost'].as_list(), [None, 1])
         self.assertEqual(labels['value'].as_list(), [None, 1])
         self.assertEqual(labels['policy'].as_list(), [None, 362])
@@ -47,6 +48,7 @@ class InputFnTest(unittest.TestCase):
         features, labels = self.dataset.output_types
 
         self.assertEqual(features, tf.float16)
+        self.assertEqual(labels['lz_features'], tf.float16)
         self.assertEqual(labels['boost'], tf.float32)
         self.assertEqual(labels['value'], tf.float32)
         self.assertEqual(labels['policy'], tf.float32)

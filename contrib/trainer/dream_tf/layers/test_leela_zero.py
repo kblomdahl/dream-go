@@ -1,4 +1,4 @@
-# Copyright (c) 2020 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+# Copyright (c) 2021 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -19,18 +19,18 @@
 # SOFTWARE.
 
 import tensorflow as tf
+import numpy as np
 import unittest
 
-from . import NUM_FEATURES
-from .tower import tower
+from .test_common import TestUtils
+from .leela_zero import leela_zero
 
-class TowerTest(unittest.TestCase):
+class ResidualBlockTest(unittest.TestCase, TestUtils):
     def setUp(self):
-        self.batch_size = 2048
-        self.num_channels = 128
-        self.num_samples = 8
-        self.num_blocks = 6
-        self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, NUM_FEATURES])
+        self.batch_size = 2
+        self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, 18])
+        np.random.seed(12345)
+        tf.set_random_seed(67890)
 
     def tearDown(self):
         tf.reset_default_graph()
@@ -38,19 +38,14 @@ class TowerTest(unittest.TestCase):
     @property
     def params(self):
         return {
-            "num_blocks": self.num_blocks,
-            "num_channels": self.num_channels,
-            "num_samples": self.num_samples
+            'lz_weights': '0e9ea880fd3c4444695e8ff4b8a36310d2c03f7c858cadd37af3b76df1d1d15f'
         }
 
     def test_shape(self):
-        v, vo, p, o, y = tower(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
-        self.assertEqual(v.shape, [self.batch_size, 1])
-        self.assertEqual(vo.shape, [self.batch_size, 361, 2])
-        self.assertEqual(p.shape, [self.batch_size, 362])
-        self.assertEqual(o.shape, [self.batch_size, 361])
-        self.assertEqual(y.shape, [self.batch_size, 19, 19, self.num_channels])
+        v, p = leela_zero(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
 
+        self.assertEqual(v.shape, [self.batch_size, 1])
+        self.assertEqual(p.shape, [self.batch_size, 362])
 
 if __name__ == '__main__':
     unittest.main()

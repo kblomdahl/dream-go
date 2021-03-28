@@ -28,9 +28,10 @@ dream_go_module = tf.load_op_library('libdg_tf.so')
 
 def _parse(is_deterministic):
     def __do_parse(line):
-        features, policy, next_policy, value, ownership, komi, boost, has_ownership = dream_go_module.sgf_to_features(line)
+        lz_features, features, policy, next_policy, value, ownership, komi, boost, has_ownership = dream_go_module.sgf_to_features(line)
 
         labels = {
+            'lz_features': lz_features,
             'boost': tf.reshape(boost, [1]),
             'value': tf.reshape(value, [1]),
             'policy': tf.reshape(policy, [362]),
@@ -101,6 +102,7 @@ def _augment(features, labels):
     # apply a random transformation to the input features
     symmetry_index = tf.random_uniform((), 0, 8, tf.int32)
     features = _apply_symmetry(symmetry_index, features)
+    lz_features = _apply_symmetry(symmetry_index, labels['lz_features'])
 
     # transforming the policy is _harder_ since it has an extra pass
     # element at the end, so we temporarily remove it while the tensor gets
@@ -111,6 +113,7 @@ def _augment(features, labels):
     next_policy = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(next_policy, [19, 19, 1])), [361])
     ownership = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(labels['ownership'], [19, 19, 1])), [361])
 
+    labels['lz_features'] = lz_features
     labels['policy'] = tf.concat([policy, policy_pass], 0)
     labels['next_policy'] = tf.concat([next_policy, next_policy_pass], 0)
     labels['ownership'] = ownership

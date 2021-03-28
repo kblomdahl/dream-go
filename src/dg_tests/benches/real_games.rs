@@ -20,7 +20,7 @@ extern crate test;
 use test::Bencher;
 
 use dg_go::{DEFAULT_KOMI, Board, Color, Point};
-use dg_go::utils::features::{HWC, Features};
+use dg_go::utils::features::{HWC, DefaultFeatures, Features};
 use dg_go::utils::symmetry::Transform;
 
 /// Benchmark the full playout of a game as a serie of `is_valid` and `place` calls.
@@ -139,7 +139,7 @@ fn get_features_16(b: &mut Bencher) {
     b.iter(move || {
         let black = test::black_box(Color::Black);
 
-        board.get_features::<HWC, f32>(black, Transform::Transpose)
+        DefaultFeatures::new(&board).get_features::<HWC, f32>(black, Transform::Transpose)
     });
 }
 
@@ -194,6 +194,6 @@ fn get_features_32(b: &mut Bencher) {
     b.iter(move || {
         let white = test::black_box(Color::White);
 
-        board.get_features::<HWC, f32>(white, Transform::FlipLR)
+        DefaultFeatures::new(&board).get_features::<HWC, f32>(white, Transform::FlipLR)
     });
 }

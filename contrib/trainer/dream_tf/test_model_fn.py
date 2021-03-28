@@ -29,6 +29,7 @@ class ModelFnTest(unittest.TestCase):
         self.batch_size = 16
         self.features = tf.placeholder(tf.float16, [self.batch_size, 19, 19, NUM_FEATURES])
         self.labels = {
+            'lz_features': tf.placeholder(tf.float16, [self.batch_size, 19, 19, 18]),
             'value': tf.placeholder(tf.float32, [self.batch_size, 1]),
             'policy': tf.placeholder(tf.float32, [self.batch_size, 362]),
             'next_policy': tf.placeholder(tf.float32, [self.batch_size, 362]),
@@ -48,7 +49,7 @@ class ModelFnTest(unittest.TestCase):
             'num_blocks': 6,
             'num_channels': 64,
             'learning_rate': 1e-4,
-            "num_samples": 8
+            'num_samples': 8
         }
 
     def tearDown(self):
@@ -65,4 +66,3 @@ class ModelFnTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

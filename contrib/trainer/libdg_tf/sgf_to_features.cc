@@ -35,6 +35,7 @@ struct Example {
     int winner;
     int number;
     float komi;
+    half lz_features[6498];
     half features[0];
 };
 
@@ -80,6 +81,7 @@ class SgfToFeaturesOp : public OpKernel {
             );
 
             // allocate output
+            Tensor* lz_features_tensor;
             Tensor* features_tensor;
             Tensor* policy_tensor;
             Tensor* policy_next_tensor;
@@ -93,6 +95,15 @@ class SgfToFeaturesOp : public OpKernel {
                 context,
                 context->allocate_output(
                     0,
+                    TensorShape({19, 19, 18}),
+                    &lz_features_tensor
+                )
+            );
+
+            OP_REQUIRES_OK(
+                context,
+                context->allocate_output(
+                    1,
                     TensorShape({19, 19, num_features}),
                     &features_tensor
                 )
@@ -101,7 +112,7 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    1,
+                    2,
                     TensorShape({362}),
                     &policy_tensor
                 )
@@ -110,7 +121,7 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    2,
+                    3,
                     TensorShape({362}),
                     &policy_next_tensor
                 )
@@ -119,7 +130,7 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    3,
+                    4,
                     TensorShape({1}),
                     &winner_tensor
                 )
@@ -128,7 +139,7 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    4,
+                    5,
                     TensorShape({361}),
                     &ownership_tensor
                 )
@@ -137,7 +148,7 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    5,
+                    6,
                     TensorShape({1}),
                     &komi_tensor
                 )
@@ -146,7 +157,7 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    6,
+                    7,
                     TensorShape({1}),
                     &boost_tensor
                 )
@@ -155,13 +166,20 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    7,
+                    8,
                     TensorShape({1}),
                     &has_ownership_tensor
                 )
             );
 
             if (status == 0) {
+                // copy the leela-zero style features
+                auto lz_features = lz_features_tensor->flat<half>();
+
+                for (auto i = 0; i < 6498; ++i) {
+                    lz_features(i) = example->lz_features[i];
+                }
+
                 // copy the features
                 auto features = features_tensor->flat<half>();
 
@@ -290,6 +308,7 @@ class SgfToFeaturesOp : public OpKernel {
 
 REGISTER_OP("SgfToFeatures")
     .Input("sgf: string")
+    .Output("lz_features: float16")
     .Output("features: float16")
     .Output("policy: float32")
     .Output("policy_next: float32")
@@ -304,14 +323,15 @@ REGISTER_OP("SgfToFeatures")
         dims.emplace_back(c->MakeDim(19));
         dims.emplace_back(c->MakeDim(get_num_features()));
 
-        c->set_output(0, c->MakeShape(dims)); // features
-        c->set_output(1, c->MakeShape({362})); // policy
-        c->set_output(2, c->MakeShape({362})); // policy_next
-        c->set_output(3, c->MakeShape({1})); // value
-        c->set_output(4, c->MakeShape({361})); // ownership
-        c->set_output(5, c->MakeShape({1})); // komi
-        c->set_output(6, c->MakeShape({1})); // boost
-        c->set_output(7, c->MakeShape({1})); // has_ownership
+        c->set_output(0, c->MakeShape({19, 19, 18})); // features
+        c->set_output(1, c->MakeShape(dims)); // features
+        c->set_output(2, c->MakeShape({362})); // policy
+        c->set_output(3, c->MakeShape({362})); // policy_next
+        c->set_output(4, c->MakeShape({1})); // value
+        c->set_output(5, c->MakeShape({361})); // ownership
+        c->set_output(6, c->MakeShape({1})); // komi
+        c->set_output(7, c->MakeShape({1})); // boost
+        c->set_output(8, c->MakeShape({1})); // has_ownership
 
         return Status::OK();
     });

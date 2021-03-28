@@ -12,29 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// 
+///
 pub struct CircularIterator<'a, T: Sized + Copy + Default> {
     count: usize,
     position: usize,
     buf: &'a [T]
 }
 
-/// Lookup table computing `(index + 1) % 6`.
-const N_MOD_SIX: [usize; 6] = [1, 2, 3, 4, 5, 0];
+/// Lookup table computing `(index + 1) % 8`.
+const N_MOD_EIGHT: [usize; 8] = [1, 2, 3, 4, 5, 6, 7, 0];
 
-/// Lookup table computing `(index - 1) % 6` with wrap-around for negative
+/// Lookup table computing `(index - 1) % 8` with wrap-around for negative
 /// numbers.
-const P_MOD_SIX: [usize; 6] = [5, 0, 1, 2, 3, 4];
+const P_MOD_EIGHT: [usize; 8] = [7, 0, 1, 2, 3, 4, 5, 6];
 
 impl<'a, T: Sized + Copy + Default> Iterator for CircularIterator<'a, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.count == 6 {
+        if self.count == 8 {
             None
         } else {
             let index = self.position;
-            self.position = P_MOD_SIX[self.position];
+            self.position = P_MOD_EIGHT[self.position];
             self.count += 1;
 
             Some(self.buf[index])
@@ -45,7 +45,7 @@ impl<'a, T: Sized + Copy + Default> Iterator for CircularIterator<'a, T> {
 /// A circular stack that keeps track of the six most recent pushed buffers.
 pub struct CircularBuf<T: Sized + Copy + Default> {
     position: usize,
-    buf: [T; 6]
+    buf: [T; 8]
 }
 
 impl<T: Sized + Copy + Default> Clone for CircularBuf<T> {
@@ -61,19 +61,19 @@ impl<T: Sized + Copy + Default> CircularBuf<T> {
     pub fn new() -> Self {
         CircularBuf {
             position: 0,
-            buf: [T::default(); 6]
+            buf: [T::default(); 8]
         }
     }
 
     /// Adds another value to this circular buffer.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `value` - 
-    /// 
+    ///
+    /// * `value` -
+    ///
     pub fn push(&mut self, value: T) {
         self.buf[self.position] = value;
-        self.position = N_MOD_SIX[self.position];
+        self.position = N_MOD_EIGHT[self.position];
     }
 
     /// Returns an iterator over all the buffers in the stack starting with the
@@ -81,7 +81,7 @@ impl<T: Sized + Copy + Default> CircularBuf<T> {
     pub fn iter(&self) -> CircularIterator<'_, T> {
         CircularIterator {
             count: 0,
-            position: P_MOD_SIX[self.position],
+            position: P_MOD_EIGHT[self.position],
             buf: &self.buf
         }
     }
@@ -104,15 +104,18 @@ mod tests {
         buf.push(6);
         buf.push(7);
         buf.push(8);
+        buf.push(9);
 
         let mut iter = buf.iter();
 
+        assert_eq!(iter.next().unwrap(), 9);
         assert_eq!(iter.next().unwrap(), 8);
         assert_eq!(iter.next().unwrap(), 7);
         assert_eq!(iter.next().unwrap(), 6);
         assert_eq!(iter.next().unwrap(), 5);
         assert_eq!(iter.next().unwrap(), 4);
         assert_eq!(iter.next().unwrap(), 3);
+        assert_eq!(iter.next().unwrap(), 2);
         assert!(iter.next().is_none());
     }
 }

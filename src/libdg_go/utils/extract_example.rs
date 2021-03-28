@@ -17,7 +17,7 @@ use board::Board;
 use point::Point;
 use ::DEFAULT_KOMI;
 
-use super::features::{HWC, FEATURE_SIZE, NUM_FEATURES, Features};
+use super::features::{HWC, FEATURE_SIZE, NUM_FEATURES, LzFeatures, DefaultFeatures, Features};
 use super::sgf::{Sgf, SgfEntry, SgfError, get_komi_from_sgf, is_scored, get_winner_from_sgf};
 use super::symmetry;
 
@@ -45,7 +45,44 @@ pub struct Example {
     pub winner: c_int,
     pub number: c_int,
     pub komi: f32,
-    pub features: [f16; FEATURE_SIZE],
+    pub lz_features: [f16; 6498],
+    pub features: [f16; FEATURE_SIZE]
+}
+
+#[repr(i32)]
+#[derive(Copy, Clone)]
+pub enum Kind {
+    Default = 0,
+    Lz = 1
+}
+
+impl Kind {
+    fn extract(&self, examples: &[Candidate], i: usize) -> Vec<f16> {
+        match *self {
+            Kind::Default => {
+                DefaultFeatures::new(&examples[i].board).get_features::<HWC, f16>(
+                    examples[i].color,
+                    symmetry::Transform::Identity
+                )
+            },
+
+            Kind::Lz => {
+                let mut board_history: Vec<&Board> =
+                    if i < 8 {
+                        examples.iter().take(i + 1).map(|cand| &cand.board).collect()
+                    } else {
+                        let start = ::std::cmp::max(0, i as i32 - 7) as usize;
+                        examples.iter().skip(start).take(8).map(|cand| &cand.board).collect()
+                    };
+                board_history.reverse();
+
+                LzFeatures::new(board_history).get_features::<HWC, f16>(
+                    examples[i].color,
+                    symmetry::Transform::Identity
+                )
+            }
+        }
+    }
 }
 
 impl Default for Example {
@@ -60,7 +97,8 @@ impl Default for Example {
             winner: 0,
             number: 0,
             komi: DEFAULT_KOMI,
-            features: [f16::from(0.0); FEATURE_SIZE],
+            lz_features: [f16::from(0.0); 6498],
+            features: [f16::from(0.0); FEATURE_SIZE]
         }
     }
 }
@@ -122,6 +160,7 @@ pub unsafe extern fn set_seed(seed: i32) {
 /// # Arguments
 ///
 /// - `raw_sgf_content` - The UTF-8 encoded content of an SGF file.
+/// - `kind` - The kind of features to extract.
 /// - `out` - Output of the extracted example.
 ///
 #[no_mangle]
@@ -187,12 +226,12 @@ pub unsafe extern fn extract_single_example(
 
 /// Choose a single example from the given examples. If there are given policies
 /// among the examples then those are favoured.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `examples` -
-/// * `has_policy` - 
-/// 
+/// * `has_policy` -
+///
 fn choose_example(examples: &[Candidate], has_policy: bool) -> Option<usize> {
     let candidate_examples: Vec<usize> = (0..examples.len())
         .filter(|&i| !has_policy || examples[i].has_policy())
@@ -227,14 +266,15 @@ fn choose_example(examples: &[Candidate], has_policy: bool) -> Option<usize> {
 }
 
 /// Set the given example values according to the given SGF and chosen examples.
-/// 
+///
 /// # Arguments
-/// 
-/// * `content` - 
-/// * `examples` - 
-/// * `i` - 
-/// * `out` - 
-/// 
+///
+/// * `content` -
+/// * `kind` -
+/// * `examples` -
+/// * `i` -
+/// * `out` -
+///
 fn copy_candidates_to(
     content: &str,
     examples: &[Candidate],
@@ -250,11 +290,10 @@ fn copy_candidates_to(
             Err(code) => { return code; }
         };
     let next_example = examples.get(i+1);
-    let features = examples[i].board.get_features::<HWC, f16>(
-        examples[i].color,
-        symmetry::Transform::Identity
-    );
+    let lz_features = Kind::Lz.extract(examples, i);
+    let features = Kind::Default.extract(examples, i);
 
+    out.lz_features.clone_from_slice(&lz_features);
     out.features.clone_from_slice(&features);
     out.index = examples[i].index as c_int;
     out.next_index = next_example.map(|example| example.index).unwrap_or(361) as c_int;
@@ -288,13 +327,13 @@ fn copy_candidates_to(
 }
 
 /// Update the vertex ownership based on the given SGF properties.
-/// 
+///
 /// # Arguments
-/// 
-/// * `property` - 
-/// * `value` - 
-/// * `ownership` - 
-/// 
+///
+/// * `property` -
+/// * `value` -
+/// * `ownership` -
+///
 fn set_vertex_ownerships(property: Option<Captures>, value: f32, ownership: &mut [f32]) {
     lazy_static! {
         static ref VERTICES: Regex = Regex::new(r"\[([a-z]*)\]").unwrap();

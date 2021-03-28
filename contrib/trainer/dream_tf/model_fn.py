@@ -24,13 +24,19 @@ from .hooks.dump import DUMP_OPS
 from .hooks.learning_rate import LEARNING_RATE, LOSS
 from .layers.tower import tower
 from .layers.ownership_head import ownership_loss
+from .layers.leela_zero import leela_zero
 
 dream_go_module = tf.load_op_library('libdg_tf.so')
 
 def model_fn(features, labels, mode, params):
-    value_hat, value_ownership_hat, policy_hat, next_policy_hat, ownership_hat, tower_hat = tower(features, mode, params)
+    value_hat, value_ownership_hat, policy_hat, ownership_hat, tower_hat = tower(features, mode, params)
 
     if labels:
+        if mode == tf.estimator.ModeKeys.TRAIN and 'lz_weights' in params:
+            lz_value_hat, lz_policy_hat = leela_zero(labels['lz_features'], mode, params)
+            labels['value'] = tf.cast(lz_value_hat, tf.float32)
+            labels['policy'] = tf.cast(lz_policy_hat, tf.float32)
+
         # determine the loss for each of the components:
         #
         # - Value head
@@ -50,13 +56,6 @@ def model_fn(features, labels, mode, params):
             reduction=tf.losses.Reduction.NONE
         ), (-1, 1))
 
-        loss_next_policy = tf.reshape(tf.losses.softmax_cross_entropy(
-            check_numerics(labels['next_policy'], 'next_policy_labels'),
-            check_numerics(next_policy_hat, 'next_policy_hat'),
-            label_smoothing=0.2,
-            reduction=tf.losses.Reduction.NONE
-        ), (-1, 1))
-
         loss_ownership = tf.reshape(ownership_loss(
             labels=check_numerics(labels['ownership'], 'ownership_labels'),
             logits=check_numerics(ownership_hat, 'ownership_hat')
@@ -72,7 +71,6 @@ def model_fn(features, labels, mode, params):
         #     -1.0 / log (1 / num_classes)
         #
         loss_unboosted = 0.12 * check_numerics(loss_policy, 'loss_policy') \
-                         + 0.12 * check_numerics(loss_next_policy, 'loss_next_policy') \
                          + 1.00 * check_numerics(loss_value, 'loss_value') * labels['boost'] \
                          + 1.00 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership']
 
@@ -119,7 +117,6 @@ def model_fn(features, labels, mode, params):
             train_op = None
 
         tf.summary.scalar('loss/policy', tf.reduce_mean(loss_policy))
-        tf.summary.scalar('loss/next_policy', tf.reduce_mean(loss_next_policy))
         tf.summary.scalar('loss/value', tf.reduce_mean(loss_value))
         tf.summary.scalar('loss/ownership', tf.reduce_mean(loss_ownership))
         tf.summary.scalar('loss/l2', tf.reduce_mean(loss_reg))
@@ -136,6 +133,10 @@ def model_fn(features, labels, mode, params):
         tf.summary.image('value/labels', to_heat_image(tf.ones([19, 19]) * labels['value'][0, 0]))
         for i in range(2):
             tf.summary.image('value/ownership/' + str(i), to_heat_image(tf.reshape(value_ownership_hat[0, :, i], [19, 19])))
+        for i in range(features.shape[-1]):
+            tf.summary.image('features/default/' + str(i), to_heat_image(tf.cast(tf.reshape(features[0, :, :, i], [19, 19]), tf.float32)))
+        for i in range(labels['lz_features'].shape[-1]):
+            tf.summary.image('features/lz/' + str(i), to_heat_image(tf.cast(tf.reshape(labels['lz_features'][0, :, :, i], [19, 19]), tf.float32)))
         tf.summary.image('ownership/predictions', to_heat_image(tf.reshape(ownership_hat[0, :], [19, 19])))
         tf.summary.image('ownership/labels', to_heat_image(tf.reshape(labels['ownership'][0, :], [19, 19])))
         tf.summary.image('policy/predictions', to_heat_image(tf.reshape(tf.nn.softmax(policy_hat[0, :361]), [19, 19])))
@@ -145,22 +146,15 @@ def model_fn(features, labels, mode, params):
         # the pure loss function. Even if it is considered bad practice to look
         # at the accuracy instead of the loss.
         policy_hot = tf.argmax(labels['policy'], axis=1)
-        next_policy_hot = tf.argmax(labels['next_policy'], axis=1)
         policy_1 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 1), tf.float32)
         policy_3 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 3), tf.float32)
         policy_5 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 5), tf.float32)
-        next_policy_1 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 1), tf.float32)
-        next_policy_3 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 3), tf.float32)
-        next_policy_5 = tf.cast(tf.nn.in_top_k(next_policy_hat, next_policy_hot, 5), tf.float32)
         value_1 = tf.cast(tf.equal(tf.sign(value_hat), tf.sign(labels['value'])), tf.float32)
         ownership_1 = tf.cast(tf.equal(tf.sign(ownership_hat), tf.sign(labels['ownership'])), tf.float32)
 
         tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_1))
         tf.summary.scalar('accuracy/policy_3', tf.reduce_mean(policy_3))
         tf.summary.scalar('accuracy/policy_5', tf.reduce_mean(policy_5))
-        tf.summary.scalar('accuracy/next_policy_1', tf.reduce_mean(next_policy_1))
-        tf.summary.scalar('accuracy/next_policy_3', tf.reduce_mean(next_policy_3))
-        tf.summary.scalar('accuracy/next_policy_5', tf.reduce_mean(next_policy_5))
         tf.summary.scalar('accuracy/value', tf.reduce_mean(value_1))
         tf.summary.scalar('accuracy/ownership', tf.reduce_mean(ownership_1))
 
@@ -168,13 +162,9 @@ def model_fn(features, labels, mode, params):
             'accuracy/policy_1': tf.metrics.mean(policy_1),
             'accuracy/policy_3': tf.metrics.mean(policy_3),
             'accuracy/policy_5': tf.metrics.mean(policy_5),
-            'accuracy/next_policy_1': tf.metrics.mean(next_policy_1),
-            'accuracy/next_policy_3': tf.metrics.mean(next_policy_3),
-            'accuracy/next_policy_5': tf.metrics.mean(next_policy_5),
             'accuracy/value': tf.metrics.mean(value_1),
             'accuracy/ownership': tf.metrics.mean(ownership_1),
             'loss/policy': tf.metrics.mean(loss_policy),
-            'loss/next_policy': tf.metrics.mean(loss_next_policy),
             'loss/value': tf.metrics.mean(loss_value),
             'loss/ownership': tf.metrics.mean(loss_ownership)
         }
@@ -191,7 +181,6 @@ def model_fn(features, labels, mode, params):
         'value_ownership': value_ownership_hat,
         'ownership': ownership_hat,
         'policy': tf.nn.softmax(policy_hat),
-        'next_policy': tf.nn.softmax(next_policy_hat),
         'tower': tower_hat
     }
 
