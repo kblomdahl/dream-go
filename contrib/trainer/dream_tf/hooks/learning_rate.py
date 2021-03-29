@@ -30,6 +30,8 @@ LEARNING_RATE = 'LearningRate'
 """ The graph collection that contains the loss """
 LOSS = 'Loss'
 
+""" The minimum learning rate before requesting a stop """
+MIN_LEARNING_RATE = 1e-5
 
 class LearningRateScheduler(tf.estimator.SessionRunHook):
     """
@@ -143,7 +145,7 @@ class LearningRateScheduler(tf.estimator.SessionRunHook):
             is_not_decreasing = p < 0.51 and rp < 0.51
 
             if can_lower_rate and is_not_decreasing:
-                if learning_rate < 1e-5:
+                if learning_rate < MIN_LEARNING_RATE:
                     run_context.request_stop()
 
                 run_context.session.run([self.learning_rate_op, self.last_decrease_op], feed_dict={

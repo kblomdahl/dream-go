@@ -20,6 +20,7 @@
 
 import tensorflow as tf
 import numpy as np
+import gzip
 
 def leela_zero(x, mode, params):
     data_type = tf.float16
@@ -32,27 +33,10 @@ def leela_zero(x, mode, params):
     )
 
     def conv2d(x, name):
-        y = tf.nn.conv2d(x, lz_init_op(f'{name}'), (1, 1, 1, 1), 'SAME', True, 'NHWC') + lz_init_op(f'{name}/offset')
-        # z, _, _ = tf.nn.fused_batch_norm(
-        #     y,
-        #     tf.ones_like(lz_init_op(f'{name}/offset')),
-        #     lz_init_op(f'{name}/offset'),
-        #     lz_init_op(f'{name}/mean'),
-        #     lz_init_op(f'{name}/variance'),
-        #     epsilon=1e-5,
-        #     data_format='NHWC',
-        #     is_training=False
-        # )
-        # with tf.control_dependencies([tf.print(name, tf.math.reduce_mean(tf.math.reduce_mean(z, axis=[1, 2])), tf.math.reduce_mean(tf.math.reduce_variance(z, axis=[1, 2])))]):
-        #     return tf.identity(z)
-        with tf.control_dependencies([tf.print(name, tf.math.reduce_mean(tf.math.reduce_mean(y, axis=[1, 2])), tf.math.reduce_mean(tf.math.reduce_variance(y, axis=[1, 2])))]):
-            return tf.identity(y)
+        return tf.nn.conv2d(x, lz_init_op(f'{name}'), (1, 1, 1, 1), 'SAME', True, 'NHWC') + lz_init_op(f'{name}/offset')
 
     def dense(x, name):
-        y = tf.matmul(x, lz_init_op(f'{name}')) + lz_init_op(f'{name}/offset')
-
-        with tf.control_dependencies([tf.print(name, tf.math.reduce_mean(tf.math.reduce_mean(y, axis=[1])), tf.math.reduce_mean(tf.math.reduce_variance(y, axis=[1])))]):
-            return tf.identity(y)
+        return tf.matmul(x, lz_init_op(f'{name}')) + lz_init_op(f'{name}/offset')
 
     x = tf.cast(x, data_type)
 
@@ -89,60 +73,102 @@ def leela_zero(x, mode, params):
 
     return tf.stop_gradient(v), tf.stop_gradient(p)
 
-def read_version(fh):
-    line = fh.readline().strip()
-    assert line == '1'
+class LzWeightsParser:
+    def __init__(self, filename, params):
+        self.filename = filename
+        self.params = params
+        self.out = {}
 
-def read_numeric_line(fh):
-    line = fh.readline().strip()
-    return np.fromstring(line, 'f4', sep=' ')
+    def __enter__(self):
+        self.fh = self._open()
+        return self
 
-def read_fold_bn_weights(fh, name, shape, out):
-    weights = read_numeric_line(fh)
-    beta = read_numeric_line(fh)
-    mean = read_numeric_line(fh)
-    variance = read_numeric_line(fh)
-    std = np.sqrt(variance + 1e-5)
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        self.fh.close()
+        self.fh = None
 
-    out[f'{name}'] = np.transpose(np.reshape(weights, shape), [2, 3, 1, 0]) / std.reshape([1, 1, 1, shape[0]])
-    out[f'{name}/offset'] = np.reshape(beta / std - mean / std, [shape[0]])
-    out[f'{name}/mean'] = np.reshape(mean, [shape[0]])
-    out[f'{name}/variance'] = np.reshape(variance, [shape[0]])
+    @property
+    def num_blocks(self):
+        with self._open() as fh:
+            count = len([line for line in fh])
 
-def read_linear_weights(fh, name, shape, out):
-    out[name] = np.transpose(np.reshape(read_numeric_line(fh), shape), [1, 0])
-    out[f'{name}/offset'] = np.reshape(read_numeric_line(fh), [shape[0]])
+        return (count - (1 + 4 + 14)) // 8
 
-def count_lines(filename):
-    with open(filename, 'r') as fh:
-        return len([line for line in fh])
+    @property
+    def num_channels(self):
+        num_inputs = self.params['num_inputs']
 
-def calc_num_channels(filename, num_inputs):
-    with open(filename, 'r') as fh:
-        read_version(fh)
-        return read_numeric_line(fh).size // (3 * 3 * num_inputs)
+        with self._open() as fh:
+            self._read_version(fh)
+            return self._read_numeric_line(fh).size // (3 * 3 * num_inputs)
+
+    def _open(self):
+        if self.filename.endswith('.gz'):
+            return gzip.open(self.filename, 'rt')
+        else:
+            return open(self.filename, 'r')
+
+    def to_dict(self):
+        return self.out
+
+    def _read_version(self, fh):
+        line = fh.readline().strip()
+        assert line == '1', f'version should be 1 -- {line}'
+
+    def read_version(self):
+        self._read_version(self.fh)
+
+    def _read_numeric_line(self, fh):
+        line = fh.readline().strip()
+        return np.fromstring(line, 'f4', sep=' ')
+
+    def read_numeric_line(self):
+        return self._read_numeric_line(self.fh)
+
+    def read_fold_bn_weights(self, name, shape):
+        weights = self.read_numeric_line()
+        beta = self.read_numeric_line()
+        mean = self.read_numeric_line()
+        variance = self.read_numeric_line()
+        std = np.sqrt(variance + 1e-5)
+
+        self.out[f'{name}'] = np.transpose(np.reshape(weights, shape), [2, 3, 1, 0]) / std.reshape([1, 1, 1, shape[0]])
+        self.out[f'{name}/offset'] = np.reshape(beta / std - mean / std, [shape[0]])
+        self.out[f'{name}/mean'] = np.reshape(mean, [shape[0]])
+        self.out[f'{name}/variance'] = np.reshape(variance, [shape[0]])
+
+    def read_linear_weights(self, name, shape):
+        weights = self.read_numeric_line()
+        beta = self.read_numeric_line()
+
+        self.out[name] = np.transpose(np.reshape(weights, shape), [1, 0])
+        self.out[f'{name}/offset'] = np.reshape(beta, [shape[0]])
+
 
 def read_lz_weights(filename, params):
-    weights = {}
     data_type = params['data_type']
-    num_inputs = params['num_inputs']
-    num_channels = calc_num_channels(filename, num_inputs)
-    num_blocks = (count_lines(filename) - (1 + 4 + 14)) // 8
 
-    with open(filename, 'r') as fh:
-        read_version(fh)
-        read_fold_bn_weights(fh, 'first_conv', [num_channels, num_inputs, 3, 3], weights)
+    with LzWeightsParser(filename, params) as p:
+        num_blocks = p.num_blocks
+        num_channels = p.num_channels
+        num_inputs = params['num_inputs']
 
-        for i in range(num_blocks):
-            read_fold_bn_weights(fh, f'res_{i}_conv_1', [num_channels, num_channels, 3, 3], weights)
-            read_fold_bn_weights(fh, f'res_{i}_conv_2', [num_channels, num_channels, 3, 3], weights)
+        p.read_version()
+        p.read_fold_bn_weights('first_conv', [num_channels, num_inputs, 3, 3])
 
-        read_fold_bn_weights(fh, 'policy_head', [2, num_channels, 1, 1], weights)
-        read_linear_weights(fh, 'w_fc_1', [362, 722], weights)
+        for i in range(p.num_blocks):
+            p.read_fold_bn_weights(f'res_{i}_conv_1', [num_channels, num_channels, 3, 3])
+            p.read_fold_bn_weights(f'res_{i}_conv_2', [num_channels, num_channels, 3, 3])
 
-        read_fold_bn_weights(fh, 'value_head', [1, num_channels, 1, 1], weights)
-        read_linear_weights(fh, 'w_fc_2', [256, 361], weights)
-        read_linear_weights(fh, 'w_fc_3', [1, 256], weights)
+        p.read_fold_bn_weights('policy_head', [2, num_channels, 1, 1])
+        p.read_linear_weights('w_fc_1', [362, 722])
+
+        p.read_fold_bn_weights('value_head', [1, num_channels, 1, 1])
+        p.read_linear_weights('w_fc_2', [256, 361])
+        p.read_linear_weights('w_fc_3', [1, 256])
+
+        #
+        weights = p.to_dict()
 
     def lz_init_op(name):
         return tf.constant(weights[name].astype(data_type.as_numpy_dtype))

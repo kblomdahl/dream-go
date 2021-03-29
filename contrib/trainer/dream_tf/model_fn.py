@@ -32,7 +32,7 @@ def model_fn(features, labels, mode, params):
     value_hat, value_ownership_hat, policy_hat, ownership_hat, tower_hat = tower(features, mode, params)
 
     if labels:
-        if mode == tf.estimator.ModeKeys.TRAIN and 'lz_weights' in params:
+        if mode == tf.estimator.ModeKeys.TRAIN and 'lz_weights' in params and params['lz_weights']:
             lz_value_hat, lz_policy_hat = leela_zero(labels['lz_features'], mode, params)
             labels['value'] = tf.cast(lz_value_hat, tf.float32)
             labels['policy'] = tf.cast(lz_policy_hat, tf.float32)
@@ -62,7 +62,7 @@ def model_fn(features, labels, mode, params):
         ), (-1, 1))
 
         loss_reg = tf.math.accumulate_n(
-            inputs=tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+            inputs=tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES) + [tf.zeros([])]
         )
 
         # normalize and sum the individual losses such that the expected value
@@ -107,10 +107,18 @@ def model_fn(features, labels, mode, params):
             # or similar issues.
             for grad, var in zip(gradients, variables):
                 var_name = var.op.name
+                shape = var.shape.as_list()
 
-                if grad is not None:
-                    tf.summary.scalar('gradients/' + var_name, tf.norm(grad))
-                tf.summary.scalar('norms/' + var_name, tf.norm(var))
+                if len(shape) >= 2:
+                    out_dims = var.shape.as_list()[-1]
+
+                    if grad is not None:
+                        tf.summary.scalar('gradients/' + var_name, tf.reduce_mean(tf.norm(tf.reshape(grad, [-1, out_dims]))))
+                    tf.summary.scalar('norms/' + var_name, tf.reduce_mean(tf.norm(tf.reshape(var, [-1, out_dims]))))
+                else:
+                    if grad is not None:
+                        tf.summary.scalar('gradients/' + var_name, tf.norm(grad))
+                    tf.summary.scalar('norms/' + var_name, tf.norm(var))
 
             tf.summary.scalar('learning_rate', learning_rate)
         else:

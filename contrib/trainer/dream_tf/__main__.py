@@ -58,6 +58,7 @@ def parse_args():
     opt_group.add_argument('--steps', nargs=1, type=int, metavar='N', help='the total number of examples to train over')
     opt_group.add_argument('--model', nargs=1, help='the directory that contains the model')
     opt_group.add_argument('--name', nargs=1, help='the name of this session')
+    opt_group.add_argument('--lz-weights', nargs=1, help='leela-zero weights to use for semi-supervised learning')
     opt_group.add_argument('--debug', action='store_true', help='enable command-line debugging')
     opt_group.add_argument('--deterministic', action='store_true', help='enable deterministic mode')
     opt_group.add_argument('--profile', action='store_true', help='enable profiling')
@@ -149,7 +150,7 @@ def main():
         'batch_size': args.batch_size[0] if args.batch_size else BATCH_SIZE,
         'learning_rate': 1e-4 if args.warm_start else 3e-4,
         'test_batches': args.test_batches if args.test_batches else 10,
-        'lz_weights': '0e9ea880fd3c4444695e8ff4b8a36310d2c03f7c858cadd37af3b76df1d1d15f',
+        'lz_weights': args.lz_weights[0] if args.lz_weights else None,
 
         'num_channels': get_num_channels(args, model_dir) or 128,
         'num_blocks': get_num_blocks(args, model_dir) or 9,

@@ -25,7 +25,7 @@ import unittest
 from .test_common import TestUtils
 from .leela_zero import leela_zero
 
-class ResidualBlockTest(unittest.TestCase, TestUtils):
+class LzTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
         self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, 18])
@@ -38,7 +38,7 @@ class ResidualBlockTest(unittest.TestCase, TestUtils):
     @property
     def params(self):
         return {
-            'lz_weights': '0e9ea880fd3c4444695e8ff4b8a36310d2c03f7c858cadd37af3b76df1d1d15f'
+            'lz_weights': 'fixtures/d645af9.gz'
         }
 
     def test_shape(self):
