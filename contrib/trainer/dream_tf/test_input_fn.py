@@ -24,16 +24,12 @@ import unittest
 from .input_fn import input_fn
 from .layers import NUM_FEATURES
 
-class InputFnTest(unittest.TestCase):
-    def setUp(self):
-        self.dataset = input_fn('', 2, None, True)
-
+class CommonInputFnTest:
     def tearDown(self):
         tf.reset_default_graph()
 
     def test_shape(self):
         features, labels = self.dataset.output_shapes
-
         self.assertEqual(features.as_list(), [None, 19, 19, NUM_FEATURES])
         self.assertEqual(labels['lz_features'].as_list(), [None, 19, 19, 18])
         self.assertEqual(labels['boost'].as_list(), [None, 1])
@@ -56,6 +52,15 @@ class InputFnTest(unittest.TestCase):
         self.assertEqual(labels['ownership'], tf.float32)
         self.assertEqual(labels['has_ownership'], tf.float32)
         self.assertEqual(labels['komi'], tf.float32)
+
+class InputFnTrainingModeTest(unittest.TestCase, CommonInputFnTest):
+    def setUp(self):
+        self.dataset = input_fn('', 2, None, True)
+
+class InputFnTestModeTest(unittest.TestCase, CommonInputFnTest):
+    def setUp(self):
+        self.dataset = input_fn('', 2, None, False)
+
 
 if __name__ == '__main__':
     unittest.main()

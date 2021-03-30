@@ -30,7 +30,12 @@ COMPUTE_TYPE = tf.float16
 
 
 def normalize_constraint(x):
-    """ Returns a constraint that set each output vector to `tf.norm(x) <= 1` """
+    """
+    Returns a constraint that set each output vector to `tf.norm(x) <= 1` [1]
+
+    [1] Norm matters: efficient and accurate normalization schemes in deep
+        networks, https://papers.nips.cc/paper/2018/file/a0160709701140704575d499c997b6ca-Paper.pdf
+    """
     out_dims = x.shape[-1]
     x_f = tf.reshape(x, (-1, out_dims))
     n = tf.norm(x_f, axis=0)

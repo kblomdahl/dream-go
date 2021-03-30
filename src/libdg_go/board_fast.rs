@@ -132,11 +132,11 @@ impl BoardFast {
 
     /// Returns all liberties of the block at the given point, the iterator may
     /// contain duplicate vertices.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `at_point` - 
-    /// 
+    ///
+    /// * `at_point` -
+    ///
     pub fn liberties_of(&self, at_point: Point) -> LibertyIter<'_, *const Self> {
         ValidIter::new(
             AdjacentChainIter::new(ChainIter::new(at_point, self)),
@@ -146,11 +146,11 @@ impl BoardFast {
 
     /// Returns all adjacent vertices of the block at the given `point`, the
     /// iterator may contain duplicate vertices.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// - `at_point` -
-    /// 
+    ///
     pub fn adjacencies_of(&self, at_point: Point) -> AdjacenciesIter<'_, *const Self> {
         ValidIter::new(
             AdjacentChainIter::new(ChainIter::new(at_point, self)),
@@ -161,11 +161,11 @@ impl BoardFast {
     /// Returns whether the given liberties of the given group (as counted by
     /// the given counter). It will stop counting after `n` liberties has been
     /// found.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `at_point` - the index of a vertex in the group
-    /// 
+    ///
     pub fn get_n_liberty(&self, at_point: Point) -> usize {
         let head = self[at_point].head_point();
 
@@ -173,11 +173,11 @@ impl BoardFast {
     }
 
     /// Returns one of the liberties to the given block.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `at_point` -
-    /// 
+    ///
     pub fn get_a_liberty(&self, at_point: Point) -> Option<Point> {
         for current in self.block_at(at_point) {
             for other_point in self.adjacent_to(current) {
@@ -192,12 +192,12 @@ impl BoardFast {
 
     /// Returns whether the given group has at least `n` liberties, using the
     /// given counter to do so.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `at_point` - the index of a vertex in the group
     /// * `n` - the maximum number of liberties to count
-    /// 
+    ///
     #[inline]
     pub fn has_n_liberty(&self, at_point: Point, n: usize) -> bool {
         let head = self[at_point].head_point();
@@ -244,12 +244,12 @@ impl BoardFast {
 
     /// Returns if the given `liberty` is a liberty of one of the points
     /// that are part of the given `block_at`.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `liberty` -
-    /// * `block_at` - 
-    /// 
+    /// * `block_at` -
+    ///
     fn is_liberty_of(&self, liberty: Point, block_at: Point) -> bool {
         debug_assert_eq!(block_at, self[block_at].head_point());
 
@@ -328,12 +328,12 @@ impl BoardFast {
 
     /// Change the liberty count of each unique adjacent block to the given
     /// `starting_point` by one.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `starting_point` - 
-    /// * `delta` - 
-    /// 
+    ///
+    /// * `starting_point` -
+    /// * `delta` -
+    ///
     fn incr_adjacent_liberties(&mut self, starting_point: Point) {
         let mut already_changed = [Point::default(); 4];
         let head = self[starting_point].head_point();
