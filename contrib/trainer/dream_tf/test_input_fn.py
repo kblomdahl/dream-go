@@ -30,6 +30,7 @@ class CommonInputFnTest:
 
     def test_shape(self):
         features, labels = self.dataset.output_shapes
+
         self.assertEqual(features.as_list(), [None, 19, 19, NUM_FEATURES])
         self.assertEqual(labels['lz_features'].as_list(), [None, 19, 19, 18])
         self.assertEqual(labels['boost'].as_list(), [None, 1])

@@ -19,34 +19,20 @@
 # SOFTWARE.
 
 import tensorflow as tf
-import numpy as np
-import unittest
 
-from .test_common import TestUtils
-from .leela_zero import leela_zero
+from ..hooks.dump import DUMP_OPS
+from .orthogonal_initializer import orthogonal_initializer
+from . import cast_to_compute_type, l2_regularizer
 
-class LzTest(unittest.TestCase, TestUtils):
-    def setUp(self):
-        self.batch_size = 2
-        self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, 18])
-        np.random.seed(12345)
-        tf.set_random_seed(67890)
+def dense(x, op_name, shape, offset_init_op, mode, params, is_recomputing=False):
+    if offset_init_op is None:
+        offset_init_op = tf.zeros_initializer()
 
-    def tearDown(self):
-        tf.reset_default_graph()
+    weights = tf.get_variable('linear_1', shape, tf.float32, orthogonal_initializer(), regularizer=l2_regularizer, use_resource=True)
+    offset = tf.get_variable('linear_1/offset', (shape[-1],), tf.float32, offset_init_op, use_resource=True)
 
-    @property
-    def params(self):
-        return {
-            'lz_weights': 'fixtures/d645af9.gz'
-        }
+    if not is_recomputing:
+        tf.add_to_collection(DUMP_OPS, [weights.name, weights, 'f2'])
+        tf.add_to_collection(DUMP_OPS, [offset.name, offset, 'f2'])
 
-    def test_shape(self):
-        v, p, y = leela_zero(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
-
-        self.assertEqual(v.shape, [self.batch_size, 1])
-        self.assertEqual(p.shape, [self.batch_size, 362])
-        self.assertEqual(y.shape, [self.batch_size, 19, 19, 8])
-
-if __name__ == '__main__':
-    unittest.main()
+    return tf.matmul(x, cast_to_compute_type(weights)) + cast_to_compute_type(offset)

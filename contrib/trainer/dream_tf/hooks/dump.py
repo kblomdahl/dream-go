@@ -39,19 +39,19 @@ class DumpHook(tf.estimator.SessionRunHook):
 
         for dump_op in tf.get_collection(DUMP_OPS):
             if len(dump_op) == 4:
-                original, value_op, as_type, max_value_op = dump_op
+                name, value_op, as_type, max_value_op = dump_op
                 value, max_value = session.run([value_op, max_value_op])
             else:
                 assert len(dump_op) == 3
 
-                original, value_op, as_type = dump_op
+                name, value_op, as_type = dump_op
                 value = session.run(value_op)
                 max_value = np.max(np.abs(value))
 
             max_value = np.asarray(max_value).astype('f4').tostring()
             value = value.astype(as_type).tostring()
 
-            output[original.name] = {
+            output[name] = {
                 's': base64.b85encode(max_value, pad=True).decode('ascii'),
                 'v': base64.b85encode(value, pad=True).decode('ascii')
             }

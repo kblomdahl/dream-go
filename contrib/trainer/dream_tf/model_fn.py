@@ -33,7 +33,8 @@ def model_fn(features, labels, mode, params):
 
     if labels:
         if mode == tf.estimator.ModeKeys.TRAIN and 'lz_weights' in params and params['lz_weights']:
-            lz_value_hat, lz_policy_hat = leela_zero(labels['lz_features'], mode, params)
+            lz_value_hat, lz_policy_hat, lz_tower_hat = leela_zero(labels['lz_features'], mode, params)
+
             labels['value'] = tf.cast(lz_value_hat, tf.float32)
             labels['policy'] = tf.cast(lz_policy_hat, tf.float32)
 

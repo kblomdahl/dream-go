@@ -33,10 +33,10 @@ def leela_zero(x, mode, params):
     )
 
     def conv2d(x, name):
-        return tf.nn.conv2d(x, lz_init_op(f'{name}'), (1, 1, 1, 1), 'SAME', True, 'NHWC') + lz_init_op(f'{name}/offset')
+        return tf.nn.conv2d(x, lz_init_op(name), (1, 1, 1, 1), 'SAME', True, 'NHWC') + lz_init_op(f'{name}/offset')
 
     def dense(x, name):
-        return tf.matmul(x, lz_init_op(f'{name}')) + lz_init_op(f'{name}/offset')
+        return tf.matmul(x, lz_init_op(name)) + lz_init_op(f'{name}/offset')
 
     x = tf.cast(x, data_type)
 
@@ -71,7 +71,7 @@ def leela_zero(x, mode, params):
         with tf.name_scope('fc_3'):
             v = tf.nn.tanh(dense(v, 'w_fc_3'))
 
-    return tf.stop_gradient(v), tf.stop_gradient(p)
+    return tf.stop_gradient(v), tf.stop_gradient(p), tf.stop_gradient(y)
 
 class LzWeightsParser:
     def __init__(self, filename, params):

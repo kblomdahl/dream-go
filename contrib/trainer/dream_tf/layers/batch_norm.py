@@ -20,16 +20,24 @@
 
 import tensorflow as tf
 
+from .orthogonal_initializer import orthogonal_initializer
+from . import conv2d, normalize_getting, l2_regularizer
 from ..hooks.dump import DUMP_OPS
 
 
-def batch_norm(x, weights, mode, params, is_recomputing=False):
+def batch_norm_conv2d(x, op_name, shape, mode, params, is_recomputing=False):
+    weights = tf.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), custom_getter=normalize_getting, regularizer=l2_regularizer, use_resource=True)
+
+    return batch_norm(conv2d(x, weights), weights, op_name, mode, params, is_recomputing=is_recomputing)
+
+
+def batch_norm(x, weights, op_name, mode, params, is_recomputing=False):
     """ Batch normalization layer. """
     num_channels = weights.shape[3]
     ones_op = tf.ones_initializer()
     zeros_op = tf.zeros_initializer()
 
-    with tf.variable_scope(weights.op.name.split('/')[-1]):
+    with tf.variable_scope(op_name) as name_scope:
         scale = tf.get_variable('scale', (num_channels,), tf.float32, ones_op, trainable=False, use_resource=True)
         mean = tf.get_variable('mean', (num_channels,), tf.float32, zeros_op, trainable=False, use_resource=True)
         variance = tf.get_variable('variance', (num_channels,), tf.float32, ones_op, trainable=False, use_resource=True)
@@ -60,8 +68,8 @@ def batch_norm(x, weights, mode, params, is_recomputing=False):
         # cudnn:      [out, h, w, in]
         weights_ = tf.transpose(weights_, [3, 0, 1, 2])
 
-        tf.add_to_collection(DUMP_OPS, [offset, offset_, 'f2'])
-        tf.add_to_collection(DUMP_OPS, [weights, weights_, 'f2'])
+        tf.add_to_collection(DUMP_OPS, [offset.name, offset_, 'f2'])
+        tf.add_to_collection(DUMP_OPS, [f'{name_scope.name}:0', weights_, 'f2'])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """

@@ -21,43 +21,23 @@
 import tensorflow as tf
 import unittest
 
-from .batch_norm import batch_norm
+from .dense import dense
 
-class BatchNormTestBase:
+class DenseTest:
     def setUp(self):
-        self.batch_size = 2048
-        self.num_channels = 128
-        self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
-        self.weights = tf.placeholder(tf.float32, [3, 3, self.num_channels, self.num_channels])
+        self.batch_size = 2
+        self.in_dims = 1024
+        self.out_dims = 16
+        self.x = tf.placeholder(tf.float16, [self.batch_size, self.in_dims])
 
     def tearDown(self):
         tf.reset_default_graph()
 
-    @property
-    def mode(self):
-        return tf.estimator.ModeKeys.EVAL
-
-    @property
-    def params(self):
-        return {
-            "num_channels": self.num_channels
-        }
-
     def test_shape(self):
         self.assertEqual(
-            batch_norm(self.x, self.weights, 'test', self.mode, self.params).shape,
-            self.x.shape
+            dense(self.x, 'test', (self.in_dims, self.out_dims), None, self.mode, self.params).shape,
+            [self.batch_size, self.out_dims]
         )
-
-class BatchNormEvalTest(BatchNormTestBase, unittest.TestCase):
-    @property
-    def mode(self):
-        return tf.estimator.ModeKeys.EVAL
-
-class BatchNormTrainTest(BatchNormTestBase, unittest.TestCase):
-    @property
-    def mode(self):
-        return tf.estimator.ModeKeys.TRAIN
 
 if __name__ == '__main__':
     unittest.main()

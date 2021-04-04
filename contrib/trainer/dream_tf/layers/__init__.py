@@ -45,9 +45,8 @@ def normalize_constraint(x):
     return tf.reshape(x_n, x.shape)
 
 
-def unit_constraint(x):
-    """ Return a constraint that clip `x` to the range [0, 1] """
-    return tf.clip_by_value(x, 0.0, 1.0)
+def normalize_getting(getter, *args, **kwargs):
+    return normalize_constraint(getter(*args, **kwargs))
 
 
 def l2_regularizer(x):
@@ -58,16 +57,6 @@ def l2_regularizer(x):
 def conv2d(x, weights):
     """ Shortcut for `tf.nn.conv2d` """
     return tf.nn.conv2d(x, cast_to_compute_type(weights), (1, 1, 1, 1), 'SAME', True, 'NHWC')
-
-
-def matmul(x, weights, offset=None):
-    """ Shortcut for `tf.matmul` """
-    y = tf.matmul(x, cast_to_compute_type(weights))
-
-    if offset is not None:
-        return y + cast_to_compute_type(offset)
-    else:
-        return y
 
 
 def cast_to_compute_type(var):
