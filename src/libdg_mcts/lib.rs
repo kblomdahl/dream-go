@@ -230,7 +230,7 @@ fn normalize_policy(policy: &mut Vec<f32>, sum_to: f32) {
     if policy_sum < 1e-6 {  // do not divide by zero
         dirichlet::add_ex(&mut policy[0..362], 0.03, sum_to);
     } else {
-        normalize_finite_f32(policy, policy_sum * sum_to);
+        normalize_finite_f32(policy, policy_sum / sum_to);
     }
 
     // check for NaN
