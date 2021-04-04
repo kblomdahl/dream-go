@@ -104,7 +104,7 @@ board_size = 19
 komi = 7.5
 
 names = list([name for name in players.keys()])
-number_of_matchups = len(names) * (len(names) - 1)
+number_of_matchups = (len(names) * (len(names) - 1)) // 2
 number_of_games = max(5, min(NUM_GAMES, TOTAL_NUM_GAMES // number_of_matchups))
 matchups = list([
     Matchup(name_1, name_2, alternating=True, number_of_games=number_of_games)
