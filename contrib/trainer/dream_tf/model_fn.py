@@ -22,6 +22,7 @@ import tensorflow as tf
 
 from .hooks.dump import DUMP_OPS
 from .hooks.learning_rate import LEARNING_RATE, LOSS
+from .layers.batch_norm import batch_norm_conv2d
 from .layers.tower import tower
 from .layers.ownership_head import ownership_loss
 from .layers.leela_zero import leela_zero
@@ -35,8 +36,17 @@ def model_fn(features, labels, mode, params):
         if mode == tf.estimator.ModeKeys.TRAIN and 'lz_weights' in params and params['lz_weights']:
             lz_value_hat, lz_policy_hat, lz_tower_hat = leela_zero(labels['lz_features'], mode, params)
 
-            labels['value'] = tf.cast(lz_value_hat, tf.float32)
-            labels['policy'] = tf.cast(lz_policy_hat, tf.float32)
+            with tf.variable_scope('lz', reuse=tf.AUTO_REUSE):
+                lz_tower_hat = batch_norm_conv2d(lz_tower_hat, 'down', (1, 1, lz_tower_hat.shape[-1], tower_hat.shape[-1]), mode, params, is_recomputing=True)
+                lz_tower_hat = tf.nn.relu(lz_tower_hat)
+
+            loss_lz_y = tf.reshape(tf.math.reduce_mean(tf.losses.mean_squared_error(
+                labels=lz_tower_hat,
+                predictions=tower_hat,
+                reduction=tf.losses.Reduction.NONE
+            ), axis=[1, 2, 3]), (-1, 1))
+        else:
+            loss_lz_y = tf.zeros_like(value_hat)
 
         # determine the loss for each of the components:
         #
@@ -73,7 +83,8 @@ def model_fn(features, labels, mode, params):
         #
         loss_unboosted = 0.12 * check_numerics(loss_policy, 'loss_policy') \
                          + 1.00 * check_numerics(loss_value, 'loss_value') * labels['boost'] \
-                         + 1.00 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership']
+                         + 1.00 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership'] \
+                         + 1.00 * check_numerics(loss_lz_y, 'loss_lz_y')
 
         loss = tf.reduce_mean(loss_unboosted) + 1e-4 * loss_reg
         tf.add_to_collection(LOSS, loss_unboosted)
@@ -128,6 +139,7 @@ def model_fn(features, labels, mode, params):
         tf.summary.scalar('loss/policy', tf.reduce_mean(loss_policy))
         tf.summary.scalar('loss/value', tf.reduce_mean(loss_value))
         tf.summary.scalar('loss/ownership', tf.reduce_mean(loss_ownership))
+        tf.summary.scalar('loss/leela_zero', tf.reduce_mean(loss_lz_y))
         tf.summary.scalar('loss/l2', tf.reduce_mean(loss_reg))
 
         # image metrics

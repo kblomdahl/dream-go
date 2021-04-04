@@ -64,5 +64,18 @@ class ModelFnTest(unittest.TestCase):
     def test_data_type(self):
         self.assertEqual(self.spec.loss.dtype, tf.float32)
 
+
+class LzModelFnTest(ModelFnTest, unittest.TestCase):
+    @property
+    def params(self):
+        return {
+            'num_blocks': 6,
+            'num_channels': 64,
+            'learning_rate': 1e-4,
+            'num_samples': 8,
+            'lz_weights': 'fixtures/d645af9.gz'
+        }
+
+
 if __name__ == '__main__':
     unittest.main()
