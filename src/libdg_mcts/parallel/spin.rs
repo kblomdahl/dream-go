@@ -43,7 +43,7 @@ impl Mutex {
         let backoff = Backoff::new();
 
         loop {
-            match self.is_available.compare_exchange_weak(true, false, Ordering::Acquire, Ordering::Relaxed) {
+            match self.is_available.compare_exchange_weak(true, false, Ordering::AcqRel, Ordering::Relaxed) {
                 Ok(_) => break,
                 _ => { backoff.snooze(); }
             }

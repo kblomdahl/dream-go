@@ -93,7 +93,7 @@ impl TimeStrategy for ByoYomi {
         factor: f32
     ) -> TimeStrategyResult
     {
-        let mut expire_time_init = self.expire_time.load(Ordering::SeqCst);
+        let mut expire_time_init = self.expire_time.load(Ordering::Acquire);
 
         // optimistic locking using atomic values, it will have a new value for
         // `expire_time` in the beginning of each loop iteration and check if it
@@ -114,7 +114,7 @@ impl TimeStrategy for ByoYomi {
             if elapsed >= expires {
                 // determine if it is possible to (and we want to) extend this
                 // time period further.
-                let count = self.count.load(Ordering::SeqCst);
+                let count = self.count.load(Ordering::Acquire);
                 let expire_time_next = {
                     let next = (factor * expire_time_init as f32) as usize;
 
@@ -131,13 +131,13 @@ impl TimeStrategy for ByoYomi {
                     let previous_value = self.expire_time.compare_exchange_weak(
                         expire_time_init,
                         expire_time_next,
-                        Ordering::SeqCst,
+                        Ordering::AcqRel,
                         Ordering::Relaxed
                     );
 
                     match previous_value {
                         Ok(_) => {
-                            self.count.fetch_add(1, Ordering::SeqCst);
+                            self.count.fetch_add(1, Ordering::Release);
 
                             return TimeStrategyResult::Extended;
                         },
@@ -176,12 +176,12 @@ impl TimeStrategy for ByoYomi {
 }
 
 /// Returns the regret if the given move number ends up becoming a blunder.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `move_nr` - the number of moves into the game
 /// * `estimate` - the estimated number of moves this game will last
-/// 
+///
 #[inline]
 fn regret_cost(move_nr: usize, estimate: usize) -> f32 {
     let remaining = estimate - move_nr;
@@ -192,12 +192,12 @@ fn regret_cost(move_nr: usize, estimate: usize) -> f32 {
 }
 
 /// Returns the integral of `regret_cost` from zero to `move_nr`.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `move_nr` - the number of moves into the game
 /// * `estimate` - the estimated number of moves this game will last
-/// 
+///
 #[inline]
 fn regret_cost_cum(move_nr: usize, estimate: usize) -> f32 {
     let move_nr = move_nr as f32;

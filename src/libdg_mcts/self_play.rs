@@ -446,7 +446,7 @@ fn self_play_one<P: Predictor + 'static>(
         let num_workers =
             ::std::cmp::max(
                 1,
-                *config::NUM_THREADS / num_parallel.load(Ordering::Acquire)
+                *config::NUM_THREADS / num_parallel.load(Ordering::Relaxed)
             );
 
         let allow_pass = board.is_scorable();
@@ -502,7 +502,7 @@ pub fn self_play(
         let server = server.clone();
 
         thread::spawn(move || {
-            while processed.fetch_add(1, Ordering::SeqCst) < num_games {
+            while processed.fetch_add(1, Ordering::AcqRel) < num_games {
                 if let Some(result) = self_play_one(&server, &num_workers, ex_it) {
                     if sender.send(result).is_err() {
                         break
@@ -510,7 +510,7 @@ pub fn self_play(
                 }
             }
 
-            num_workers.fetch_sub(1, Ordering::Release);
+            num_workers.fetch_sub(1, Ordering::AcqRel);
         });
     }
 

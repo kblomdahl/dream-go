@@ -61,12 +61,12 @@ impl PolicyLayer {
     }
 
     /// Returns a `Softmax` structure for the given `batch_size` and `num_channels`.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `batch_size` -
     /// * `num_channels` -
-    /// 
+    ///
     fn create_softmax(batch_size: i32, num_channels: i32) -> Result<cudnn::Softmax, cudnn::Status> {
         cudnn::Softmax::new(
             cudnn::SoftmaxMode::Instance,

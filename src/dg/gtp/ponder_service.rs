@@ -46,7 +46,7 @@ impl TimeStrategy for PonderTimeControl {
         _factor: f32
     ) -> TimeStrategyResult
     {
-        if self.is_running.load(Ordering::SeqCst) {
+        if self.is_running.load(Ordering::Relaxed) {
             let total_visits = root.size();
 
             if total_visits < self.max_tree_size {
@@ -112,7 +112,7 @@ pub struct PonderService {
 
 impl Drop for PonderService {
     fn drop(&mut self) {
-        self.is_running.store(false, Ordering::SeqCst);
+        self.is_running.store(false, Ordering::Relaxed);
 
         if let Some(handle) = self.worker.take() {
             let _result = handle.join();
@@ -175,7 +175,7 @@ impl PonderService {
             None => return Err(self.last_error)
         };
 
-        self.is_running.store(false, Ordering::SeqCst);
+        self.is_running.store(false, Ordering::Relaxed);
 
         match handle.join().unwrap() {
             (Err(reason), duration) => {
@@ -197,7 +197,7 @@ impl PonderService {
                 let is_running_worker = self.is_running.clone();
 
                 self.cpu_time += start_time.elapsed() + duration;
-                self.is_running.store(!*config::NO_PONDER, Ordering::SeqCst);
+                self.is_running.store(!*config::NO_PONDER, Ordering::Relaxed);
                 self.worker = Some(thread::spawn(move || {
                     ponder_worker(service, search_tree, board, to_move, is_running_worker)
                 }));
