@@ -17,7 +17,7 @@ use board::Board;
 use point::Point;
 use ::DEFAULT_KOMI;
 
-use super::features::{HWC, FEATURE_SIZE, NUM_FEATURES, LzFeatures, DefaultFeatures, Features};
+use super::features::{self, HWC, FEATURE_SIZE, NUM_FEATURES, LzFeatures, Features};
 use super::sgf::{Sgf, SgfEntry, SgfError, get_komi_from_sgf, is_scored, get_winner_from_sgf};
 use super::symmetry;
 
@@ -60,7 +60,7 @@ impl Kind {
     fn extract(&self, examples: &[Candidate], i: usize) -> Vec<f16> {
         match *self {
             Kind::Default => {
-                DefaultFeatures::new(&examples[i].board).get_features::<HWC, f16>(
+                features::V1::new(&examples[i].board).get_features::<HWC, f16>(
                     examples[i].color,
                     symmetry::Transform::Identity
                 )

@@ -18,6 +18,7 @@ use point::Point;
 use point_state::Vertex;
 use dg_utils::{max, min};
 
+use super::benson::BensonImpl;
 use super::ladder::Ladder;
 use super::symmetry;
 
@@ -67,17 +68,17 @@ pub trait Features {
     ) -> Vec<T>;
 }
 
-pub struct DefaultFeatures<'a> {
+pub struct V1<'a> {
     board: &'a Board
 }
 
-impl<'a> DefaultFeatures<'a> {
+impl<'a> V1<'a> {
     pub fn new(board: &'a Board) -> Self {
         Self { board }
     }
 }
 
-impl<'a> Features for DefaultFeatures<'a> {
+impl<'a> Features for V1<'a> {
     /// Returns the features of the current board state for the given color,
     /// it returns the following features. Divided into four sections based
     /// on their intended purpose (regardless of what the network does with
@@ -308,6 +309,97 @@ impl<'a> Features for LzFeatures<'a> {
     }
 }
 
+pub struct V2<'a> {
+    board: &'a Board
+}
+
+impl<'a> V2<'a> {
+    fn new(board: &'a Board) -> Self {
+        Self { board }
+    }
+
+    fn self_komi(&self, to_move: Color) -> f32 {
+        let komi =
+            match to_move {
+                Color::Black => -self.board.komi(),
+                Color::White => self.board.komi()
+            };
+
+        (komi / 7.5).max(1.0).min(-1.0)
+    }
+}
+
+impl<'a> Features for V2<'a> {
+    fn get_features<O: Order, T: From<f32> + Copy>(
+        &self,
+        to_move: Color,
+        symmetry: symmetry::Transform
+    ) -> Vec<T>
+    {
+        let c_0 = T::from(0.0);
+        let c_1 = T::from(1.0);
+        let c_komi = T::from(self.self_komi(to_move));
+
+        let mut out = vec! [c_0; 16 * 361];
+        let symmetry_table = symmetry.get_table();
+        let opponent = to_move.opposite();
+        let benson_our = BensonImpl::new(self.board, to_move);
+        let benson_opp = BensonImpl::new(self.board, opponent);
+
+        for point in Point::all() {
+            let other = symmetry_table[point];
+
+            out[O::index(16, 0, other)] = c_1;
+            out[O::index(16, 1, other)] = c_komi;
+
+            if self.board.at(point) == Some(to_move) {
+                out[O::index(16, 2, other)] = c_1;
+            } else if self.board.at(point) == Some(opponent) {
+                out[O::index(16, 3, other)] = c_1;
+            } else if self.board.inner.is_valid(to_move, point) {
+                out[O::index(16, 10, other)] = c_1;
+
+                if self.board._is_ko(to_move, point) {
+                    out[O::index(16, 13, other)] = c_1;
+                }
+            }
+
+            if self.board.at(point) != None {
+                match self.board.inner.get_n_liberty(point) {
+                    1 => out[O::index(16, 4, other)] = c_1,
+                    2 => out[O::index(16, 5, other)] = c_1,
+                    3 => out[O::index(16, 6, other)] = c_1,
+                    4 => out[O::index(16, 7, other)] = c_1,
+                    _ => ()
+                }
+            } else if benson_our.is_eye(point) {
+                out[O::index(16, 11, other)] = c_1;
+            } else if benson_opp.is_eye(point) {
+                out[O::index(16, 12, other)] = c_1;
+            }
+
+            if self.board.at(point) == None {
+                match self.board.inner.get_n_liberty_if(to_move, point) {
+                    1 => out[O::index(16, 8, other)] = c_1,
+                    2 => out[O::index(16, 9, other)] = c_1,
+                    _ => ()
+                }
+            }
+
+            if self.board.inner.is_ladder_capture(to_move, point) {
+                out[O::index(16, 14, other)] = c_1;
+            }
+
+            if self.board.inner.is_ladder_escape(to_move, point) {
+                out[O::index(16, 15, other)] = c_1;
+            }
+        }
+
+        out
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,7 +407,7 @@ mod tests {
     #[test]
     fn check_features_chw() {
         let board = Board::new(0.5);
-        let features = DefaultFeatures::new(&board)
+        let features = V1::new(&board)
             .get_features::<CHW, f32>(Color::Black, symmetry::Transform::Identity);
 
         assert_eq!(features.len(), FEATURE_SIZE);
@@ -324,7 +416,7 @@ mod tests {
     #[test]
     fn check_features_hwc() {
         let board = Board::new(0.5);
-        let features = DefaultFeatures::new(&board)
+        let features = V1::new(&board)
             .get_features::<HWC, f32>(Color::Black, symmetry::Transform::Identity);
 
         assert_eq!(features.len(), FEATURE_SIZE);

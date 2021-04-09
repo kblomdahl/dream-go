@@ -63,7 +63,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use dg_go::utils::features::{DefaultFeatures, HWC, Features, FEATURE_SIZE};
+use dg_go::utils::features::{self, HWC, Features, FEATURE_SIZE};
 use dg_go::utils::symmetry;
 use dg_go::{Board, Color, Point};
 use self::options::{SearchOptions, ScoringSearch};
@@ -106,7 +106,7 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
                 policy[i] += new_policy[i];
             }
         } else {
-            let features = DefaultFeatures::new(&board).get_features::<HWC, f16>(to_move, t);
+            let features = features::V1::new(&board).get_features::<HWC, f16>(to_move, t);
             new_requests.extend_from_slice(&features);
             new_symmetries.push(t);
         }
@@ -263,7 +263,7 @@ impl Event {
             if let Some(response) = server.cache().fetch(&board, to_move, transformation) {
                 EventKind::Insert(response)
             } else {
-                let features = DefaultFeatures::new(&board).get_features::<HWC, f16>(to_move, transformation);
+                let features = features::V1::new(&board).get_features::<HWC, f16>(to_move, transformation);
                 EventKind::Predict(features)
             };
 

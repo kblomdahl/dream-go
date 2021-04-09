@@ -187,13 +187,13 @@ impl Score for Board {
 
 /// Returns a clone of the given `board` with all stones that are inside of an
 /// opponents eye removed.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `board` -
-/// * `benson_black` - 
+/// * `benson_black` -
 /// * `benson_white` -
-/// 
+///
 fn clear_board(board: &Board, benson_black: &BensonImpl, benson_white: &BensonImpl) -> Board {
     let mut cleaned = board.clone();
 
