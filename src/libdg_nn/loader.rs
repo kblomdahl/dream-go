@@ -14,128 +14,57 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufReader, BufRead, ErrorKind};
+use std::io::Read;
 use std::path::Path;
-use memchr::memchr;
+use std::slice;
 
 use super::tensor::Tensor;
 use super::Error;
 use dg_utils::types::f16;
+use dg_utils::json::{JsonKey, JsonToken, JsonStream};
 use dg_utils::b85;
-
-/// Step the iterator forward until the character given `stop` character is
-/// encountered. The character `stop` is also skipped.
-///
-/// The implementation is a slight adaptation of `BufRead::read_until` to
-/// not include `stop`, and to use `memchr` from the external crate for better
-/// performance.
-/// 
-/// # Arguments
-/// 
-/// * `iter` - the iterator to step forward
-/// * `stop` - the character to step until
-/// 
-fn skip_until<R: BufRead>(buf_read: &mut R, stop: u8) -> Vec<u8> {
-    let mut out = Vec::with_capacity(32);
-
-    loop {
-        let (done, used) = {
-            let available = match buf_read.fill_buf() {
-                Ok(n) => n,
-                Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
-                Err(e) => panic!("{}", e)
-            };
-
-            match memchr(stop, available) {
-                Some(i) => {
-                    out.extend_from_slice(&available[..i]);
-                    (true, i + 1)
-                },
-                None => {
-                    out.extend_from_slice(available);
-                    (false, available.len())
-                }
-            }
-        };
-
-        buf_read.consume(used);
-        if done || used == 0 {
-            return out;
-        }
-    }
-}
-
-/// An iterator that parse entries with the following format:
-/// 
-/// `"name": { "s": "...", v: "..." }`
-/// 
-struct JsonEntryIter<R: BufRead> {
-    buf_read: R
-}
-
-impl<R: BufRead> Iterator for JsonEntryIter<R> {
-    type Item = (String, Result<Tensor, Error>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // skip until the quote before the name
-        skip_until(&mut self.buf_read, b'"');
-
-        let name = String::from_utf8(skip_until(&mut self.buf_read, b'"')).unwrap();
-        if name.is_empty() {
-            return None;
-        }
-
-        // skip until the next `{` and then parse the interior of the
-        // object by iterating over the properties
-        skip_until(&mut self.buf_read, b'{');
-
-        let mut tensor = Tensor::default();
-
-        loop {
-            skip_until(&mut self.buf_read, b'"');
-            let key = String::from_utf8(skip_until(&mut self.buf_read, b'"')).unwrap();
-
-            skip_until(&mut self.buf_read, b'"');
-            let value = skip_until(&mut self.buf_read, b'"');
-
-            if key == "s" {
-                let array = b85::decode::<f32, f32>(&value).unwrap();
-
-                tensor.set_scale(array[0]);
-            } else if key == "v" {
-                match tensor.set_host(b85::decode::<f16, f16>(&value).unwrap()) {
-                    Ok(()) => (),
-                    Err(reason) => { return Some((name, Err(reason))) }
-                }
-            } else {
-                break
-            }
-
-            // check if the object terminated
-            let more = skip_until(&mut self.buf_read, b',');
-            if memchr(b'}', &more).is_some() {
-                break
-            }
-        };
-
-        Some((name, Ok(tensor)))
-    }
-}
 
 /// Load all tensors in the given buffer and returns a map from
 /// their name to description. If we failed to load any tensors
 /// from the given file then `None` is returned.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `path` -
-/// 
-fn load_aux<R: BufRead>(reader: R) -> Result<HashMap<String, Tensor>, Error> {
+///
+fn load_aux<R: Read>(reader: R) -> Result<HashMap<String, Tensor>, Error> {
     let mut out: HashMap<String, Tensor> = HashMap::new();
-    let iter = JsonEntryIter { buf_read: reader };
 
-    for (name, t) in iter {
-        out.insert(name, t?);
+    for entry in JsonStream::new(reader) {
+        match (&entry.stack()[..], entry.token()) {
+            ([], JsonToken::ObjectStart) => {},
+            ([], JsonToken::ObjectEnd) => {},
+            ([JsonKey::Object(name)], JsonToken::ObjectStart) => {
+                out.insert(name.clone(), Tensor::default());
+            },
+            ([JsonKey::Object(_)], JsonToken::ObjectEnd) => {},
+            ([JsonKey::Object(name), JsonKey::Object(attribute)], JsonToken::StringPtr { ptr, len }) => {
+                let value = unsafe { slice::from_raw_parts(*ptr, *len) };
+                let tensor = out.get_mut(name).expect("could not get tensor");
+
+                if attribute == "s" {
+                    if let Some(parsed_value) = b85::decode::<f32, f32>(&value) {
+                        tensor.set_scale(parsed_value[0]);
+                    } else {
+                        return Err(Error::MalformedWeights);
+                    }
+                } else if attribute == "v" {
+                    let array = b85::decode::<f16, f16>(&value).ok_or(Error::MalformedWeights);
+
+                    if let Err(reason) = array.and_then(|h| tensor.set_host(h)) {
+                        return Err(reason);
+                    }
+                } else {
+                    return Err(Error::MalformedWeights);
+                }
+            }
+            _ => { return Err(Error::MalformedWeights) }
+        }
     }
 
     // an empty result-set is an error
@@ -149,14 +78,14 @@ fn load_aux<R: BufRead>(reader: R) -> Result<HashMap<String, Tensor>, Error> {
 /// Load all tensors in the given file and returns a map from
 /// their name to description. If we failed to load any tensors
 /// from the given file then `None` is returned.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `path` -
-/// 
+///
 pub fn load(path: &Path) -> Result<HashMap<String, Tensor>, Error> {
     if let Ok(file) = File::open(path) {
-        load_aux(BufReader::new(file))
+        load_aux(file)
     } else {
         Err(Error::MissingWeights)
     }

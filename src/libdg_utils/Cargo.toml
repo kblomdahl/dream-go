@@ -14,3 +14,4 @@ crate-type = ["lib"]
 dashmap = "4.0"
 lazy_static = "1.4"
 regex = "1.4"
+memchr = "2.3"

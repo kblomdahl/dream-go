@@ -19,6 +19,7 @@ use dg_cuda::cudnn;
 pub enum Error {
     CuDNN(cudnn::Status),
     Cuda(cuda::Error),
+    MalformedWeights,
     MissingWeights
 }
 

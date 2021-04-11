@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 #![feature(core_intrinsics, link_llvm_intrinsics)]
 #![feature(test)]
 
@@ -19,9 +18,11 @@ extern crate dashmap;
 #[macro_use] extern crate lazy_static;
 extern crate regex;
 #[cfg(test)] extern crate test;
+extern crate memchr;
 
 pub mod b85;
 pub mod config;
+pub mod json;
 pub mod lcb;
 pub mod types;
 

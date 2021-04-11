@@ -128,7 +128,6 @@ dependencies = [
  "dg_go",
  "dg_utils",
  "libc",
- "memchr",
 ]
 
 [[package]]
@@ -152,6 +151,7 @@ version = "0.0.0"
 dependencies = [
  "dashmap",
  "lazy_static",
+ "memchr",
  "regex",
 ]
 
