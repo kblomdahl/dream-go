@@ -183,25 +183,25 @@ lazy_static! {
     /// The softmax temperature to use at the end of the _policy head_. This
     /// temperature is applied for the entire game.
     pub static ref SOFTMAX_TEMPERATURE: f32 = get_env("SOFTMAX_TEMPERATURE")
-        .unwrap_or(1.0);
+        .unwrap_or(0.67);
 
     /// The _First Play Urgency_ reduction. Setting this is `1.0`, or `0.0`
     /// effectively disables FPU.
     pub static ref FPU_REDUCE: Vec<(i32, f32)> = get_intp_list("FPU_REDUCE")
-        .unwrap_or_else(|| vec! [(0, 0.35), (800, 0.22), (1600, 0.10)]);
+        .unwrap_or_else(|| vec! [(0, 0.465), (800, 0.4885)]);
 
     /// The number of virtual losses to add during async probes into the monte
     /// carlo search tree. A higher value avoids multiple probes exploring the
     /// same search tree.
-    pub static ref VLOSS_CNT: i32 = get_env("VLOSS_CNT").unwrap_or(32);
+    pub static ref VLOSS_CNT: i32 = get_env("VLOSS_CNT").unwrap_or(16);
 
     /// The UCT exploration rate.
     pub static ref UCT_EXP: Vec<(i32, f32)> = get_intp_list("UCT_EXP")
-        .unwrap_or_else(|| vec! [(0, 0.88), (3200, 1.44)]);
+        .unwrap_or_else(|| vec! [(0, 0.612), (800, 0.895)]);
 
     /// The LCB critical value.
     pub static ref CRITICAL_VALUE: Vec<(i32, f32)> = get_intp_list("CRITICAL_VALUE")
-        .unwrap_or_else(|| vec! [(0, 1.645), (3200, 1.96), (16000, 2.576)]);
+        .unwrap_or_else(|| vec! [(0, 1.915), (800, 1.8235)]);
 }
 
 /// Returns a description of the configurations for this engine.
