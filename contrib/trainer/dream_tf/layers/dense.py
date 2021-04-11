@@ -28,8 +28,8 @@ def dense(x, op_name, shape, offset_init_op, mode, params, is_recomputing=False)
     if offset_init_op is None:
         offset_init_op = tf.zeros_initializer()
 
-    weights = tf.get_variable('linear_1', shape, tf.float32, orthogonal_initializer(), regularizer=l2_regularizer, use_resource=True)
-    offset = tf.get_variable('linear_1/offset', (shape[-1],), tf.float32, offset_init_op, use_resource=True)
+    weights = tf.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), regularizer=l2_regularizer, use_resource=True)
+    offset = tf.get_variable(op_name + '/offset', (shape[-1],), tf.float32, offset_init_op, use_resource=True)
 
     if not is_recomputing:
         tf.add_to_collection(DUMP_OPS, [weights.name, weights, 'f2'])
