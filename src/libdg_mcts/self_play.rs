@@ -519,6 +519,7 @@ pub fn self_play(
 
 #[cfg(test)]
 mod tests {
+    use ::options::StandardDeterministicSearch;
     use ::predict::FakePredictor;
     use super::*;
 
@@ -575,7 +576,7 @@ mod tests {
         let (value, index, tree) =
             predict_aux::<_, _>(
                 &server,
-                Box::new(StandardSearch::default()),
+                Box::new(StandardDeterministicSearch::default()),
                 RolloutLimit::new(10),
                 None,
                 &board,

@@ -648,7 +648,7 @@ mod tests {
 
     use std::sync::Arc;
     use std::cell::UnsafeCell;
-    use options::StandardSearch;
+    use options::StandardDeterministicSearch;
 
     #[test]
     fn valid_komi() {
@@ -667,7 +667,7 @@ mod tests {
         let context = ThreadContext {
             root: root.clone(),
             starting_point: Board::new(7.5),
-            options: Arc::new(Box::new(StandardSearch::new(1))),
+            options: Arc::new(Box::new(StandardDeterministicSearch::new(1))),
             time_strategy: time_control::RolloutLimit::new(100),
             predict_batch: Batcher::new(1),
             event_queue: Arc::new(ConcurrentQueue::unbounded())
@@ -713,7 +713,7 @@ mod tests {
     fn no_finite_candidates() {
         let (value, index, root) = predict::<_, _>(
             &NanPredictor::default(),
-            Box::new(StandardSearch::new(1)),
+            Box::new(StandardDeterministicSearch::new(1)),
             time_control::RolloutLimit::new(1600),
             None,
             &Board::new(7.5),

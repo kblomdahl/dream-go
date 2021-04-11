@@ -29,12 +29,12 @@ pub trait PolicyChecker {
 
 pub trait SearchOptions {
     /// Returns the policy checker to use for the given `board`.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `board` - 
+    ///
+    /// * `board` -
     /// * `to_move` -
-    /// 
+    ///
     fn policy_checker(&self, board: &Board, to_move: Color) -> Box<dyn PolicyChecker>;
 
     /// Returns the number of worker threads to use.
@@ -84,6 +84,37 @@ impl SearchOptions for StandardSearch {
 
     fn deterministic(&self) -> bool {
         false
+    }
+
+    fn num_workers(&self) -> usize {
+        self.num_workers
+    }
+}
+
+#[derive(Clone)]
+pub struct StandardDeterministicSearch {
+    num_workers: usize
+}
+
+impl StandardDeterministicSearch {
+    pub fn new(num_workers: usize) -> Self {
+        Self { num_workers }
+    }
+}
+
+impl Default for StandardDeterministicSearch {
+    fn default() -> Self {
+        Self::new(*config::NUM_THREADS)
+    }
+}
+
+impl SearchOptions for StandardDeterministicSearch {
+    fn policy_checker(&self, _board: &Board, to_move: Color) -> Box<dyn PolicyChecker> {
+        Box::new(StandardPolicyChecker::new(to_move))
+    }
+
+    fn deterministic(&self) -> bool {
+        true
     }
 
     fn num_workers(&self) -> usize {
