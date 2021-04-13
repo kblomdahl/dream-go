@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use dg_cuda as cuda;
 use dg_cuda::cudnn;
-use dg_go::utils::features::{FEATURE_SIZE};
+use dg_go::utils::features;
 use dg_utils::types::f16;
 use crate::layers::{PolicyLayer, ResidualLayer, UpLayer, ValueLayer};
 use crate::output_map::*;
@@ -121,8 +121,8 @@ pub struct Workspace {
 /// * `features` - the input features
 ///
 pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap<f16>, Error> {
-    debug_assert!(features.len() % FEATURE_SIZE == 0);
-    debug_assert!(features.len() / FEATURE_SIZE == workspace.batch_size);
+    debug_assert!(features.len() % features::Default::size() == 0);
+    debug_assert!(features.len() / features::Default::size() == workspace.batch_size);
 
     let mut allocator = cuda::Cloneable::new(cuda::Sticky::new(workspace.allocator.clone()));
 

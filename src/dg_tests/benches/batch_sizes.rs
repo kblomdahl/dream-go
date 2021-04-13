@@ -22,7 +22,7 @@ extern crate rand;
 use test::Bencher;
 use rand::{Rng, thread_rng};
 
-use dg_go::utils::features::FEATURE_SIZE;
+use dg_go::utils::features;
 use dg_nn::*;
 use dg_utils::types::f16;
 
@@ -32,17 +32,17 @@ thread_local! {
 
 /// Benchmark the forward pass through the neural network for the given batch
 /// size.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `b` -
 /// * `batch_size` - the batch size to benchmark
-/// 
+///
 fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
     NETWORK.with(|network| {
         let mut workspace = network.get_workspace(batch_size).expect("Failed to get workspace");
         let features = (0..batch_size).flat_map(|_| {
-            let mut input = vec! [f16::from(0.0); FEATURE_SIZE];
+            let mut input = vec! [f16::from(0.0); features::Default::size()];
 
             for b in input.iter_mut() {
                 *b = f16::from(if thread_rng().gen::<f32>() < 0.2 { 1.0 } else { 0.0 });

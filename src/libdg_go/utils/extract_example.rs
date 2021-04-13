@@ -17,7 +17,7 @@ use board::Board;
 use point::Point;
 use ::DEFAULT_KOMI;
 
-use super::features::{self, HWC, FEATURE_SIZE, NUM_FEATURES, LzFeatures, Features};
+use super::features::{self, HWC, LzFeatures, Features};
 use super::sgf::{Sgf, SgfEntry, SgfError, get_komi_from_sgf, is_scored, get_winner_from_sgf};
 use super::symmetry;
 
@@ -46,7 +46,7 @@ pub struct Example {
     pub number: c_int,
     pub komi: f32,
     pub lz_features: [f16; 6498],
-    pub features: [f16; FEATURE_SIZE]
+    pub features: [f16; features::Default::size()]
 }
 
 #[repr(i32)]
@@ -60,7 +60,7 @@ impl Kind {
     fn extract(&self, examples: &[Candidate], i: usize) -> Vec<f16> {
         match *self {
             Kind::Default => {
-                features::V1::new(&examples[i].board).get_features::<HWC, f16>(
+                features::Default::new(&examples[i].board).get_features::<HWC, f16>(
                     examples[i].color,
                     symmetry::Transform::Identity
                 )
@@ -98,7 +98,7 @@ impl Default for Example {
             number: 0,
             komi: DEFAULT_KOMI,
             lz_features: [f16::from(0.0); 6498],
-            features: [f16::from(0.0); FEATURE_SIZE]
+            features: [f16::from(0.0); features::Default::size()]
         }
     }
 }
@@ -137,7 +137,7 @@ lazy_static! {
 /// Returns the number of features used internally.
 #[no_mangle]
 pub unsafe extern fn get_num_features() -> c_int {
-    NUM_FEATURES as i32
+    features::Default::num_features() as i32
 }
 
 /// Sets the random seed used to determine which example is extracted from

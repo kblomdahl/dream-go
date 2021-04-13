@@ -14,7 +14,7 @@
 
 use dg_cuda::cudnn;
 use dg_cuda as cuda;
-use dg_go::utils::features::NUM_FEATURES;
+use dg_go::utils::features;
 use std::collections::HashMap;
 
 use crate::layers::{Conv2d, get_num_channels};
@@ -35,10 +35,11 @@ impl UpLayer {
     /// * `tensors` -
     ///
     pub fn new(handle: &cudnn::Handle, n: i32, tensors: &HashMap<String, Tensor>) -> Result<UpLayer, Error> {
+        let num_features = features::Default::num_features();
         let num_channels = get_num_channels(tensors);
 
         Ok(UpLayer {
-            up: Conv2d::new(n, [num_channels, NUM_FEATURES as i32, 3, 3])
+            up: Conv2d::new(n, [num_channels, num_features as i32, 3, 3])
                     .with_tensors(tensors, "01_upsample/conv_1")
                     .build(handle)?
         })

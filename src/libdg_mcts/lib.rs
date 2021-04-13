@@ -63,7 +63,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use dg_go::utils::features::{self, HWC, Features, FEATURE_SIZE};
+use dg_go::utils::features::{self, HWC, Features};
 use dg_go::utils::symmetry;
 use dg_go::{Board, Color, Point};
 use self::options::{SearchOptions, ScoringSearch};
@@ -92,7 +92,7 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
     let mut value = 0.0f32;
 
     // find out which symmetries has already been calculated, and which ones has not
-    let mut new_requests = Vec::with_capacity(8 * FEATURE_SIZE);
+    let mut new_requests = Vec::with_capacity(8 * features::Default::size());
     let mut new_symmetries = Vec::with_capacity(8);
 
     for &t in &symmetry::ALL {
@@ -106,7 +106,7 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
                 policy[i] += new_policy[i];
             }
         } else {
-            let features = features::V1::new(&board).get_features::<HWC, f16>(to_move, t);
+            let features = features::Default::new(&board).get_features::<HWC, f16>(to_move, t);
             new_requests.extend_from_slice(&features);
             new_symmetries.push(t);
         }
@@ -263,7 +263,7 @@ impl Event {
             if let Some(response) = server.cache().fetch(&board, to_move, transformation) {
                 EventKind::Insert(response)
             } else {
-                let features = features::V1::new(&board).get_features::<HWC, f16>(to_move, transformation);
+                let features = features::Default::new(&board).get_features::<HWC, f16>(to_move, transformation);
                 EventKind::Predict(features)
             };
 
@@ -313,7 +313,7 @@ struct BatcherList {
 impl BatcherList {
     fn new(max_batch_size: usize) -> Self {
         Self {
-            features: Vec::with_capacity(2 * max_batch_size * FEATURE_SIZE),
+            features: Vec::with_capacity(2 * max_batch_size * features::Default::size()),
             events: Vec::with_capacity(2 * max_batch_size)
         }
     }
@@ -373,7 +373,7 @@ impl Batcher {
 
                 Some(
                     Batch::new(
-                        list.features.split_off(split_index * FEATURE_SIZE),
+                        list.features.split_off(split_index * features::Default::size()),
                         list.events.split_off(split_index),
                         self.num_batches.clone()
                     )
