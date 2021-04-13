@@ -43,6 +43,7 @@ fn load_aux<R: Read>(reader: R) -> Result<HashMap<String, Tensor>, Error> {
                 out.insert(name.clone(), Tensor::default());
             },
             ([JsonKey::Object(_)], JsonToken::ObjectEnd) => {},
+            ([JsonKey::Object(_)], JsonToken::StringPtr { ptr: _, len: _ }) => {},
             ([JsonKey::Object(name), JsonKey::Object(attribute)], JsonToken::StringPtr { ptr, len }) => {
                 let value = unsafe { slice::from_raw_parts(*ptr, *len) };
                 let tensor = out.get_mut(name).expect("could not get tensor");

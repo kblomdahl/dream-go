@@ -21,7 +21,7 @@
 import tensorflow as tf
 
 from . import conv2d, cast_to_compute_type, NUM_FEATURES
-from ..hooks.dump import DUMP_OPS
+from ..hooks.dump import DUMP_OPS, DUMP_STR_OPS
 from .batch_norm import batch_norm_conv2d
 from .policy_head import policy_head
 from .residual_block import residual_block
@@ -42,10 +42,12 @@ def tower(x, mode, params):
     num_blocks_ = tf.Variable(num_blocks, False, name='num_blocks', dtype=tf.int32)
     num_channels_ = tf.Variable(num_channels, False, name='num_channels', dtype=tf.int32)
     num_samples_ = tf.Variable(num_samples, False, name='num_samples', dtype=tf.int32)
+    model_name_ = tf.constant(params['model_name'], tf.string, ())
 
     tf.add_to_collection(DUMP_OPS, ['num_blocks:0', num_blocks_, 'i4'])
     tf.add_to_collection(DUMP_OPS, ['num_channels:0', num_channels_, 'i4'])
     tf.add_to_collection(DUMP_OPS, ['num_samples:0', num_samples_, 'i4'])
+    tf.add_to_collection(DUMP_STR_OPS, ['model_name:0', model_name_])
     tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, num_blocks_)
     tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, num_channels_)
     tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, num_samples_)

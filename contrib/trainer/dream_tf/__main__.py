@@ -151,6 +151,7 @@ def main():
         'learning_rate': 1e-4 if args.warm_start else 3e-4,
         'test_batches': args.test_batches if args.test_batches else 10,
         'lz_weights': args.lz_weights[0] if args.lz_weights else None,
+        'model_name': model_dir,
 
         'num_channels': get_num_channels(args, model_dir) or 128,
         'num_blocks': get_num_blocks(args, model_dir) or 9,

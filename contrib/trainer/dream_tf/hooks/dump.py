@@ -27,6 +27,9 @@ import tensorflow as tf
 """ The graph collection that contains all dump operations """
 DUMP_OPS = 'DumpOps'
 
+""" The graph collection that contains all dump string operations """
+DUMP_STR_OPS = 'DumpStrOps'
+
 
 class DumpHook(tf.estimator.SessionRunHook):
     """ A hook that prints all tensors registered in the `DUMP_OPS` graph
@@ -55,5 +58,9 @@ class DumpHook(tf.estimator.SessionRunHook):
                 's': base64.b85encode(max_value, pad=True).decode('ascii'),
                 'v': base64.b85encode(value, pad=True).decode('ascii')
             }
+
+            for dump_op in tf.get_collection(DUMP_STR_OPS):
+                name, value_op = dump_op
+                output[name] = session.run(value_op).decode('ascii')
 
         json.dump(output, sys.stdout, sort_keys=True)
