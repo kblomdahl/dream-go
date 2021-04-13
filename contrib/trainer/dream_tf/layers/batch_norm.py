@@ -20,6 +20,7 @@
 
 import tensorflow as tf
 
+from .moving_average import moving_average
 from .orthogonal_initializer import orthogonal_initializer
 from . import conv2d, normalize_getting, l2_regularizer
 from ..hooks.dump import DUMP_OPS
@@ -68,8 +69,8 @@ def batch_norm(x, weights, op_name, mode, params, is_recomputing=False):
         # cudnn:      [out, h, w, in]
         weights_ = tf.transpose(weights_, [3, 0, 1, 2])
 
-        tf.add_to_collection(DUMP_OPS, [offset.name, offset_, 'f2'])
-        tf.add_to_collection(DUMP_OPS, [f'{name_scope.name}:0', weights_, 'f2'])
+        tf.add_to_collection(DUMP_OPS, [offset.name, moving_average(offset_, f'{op_name}/moving_avg', mode), 'f2'])
+        tf.add_to_collection(DUMP_OPS, [f'{name_scope.name}:0', moving_average(weights_, f'{op_name}/offset/moving_avg', mode), 'f2'])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """

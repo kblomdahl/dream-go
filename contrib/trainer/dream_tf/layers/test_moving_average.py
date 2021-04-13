@@ -19,21 +19,25 @@
 # SOFTWARE.
 
 import tensorflow as tf
+import numpy as np
+import unittest
 
-from ..hooks.dump import DUMP_OPS
+from .test_common import TestUtils
 from .moving_average import moving_average
-from .orthogonal_initializer import orthogonal_initializer
-from . import cast_to_compute_type, l2_regularizer
 
-def dense(x, op_name, shape, offset_init_op, mode, params, is_recomputing=False):
-    if offset_init_op is None:
-        offset_init_op = tf.zeros_initializer()
+class MovingAverageTest(unittest.TestCase, TestUtils):
+    def setUp(self):
+        self.x = tf.placeholder(tf.float16, [2, 3, 64, 32])
 
-    weights = tf.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), regularizer=l2_regularizer, use_resource=True)
-    offset = tf.get_variable(op_name + '/offset', (shape[-1],), tf.float32, offset_init_op, use_resource=True)
+    def tearDown(self):
+        tf.reset_default_graph()
 
-    if not is_recomputing:
-        tf.add_to_collection(DUMP_OPS, [weights.name, moving_average(weights, f'{op_name}/moving_avg', mode), 'f2'])
-        tf.add_to_collection(DUMP_OPS, [offset.name, moving_average(offset, f'{op_name}/offset/moving_avg', mode), 'f2'])
+    def test_moving_average(self):
+        y = moving_average(self.x, tf.estimator.ModeKeys.TRAIN)
 
-    return tf.matmul(x, cast_to_compute_type(weights)) + cast_to_compute_type(offset)
+        self.assertEqual(y.dtype, self.x.dtype)
+        self.assertEqual(y.shape, self.x.shape)
+
+
+if __name__ == '__main__':
+    unittest.main()

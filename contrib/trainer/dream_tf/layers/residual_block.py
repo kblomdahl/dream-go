@@ -23,6 +23,7 @@ import tensorflow as tf
 from . import cast_to_compute_type
 from ..hooks.dump import DUMP_OPS
 from .batch_norm import batch_norm_conv2d
+from .moving_average import moving_average
 from .recompute_grad import recompute_grad
 
 
@@ -42,7 +43,7 @@ def residual_block(x, mode, params):
     num_channels = params['num_channels']
 
     alpha = tf.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=True, use_resource=True)
-    tf.add_to_collection(DUMP_OPS, [alpha.name, alpha, 'f4'])
+    tf.add_to_collection(DUMP_OPS, [alpha.name, moving_average(alpha, 'alpha/moving_avg', mode), 'f4'])
 
     def _forward(x, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """

@@ -21,7 +21,6 @@
 import tensorflow as tf
 
 from . import conv2d, normalize_getting, l2_regularizer, cast_to_compute_type
-from ..hooks.dump import DUMP_OPS
 from .recompute_grad import recompute_grad
 from .orthogonal_initializer import orthogonal_initializer
 
@@ -42,10 +41,6 @@ def ownership_head(x, mode, params):
         conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op, custom_getter=normalize_getting, regularizer=l2_regularizer, use_resource=True)
         offset_1 = tf.get_variable('conv_1/offset', (1,), tf.float32, zeros_op, use_resource=True)
         y = conv2d(x, conv_1) + cast_to_compute_type(offset_1)
-
-        if not is_recomputing:
-            tf.add_to_collection(DUMP_OPS, [conv_1.name, conv_1, 'f2'])
-            tf.add_to_collection(DUMP_OPS, [offset_1.name, offset_1, 'f2'])
 
         y = tf.reshape(y, [-1, 361])
         return tf.cast(tf.nn.tanh(y), tf.float32)
