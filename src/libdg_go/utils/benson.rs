@@ -150,46 +150,46 @@ impl<'a, R: AllRegions<'a>, B: AllBlocks<'a>> Benson<'a, R, B> {
     }
 
     /// Returns if the given `point` is part of an unconditionally alive block
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `point` -
-    /// 
+    ///
     pub fn is_alive(&self, point: Point) -> bool {
         self.points[point.to_i()] == PointStatus::Block
     }
 
-    /// Returns if the given `point` is vital to an unconditionally alive 
+    /// Returns if the given `point` is vital to an unconditionally alive
     /// block.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `point` -
-    /// 
+    ///
     pub fn is_eye(&self, point: Point) -> bool {
         self.points[point.to_i()] == PointStatus::Region
     }
 
     /// Returns if the given `point` is not a liberty of a group that is
     /// unconditionally alive.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `point` - 
-    /// 
+    ///
+    /// * `point` -
+    ///
     pub fn is_valid(&self, point: Point) -> bool {
         self.points[point.to_i()] == PointStatus::None
     }
 }
 
 /// Set all `points` in the iterator to `value`.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `points` -
 /// * `iter` -
 /// * `value` -
-/// 
+///
 fn mark_points<I: Iterator<Item=Point>>(points: &mut [PointStatus], iter: I, value: PointStatus) {
     for point in iter {
         points[point.to_i()] = value;
@@ -198,12 +198,12 @@ fn mark_points<I: Iterator<Item=Point>>(points: &mut [PointStatus], iter: I, val
 
 /// Return if all points in the given `region` is a liberty of the given
 /// `block`.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `region` -
 /// * `block` -
-/// 
+///
 fn is_vital<B: Block, R: Region>(region: &R, block: &B) -> bool {
     region.points().all(|p| block.is_liberty(p))
 }
@@ -567,7 +567,7 @@ mod tests {
     }
 
     /// Example from Sensei Library [1]
-    /// 
+    ///
     /// [1] https://senseis.xmp.net/diagrams/7/75bae2500cd8d4922ee8c6659a0666a2.png
     #[test]
     fn benson() {

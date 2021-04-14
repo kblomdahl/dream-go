@@ -333,6 +333,14 @@ impl<'a> Features for V2<'a> {
                 if self.board._is_ko(to_move, point) {
                     out[o.index(13, other)] = c_1;
                 }
+
+                if self.board.inner.is_ladder_capture(to_move, point) {
+                    out[o.index(14, other)] = c_1;
+                }
+
+                if self.board.inner.is_ladder_escape(to_move, point) {
+                    out[o.index(15, other)] = c_1;
+                }
             }
 
             if self.board.at(point) != None {
@@ -355,14 +363,6 @@ impl<'a> Features for V2<'a> {
                     2 => out[o.index(9, other)] = c_1,
                     _ => ()
                 }
-            }
-
-            if self.board.inner.is_ladder_capture(to_move, point) {
-                out[o.index(14, other)] = c_1;
-            }
-
-            if self.board.inner.is_ladder_escape(to_move, point) {
-                out[o.index(15, other)] = c_1;
             }
         }
 

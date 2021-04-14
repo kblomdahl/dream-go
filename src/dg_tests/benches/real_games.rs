@@ -129,9 +129,9 @@ const LEE_SEDOL_ALPHAGO_4_78: [(dg_go::Color, usize, usize); 78] = [
     (Color::Black,  5,  2), (Color::White, 10,  8)
 ];
 
-/// Benchmark feature extraction (V1) from a given board position in the `f16` data type.
+/// Benchmark feature extraction (V1) from a given board position.
 #[bench]
-fn get_features_v1_16(b: &mut Bencher) {
+fn get_features_v1_lee(b: &mut Bencher) {
     let board = play_moves(&LEE_SEDOL_ALPHAGO_4_78);
 
     b.iter(move || {
@@ -142,9 +142,9 @@ fn get_features_v1_16(b: &mut Bencher) {
     });
 }
 
-/// Benchmark feature extraction (V2) from a given board position in the `f16` data type.
+/// Benchmark feature extraction (V2) from a given board position.
 #[bench]
-fn get_features_v2_16(b: &mut Bencher) {
+fn get_features_v2_lee(b: &mut Bencher) {
     let board = play_moves(&LEE_SEDOL_ALPHAGO_4_78);
 
     b.iter(move || {
@@ -192,10 +192,9 @@ const RINA_FUJISAWA_ZHIYING_YU: [(dg_go::Color, usize, usize); 135] = [
     (Color::Black,  8,  9), (Color::White,  4,  1), (Color::Black,  5,  2)
 ];
 
-
-/// Benchmark feature extraction (V1) from a given board position in the `f32` data type.
+/// Benchmark feature extraction (V1) from a given board position.
 #[bench]
-fn get_features_v1_32(b: &mut Bencher) {
+fn get_features_v1_rina(b: &mut Bencher) {
     let board = play_moves(&RINA_FUJISAWA_ZHIYING_YU);
 
     b.iter(move || {
@@ -206,9 +205,9 @@ fn get_features_v1_32(b: &mut Bencher) {
     });
 }
 
-/// Benchmark feature extraction (V2) from a given board position in the `f32` data type.
+/// Benchmark feature extraction (V2) from a given board position.
 #[bench]
-fn get_features_v2_32(b: &mut Bencher) {
+fn get_features_v2_rina(b: &mut Bencher) {
     let board = play_moves(&RINA_FUJISAWA_ZHIYING_YU);
 
     b.iter(move || {
