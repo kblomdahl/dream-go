@@ -49,7 +49,8 @@ class ModelFnTest(unittest.TestCase):
             'num_blocks': 6,
             'num_channels': 64,
             'learning_rate': 1e-4,
-            'num_samples': 8
+            'num_samples': 8,
+            'model_name': 'test'
         }
 
     def tearDown(self):
@@ -73,7 +74,8 @@ class LzModelFnTest(ModelFnTest, unittest.TestCase):
             'num_channels': 64,
             'learning_rate': 1e-4,
             'num_samples': 8,
-            'lz_weights': 'fixtures/d645af9.gz'
+            'lz_weights': 'fixtures/d645af9.gz',
+            'model_name': 'test'
         }
 
 

@@ -40,7 +40,8 @@ class TowerTest(unittest.TestCase):
         return {
             "num_blocks": self.num_blocks,
             "num_channels": self.num_channels,
-            "num_samples": self.num_samples
+            "num_samples": self.num_samples,
+            "model_name": 'test'
         }
 
     def test_shape(self):

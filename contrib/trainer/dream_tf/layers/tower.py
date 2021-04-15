@@ -22,7 +22,7 @@ import tensorflow as tf
 
 from . import conv2d, cast_to_compute_type, NUM_FEATURES
 from ..hooks.dump import DUMP_OPS, DUMP_STR_OPS
-from .batch_norm import batch_norm_conv2d
+from .batch_norm import batch_norm_conv2d, relu3
 from .policy_head import policy_head
 from .residual_block import residual_block
 from .value_head import value_head
@@ -55,7 +55,7 @@ def tower(x, mode, params):
     with tf.variable_scope('01_upsample', reuse=tf.AUTO_REUSE):
         y = cast_to_compute_type(x)
         y = batch_norm_conv2d(y, 'conv_1', (3, 3, num_inputs, num_channels), mode, params)
-        y = tf.nn.relu(y)
+        y = relu3(y)
 
     for i in range(num_blocks):
         with tf.variable_scope('{:02d}_residual'.format(2 + i), reuse=tf.AUTO_REUSE):

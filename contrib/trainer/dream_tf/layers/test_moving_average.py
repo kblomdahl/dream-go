@@ -33,7 +33,7 @@ class MovingAverageTest(unittest.TestCase, TestUtils):
         tf.reset_default_graph()
 
     def test_moving_average(self):
-        y = moving_average(self.x, tf.estimator.ModeKeys.TRAIN)
+        y = moving_average(self.x, 'x/moving_avg', tf.estimator.ModeKeys.TRAIN)
 
         self.assertEqual(y.dtype, self.x.dtype)
         self.assertEqual(y.shape, self.x.shape)

@@ -25,6 +25,11 @@ from .orthogonal_initializer import orthogonal_initializer
 from . import conv2d, normalize_getting, l2_regularizer
 from ..hooks.dump import DUMP_OPS
 
+THREE = 3.09023
+
+def relu3(x):
+    return tf.clip_by_value(x, 0.0, THREE)
+
 
 def batch_norm_conv2d(x, op_name, shape, mode, params, is_recomputing=False):
     weights = tf.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), custom_getter=normalize_getting, regularizer=l2_regularizer, use_resource=True)
