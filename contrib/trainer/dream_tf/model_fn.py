@@ -20,7 +20,7 @@
 
 import tensorflow as tf
 
-from .hooks.dump import DUMP_OPS
+from .hooks.dump import DUMP_OPS, DUMP_STR_OPS
 from .hooks.learning_rate import LEARNING_RATE, LOSS
 from .layers.batch_norm import batch_norm_conv2d
 from .layers.tower import tower
@@ -199,6 +199,7 @@ def model_fn(features, labels, mode, params):
     # over the code.
     if mode != tf.estimator.ModeKeys.PREDICT:
         tf.get_default_graph().clear_collection(DUMP_OPS)
+        tf.get_default_graph().clear_collection(DUMP_STR_OPS)
 
     # put it all together into a specification
     return tf.estimator.EstimatorSpec(
