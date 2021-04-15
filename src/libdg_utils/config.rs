@@ -220,6 +220,18 @@ pub fn get_description() -> String {
     ].join("\n")
 }
 
+fn args() -> ::std::vec::IntoIter<String> {
+    let mut out = env::args().collect::<Vec<_>>();
+
+    if let Ok(dg_opts) = env::var("DG_OPTS") {
+        for opt in dg_opts.split_whitespace() {
+            out.push(opt.to_string());
+        }
+    }
+
+    out.into_iter()
+}
+
 /// Returns true if any command-line argument with the given name is present.
 ///
 /// # Arguments
@@ -227,11 +239,11 @@ pub fn get_description() -> String {
 /// * `name` - the command-line arguments to check for
 ///
 pub fn has_opt(name: &str) -> bool {
-    env::args().skip(1).any(|arg| arg == name)
+    args().skip(1).any(|arg| arg == name)
 }
 
 pub fn get_opt<T: FromStr>(name: &str) -> Option<T> {
-    env::args().skip(1).zip(env::args().skip(2))
+    args().skip(1).zip(args().skip(2))
         .filter_map(|(arg, value)| {
             if arg == name {
                 T::from_str(&value).ok()
@@ -276,11 +288,11 @@ pub fn get_intp_list(name: &str) -> Option<Vec<(i32, f32)>> {
 pub fn get_args() -> Vec<String> {
     let mut rest = vec! [];
 
-    for (i, arg) in env::args().enumerate().skip(1) {
+    for (i, arg) in args().enumerate().skip(1) {
         if !arg.starts_with("--") && usize::from_str(&arg).is_err() {
             rest.push(arg);
         } else if arg == "--" {
-            for arg in env::args().skip(i + 1) {
+            for arg in args().skip(i + 1) {
                 rest.push(arg);
             }
 
