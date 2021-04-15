@@ -160,13 +160,13 @@ def model_fn(features, labels, mode, params):
         policy_3 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 3), tf.float32)
         policy_5 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 5), tf.float32)
         value_1 = tf.cast(tf.equal(tf.sign(value_hat), tf.sign(labels['value'])), tf.float32)
-        ownership_1 = tf.cast(tf.equal(tf.sign(ownership_hat), tf.sign(labels['ownership'])), tf.float32)
+        ownership_1 = tf.cast(tf.equal(tf.sign(ownership_hat), tf.sign(labels['ownership'])), tf.float32) * labels['has_ownership']
 
         tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_1))
         tf.summary.scalar('accuracy/policy_3', tf.reduce_mean(policy_3))
         tf.summary.scalar('accuracy/policy_5', tf.reduce_mean(policy_5))
         tf.summary.scalar('accuracy/value', tf.reduce_mean(value_1))
-        tf.summary.scalar('accuracy/ownership', tf.reduce_mean(ownership_1))
+        tf.summary.scalar('accuracy/ownership', tf.reduce_sum(ownership_1) / (361 * tf.reduce_sum(labels['has_ownership'])))
 
         eval_metric_ops = {
             'accuracy/policy_1': tf.metrics.mean(policy_1),
