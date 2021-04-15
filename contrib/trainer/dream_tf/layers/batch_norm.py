@@ -74,8 +74,29 @@ def batch_norm(x, weights, op_name, mode, params, is_recomputing=False):
         # cudnn:      [out, h, w, in]
         weights_ = tf.transpose(weights_, [3, 0, 1, 2])
 
-        tf.add_to_collection(DUMP_OPS, [offset.name, moving_average(offset_, f'{op_name}/moving_avg', mode), 'f2'])
-        tf.add_to_collection(DUMP_OPS, [f'{name_scope.name}:0', moving_average(weights_, f'{op_name}/offset/moving_avg', mode), 'f2'])
+        # calulate the moving average of the weights and the offset.
+        weights_ = moving_average(weights_, f'{op_name}/moving_avg', mode)
+        offset_ = moving_average(offset_, f'{op_name}/offset/moving_avg', mode)
+
+        # quantize the weights to [-127, +127] and offset to the same range (but
+        # as a floating point number as required by cuDNN).
+        #
+        # We do the funny `tf.stack` and flatten because `tf.reduce_max` does
+        # not want to behave with the `moving_average` output tensor.
+        weights_max = tf.reduce_max(tf.reshape(tf.stack([weights_, -weights_]), [-1]))
+        weights_q, weights_qmin, weights_qmax = tf.quantization.quantize(
+            weights_,
+            -weights_max,
+            weights_max,
+            tf.qint8,
+            'SCALED',
+            'HALF_AWAY_FROM_ZERO'
+        )
+
+        step_size = (2 * THREE) / 255.0
+
+        tf.add_to_collection(DUMP_OPS, [offset.name, offset_ / step_size, 'f4', tf.constant(127 * step_size)])
+        tf.add_to_collection(DUMP_OPS, [f'{name_scope.name}:0', weights_q, 'i1', tf.math.reduce_max(tf.stack([weights_qmin, -weights_qmin, weights_qmax, -weights_qmax]))])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """

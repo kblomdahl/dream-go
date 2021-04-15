@@ -56,7 +56,8 @@ class DumpHook(tf.estimator.SessionRunHook):
 
             output[name] = {
                 's': base64.b85encode(max_value, pad=True).decode('ascii'),
-                'v': base64.b85encode(value, pad=True).decode('ascii')
+                't': as_type,
+                'v': base64.b85encode(value, pad=True).decode('ascii'),
             }
 
             for dump_op in tf.get_collection(DUMP_STR_OPS):
