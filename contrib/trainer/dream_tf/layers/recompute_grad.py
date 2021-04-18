@@ -30,7 +30,7 @@ def recompute_grad(func):
             y = func(x, is_recomputing=False)
 
         original_vars = set(tape.watched_variables())
-        var_scope = tf.get_variable_scope()
+        var_scope = tf.compat.v1.get_variable_scope()
 
         def grad_fn(output_grad, variables=None):
             assert set(variables) == original_vars, 'Wrong variables passed to @tf.custom_gradient function'
@@ -39,17 +39,15 @@ def recompute_grad(func):
             in_var = tf.identity(x)
 
             with tf.control_dependencies([output_grad]):
-                with tf.variable_scope(var_scope, reuse=True):
+                with tf.compat.v1.variable_scope(var_scope, reuse=True):
                     y = func(in_var, is_recomputing=True)
 
             grads = tf.gradients(
-                [y],
-                [in_var] + variables,
-                [output_grad],
+                ys=[y],
+                xs=[in_var] + variables,
+                grad_ys=[output_grad],
                 gate_gradients=True,
-                aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
-                colocate_gradients_with_ops=True
-            )
+                aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N)
 
             return grads[:1], grads[1:]
 

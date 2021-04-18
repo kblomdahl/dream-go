@@ -27,10 +27,10 @@ from .moving_average import moving_average
 
 class MovingAverageTest(unittest.TestCase, TestUtils):
     def setUp(self):
-        self.x = tf.placeholder(tf.float16, [2, 3, 64, 32])
+        self.x = tf.compat.v1.placeholder(tf.float16, [2, 3, 64, 32])
 
     def tearDown(self):
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
 
     def test_moving_average(self):
         y = moving_average(self.x, 'x/moving_avg', tf.estimator.ModeKeys.TRAIN)

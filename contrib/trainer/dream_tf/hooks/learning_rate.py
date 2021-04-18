@@ -49,39 +49,39 @@ class LearningRateScheduler(tf.estimator.SessionRunHook):
         self.steps_to_skip = steps_to_skip
 
     def begin(self):
-        self.global_step = tf.train.get_global_step()
-        self.learning_rate = tf.get_collection(LEARNING_RATE)[-1]
-        self.loss = tf.reduce_mean(tf.get_collection(LOSS))
+        self.global_step = tf.compat.v1.train.get_global_step()
+        self.learning_rate = tf.compat.v1.get_collection(LEARNING_RATE)[-1]
+        self.loss = tf.reduce_mean(input_tensor=tf.compat.v1.get_collection(LOSS))
 
         with tf.device('cpu:0'):
             buf_size = LearningRateScheduler.BUF_SIZE
 
             # keep track of the loss in a tensorflow variable so that it can
             # survive a checkpoint
-            self.losses = tf.get_variable('learning_rate/losses', (buf_size, 3), tf.float32, trainable=False)
-            self.losses_ph = tf.placeholder(tf.float32)
+            self.losses = tf.compat.v1.get_variable('learning_rate/losses', (buf_size, 3), tf.float32, trainable=False)
+            self.losses_ph = tf.compat.v1.placeholder(tf.float32)
             self.losses_op = self.losses.assign(self.losses_ph)
 
             # keep track of when we last decreased so we don't do it too often
             self.last_decrease = tf.Variable(0, False, name='learning_rate/last_decrease', dtype=tf.int64)
-            self.last_decrease_ph = tf.placeholder(tf.int64)
+            self.last_decrease_ph = tf.compat.v1.placeholder(tf.int64)
             self.last_decrease_op = self.last_decrease.assign(self.last_decrease_ph)
 
             # create some variable purely for the purpose of TensorBoard logging
             # of the slope and the probability that the slope is decreasing
             self.slope = tf.Variable(0.0, False, name='learning_rate/slope')
-            self.slope_ph = tf.placeholder(tf.float32)
+            self.slope_ph = tf.compat.v1.placeholder(tf.float32)
             self.slope_op = self.slope.assign(self.slope_ph)
 
             self.p_decreasing = tf.Variable(1.0, False, name='learning_rate/decreasing')
-            self.p_decreasing_ph = tf.placeholder(tf.float32)
+            self.p_decreasing_ph = tf.compat.v1.placeholder(tf.float32)
             self.p_decreasing_op = self.p_decreasing.assign(self.p_decreasing_ph)
 
-        tf.summary.scalar('learning_rate/slope', self.slope)
-        tf.summary.scalar('learning_rate/p_decreasing', self.p_decreasing)
+        tf.compat.v1.summary.scalar('learning_rate/slope', self.slope)
+        tf.compat.v1.summary.scalar('learning_rate/p_decreasing', self.p_decreasing)
 
         # the operations necessary to decrease the learning rate
-        self.learning_rate_ph = tf.placeholder(tf.float32)
+        self.learning_rate_ph = tf.compat.v1.placeholder(tf.float32)
         self.learning_rate_op = self.learning_rate.assign(self.learning_rate_ph)
 
     def before_run(self, run_context):

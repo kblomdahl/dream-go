@@ -20,28 +20,28 @@
 
 import tensorflow as tf
 
-# https://github.com/tensorflow/tensorflow/blob/85c8b2a817f95a3e979ecd1ed95bff1dc1335cff/tensorflow/python/training/moving_averages.py#L270
 def moving_average(x, op_name, mode, decay=0.99975):
     """ Returns a moving average variable of `x` with zero-debias [1]
 
     [1] Adam - A Method for Stochastic Optimization, Kingma et al, https://arxiv.org/abs/1412.6980
     """
-    zeros_op = tf.zeros_initializer()
+    zeros_op = tf.compat.v1.zeros_initializer()
 
     if op_name is None:
         op_name = x.name.split(':')[0].split('/')[-1]
 
-    with tf.variable_scope(op_name):
-        moving_avg = tf.get_variable('moving_average', x.shape, x.dtype, zeros_op, trainable=False, use_resource=True)
-        biased_avg = tf.get_variable('biased_average', x.shape, x.dtype, zeros_op, trainable=False, use_resource=True)
-        local_step = tf.get_variable('local_step', (), tf.float32, zeros_op, trainable=False, use_resource=True)
+    with tf.compat.v1.variable_scope(op_name):
+        moving_avg = tf.compat.v1.get_variable('moving_average', x.shape, x.dtype, zeros_op, trainable=False, use_resource=True)
+        biased_avg = tf.compat.v1.get_variable('biased_average', x.shape, x.dtype, zeros_op, trainable=False, use_resource=True)
+        local_step = tf.compat.v1.get_variable('local_step', (), tf.float32, zeros_op, trainable=False, use_resource=True)
 
-    if mode == tf.estimator.ModeKeys.TRAIN:
-        biased_avg_op = tf.assign_sub(biased_avg, (1.0 - decay) * (moving_avg - x))
-        local_step_op = local_step.assign_add(1.0)
-        bias_factor = 1.0 - tf.math.pow(decay, local_step_op)
-        update_op = tf.assign(moving_avg, biased_avg_op / tf.cast(bias_factor, moving_avg.dtype))
+    with tf.compat.v1.name_scope(op_name):
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            biased_avg_op = tf.compat.v1.assign_sub(biased_avg, (1.0 - decay) * (moving_avg - x), use_locking=True)
+            local_step_op = local_step.assign_add(1.0, use_locking=True)
+            bias_factor = 1.0 - tf.math.pow(decay, local_step_op)
+            update_op = tf.compat.v1.assign(moving_avg, biased_avg_op / tf.cast(bias_factor, moving_avg.dtype), use_locking=True)
 
-        tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, update_op)
+            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_op)
 
     return moving_avg

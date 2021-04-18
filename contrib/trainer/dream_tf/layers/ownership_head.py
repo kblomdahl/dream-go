@@ -33,13 +33,13 @@ def ownership_head(x, mode, params):
     2. A tanh non-linearity outputting a scalar in the range [-1, 1]
     """
     init_op = orthogonal_initializer()
-    zeros_op = tf.zeros_initializer()
+    zeros_op = tf.compat.v1.zeros_initializer()
     num_channels = params['num_channels']
 
     def _forward(x, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """
-        conv_1 = tf.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op, custom_getter=normalize_getting, regularizer=l2_regularizer, use_resource=True)
-        offset_1 = tf.get_variable('conv_1/offset', (1,), tf.float32, zeros_op, use_resource=True)
+        conv_1 = tf.compat.v1.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op, custom_getter=normalize_getting, regularizer=l2_regularizer, use_resource=True)
+        offset_1 = tf.compat.v1.get_variable('conv_1/offset', (1,), tf.float32, zeros_op, use_resource=True)
         y = conv2d(x, conv_1) + cast_to_compute_type(offset_1)
 
         y = tf.reshape(y, [-1, 361])
@@ -51,11 +51,11 @@ def ownership_head(x, mode, params):
 def ownership_loss(*, labels=None, logits=None):
     categorical_labels = tf.stack([(1 + labels) / 2, (1 - labels) / 2], axis=2)
     categorical_logits = tf.stack([logits, -logits], axis=2)
-    loss = tf.losses.softmax_cross_entropy(
+    loss = tf.compat.v1.losses.softmax_cross_entropy(
         categorical_labels,
         categorical_logits,
         label_smoothing=0.2,
-        reduction=tf.losses.Reduction.NONE
+        reduction=tf.compat.v1.losses.Reduction.NONE
     )
 
-    return tf.reduce_mean(loss, [1], keepdims=True)
+    return tf.reduce_mean(input_tensor=loss, axis=[1], keepdims=True)

@@ -27,9 +27,9 @@ class TestUtils(object):
         return cand / np.sum(cand)
 
     def fit_categorical(self, inputs, labels, logits, step_ops=None, iter=100):
-        labels_ph = tf.placeholder(tf.float32, labels.shape)
+        labels_ph = tf.compat.v1.placeholder(tf.float32, labels.shape)
         loss = tf.reduce_mean(
-            tf.nn.softmax_cross_entropy_with_logits_v2(
+            input_tensor=tf.nn.softmax_cross_entropy_with_logits(
                 labels=labels_ph,
                 logits=logits
             )
@@ -45,9 +45,9 @@ class TestUtils(object):
         )
 
     def fit_regression(self, inputs, labels, logits, step_ops=None, iter=100):
-        labels_ph = tf.placeholder(tf.float32, labels.shape)
+        labels_ph = tf.compat.v1.placeholder(tf.float32, labels.shape)
         loss = tf.reduce_mean(
-            tf.math.squared_difference(logits, labels_ph)
+            input_tensor=tf.math.squared_difference(logits, labels_ph)
         )
 
         return self.fit(
@@ -60,17 +60,17 @@ class TestUtils(object):
         )
 
     def fit(self, loss, inputs, labels, labels_ph, step_ops=None, iter=100):
-        optimizer = tf.train.GradientDescentOptimizer(1e-4)
+        optimizer = tf.compat.v1.train.GradientDescentOptimizer(1e-4)
 
         if step_ops is None:
             step_ops = {'loss': loss}
 
-        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
             minimize_op = optimizer.minimize(loss)
 
-        with tf.Session() as session:
-            session.run(tf.global_variables_initializer())
+        with tf.compat.v1.Session() as session:
+            session.run(tf.compat.v1.global_variables_initializer())
 
             return \
                 [

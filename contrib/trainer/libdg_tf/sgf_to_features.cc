@@ -73,7 +73,7 @@ class SgfToFeaturesOp : public OpKernel {
             const auto num_features = get_num_features();
             const auto features_size = 361 * num_features;
             Example* example = (Example*)malloc(sizeof(Example) + sizeof(half) * features_size);
-            const auto sgf = sgf_tensor->flat<string>();
+            const auto sgf = sgf_tensor->flat<tstring>();
 
             const auto status = extract_single_example(
                 sgf(0).c_str(),

@@ -27,15 +27,15 @@ from .layers import NUM_FEATURES
 class ModelFnTest(unittest.TestCase):
     def setUp(self):
         self.batch_size = 16
-        self.features = tf.placeholder(tf.float16, [self.batch_size, 19, 19, NUM_FEATURES])
+        self.features = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, NUM_FEATURES])
         self.labels = {
-            'lz_features': tf.placeholder(tf.float16, [self.batch_size, 19, 19, 18]),
-            'value': tf.placeholder(tf.float32, [self.batch_size, 1]),
-            'policy': tf.placeholder(tf.float32, [self.batch_size, 362]),
-            'next_policy': tf.placeholder(tf.float32, [self.batch_size, 362]),
-            'boost': tf.placeholder(tf.float32, [self.batch_size, 1]),
-            'ownership': tf.placeholder(tf.float32, [self.batch_size, 361]),
-            'has_ownership': tf.placeholder(tf.float32, [self.batch_size, 1]),
+            'lz_features': tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, 18]),
+            'value': tf.compat.v1.placeholder(tf.float32, [self.batch_size, 1]),
+            'policy': tf.compat.v1.placeholder(tf.float32, [self.batch_size, 362]),
+            'next_policy': tf.compat.v1.placeholder(tf.float32, [self.batch_size, 362]),
+            'boost': tf.compat.v1.placeholder(tf.float32, [self.batch_size, 1]),
+            'ownership': tf.compat.v1.placeholder(tf.float32, [self.batch_size, 361]),
+            'has_ownership': tf.compat.v1.placeholder(tf.float32, [self.batch_size, 1]),
         }
         self.spec = model_fn(self.features, self.labels, self.mode, self.params)
 
@@ -54,7 +54,7 @@ class ModelFnTest(unittest.TestCase):
         }
 
     def tearDown(self):
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
 
     def test_mode(self):
         self.assertEqual(self.spec.mode, self.mode)

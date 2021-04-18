@@ -30,10 +30,10 @@ class TowerTest(unittest.TestCase):
         self.num_channels = 128
         self.num_samples = 8
         self.num_blocks = 6
-        self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, NUM_FEATURES])
+        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, NUM_FEATURES])
 
     def tearDown(self):
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
 
     @property
     def params(self):

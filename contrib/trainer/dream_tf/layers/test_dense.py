@@ -28,10 +28,10 @@ class DenseTest:
         self.batch_size = 2
         self.in_dims = 1024
         self.out_dims = 16
-        self.x = tf.placeholder(tf.float16, [self.batch_size, self.in_dims])
+        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, self.in_dims])
 
     def tearDown(self):
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
 
     def test_shape(self):
         self.assertEqual(

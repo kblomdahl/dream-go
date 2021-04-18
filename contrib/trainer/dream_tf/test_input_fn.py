@@ -26,7 +26,7 @@ from .layers import NUM_FEATURES
 
 class CommonInputFnTest:
     def tearDown(self):
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
 
     def test_shape(self):
         features, labels = self.dataset.output_shapes

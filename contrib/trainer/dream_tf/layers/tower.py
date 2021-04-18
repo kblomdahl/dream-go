@@ -44,33 +44,33 @@ def tower(x, mode, params):
     num_samples_ = tf.Variable(num_samples, False, name='num_samples', dtype=tf.int32)
     model_name_ = tf.constant(params['model_name'], tf.string, ())
 
-    tf.add_to_collection(DUMP_OPS, ['num_blocks:0', num_blocks_, 'i4'])
-    tf.add_to_collection(DUMP_OPS, ['num_channels:0', num_channels_, 'i4'])
-    tf.add_to_collection(DUMP_OPS, ['num_samples:0', num_samples_, 'i4'])
-    tf.add_to_collection(DUMP_STR_OPS, ['model_name:0', model_name_])
-    tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, num_blocks_)
-    tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, num_channels_)
-    tf.add_to_collection(tf.GraphKeys.MODEL_VARIABLES, num_samples_)
+    tf.compat.v1.add_to_collection(DUMP_OPS, ['num_blocks:0', num_blocks_, 'i4'])
+    tf.compat.v1.add_to_collection(DUMP_OPS, ['num_channels:0', num_channels_, 'i4'])
+    tf.compat.v1.add_to_collection(DUMP_OPS, ['num_samples:0', num_samples_, 'i4'])
+    tf.compat.v1.add_to_collection(DUMP_STR_OPS, ['model_name:0', model_name_])
+    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.MODEL_VARIABLES, num_blocks_)
+    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.MODEL_VARIABLES, num_channels_)
+    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.MODEL_VARIABLES, num_samples_)
 
-    with tf.variable_scope('01_upsample', reuse=tf.AUTO_REUSE):
+    with tf.compat.v1.variable_scope('01_upsample', reuse=tf.compat.v1.AUTO_REUSE):
         y = cast_to_compute_type(x)
         y = batch_norm_conv2d(y, 'conv_1', (3, 3, num_inputs, num_channels), mode, params)
         y = relu3(y)
 
     for i in range(num_blocks):
-        with tf.variable_scope('{:02d}_residual'.format(2 + i), reuse=tf.AUTO_REUSE):
+        with tf.compat.v1.variable_scope('{:02d}_residual'.format(2 + i), reuse=tf.compat.v1.AUTO_REUSE):
             y = residual_block(y, mode, params)
 
     # policy head
-    with tf.variable_scope('{:02d}p_policy'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
+    with tf.compat.v1.variable_scope('{:02d}p_policy'.format(2 + num_blocks), reuse=tf.compat.v1.AUTO_REUSE):
         p = policy_head(y, mode, params)
 
     # value head
-    with tf.variable_scope('{:02d}v_value'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
+    with tf.compat.v1.variable_scope('{:02d}v_value'.format(2 + num_blocks), reuse=tf.compat.v1.AUTO_REUSE):
         v, vo = value_head(y, mode, params)
 
     # ownership head
-    with tf.variable_scope('{:02d}o_ownership'.format(2 + num_blocks), reuse=tf.AUTO_REUSE):
+    with tf.compat.v1.variable_scope('{:02d}o_ownership'.format(2 + num_blocks), reuse=tf.compat.v1.AUTO_REUSE):
         o = ownership_head(y, mode, params)
 
     return v, vo, p, o, y

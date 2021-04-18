@@ -45,17 +45,17 @@ def model_fn(features, labels, mode, params):
         # - Policy head (2x)
         # - Ownership
         #
-        loss_value = tf.reshape(tf.losses.huber_loss(
+        loss_value = tf.reshape(tf.compat.v1.losses.huber_loss(
             check_numerics(labels['value'], 'value_labels'),
             check_numerics(value_hat, 'value_hat'),
-            reduction=tf.losses.Reduction.NONE
+            reduction=tf.compat.v1.losses.Reduction.NONE
         ), (-1, 1))
 
-        loss_policy = tf.reshape(tf.losses.softmax_cross_entropy(
+        loss_policy = tf.reshape(tf.compat.v1.losses.softmax_cross_entropy(
             check_numerics(labels['policy'], 'policy_labels'),
             check_numerics(policy_hat, 'policy_hat'),
             label_smoothing=0.2,
-            reduction=tf.losses.Reduction.NONE
+            reduction=tf.compat.v1.losses.Reduction.NONE
         ), (-1, 1))
 
         loss_ownership = tf.reshape(ownership_loss(
@@ -64,7 +64,7 @@ def model_fn(features, labels, mode, params):
         ), (-1, 1))
 
         loss_reg = tf.math.accumulate_n(
-            inputs=tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES) + [tf.zeros([])]
+            inputs=tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES) + [tf.zeros([])]
         )
 
         # normalize and sum the individual losses such that the expected value
@@ -76,8 +76,8 @@ def model_fn(features, labels, mode, params):
                          + 1.00 * check_numerics(loss_value, 'loss_value') * labels['boost'] \
                          + 1.00 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership']
 
-        loss = tf.reduce_mean(loss_unboosted) + 1e-4 * loss_reg
-        tf.add_to_collection(LOSS, loss_unboosted)
+        loss = tf.reduce_mean(input_tensor=loss_unboosted) + 1e-4 * loss_reg
+        tf.compat.v1.add_to_collection(LOSS, loss_unboosted)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             # set an initial learning rate and then rely on the `LearningRateScheduler`
@@ -85,17 +85,17 @@ def model_fn(features, labels, mode, params):
             learning_rate = tf.Variable(params['learning_rate'], False, name='lr')
             loss_scale = 128
 
-            tf.add_to_collection(LEARNING_RATE, learning_rate)
+            tf.compat.v1.add_to_collection(LEARNING_RATE, learning_rate)
 
-            global_step = tf.train.get_global_step()
-            adam_optimizer = tf.train.AdamOptimizer(learning_rate)
-            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+            global_step = tf.compat.v1.train.get_global_step()
+            adam_optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate)
+            update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
 
             with tf.control_dependencies(update_ops):
-                variables = tf.trainable_variables()
+                variables = tf.compat.v1.trainable_variables()
                 gradients = tf.gradients(
-                    loss_scale * loss,
-                    variables,
+                    ys=loss_scale * loss,
+                    xs=variables,
                     gate_gradients=True,
                     aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
                     #colocate_gradients_with_ops=True  # would force _custom gradients_ to the CPU
@@ -115,21 +115,21 @@ def model_fn(features, labels, mode, params):
                     out_dims = var.shape.as_list()[-1]
 
                     if grad is not None:
-                        tf.summary.scalar('gradients/' + var_name, tf.reduce_mean(tf.norm(tf.reshape(grad, [-1, out_dims]))))
-                    tf.summary.scalar('norms/' + var_name, tf.reduce_mean(tf.norm(tf.reshape(var, [-1, out_dims]))))
+                        tf.compat.v1.summary.scalar('gradients/' + var_name, tf.reduce_mean(input_tensor=tf.norm(tensor=tf.reshape(grad, [-1, out_dims]))))
+                    tf.compat.v1.summary.scalar('norms/' + var_name, tf.reduce_mean(input_tensor=tf.norm(tensor=tf.reshape(var, [-1, out_dims]))))
                 else:
                     if grad is not None:
-                        tf.summary.scalar('gradients/' + var_name, tf.norm(grad))
-                    tf.summary.scalar('norms/' + var_name, tf.norm(var))
+                        tf.compat.v1.summary.scalar('gradients/' + var_name, tf.norm(tensor=grad))
+                    tf.compat.v1.summary.scalar('norms/' + var_name, tf.norm(tensor=var))
 
-            tf.summary.scalar('learning_rate', learning_rate)
+            tf.compat.v1.summary.scalar('learning_rate', learning_rate)
         else:
             train_op = None
 
-        tf.summary.scalar('loss/policy', tf.reduce_mean(loss_policy))
-        tf.summary.scalar('loss/value', tf.reduce_mean(loss_value))
-        tf.summary.scalar('loss/ownership', tf.reduce_mean(loss_ownership))
-        tf.summary.scalar('loss/l2', tf.reduce_mean(loss_reg))
+        tf.compat.v1.summary.scalar('loss/policy', tf.reduce_mean(input_tensor=loss_policy))
+        tf.compat.v1.summary.scalar('loss/value', tf.reduce_mean(input_tensor=loss_value))
+        tf.compat.v1.summary.scalar('loss/ownership', tf.reduce_mean(input_tensor=loss_ownership))
+        tf.compat.v1.summary.scalar('loss/l2', tf.reduce_mean(input_tensor=loss_reg))
 
         # image metrics
         def to_heat_image(heat):
@@ -139,44 +139,44 @@ def model_fn(features, labels, mode, params):
                 heat
             )
 
-        tf.summary.image('value/predictions', to_heat_image(tf.ones([19, 19]) * value_hat[0, 0]))
-        tf.summary.image('value/labels', to_heat_image(tf.ones([19, 19]) * labels['value'][0, 0]))
+        tf.compat.v1.summary.image('value/predictions', to_heat_image(tf.ones([19, 19]) * value_hat[0, 0]))
+        tf.compat.v1.summary.image('value/labels', to_heat_image(tf.ones([19, 19]) * labels['value'][0, 0]))
         for i in range(2):
-            tf.summary.image('value/ownership/' + str(i), to_heat_image(tf.reshape(value_ownership_hat[0, :, i], [19, 19])))
+            tf.compat.v1.summary.image('value/ownership/' + str(i), to_heat_image(tf.reshape(value_ownership_hat[0, :, i], [19, 19])))
         for i in range(features.shape[-1]):
-            tf.summary.image('features/default/' + str(i), to_heat_image(tf.cast(tf.reshape(features[0, :, :, i], [19, 19]), tf.float32)))
+            tf.compat.v1.summary.image('features/default/' + str(i), to_heat_image(tf.cast(tf.reshape(features[0, :, :, i], [19, 19]), tf.float32)))
         for i in range(labels['lz_features'].shape[-1]):
-            tf.summary.image('features/lz/' + str(i), to_heat_image(tf.cast(tf.reshape(labels['lz_features'][0, :, :, i], [19, 19]), tf.float32)))
-        tf.summary.image('ownership/predictions', to_heat_image(tf.reshape(ownership_hat[0, :], [19, 19])))
-        tf.summary.image('ownership/labels', to_heat_image(tf.reshape(labels['ownership'][0, :], [19, 19])))
-        tf.summary.image('policy/predictions', to_heat_image(tf.reshape(tf.nn.softmax(policy_hat[0, :361]), [19, 19])))
-        tf.summary.image('policy/labels', to_heat_image(tf.reshape(labels['policy'][0, :361], [19, 19])))
+            tf.compat.v1.summary.image('features/lz/' + str(i), to_heat_image(tf.cast(tf.reshape(labels['lz_features'][0, :, :, i], [19, 19]), tf.float32)))
+        tf.compat.v1.summary.image('ownership/predictions', to_heat_image(tf.reshape(ownership_hat[0, :], [19, 19])))
+        tf.compat.v1.summary.image('ownership/labels', to_heat_image(tf.reshape(labels['ownership'][0, :], [19, 19])))
+        tf.compat.v1.summary.image('policy/predictions', to_heat_image(tf.reshape(tf.nn.softmax(policy_hat[0, :361]), [19, 19])))
+        tf.compat.v1.summary.image('policy/labels', to_heat_image(tf.reshape(labels['policy'][0, :361], [19, 19])))
 
         # evaluation metrics such as the accuracy is more human readable than
         # the pure loss function. Even if it is considered bad practice to look
         # at the accuracy instead of the loss.
-        policy_hot = tf.argmax(labels['policy'], axis=1)
-        policy_1 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 1), tf.float32)
-        policy_3 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 3), tf.float32)
-        policy_5 = tf.cast(tf.nn.in_top_k(policy_hat, policy_hot, 5), tf.float32)
+        policy_hot = tf.argmax(input=labels['policy'], axis=1)
+        policy_1 = tf.cast(tf.nn.in_top_k(predictions=policy_hat, targets=policy_hot, k=1), tf.float32)
+        policy_3 = tf.cast(tf.nn.in_top_k(predictions=policy_hat, targets=policy_hot, k=3), tf.float32)
+        policy_5 = tf.cast(tf.nn.in_top_k(predictions=policy_hat, targets=policy_hot, k=5), tf.float32)
         value_1 = tf.cast(tf.equal(tf.sign(value_hat), tf.sign(labels['value'])), tf.float32)
         ownership_1 = tf.cast(tf.equal(tf.sign(ownership_hat), tf.sign(labels['ownership'])), tf.float32) * labels['has_ownership']
 
-        tf.summary.scalar('accuracy/policy_1', tf.reduce_mean(policy_1))
-        tf.summary.scalar('accuracy/policy_3', tf.reduce_mean(policy_3))
-        tf.summary.scalar('accuracy/policy_5', tf.reduce_mean(policy_5))
-        tf.summary.scalar('accuracy/value', tf.reduce_mean(value_1))
-        tf.summary.scalar('accuracy/ownership', tf.reduce_sum(ownership_1) / (361 * tf.reduce_sum(labels['has_ownership'])))
+        tf.compat.v1.summary.scalar('accuracy/policy_1', tf.reduce_mean(input_tensor=policy_1))
+        tf.compat.v1.summary.scalar('accuracy/policy_3', tf.reduce_mean(input_tensor=policy_3))
+        tf.compat.v1.summary.scalar('accuracy/policy_5', tf.reduce_mean(input_tensor=policy_5))
+        tf.compat.v1.summary.scalar('accuracy/value', tf.reduce_mean(input_tensor=value_1))
+        tf.compat.v1.summary.scalar('accuracy/ownership', tf.reduce_sum(input_tensor=ownership_1) / (361 * tf.reduce_sum(input_tensor=labels['has_ownership'])))
 
         eval_metric_ops = {
-            'accuracy/policy_1': tf.metrics.mean(policy_1),
-            'accuracy/policy_3': tf.metrics.mean(policy_3),
-            'accuracy/policy_5': tf.metrics.mean(policy_5),
-            'accuracy/value': tf.metrics.mean(value_1),
-            'accuracy/ownership': tf.metrics.mean(ownership_1),
-            'loss/policy': tf.metrics.mean(loss_policy),
-            'loss/value': tf.metrics.mean(loss_value),
-            'loss/ownership': tf.metrics.mean(loss_ownership)
+            'accuracy/policy_1': tf.compat.v1.metrics.mean(policy_1),
+            'accuracy/policy_3': tf.compat.v1.metrics.mean(policy_3),
+            'accuracy/policy_5': tf.compat.v1.metrics.mean(policy_5),
+            'accuracy/value': tf.compat.v1.metrics.mean(value_1),
+            'accuracy/ownership': tf.compat.v1.metrics.mean(ownership_1),
+            'loss/policy': tf.compat.v1.metrics.mean(loss_policy),
+            'loss/value': tf.compat.v1.metrics.mean(loss_value),
+            'loss/ownership': tf.compat.v1.metrics.mean(loss_ownership)
         }
     else:
         loss = None
@@ -198,8 +198,8 @@ def model_fn(features, labels, mode, params):
     # saved graph. We do this here to avoid sprinkling a lot of conditions all
     # over the code.
     if mode != tf.estimator.ModeKeys.PREDICT:
-        tf.get_default_graph().clear_collection(DUMP_OPS)
-        tf.get_default_graph().clear_collection(DUMP_STR_OPS)
+        tf.compat.v1.get_default_graph().clear_collection(DUMP_OPS)
+        tf.compat.v1.get_default_graph().clear_collection(DUMP_STR_OPS)
 
     # put it all together into a specification
     return tf.estimator.EstimatorSpec(

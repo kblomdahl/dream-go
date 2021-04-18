@@ -40,7 +40,7 @@ class DumpHook(tf.estimator.SessionRunHook):
         # space.
         output = {}
 
-        for dump_op in tf.get_collection(DUMP_OPS):
+        for dump_op in tf.compat.v1.get_collection(DUMP_OPS):
             if len(dump_op) == 4:
                 name, value_op, as_type, max_value_op = dump_op
                 value, max_value = session.run([value_op, max_value_op])
@@ -60,7 +60,7 @@ class DumpHook(tf.estimator.SessionRunHook):
                 'v': base64.b85encode(value, pad=True).decode('ascii'),
             }
 
-            for dump_op in tf.get_collection(DUMP_STR_OPS):
+            for dump_op in tf.compat.v1.get_collection(DUMP_STR_OPS):
                 name, value_op = dump_op
                 output[name] = session.run(value_op).decode('ascii')
 

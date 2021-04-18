@@ -39,11 +39,11 @@ def residual_block(x, mode, params):
     6. A skip connection that adds the input to the block
     7. A rectifier non-linearity
     """
-    half_op = tf.constant_initializer(0.5)
+    half_op = tf.compat.v1.constant_initializer(0.5)
     num_channels = params['num_channels']
 
-    alpha = tf.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=True, use_resource=True)
-    tf.add_to_collection(DUMP_OPS, [alpha.name, moving_average(alpha, 'alpha/moving_avg', mode), 'f4'])
+    alpha = tf.compat.v1.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=True, use_resource=True)
+    tf.compat.v1.add_to_collection(DUMP_OPS, [alpha.name, moving_average(alpha, 'alpha/moving_avg', mode), 'f4'])
 
     def _forward(x, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """

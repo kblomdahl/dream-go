@@ -28,12 +28,12 @@ from .leela_zero import leela_zero
 class LzTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
-        self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, 18])
+        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, 18])
         np.random.seed(12345)
-        tf.set_random_seed(67890)
+        tf.compat.v1.set_random_seed(67890)
 
     def tearDown(self):
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
 
     @property
     def params(self):

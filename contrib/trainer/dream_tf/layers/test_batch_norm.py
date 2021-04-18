@@ -27,11 +27,11 @@ class BatchNormTestBase:
     def setUp(self):
         self.batch_size = 2048
         self.num_channels = 128
-        self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
-        self.weights = tf.placeholder(tf.float32, [3, 3, self.num_channels, self.num_channels])
+        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
+        self.weights = tf.compat.v1.placeholder(tf.float32, [3, 3, self.num_channels, self.num_channels])
 
     def tearDown(self):
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
 
     @property
     def mode(self):

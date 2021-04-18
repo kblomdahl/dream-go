@@ -38,7 +38,7 @@ def normalize_constraint(x):
     """
     out_dims = x.shape[-1]
     x_f = tf.reshape(x, (-1, out_dims))
-    n = tf.norm(x_f, axis=0)
+    n = tf.norm(tensor=x_f, axis=0)
     d = tf.clip_by_value(n, 0.001, tf.math.rsqrt(tf.cast(out_dims, tf.float32)))
     x_n = x_f * tf.math.divide_no_nan(d, n)
 
@@ -56,7 +56,7 @@ def l2_regularizer(x):
 
 def conv2d(x, weights):
     """ Shortcut for `tf.nn.conv2d` """
-    return tf.nn.conv2d(x, cast_to_compute_type(weights), (1, 1, 1, 1), 'SAME', True, 'NHWC')
+    return tf.nn.conv2d(input=x, filters=cast_to_compute_type(weights), strides=(1, 1, 1, 1), padding='SAME', data_format='NHWC')
 
 
 def cast_to_compute_type(var):

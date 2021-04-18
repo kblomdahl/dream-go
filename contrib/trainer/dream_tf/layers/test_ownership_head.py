@@ -29,12 +29,12 @@ class OwnershipHeadTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 1
         self.num_channels = 128
-        self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
+        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
         np.random.seed(12345)
-        tf.set_random_seed(67890)
+        tf.compat.v1.set_random_seed(67890)
 
     def tearDown(self):
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
 
     @property
     def params(self):
@@ -56,7 +56,7 @@ class OwnershipHeadTest(unittest.TestCase, TestUtils):
 
     def test_ownership_loss(self):
         logits = ownership_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
-        labels = tf.placeholder(tf.float32, [self.batch_size, 361])
+        labels = tf.compat.v1.placeholder(tf.float32, [self.batch_size, 361])
         loss = ownership_loss(labels=labels, logits=logits)
 
         self.assertEqual(loss.shape, [self.batch_size, 1])

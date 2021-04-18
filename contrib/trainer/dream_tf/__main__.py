@@ -160,15 +160,15 @@ def main():
 
     config = tf.estimator.RunConfig(
         tf_random_seed=0xfde6885f if args.deterministic else None,
-        session_config=tf.ConfigProto(
-            graph_options=tf.GraphOptions(
-                optimizer_options=tf.OptimizerOptions(
+        session_config=tf.compat.v1.ConfigProto(
+            graph_options=tf.compat.v1.GraphOptions(
+                optimizer_options=tf.compat.v1.OptimizerOptions(
                     do_common_subexpression_elimination=not args.debug,
                     do_constant_folding=not args.debug,
                     do_function_inlining=not args.debug
                 )
             ),
-            gpu_options=tf.GPUOptions(
+            gpu_options=tf.compat.v1.GPUOptions(
                 allow_growth=True
             )
         )

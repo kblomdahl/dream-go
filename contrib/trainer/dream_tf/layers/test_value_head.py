@@ -30,12 +30,12 @@ class ValueHeadTest(unittest.TestCase, TestUtils):
         self.batch_size = 1
         self.num_channels = 128
         self.num_samples = 8
-        self.x = tf.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
+        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
         np.random.seed(12345)
-        tf.set_random_seed(67890)
+        tf.compat.v1.set_random_seed(67890)
 
     def tearDown(self):
-        tf.reset_default_graph()
+        tf.compat.v1.reset_default_graph()
 
     @property
     def params(self):

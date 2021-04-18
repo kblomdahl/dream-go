@@ -54,7 +54,7 @@ def _parse(is_deterministic):
 
 
 def _legal_policy(features, labels):
-    return tf.greater(tf.reduce_sum(labels['boost']), 0.0)
+    return tf.greater(tf.reduce_sum(input_tensor=labels['boost']), 0.0)
 
 
 def _apply_symmetry(symmetry_index, x):
@@ -62,25 +62,25 @@ def _apply_symmetry(symmetry_index, x):
         return tf.identity(image)
 
     def _flip_lr(image):
-        return tf.reverse_v2(image, [1])
+        return tf.reverse(image, [1])
 
     def _flip_ud(image):
-        return tf.reverse_v2(image, [0])
+        return tf.reverse(image, [0])
 
     def _transpose_main(image):
-        return tf.transpose(image, [1, 0, 2])
+        return tf.transpose(a=image, perm=[1, 0, 2])
 
     def _transpose_anti(image):
-        return tf.reverse_v2(tf.transpose(image, [1, 0, 2]), [0, 1])
+        return tf.reverse(tf.transpose(a=image, perm=[1, 0, 2]), [0, 1])
 
     def _rot90(image):
-        return tf.transpose(tf.reverse_v2(image, [1]), [1, 0, 2])
+        return tf.transpose(a=tf.reverse(image, [1]), perm=[1, 0, 2])
 
     def _rot180(image):
-        return tf.reverse_v2(image, [0, 1])
+        return tf.reverse(image, [0, 1])
 
     def _rot270(image):
-        return tf.reverse_v2(tf.transpose(image, [1, 0, 2]), [1])
+        return tf.reverse(tf.transpose(a=image, perm=[1, 0, 2]), [1])
 
     return tf.case(
         [
@@ -100,7 +100,7 @@ def _apply_symmetry(symmetry_index, x):
 
 def _augment(features, labels):
     # apply a random transformation to the input features
-    symmetry_index = tf.random_uniform((), 0, 8, tf.int32)
+    symmetry_index = tf.random.uniform((), 0, 8, tf.int32)
     features = _apply_symmetry(symmetry_index, features)
     lz_features = _apply_symmetry(symmetry_index, labels['lz_features'])
 
@@ -127,7 +127,7 @@ def _fix_history(features, labels):
     zero_history_mask[3:5] = 0.0
     zero_history_mask = tf.constant(zero_history_mask, tf.float16, (1, 1, NUM_FEATURES))
 
-    random = tf.random_uniform((), 0, 100, tf.int32)
+    random = tf.random.uniform((), 0, 100, tf.int32)
     features = tf.case(
         [
             (tf.less(random, 5), lambda: features * zero_history_mask)
