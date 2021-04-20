@@ -31,7 +31,6 @@ from .hooks.dump import DumpHook
 from .hooks.learning_rate import LearningRateScheduler
 from .input_fn import input_fn
 from .model_fn import model_fn
-from .sgf.heat_map import to_sgf_heat_map
 
 """ The default total number of examples to train over """
 MAX_STEPS = 524288000
@@ -74,7 +73,6 @@ def parse_args():
     op_group.add_argument('--resume', action='store_true', help='resume training of an existing model')
     op_group.add_argument('--verify', action='store_true', help='evaluate the accuracy of a model')
     op_group.add_argument('--dump', action='store_true', help='print the weights of a model to standard output')
-    op_group.add_argument('--features-map', action='store_true', help='print the final tower features to standard output')
     op_group.add_argument('--print', action='store_true', help='print the value of the given tensor')
 
     return parser.parse_args()
@@ -245,22 +243,6 @@ def main():
 
         for _ in predictor:
             pass
-    elif args.features_map > 0:
-        predictor = nn.predict(
-            input_fn=lambda: input_fn(args.files, 1, features_mask, False, num_test_batches=20, is_deterministic=args.deterministic)
-        )
-        count = 0
-
-        print('(;GM[1]FF[4]SZ[19]')
-        for results in predictor:
-            board_state = to_sgf_heat_map(results['features'], results['tower'])
-
-            print('(;{})'.format(board_state))
-
-            count += 1
-            if count > 100:
-                break
-        print(')')
     elif args.print:
         # tensors are given then print all available tensors with some statistics.
         if not args.files:
