@@ -15,6 +15,7 @@
 use std::mem::size_of;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use dg_cuda::cudnn::DataType;
 use dg_cuda::{PerDevice, Ptr, Stream};
 use super::Error;
 
@@ -28,6 +29,9 @@ pub struct Tensor {
     /// The scaled tensor in device memory as the type given in
     /// `dtype`, or null if not applicable.
     ptr: Arc<PerDevice<Mutex<Ptr>>>,
+
+    /// The data-type that this tensor contains.
+    data_type: DataType,
 
     /// The size of this tensor in bytes.
     size_in_bytes: usize,
@@ -44,6 +48,7 @@ impl Default for Tensor {
         Tensor {
             host: Arc::new(vec! []),
             ptr: Arc::new(PerDevice::new().unwrap()),
+            data_type: DataType::Float,
             size_in_bytes: 0,
             size_in_elements: 0,
             scale: 1.0
@@ -53,8 +58,9 @@ impl Default for Tensor {
 
 impl Tensor {
     #[cfg(test)]
-    pub fn from_vec<T: Sized>(data: Vec<T>) -> Result<Self, Error> {
+    pub fn from_vec<T: Sized>(data_type: DataType, data: Vec<T>) -> Result<Self, Error> {
         let mut out = Self::default();
+        out.set_data_type(data_type);
         out.set_host(data)?;
         Ok(out)
     }
@@ -67,6 +73,14 @@ impl Tensor {
         self.size_in_bytes
     }
 
+    pub fn data_type(&self) -> DataType {
+        self.data_type
+    }
+
+    pub fn set_data_type(&mut self, data_type: DataType) {
+        self.data_type = data_type;
+    }
+
     #[cfg(test)]
     pub fn scale(&self) -> f32 {
         self.scale
@@ -77,6 +91,8 @@ impl Tensor {
     }
 
     pub fn set_host<T: Sized>(&mut self, data: Vec<T>) -> Result<(), Error> {
+        debug_assert!(self.data_type().size_in_bytes() == size_of::<T>());
+
         unsafe {
             let (raw_ptr, length, capacity) = data.into_raw_parts();
 
@@ -89,12 +105,16 @@ impl Tensor {
     }
 
     pub fn as_f32(&self) -> f32 {
+        debug_assert!(self.data_type() == DataType::Float);
+
         unsafe {
             *(self.host.as_ptr() as *const f32)
         }
     }
 
     pub fn as_i32(&self) -> i32 {
+        debug_assert!(self.data_type() == DataType::Int32);
+
         unsafe {
             *(self.host.as_ptr() as *const i32)
         }

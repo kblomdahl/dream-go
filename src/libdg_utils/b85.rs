@@ -80,13 +80,24 @@ impl FromB85<f32> for f32 {
     }
 }
 
+impl FromB85<i32> for i32 {
+    fn decode<O: From<i32>>(bits: [u8; 4], output: &mut Vec<O>) {
+        let raw_bits = (bits[0] as i32)
+            | ((bits[1] as i32) << 8)
+            | ((bits[2] as i32) << 16)
+            | ((bits[3] as i32) << 24);
+
+        output.push(O::from(i32::from_be(raw_bits)));
+    }
+}
+
 /// Decode a RFC 1924 (Ascii85) encoded string of values and returns
 /// an array of the numbers it represents.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `input` -
-/// 
+///
 pub fn decode<T: FromB85<T> + Clone, O: From<T>>(input: &[u8]) -> Option<Vec<O>>
 {
     let decode_table = &*DECODE_85;  // de-ref once
@@ -122,11 +133,11 @@ pub fn decode<T: FromB85<T> + Clone, O: From<T>>(input: &[u8]) -> Option<Vec<O>>
 
 /// Encode an array of FP32 values as an array of FP16 values, encoded
 /// according to RFC 1924 (Ascii85).
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `input` -
-/// 
+///
 pub fn encode(input: &[f32]) -> String {
     debug_assert!(input.len() % 2 == 0);
 

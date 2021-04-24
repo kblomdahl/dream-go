@@ -20,6 +20,7 @@ use std::slice;
 
 use super::tensor::Tensor;
 use super::Error;
+use dg_cuda::cudnn::DataType;
 use dg_utils::types::f16;
 use dg_utils::json::{JsonKey, JsonToken, JsonStream};
 use dg_utils::b85;
@@ -54,12 +55,34 @@ fn load_aux<R: Read>(reader: R) -> Result<HashMap<String, Tensor>, Error> {
                     } else {
                         return Err(Error::MalformedWeights);
                     }
-                } else if attribute == "v" {
-                    let array = b85::decode::<f16, f16>(&value).ok_or(Error::MalformedWeights);
+                } else if attribute == "t" {
+                    let str_data_type = ::std::str::from_utf8(value).map_err(|_| Error::MalformedWeights)?;
 
-                    if let Err(reason) = array.and_then(|h| tensor.set_host(h)) {
-                        return Err(reason);
+                    tensor.set_data_type(match str_data_type {
+                        "i1" => DataType::Int8,
+                        "i4" => DataType::Int32,
+                        "f2" => DataType::Half,
+                        "f4" => DataType::Float,
+                        _ => { return Err(Error::MalformedWeights) }
+                    });
+                } else if attribute == "v" {
+                    macro_rules! decode_as_and_set_host {
+                        ($dtype:ty) => {{
+                            let array = b85::decode::<$dtype, $dtype>(&value).ok_or(Error::MalformedWeights);
+
+                            if let Err(reason) = array.and_then(|h| tensor.set_host(h)) {
+                                return Err(reason);
+                            }
+                        }};
                     }
+
+                    match tensor.data_type() {
+                        DataType::Int8 => decode_as_and_set_host!(i8),
+                        DataType::Int32 => decode_as_and_set_host!(i32),
+                        DataType::Half => decode_as_and_set_host!(f16),
+                        DataType::Float => decode_as_and_set_host!(f32),
+                        _ => unreachable!()
+                    };
                 } else {
                     return Err(Error::MalformedWeights);
                 }
@@ -106,7 +129,7 @@ mod tests {
 
     #[test]
     fn load_json() {
-        let out = load_aux(Cursor::new("{\"11v_value/linear_2/offset:0\": {\"s\": \"(^d>V\", \"v\": \"(^d>V\"}}"));
+        let out = load_aux(Cursor::new("{\"11v_value/linear_2/offset:0\": {\"s\": \"(^d>V\", \"t\": \"f2\", \"v\": \"(^d>V\"}}"));
         assert!(out.is_ok());
 
         // verify internal values

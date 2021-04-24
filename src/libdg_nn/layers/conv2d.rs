@@ -234,11 +234,12 @@ fn has_true_half() -> bool {
 #[cfg(test)]
 mod tests {
     use std::mem::size_of;
+    use dg_cuda::cudnn::DataType;
     use dg_utils::types::f16;
     use super::*;
 
     fn create_tensor(data: &[f32]) -> Result<Tensor, Error> {
-        Tensor::from_vec(data.iter().map(|&x| f16::from(x)).collect())
+        Tensor::from_vec(DataType::Half, data.iter().map(|&x| f16::from(x)).collect())
     }
 
     fn create_ptr<A: cuda::Allocator + Clone>(data: &[f32], allocator: &A) -> Result<cuda::SmartPtr<A>, Error> {

@@ -117,12 +117,12 @@ impl DenseBuilder {
 
     /// Returns a `FilterDescriptor` for a one wide and high filter for the given
     /// `num_outputs` and `num_inputs` features.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `num_outputs` -
     /// * `num_inputs` -
-    /// 
+    ///
     fn create_filter_descriptor(&self) -> Result<cudnn::FilterDescriptor, cudnn::Status> {
         let num_outputs = self.shape[0];
         let num_inputs = self.shape[1];
@@ -175,7 +175,7 @@ impl Dense {
         handle: &cudnn::Handle,
         allocator: &A,
         stream: &cuda::Stream
-    ) -> Result<bool, Error> 
+    ) -> Result<bool, Error>
     {
         handle.set_stream(stream)?;
         if self.filter.copy_to_device(&stream)? && self.offset.copy_to_device(&stream)? {
@@ -223,19 +223,20 @@ impl Dense {
 #[cfg(test)]
 mod tests {
     use std::mem::size_of;
+    use dg_cuda::cudnn::DataType;
     use dg_utils::types::f16;
 
     use super::*;
 
     fn create_tensor(data: &[f32]) -> Result<Tensor, Error> {
-        Tensor::from_vec(data.iter().map(|&x| f16::from(x)).collect())
+        Tensor::from_vec(DataType::Half, data.iter().map(|&x| f16::from(x)).collect())
     }
 
     fn create_ptr<A: cuda::Allocator + Clone>(data: &[f32], allocator: &A) -> Result<cuda::SmartPtr<A>, Error> {
         let stream = cuda::Stream::default();
         let mut output = cuda::malloc(size_of::<f16>() * data.len(), allocator)?;
         output.copy_from_slice(&data.iter().map(|&x| f16::from(x)).collect::<Vec<_>>(), &stream)?;
-        
+
         Ok(output)
     }
 
