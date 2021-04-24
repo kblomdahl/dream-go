@@ -279,7 +279,7 @@ impl<'a> V2<'a> {
 
     /// Returns the number of channels.
     pub const fn num_features() -> usize {
-        16
+        18
     }
 
     /// Returns the total number of elements that the returned features will
@@ -300,6 +300,43 @@ impl<'a> V2<'a> {
 }
 
 impl<'a> Features for V2<'a> {
+    /// Returns the features of the current board state for the given color,
+    /// it returns the following features. Divided into four sections based
+    /// on their intended purpose (regardless of what the network does with
+    /// them).
+    ///
+    /// ## Global properties
+    ///
+    ///  0. One
+    ///  1. Komi (-1 to +1)
+    ///
+    /// ## Vertex properties
+    ///
+    ///  2. Is player
+    ///  3. Is opponent
+    ///  4. Has exactly 1 liberty
+    ///  5. Has exactly 2 liberty
+    ///  6. Has exactly 3 liberty
+    ///  7. Has exactly 4 liberty
+    ///  8. Would have exactly 1 liberty if played
+    ///  9. Would have exactly 2 liberty if played
+    /// 10. Is valid move
+    /// 11. Is player eye
+    /// 12. Is opponent eye
+    /// 13. Is forbidden due to ko
+    /// 14. Is a ladder capture
+    /// 15. Is a ladder escape mode
+    ///
+    /// ## Board properties
+    ///
+    /// 16. Is corner
+    /// 17. Is edge
+    ///
+    /// # Arguments
+    ///
+    /// * `to_move` -
+    /// * `symmetry`-
+    ///
     fn get_features<O: Order, T: From<f32> + Copy>(
         &self,
         to_move: Color,
@@ -363,6 +400,12 @@ impl<'a> Features for V2<'a> {
                     2 => out[o.index(9, other)] = c_1,
                     _ => ()
                 }
+            }
+
+            if (point.x() == 0 || point.x() == 18) && (point.y() == 0 || point.y() == 18) {
+                out[o.index(16, other)] = c_1; // corner
+            } else if point.x() == 0 || point.x() == 18 || point.y() == 0 || point.y() == 18 {
+                out[o.index(17, other)] = c_1; // edge
             }
         }
 
