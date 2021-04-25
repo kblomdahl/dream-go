@@ -53,6 +53,7 @@ impl From<q8> for f32 {
 /// * `data_type` - the data type of the input / output / weight arrays
 /// * `conv_algo` - the convolutional algorithm to use
 /// * `conv_type` - the data type to use internally in the convolution
+/// * `reorder_type` - the filter & bias reorder type to set
 ///
 unsafe fn bench_conv<T: From<f32> + Clone>(
     bencher: &mut Bencher,
@@ -60,7 +61,8 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     tensor_format: cudnn::TensorFormat,
     data_type: cudnn::DataType,
     offset_type: cudnn::DataType,
-    conv_type: cudnn::DataType
+    conv_type: cudnn::DataType,
+    reorder_type: cudnn::ReorderType
 ) -> Result<(), cudnn::Status>
     where f32: From<T>
 {
@@ -96,6 +98,10 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
         cudnn::ConvolutionMode::CrossCorrelation,
         conv_type
     )?;
+
+    if reorder_type != cudnn::ReorderType::DefaultReorder {
+        conv_desc.set_reorder_type(reorder_type)?;
+    }
 
     // the relu descriptor
     let relu = cudnn::ActivationDescriptor::relu()?;
@@ -198,7 +204,8 @@ fn f32_compute_type_f32(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Float, cudnn::DataType::Float,
-            cudnn::DataType::Float
+            cudnn::DataType::Float,
+            cudnn::ReorderType::DefaultReorder
         ).unwrap();
     }
 }
@@ -215,7 +222,8 @@ fn f16_nchw_compute_type_f32(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::DataType::Float
+            cudnn::DataType::Float,
+            cudnn::ReorderType::DefaultReorder
         ).unwrap();
     }
 }
@@ -230,7 +238,8 @@ fn f16_nhwc_compute_type_f32(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::DataType::Float
+            cudnn::DataType::Float,
+            cudnn::ReorderType::DefaultReorder
         ).unwrap();
     }
 }
@@ -245,7 +254,8 @@ fn f16_nchw_compute_type_f16(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::DataType::Half
+            cudnn::DataType::Half,
+            cudnn::ReorderType::DefaultReorder
         ).unwrap();
     }
 }
@@ -260,7 +270,8 @@ fn f16_nhwc_compute_type_f16(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half, cudnn::DataType::Half,
-            cudnn::DataType::Half
+            cudnn::DataType::Half,
+            cudnn::ReorderType::DefaultReorder
         ).unwrap();
     }
 }
@@ -277,7 +288,8 @@ fn i8_nhwc(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NHWC,
             cudnn::DataType::Int8, cudnn::DataType::Float,
-            cudnn::DataType::Int32
+            cudnn::DataType::Int32,
+            cudnn::ReorderType::DefaultReorder
         ).unwrap();
     }
 }
@@ -292,7 +304,8 @@ fn i8x4_nhwcvectc(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NCHW_VECT_C,
             cudnn::DataType::Int8x4, cudnn::DataType::Float,
-            cudnn::DataType::Int32
+            cudnn::DataType::Int32,
+            cudnn::ReorderType::DefaultReorder
         ).unwrap();
     }
 }
@@ -307,7 +320,24 @@ fn i8x32_nhwcvectc(b: &mut Bencher) {
             NUM_FEATURES,
             cudnn::TensorFormat::NCHW_VECT_C,
             cudnn::DataType::Int8x32, cudnn::DataType::Float,
-            cudnn::DataType::Int32
+            cudnn::DataType::Int32,
+            cudnn::ReorderType::DefaultReorder
+        ).unwrap();
+    }
+}
+
+#[bench]
+fn i8x32_nhwcvectc_noreorder(b: &mut Bencher) {
+    if !supports_i8() { return }
+
+    unsafe {
+        bench_conv::<q8>(
+            b,
+            NUM_FEATURES,
+            cudnn::TensorFormat::NCHW_VECT_C,
+            cudnn::DataType::Int8x32, cudnn::DataType::Float,
+            cudnn::DataType::Int32,
+            cudnn::ReorderType::NoReorder
         ).unwrap();
     }
 }

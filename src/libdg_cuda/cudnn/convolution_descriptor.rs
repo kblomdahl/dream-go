@@ -55,6 +55,14 @@ extern {
         conv_desc: cudnnConvolutionDescriptor_t,
         math_type: *mut cudnnMathType_t
     ) -> cudnnStatus_t;
+    fn cudnnSetConvolutionReorderType(
+        conv_desc: cudnnConvolutionDescriptor_t,
+        reorder_type: cudnnReorderType_t
+    ) -> cudnnStatus_t;
+    fn cudnnGetConvolutionReorderType(
+        conv_desc: cudnnConvolutionDescriptor_t,
+        reorder_type: *mut cudnnReorderType_t
+    ) -> cudnnStatus_t;
 }
 
 struct GetConvolution2dDescriptor {
@@ -177,6 +185,25 @@ impl ConvolutionDescriptor {
     pub fn math_type(&self) -> Result<MathType, Status> {
         let mut out = MathType::DefaultMath;
         let status = unsafe { cudnnGetConvolutionMathType(self.conv_desc, &mut out) };
+
+        status.into_result(out)
+    }
+
+    pub fn set_reorder_type(&self, reorder_type: ReorderType) -> Result<(), Status> {
+        let status =
+            unsafe {
+                cudnnSetConvolutionReorderType(
+                    self.conv_desc,
+                    reorder_type
+                )
+            };
+
+        status.into_result(())
+    }
+
+    pub fn reorder_type(&self) -> Result<ReorderType, Status> {
+        let mut out = ReorderType::DefaultReorder;
+        let status = unsafe { cudnnGetConvolutionReorderType(self.conv_desc, &mut out) };
 
         status.into_result(out)
     }
