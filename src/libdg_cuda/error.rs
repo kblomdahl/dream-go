@@ -19,7 +19,7 @@ use libc::c_char;
 #[allow(non_camel_case_types)]
 pub(super) type cudaError_t = Error;
 
-#[link(name = "cudnn")]
+#[link(name = "cudart")]
 extern {
     fn cudaGetErrorName(error: cudaError_t) -> *const c_char;
 }
