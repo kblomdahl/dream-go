@@ -130,7 +130,7 @@ pub fn forward(workspace: &mut Workspace, features: &[f16]) -> Result<OutputMap<
     let mut input = cuda::malloc(size_of::<f16>() * features.len(), &mut allocator)?;
     input.copy_from_slice(&features, &workspace.tower_stream)?;
 
-    // Upsample features to 128 channels
+    // upsample features to `n` channels
     let mut residual_1 = workspace.c_up.forward(&workspace.handle, &input, &mut allocator, &workspace.tower_stream)?;
 
     // residual blocks

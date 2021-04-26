@@ -87,7 +87,7 @@ impl<'a> V1<'a> {
 
     /// Returns the number of channels.
     pub const fn num_features() -> usize {
-        40
+        32
     }
 
     /// Returns the total number of elements that the returned features will
@@ -122,38 +122,30 @@ impl<'a> Features for V1<'a> {
     ///  9. Our liberties (>= 4)
     /// 10. Our liberties (>= 5)
     /// 11. Our liberties (>= 6)
-    /// 12. Our liberties (>= 7)
-    /// 13. Our liberties (>= 8)
-    /// 14. Our liberties after move (>= 1)
-    /// 15. Our liberties after move (>= 2)
-    /// 16. Our liberties after move (>= 3)
-    /// 17. Our liberties after move (>= 4)
-    /// 18. Our liberties after move (>= 5)
-    /// 19. Our liberties after move (>= 6)
-    /// 20. Our liberties after move (>= 7)
-    /// 21. Our liberties after move (>= 8)
-    /// 22. Opponent liberties (>= 1)
-    /// 23. Opponent liberties (>= 2)
-    /// 24. Opponent liberties (>= 3)
-    /// 25. Opponent liberties (>= 4)
-    /// 26. Opponent liberties (>= 5)
-    /// 27. Opponent liberties (>= 6)
-    /// 28. Opponent liberties (>= 7)
-    /// 29. Opponent liberties (>= 8)
-    /// 30. Opponent liberties after move (>= 1)
-    /// 31. Opponent liberties after move (>= 2)
-    /// 32. Opponent liberties after move (>= 3)
-    /// 33. Opponent liberties after move (>= 4)
-    /// 34. Opponent liberties after move (>= 5)
-    /// 35. Opponent liberties after move (>= 6)
-    /// 36. Opponent liberties after move (>= 7)
-    /// 37. Opponent liberties after move (>= 8)
+    /// 12. Our liberties after move (>= 1)
+    /// 13. Our liberties after move (>= 2)
+    /// 14. Our liberties after move (>= 3)
+    /// 15. Our liberties after move (>= 4)
+    /// 16. Our liberties after move (>= 5)
+    /// 17. Our liberties after move (>= 6)
+    /// 18. Opponent liberties (>= 1)
+    /// 19. Opponent liberties (>= 2)
+    /// 20. Opponent liberties (>= 3)
+    /// 21. Opponent liberties (>= 4)
+    /// 22. Opponent liberties (>= 5)
+    /// 23. Opponent liberties (>= 6)
+    /// 24. Opponent liberties after move (>= 1)
+    /// 25. Opponent liberties after move (>= 2)
+    /// 26. Opponent liberties after move (>= 3)
+    /// 27. Opponent liberties after move (>= 4)
+    /// 28. Opponent liberties after move (>= 5)
+    /// 29. Opponent liberties after move (>= 6)
     ///
     /// ## Vertex properties
     ///
-    /// 38. Is super-ko
-    /// 39. Is ladder capture
-    /// 40. Is ladder escape
+    /// 30. Is super-ko
+    /// 31. Is ladder capture
+    /// 32. Is ladder escape
     ///
     /// # Arguments
     ///
@@ -188,10 +180,10 @@ impl<'a> Features for V1<'a> {
             let other = symmetry_table[index];
 
             if self.board.inner[index].color() != None {
-                let start = if self.board.inner[index].color() == Some(to_move) { 5 } else { 21 };
+                let start = if self.board.inner[index].color() == Some(to_move) { 5 } else { 17 };
                 let num_liberties = ::std::cmp::min(
                     self.board.inner.get_n_liberty(index),
-                    8
+                    6
                 );
 
                 for i in 0..num_liberties {
@@ -201,22 +193,22 @@ impl<'a> Features for V1<'a> {
                 if self.board.inner.is_valid(to_move, index) {
                     let num_liberties = ::std::cmp::min(
                         self.board.inner.get_n_liberty_if(to_move, index),
-                        8
+                        6
                     );
 
                     for i in 0..num_liberties {
-                        features[o.index(13+i, other)] = c_1;
+                        features[o.index(11+i, other)] = c_1;
                     }
                 }
 
                 if self.board.inner.is_valid(opponent, index) {
                     let num_liberties = ::std::cmp::min(
                         self.board.inner.get_n_liberty_if(opponent, index),
-                        8
+                        6
                     );
 
                     for i in 0..num_liberties {
-                        features[o.index(29+i, other)] = c_1;
+                        features[o.index(23+i, other)] = c_1;
                     }
                 }
             }
@@ -235,17 +227,17 @@ impl<'a> Features for V1<'a> {
                 if self.board._is_ko(to_move, index) {
                     is_ko = c_1;
 
-                    features[o.index(37, other)] = c_1;
+                    features[o.index(29, other)] = c_1;
                 }
 
                 // is ladder capture
                 if self.board.inner.is_ladder_capture(to_move, index) {
-                    features[o.index(38, other)] = c_1;
+                    features[o.index(30, other)] = c_1;
                 }
 
                 // is ladder escape
                 if self.board.inner.is_ladder_escape(to_move, index) {
-                    features[o.index(39, other)] = c_1;
+                    features[o.index(31, other)] = c_1;
                 }
             }
         }

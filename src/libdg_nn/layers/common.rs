@@ -25,11 +25,11 @@ pub const DEFAULT_NUM_CHANNELS: i32 = 128;
 pub const DEFAULT_NUM_SAMPLES: i32 = 8;
 
 /// Returns the number of channels to in each layer of the graph.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `tensors` -
-/// 
+///
 pub fn get_num_channels(tensors: &HashMap<String, Tensor>) -> i32 {
     tensors.get("num_channels:0")
         .map(|x| { x.as_i32() })
@@ -38,11 +38,11 @@ pub fn get_num_channels(tensors: &HashMap<String, Tensor>) -> i32 {
 
 /// Returns the number of samples to use internally in the policy & value
 /// head.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `tensors` -
-/// 
+///
 pub fn get_num_samples(tensors: &HashMap<String, Tensor>) -> i32 {
     tensors.get("num_samples:0")
         .map(|x| { x.as_i32() })
