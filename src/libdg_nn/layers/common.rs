@@ -51,13 +51,13 @@ pub fn get_num_samples(tensors: &HashMap<String, Tensor>) -> i32 {
 
 /// Returns a `TensorDescriptor` for an feature tensor for the given
 /// `batch_size` and `num_channels`.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `batch_size` -
 /// * `num_channels` -
 /// * `width_height` -
-/// 
+///
 pub fn create_tensor_descriptor(batch_size: i32, num_channels: i32, width_height: i32) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
     cudnn::TensorDescriptor::new(
         cudnn::TensorFormat::NHWC,
@@ -68,11 +68,11 @@ pub fn create_tensor_descriptor(batch_size: i32, num_channels: i32, width_height
 
 /// Returns a `TensorDescriptor` for an offset tensor for the given
 /// `num_channels`.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `num_channels` -
-/// 
+///
 pub fn create_offset_descriptor(num_channels: i32) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
     cudnn::TensorDescriptor::new(
         cudnn::TensorFormat::NHWC,
@@ -85,10 +85,10 @@ pub fn create_offset_descriptor(num_channels: i32) -> Result<cudnn::TensorDescri
 /// and `size`.
 ///
 /// # Arguments
-/// 
+///
 /// * `batch_size` -
 /// * `size` -
-/// 
+///
 pub fn create_dense_descriptor(batch_size: i32, size: i32) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
     cudnn::TensorDescriptor::new(
         cudnn::TensorFormat::NHWC,
