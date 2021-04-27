@@ -20,7 +20,7 @@
 
 import tensorflow as tf
 
-from . import conv2d, normalize_getting, l2_regularizer, cast_to_compute_type
+from . import conv2d, normalize_getting, cast_to_compute_type
 from .recompute_grad import recompute_grad
 from .orthogonal_initializer import orthogonal_initializer
 
@@ -38,7 +38,7 @@ def ownership_head(x, mode, params):
 
     def _forward(x, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """
-        conv_1 = tf.compat.v1.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op, custom_getter=normalize_getting, regularizer=l2_regularizer, use_resource=True)
+        conv_1 = tf.compat.v1.get_variable('conv_1', (1, 1, num_channels, 1), tf.float32, init_op, custom_getter=normalize_getting, use_resource=True)
         offset_1 = tf.compat.v1.get_variable('conv_1/offset', (1,), tf.float32, zeros_op, use_resource=True)
         y = conv2d(x, conv_1) + cast_to_compute_type(offset_1)
 

@@ -22,7 +22,7 @@ import tensorflow as tf
 
 from . import cast_to_compute_type
 from ..hooks.dump import DUMP_OPS
-from .batch_norm import batch_norm_conv2d, relu3
+from .batch_norm import batch_norm_conv2d
 from .moving_average import moving_average
 from .recompute_grad import recompute_grad
 
@@ -50,11 +50,11 @@ def residual_block(x, mode, params):
 
         # the 1st convolution
         y = batch_norm_conv2d(x, 'conv_1', (3, 3, num_channels, num_channels), mode, params, is_recomputing=is_recomputing)
-        y = relu3(y)
+        y = tf.nn.relu(y)
 
         # the 2nd convolution
         y = batch_norm_conv2d(y, 'conv_2', (3, 3, num_channels, num_channels), mode, params, is_recomputing=is_recomputing)
-        y = relu3(cast_to_compute_type(alpha) * y + cast_to_compute_type(1.0 - alpha) * x)
+        y = tf.nn.relu(cast_to_compute_type(alpha) * y + cast_to_compute_type(1.0 - alpha) * x)
 
         return y
 

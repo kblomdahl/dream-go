@@ -63,20 +63,16 @@ def model_fn(features, labels, mode, params):
             logits=check_numerics(ownership_hat, 'ownership_hat')
         ), (-1, 1))
 
-        loss_reg = tf.math.accumulate_n(
-            inputs=tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES) + [tf.zeros([])]
-        )
-
         # normalize and sum the individual losses such that the expected value
         # of each loss is the same according to the cross entropy formula:
         #
         #     -1.0 / log (1 / num_classes)
         #
         loss_unboosted = 0.12 * check_numerics(loss_policy, 'loss_policy') \
-                         + 1.00 * check_numerics(loss_value, 'loss_value') * labels['boost'] \
+                         + 1.00 * check_numerics(loss_value, 'loss_value') \
                          + 1.00 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership']
 
-        loss = tf.reduce_mean(input_tensor=loss_unboosted) + 1e-4 * loss_reg
+        loss = tf.reduce_mean(input_tensor=loss_unboosted)
         tf.compat.v1.add_to_collection(LOSS, loss_unboosted)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
@@ -92,6 +88,7 @@ def model_fn(features, labels, mode, params):
             update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
 
             with tf.control_dependencies(update_ops):
+                variables_l2 = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.WEIGHTS)
                 variables = tf.compat.v1.trainable_variables()
                 gradients = tf.gradients(
                     ys=loss_scale * loss,
@@ -102,7 +99,10 @@ def model_fn(features, labels, mode, params):
                 )
 
                 gradients = [grad / loss_scale for grad in gradients]
-                train_op = adam_optimizer.apply_gradients(zip(gradients, variables), global_step)
+                update_l2_ops = [tf.compat.v1.assign_sub(var, 1e-4 * var) for var in variables_l2]
+
+                with tf.control_dependencies(update_l2_ops):
+                    train_op = adam_optimizer.apply_gradients(zip(gradients, variables), global_step)
 
             # during training it is very useful to plot the norm of the gradients at
             # each tensor so that we can detect the cause of any exploding gradients
@@ -129,13 +129,12 @@ def model_fn(features, labels, mode, params):
         tf.compat.v1.summary.scalar('loss/policy', tf.reduce_mean(input_tensor=loss_policy))
         tf.compat.v1.summary.scalar('loss/value', tf.reduce_mean(input_tensor=loss_value))
         tf.compat.v1.summary.scalar('loss/ownership', tf.reduce_mean(input_tensor=loss_ownership))
-        tf.compat.v1.summary.scalar('loss/l2', tf.reduce_mean(input_tensor=loss_reg))
 
         # image metrics
         def to_heat_image(heat):
             return dream_go_module.tensor_to_heat_image(
                 features[0, :, :, 5],
-                features[0, :, :, 21],
+                features[0, :, :, 17],
                 heat
             )
 

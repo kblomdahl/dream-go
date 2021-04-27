@@ -21,7 +21,7 @@
 import numpy as np
 import tensorflow as tf
 
-from .batch_norm import batch_norm_conv2d, relu3
+from .batch_norm import batch_norm_conv2d
 from .dense import dense
 from .recompute_grad import recompute_grad
 

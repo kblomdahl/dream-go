@@ -22,17 +22,11 @@ import tensorflow as tf
 
 from .moving_average import moving_average
 from .orthogonal_initializer import orthogonal_initializer
-from . import conv2d, normalize_getting, l2_regularizer
+from . import conv2d, normalize_getting
 from ..hooks.dump import DUMP_OPS
 
-THREE = 3.09023
-
-def relu3(x):
-    return tf.clip_by_value(x, 0.0, THREE)
-
-
 def batch_norm_conv2d(x, op_name, shape, mode, params, is_recomputing=False):
-    weights = tf.compat.v1.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), custom_getter=normalize_getting, regularizer=l2_regularizer, use_resource=True)
+    weights = tf.compat.v1.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), custom_getter=normalize_getting, collections=[tf.compat.v1.GraphKeys.GLOBAL_VARIABLES, tf.compat.v1.GraphKeys.WEIGHTS], use_resource=True)
 
     return batch_norm(conv2d(x, weights), weights, op_name, mode, params, is_recomputing=is_recomputing)
 
@@ -49,7 +43,7 @@ def batch_norm(x, weights, op_name, mode, params, is_recomputing=False):
         variance = tf.compat.v1.get_variable('variance', (num_channels,), tf.float32, ones_op, trainable=False, use_resource=True)
         offset = tf.compat.v1.get_variable('offset', (num_channels,), tf.float32, zeros_op, trainable=True, use_resource=True)
 
-    if not is_recomputing:
+    if not is_recomputing and 'no_dump' not in params:
         # fold the batch normalization into the convolutional weights and one
         # additional bias term. By scaling the weights and the mean by the
         # term `scale / sqrt(variance + 0.001)`.
@@ -71,32 +65,12 @@ def batch_norm(x, weights, op_name, mode, params, is_recomputing=False):
         # to cuDNN (for NHWC):
         #
         # tensorflow: [h, w, in, out]
-        # cudnn:      [out, h, w, in]
+        # cudnn:      [out, in, h, w]
         weights_ = tf.transpose(a=weights_, perm=[3, 0, 1, 2])
 
         # calulate the moving average of the weights and the offset.
-        weights_ma = moving_average(weights_, f'{op_name}/moving_avg', mode)
-        offset_ma = moving_average(offset_, f'{op_name}/offset/moving_avg', mode)
-
-        # quantize the weights to [-127, +127] and offset to the same range (but
-        # as a floating point number as required by cuDNN).
-        #
-        # We do the funny `tf.stack` and flatten because `tf.reduce_max` does
-        # not want to behave with the `moving_average` output tensor.
-        weights_max = tf.reduce_max(input_tensor=tf.reshape(tf.stack([weights_ma, -weights_ma]), [-1]))
-        weights_q, weights_qmin, weights_qmax = tf.quantization.quantize(
-            weights_ma,
-            -weights_max,
-            weights_max,
-            tf.qint8,
-            'SCALED',
-            'HALF_AWAY_FROM_ZERO'
-        )
-
-        step_size = (2 * THREE) / 255.0
-
-        tf.compat.v1.add_to_collection(DUMP_OPS, [offset.name, offset_ma / step_size, 'f4', tf.constant(127 * step_size)])
-        tf.compat.v1.add_to_collection(DUMP_OPS, [f'{name_scope.name}:0', weights_q, 'i1', tf.math.reduce_max(input_tensor=tf.stack([weights_qmin, -weights_qmin, weights_qmax, -weights_qmax]))])
+        tf.compat.v1.add_to_collection(DUMP_OPS, [offset.name, moving_average(offset_, f'{op_name}/offset/moving_avg', mode), 'f2'])
+        tf.compat.v1.add_to_collection(DUMP_OPS, [f'{name_scope.name}:0', moving_average(weights_, f'{op_name}/moving_avg', mode), 'f2'])
 
     def _forward(x):
         """ Returns the result of the forward inference pass on `x` """
