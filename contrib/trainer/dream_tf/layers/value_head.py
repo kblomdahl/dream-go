@@ -21,9 +21,11 @@
 import numpy as np
 import tensorflow as tf
 
+from . import normalize_getting, conv2d, cast_to_compute_type
 from .batch_norm import batch_norm_conv2d
 from .dense import dense
 from .recompute_grad import recompute_grad
+from .orthogonal_initializer import orthogonal_initializer
 
 
 def value_head(x, mode, params):
@@ -43,11 +45,16 @@ def value_head(x, mode, params):
         """ Returns the result of the forward inference pass on `x` """
         y = batch_norm_conv2d(x, 'conv_1', (3, 3, num_channels, num_samples), mode, params, is_recomputing=is_recomputing)
         y = tf.nn.relu(y)
+
+        zo = conv2d(y, 'conv_2', [1, 1, num_samples, 1])
+        zo = tf.reshape(zo, [-1, 361])
+        zo = tf.nn.tanh(zo)
+
         z = tf.reshape(y, [-1, 361 * num_samples])
         z = dense(z, 'linear_2', (361 * num_samples, 1), value_offset_op, mode, params, is_recomputing=is_recomputing)
         z = tf.nn.tanh(z)
 
-        return tf.cast(z, tf.float32), tf.cast(tf.reshape(y, [-1, 361, 2]), tf.float32)
+        return tf.cast(z, tf.float32), tf.cast(zo, tf.float32), tf.cast(tf.reshape(y, [-1, 361, num_samples]), tf.float32)
 
     return _forward(x)
 

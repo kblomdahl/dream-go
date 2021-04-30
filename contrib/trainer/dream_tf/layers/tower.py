@@ -65,12 +65,8 @@ def tower(x, mode, params):
     with tf.compat.v1.variable_scope('{:02d}p_policy'.format(2 + num_blocks), reuse=tf.compat.v1.AUTO_REUSE):
         p = policy_head(y, mode, params)
 
-    # value head
+    # value head and ownership head
     with tf.compat.v1.variable_scope('{:02d}v_value'.format(2 + num_blocks), reuse=tf.compat.v1.AUTO_REUSE):
-        v, vo = value_head(y, mode, params)
+        v, vo, vy = value_head(y, mode, params)
 
-    # ownership head
-    with tf.compat.v1.variable_scope('{:02d}o_ownership'.format(2 + num_blocks), reuse=tf.compat.v1.AUTO_REUSE):
-        o = ownership_head(y, mode, params)
-
-    return v, vo, p, o, y
+    return v, vy, p, vo, y

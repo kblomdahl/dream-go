@@ -63,6 +63,9 @@ def model_fn(features, labels, mode, params):
             logits=check_numerics(ownership_hat, 'ownership_hat')
         ), (-1, 1))
 
+        variables_l2 = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.WEIGHTS)
+        loss_l2 = tf.math.accumulate_n([tf.nn.l2_loss(var) for var in variables_l2])
+
         # normalize and sum the individual losses such that the expected value
         # of each loss is the same according to the cross entropy formula:
         #
@@ -88,7 +91,6 @@ def model_fn(features, labels, mode, params):
             update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
 
             with tf.control_dependencies(update_ops):
-                variables_l2 = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.WEIGHTS)
                 variables = tf.compat.v1.trainable_variables()
                 gradients = tf.gradients(
                     ys=loss_scale * loss,
@@ -129,6 +131,7 @@ def model_fn(features, labels, mode, params):
         tf.compat.v1.summary.scalar('loss/policy', tf.reduce_mean(input_tensor=loss_policy))
         tf.compat.v1.summary.scalar('loss/value', tf.reduce_mean(input_tensor=loss_value))
         tf.compat.v1.summary.scalar('loss/ownership', tf.reduce_mean(input_tensor=loss_ownership))
+        tf.compat.v1.summary.scalar('loss/l2', tf.reduce_mean(input_tensor=loss_l2))
 
         # image metrics
         def to_heat_image(heat):
@@ -140,7 +143,7 @@ def model_fn(features, labels, mode, params):
 
         tf.compat.v1.summary.image('value/predictions', to_heat_image(tf.ones([19, 19]) * value_hat[0, 0]))
         tf.compat.v1.summary.image('value/labels', to_heat_image(tf.ones([19, 19]) * labels['value'][0, 0]))
-        for i in range(2):
+        for i in range(value_ownership_hat.shape[-1]):
             tf.compat.v1.summary.image('value/ownership/' + str(i), to_heat_image(tf.reshape(value_ownership_hat[0, :, i], [19, 19])))
         for i in range(features.shape[-1]):
             tf.compat.v1.summary.image('features/default/' + str(i), to_heat_image(tf.cast(tf.reshape(features[0, :, :, i], [19, 19]), tf.float32)))
@@ -175,7 +178,8 @@ def model_fn(features, labels, mode, params):
             'accuracy/ownership': tf.compat.v1.metrics.mean(ownership_1),
             'loss/policy': tf.compat.v1.metrics.mean(loss_policy),
             'loss/value': tf.compat.v1.metrics.mean(loss_value),
-            'loss/ownership': tf.compat.v1.metrics.mean(loss_ownership)
+            'loss/ownership': tf.compat.v1.metrics.mean(loss_ownership),
+            'loss/l2': tf.compat.v1.metrics.mean(loss_l2)
         }
     else:
         loss = None

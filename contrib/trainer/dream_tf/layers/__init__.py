@@ -21,6 +21,7 @@
 import tensorflow as tf
 
 from ..ffi.libdg_go import get_num_features
+from .orthogonal_initializer import orthogonal_initializer
 
 """ The total number of input features """
 NUM_FEATURES = get_num_features()
@@ -49,9 +50,12 @@ def normalize_getting(getter, *args, **kwargs):
     return normalize_constraint(getter(*args, **kwargs))
 
 
-def conv2d(x, weights):
+def conv2d(x, op_name, shape):
     """ Shortcut for `tf.nn.conv2d` """
-    return tf.nn.conv2d(input=x, filters=cast_to_compute_type(weights), strides=(1, 1, 1, 1), padding='SAME', data_format='NHWC')
+    weights = tf.compat.v1.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), custom_getter=normalize_getting, use_resource=True)
+    offset = tf.compat.v1.get_variable(f'{op_name}/offset', [shape[-1]], tf.float32, tf.compat.v1.zeros_initializer(), use_resource=True)
+
+    return tf.nn.conv2d(input=x, filters=cast_to_compute_type(weights), strides=(1, 1, 1, 1), padding='SAME', data_format='NHWC') + cast_to_compute_type(offset)
 
 
 def cast_to_compute_type(var):

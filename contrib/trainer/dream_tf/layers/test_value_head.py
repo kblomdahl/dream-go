@@ -45,18 +45,20 @@ class ValueHeadTest(unittest.TestCase, TestUtils):
         }
 
     def test_shape(self):
-        value_hat, value_ownership_hat = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+        value_hat, ownership_hat, value_ownership_hat = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
         self.assertEqual(value_hat.shape, [self.batch_size, 1])
+        self.assertEqual(ownership_hat.shape, [self.batch_size, 361])
         self.assertEqual(value_ownership_hat.shape, [self.batch_size, 361, 2])
 
     def test_data_type(self):
-        value_hat, value_ownership_hat = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+        value_hat, ownership_hat, value_ownership_hat = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
         self.assertEqual(value_hat.dtype, tf.float32)
+        self.assertEqual(ownership_hat.dtype, tf.float32)
         self.assertEqual(value_ownership_hat.dtype, tf.float32)
 
     def test_fit(self):
         with tf.device('/cpu:0'):
-            logits, _ = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+            logits, _, _ = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
             steps = self.fit_regression(
                 inputs= \
                     np.random.random([1, 19, 19, self.num_channels])

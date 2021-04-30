@@ -22,13 +22,14 @@ import tensorflow as tf
 
 from .moving_average import moving_average
 from .orthogonal_initializer import orthogonal_initializer
-from . import conv2d, normalize_getting
+from . import cast_to_compute_type, normalize_getting
 from ..hooks.dump import DUMP_OPS
 
 def batch_norm_conv2d(x, op_name, shape, mode, params, is_recomputing=False):
     weights = tf.compat.v1.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), custom_getter=normalize_getting, collections=[tf.compat.v1.GraphKeys.GLOBAL_VARIABLES, tf.compat.v1.GraphKeys.WEIGHTS], use_resource=True)
+    y = tf.nn.conv2d(input=x, filters=cast_to_compute_type(weights), strides=(1, 1, 1, 1), padding='SAME', data_format='NHWC')
 
-    return batch_norm(conv2d(x, weights), weights, op_name, mode, params, is_recomputing=is_recomputing)
+    return batch_norm(y, weights, op_name, mode, params, is_recomputing=is_recomputing)
 
 
 def batch_norm(x, weights, op_name, mode, params, is_recomputing=False):
