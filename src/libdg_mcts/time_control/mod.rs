@@ -30,49 +30,21 @@ pub enum TimeStrategyResult {
 pub trait TimeStrategy {
     /// Checking if this time period has expired, and if so calls `predicate` to
     /// determine whether we should attempt to extend it further.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `root` - the root of the search tree.
-    /// * `predicate` - function that returns true if this time period should be
-    ///   extended.
-    /// * `factor` - asd
-    /// 
-    fn try_extend<F: Fn() -> bool>(
-        &self,
-        root: &tree::Node,
-        predicate: F,
-        factor: f32
-    ) -> TimeStrategyResult;
-}
-
-/// Returns true if the given tree policy is _stable_, i.e. the most visited
-/// child is also the child with the highest winrate (within some margin of
-/// error).
-/// 
-/// # Arguments
-/// 
-/// * `root` - the tree to check for stability
-/// 
-fn is_stable(root: &tree::Node) -> bool {
-    let max_visits = root.children.argmax_count();
-    let max_wins = root.children.argmax_value();
-
-    max_visits == max_wins || {
-        let max_value = root.children.with(max_wins, |child| child.value(), root.initial_value);
-        let other_value = root.children.with(max_visits, |child| child.value(), root.initial_value);
-
-        max_value - other_value < 0.005  // within 0.025%
-    }
+    ///
+    fn try_extend(&self, root: &tree::Node) -> TimeStrategyResult;
 }
 
 /// Returns the minimum number of playouts that are necessary for the second
 /// most visited child to become the most visited child.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `root` - the tree to get the lower bound for
-/// 
+///
 fn min_promote_rollouts(root: &tree::Node) -> usize {
     let top_1 = root.children.argmax_count();
 
@@ -99,22 +71,20 @@ fn min_promote_rollouts(root: &tree::Node) -> usize {
 
 /// Implements a time control scheme based on the `UNST-N` and `EARLY-C`
 /// strategy as suggested by _Hendrik Baier_ and _Mark H.M. Winands_ [1].
-/// 
+///
 /// * `UNST-N` extends the search until the most visited also has the highest
 ///   win rate.
 /// * `EARLY-C` terminate the search early if the second most visited node
 ///   cannot catch up to the most visited node in the remaining time.
-/// 
+///
 /// [1] _Hendrik Baier_ and _Mark H.M. Winands_, "Time Management for
 ///     Monte-Carlo Tree Search in Go", https://pdfs.semanticscholar.org/a2e6/299fd3c8ab17e3a1a783d518688b55bb2363.pdf
-/// 
-pub fn is_done<T>(root: &tree::Node, ticket: &T) -> bool
-    where T: TimeStrategy
-{
+///
+pub fn is_done(root: &tree::Node, ticket: &Box<dyn TimeStrategy + Sync>) -> bool {
     if root.total_count == 0 {
         false
     } else {
-        match ticket.try_extend(root, || !is_stable(root), 1.75) {
+        match ticket.try_extend(root) {
             TimeStrategyResult::NotExpired(remaining) => {
                 let min_promote = min_promote_rollouts(root);
 

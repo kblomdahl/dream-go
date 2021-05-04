@@ -21,7 +21,7 @@ use std::time::Instant;
 use dg_go::utils::score::{Score, StoneStatus};
 use dg_go::utils::sgf::Sgf;
 use dg_go::{DEFAULT_KOMI, Board, Color, Point};
-use dg_mcts::time_control;
+use dg_mcts::time_control::{RolloutLimit, ByoYomi};
 use dg_mcts as mcts;
 use dg_utils::config;
 
@@ -61,7 +61,7 @@ impl GenMoveMode {
         *self == GenMoveMode::Regression
     }
 
-    fn search_strategy(&self) -> Box<dyn SearchOptions> {
+    fn search_strategy(&self) -> Box<dyn SearchOptions + Sync> {
         if self.is_cleanup() {
             Box::new(ScoringSearch::default())
         } else {
@@ -351,7 +351,7 @@ impl Gtp {
                 mcts::predict(
                     service,
                     mode.search_strategy(),
-                    time_control::ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods),
+                    Box::new(ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods)),
                     search_tree,
                     &board,
                     to_move
@@ -360,7 +360,7 @@ impl Gtp {
                 mcts::predict(
                     service,
                     mode.search_strategy(),
-                    time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
+                    Box::new(RolloutLimit::new((*config::NUM_ROLLOUT).into())),
                     search_tree,
                     &board,
                     to_move
@@ -437,14 +437,14 @@ impl Gtp {
         }
 
         let result = finished_board.get_or_insert_with(|| {
-            self.ponder.service(|service, original_search_tree, p_state| {
+            self.ponder.service(|pool, original_search_tree, p_state| {
                 // if the search tree is too small, the expand it before continuing
                 let mut board = board.clone();
                 let mut to_move = board.to_move();
                 let search_tree = match mcts::predict(
-                    service,
+                    pool,
                     Box::new(ScoringSearch::default()),
-                    time_control::RolloutLimit::new((*config::NUM_ROLLOUT).into()),
+                    Box::new(RolloutLimit::new((*config::NUM_ROLLOUT).into())),
                     None,
                     &board,
                     to_move
@@ -465,7 +465,7 @@ impl Gtp {
 
                 // greedy rollout of the rest of the game
                 let (finished, _rollout) = mcts::greedy_score(
-                    service,
+                    pool.predictor(),
                     &board,
                     to_move
                 );

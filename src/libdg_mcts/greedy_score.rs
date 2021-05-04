@@ -23,14 +23,14 @@ use super::{full_forward, ScoringSearch};
 /// Play the given board until the end using the policy of the neural network
 /// in a greedy manner (ignoring the pass move every time) until it is scorable
 /// according to the TT-rules.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `server` - the server to use during evaluation
 /// * `board` - the board to score
 /// * `to_move` - the color of the player whose turn it is to play
-/// 
-pub fn greedy_score<P: Predictor>(server: &P, board: &Board, mut to_move: Color) -> (Board, String) {
+///
+pub fn greedy_score(predictor: &dyn Predictor, board: &Board, mut to_move: Color) -> (Board, String) {
     let options = ScoringSearch::default();
     let mut board = board.clone();
     let mut sgf = String::new();
@@ -38,7 +38,7 @@ pub fn greedy_score<P: Predictor>(server: &P, board: &Board, mut to_move: Color)
     let mut count = 0;
 
     while count < 722 && pass_count < 2 {
-        let policy = if let Some(response) = full_forward(server, &options, &board, to_move) {
+        let policy = if let Some(response) = full_forward(predictor, &options, &board, to_move) {
             response.1
         } else {
             return (board, sgf)

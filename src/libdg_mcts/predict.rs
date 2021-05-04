@@ -40,7 +40,11 @@ impl PredictResponse {
     }
 }
 
-pub trait PredictorCache : Clone + Send {
+pub trait Predictor : Send {
+    /// Returns the maximum number of parallel calls that should be made into
+    /// `predict`.
+    fn max_num_threads(&self) -> usize;
+
     /// Retrieve the value and policy from the transposition table.
     ///
     /// # Arguments
@@ -60,18 +64,7 @@ pub trait PredictorCache : Clone + Send {
     /// * `symmetry` - the symmetry to add to the table
     /// * `response` - the response to add to the table
     ///
-    fn insert(&self, board: &Board, to_move: Color, symmetry: symmetry::Transform, response: PredictResponse);
-}
-
-pub trait Predictor : Clone + Send {
-    type Cache: PredictorCache;
-
-    /// Returns the maximum number of parallel calls that should be made into
-    /// `predict`.
-    fn max_num_threads(&self) -> usize;
-
-    /// Returns the cache associated with this predictor.
-    fn cache(&self) -> &Self::Cache;
+    fn cache(&self, board: &Board, to_move: Color, symmetry: symmetry::Transform, response: PredictResponse);
 
     /// Returns the result of the given query.
     ///
@@ -82,35 +75,22 @@ pub trait Predictor : Clone + Send {
     fn predict(&self, features: &[f16], batch_size: usize) -> Vec<PredictResponse>;
 }
 
-#[derive(Clone, Default)]
-pub struct NoCache;
-
-impl PredictorCache for NoCache {
-    fn fetch(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform) -> Option<PredictResponse> {
-        None
-    }
-
-    fn insert(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform, _response: PredictResponse) {
-        // pass
-    }
-}
-
 /// An implementation of `Predictor` that returns completely random predictions. This
 /// is useful for testing purposes.
 #[derive(Clone, Default)]
-pub struct RandomPredictor {
-    cache: NoCache
-}
+pub struct RandomPredictor;
 
 impl Predictor for RandomPredictor {
-    type Cache = NoCache;
-
     fn max_num_threads(&self) -> usize {
         1
     }
 
-    fn cache(&self) -> &Self::Cache {
-        &self.cache
+    fn fetch(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform) -> Option<PredictResponse> {
+        None
+    }
+
+    fn cache(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform, _response: PredictResponse) {
+        // pass
     }
 
     fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<PredictResponse> {
@@ -142,7 +122,6 @@ impl Predictor for RandomPredictor {
 #[cfg(test)]
 #[derive(Clone, Default)]
 pub struct FakePredictor {
-    cache: NoCache,
     point: usize,
     value: f16
 }
@@ -150,20 +129,22 @@ pub struct FakePredictor {
 #[cfg(test)]
 impl FakePredictor {
     pub fn new(point: usize, value: f32) -> Self {
-        Self { cache: NoCache::default(), point: point, value: f16::from(value) }
+        Self { point: point, value: f16::from(value) }
     }
 }
 
 #[cfg(test)]
 impl Predictor for FakePredictor {
-    type Cache = NoCache;
-
     fn max_num_threads(&self) -> usize {
         1
     }
 
-    fn cache(&self) -> &Self::Cache {
-        &self.cache
+    fn fetch(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform) -> Option<PredictResponse> {
+        None
+    }
+
+    fn cache(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform, _response: PredictResponse) {
+        // pass
     }
 
     fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<PredictResponse> {

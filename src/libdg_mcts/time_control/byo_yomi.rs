@@ -24,6 +24,9 @@ use std::time::{Duration, Instant};
 /// any latency in the rest of the program.
 const PERIOD_BUF_TIME_MS: usize = 50;
 
+/// The amount of extra time to take if we need more time to think.
+const EXTEND_FACTOR: f32 = 1.75;
+
 #[derive(Clone)]
 pub struct ByoYomi {
     /// The total remaining time in milliseconds
@@ -86,13 +89,7 @@ impl ByoYomi {
 }
 
 impl TimeStrategy for ByoYomi {
-    fn try_extend<F: Fn() -> bool>(
-        &self,
-        root: &tree::Node,
-        predicate: F,
-        factor: f32
-    ) -> TimeStrategyResult
-    {
+    fn try_extend(&self, root: &tree::Node) -> TimeStrategyResult {
         let mut expire_time_init = self.expire_time.load(Ordering::Acquire);
 
         // optimistic locking using atomic values, it will have a new value for
@@ -116,7 +113,7 @@ impl TimeStrategy for ByoYomi {
                 // time period further.
                 let count = self.count.load(Ordering::Acquire);
                 let expire_time_next = {
-                    let next = (factor * expire_time_init as f32) as usize;
+                    let next = (EXTEND_FACTOR * expire_time_init as f32) as usize;
 
                     if next > self.total_time_ms {
                         self.total_time_ms
@@ -125,7 +122,7 @@ impl TimeStrategy for ByoYomi {
                     }
                 };
 
-                if count < 2 && expire_time_next > expire_time_init && predicate() {
+                if count < 2 && expire_time_next > expire_time_init && !is_stable(root) {
                     // attempt to extend this time period, checking so that no
                     // one else has done it while we worked.
                     let previous_value = self.expire_time.compare_exchange_weak(
@@ -172,6 +169,26 @@ impl TimeStrategy for ByoYomi {
                 });
             }
         }
+    }
+}
+
+/// Returns true if the given tree policy is _stable_, i.e. the most visited
+/// child is also the child with the highest winrate (within some margin of
+/// error).
+///
+/// # Arguments
+///
+/// * `root` - the tree to check for stability
+///
+fn is_stable(root: &tree::Node) -> bool {
+    let max_visits = root.children.argmax_count();
+    let max_wins = root.children.argmax_value();
+
+    max_visits == max_wins || {
+        let max_value = root.children.with(max_wins, |child| child.value(), root.initial_value);
+        let other_value = root.children.with(max_visits, |child| child.value(), root.initial_value);
+
+        max_value - other_value < 0.005  // within 0.025%
     }
 }
 

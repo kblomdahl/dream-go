@@ -45,6 +45,7 @@ mod reanalyze;
 mod self_play;
 pub mod tree;
 pub mod time_control;
+pub mod pool;
 
 /* -------- Exports -------- */
 
@@ -55,38 +56,33 @@ pub use self::reanalyze::*;
 
 /* -------- Code -------- */
 
-use concurrent_queue::ConcurrentQueue;
-use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
 
 use dg_go::utils::features::{self, HWC, Features};
 use dg_go::utils::symmetry;
 use dg_go::{Board, Color, Point};
 use self::options::{SearchOptions, ScoringSearch};
 use self::time_control::TimeStrategy;
-use self::tree::{ProbeResult, NodeTrace};
-use self::predict::{Predictor, PredictorCache, PredictResponse};
+use self::tree::NodeTrace;
+use self::predict::{Predictor, PredictResponse};
 use dg_utils::config;
 use dg_utils::types::f16;
 use self::asm::sum_finite_f32;
 use self::asm::normalize_finite_f32;
-use self::parallel::global_rwlock;
+use self::pool::Pool;
 
 /// Return the value and policy for the given board position, as the interpolation
 /// of their value for every symmetry.
 ///
 /// # Arguments
 ///
-/// * `server` - the server to use for predictions
+/// * `predictor` - the server to use for predictions
 /// * `options` -
 /// * `board` - the board position to evaluate
 /// * `to_move` - the color to evaluate for
 ///
-fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>)> {
+fn full_forward(predictor: &dyn Predictor, options: &dyn SearchOptions, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>)> {
     let (initial_policy, indices) = create_initial_policy(options, board, to_move);
     let mut policy = initial_policy.clone();
     let mut value = 0.0f32;
@@ -96,7 +92,7 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
     let mut new_symmetries = Vec::with_capacity(8);
 
     for &t in &symmetry::ALL {
-        if let Some(new_response) = server.cache().fetch(board, to_move, t) {
+        if let Some(new_response) = predictor.fetch(board, to_move, t) {
             let mut new_policy = initial_policy.clone();
             add_valid_candidates(&mut new_policy, new_response.policy(), &indices, t);
             normalize_policy(&mut new_policy, 0.125);
@@ -117,7 +113,7 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
     let batch_size = new_symmetries.len();
 
     if batch_size > 0 {
-        let new_responses = server.predict(&new_requests, batch_size);
+        let new_responses = predictor.predict(&new_requests, batch_size);
 
         for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
             let mut new_policy = initial_policy.clone();
@@ -128,7 +124,7 @@ fn full_forward<P: Predictor>(server: &P, options: &dyn SearchOptions, board: &B
             for i in 0..362 {
                 policy[i] += new_policy[i];
             }
-            server.cache().insert(board, to_move, t, new_response);
+            predictor.cache(board, to_move, t, new_response);
         }
     }
 
@@ -239,284 +235,34 @@ fn normalize_policy(policy: &mut Vec<f32>, sum_to: f32) {
     }
 }
 
-#[derive(Clone)]
-enum EventKind {
-    Predict(Vec<f16>),
-    Insert(PredictResponse),
-    Pending
-}
-
-#[derive(Clone)]
-struct Event {
-    kind: EventKind,
-    board: Board,
-    transformation: symmetry::Transform,
-    trace: NodeTrace
-}
-
-impl Event {
-    fn predict<P: Predictor>(server: &P, board: Board, trace: NodeTrace) -> Self {
-        let transformation = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
-        let &(_, last_move, _) = trace.last().unwrap();
-        let to_move = last_move.opposite();
-        let kind =
-            if let Some(response) = server.cache().fetch(&board, to_move, transformation) {
-                EventKind::Insert(response)
-            } else {
-                let features = features::Default::new(&board).get_features::<HWC, f16>(to_move, transformation);
-                EventKind::Predict(features)
-            };
-
-        Self { kind, board, transformation, trace }
-    }
-
-    fn into_insert(mut self, response: PredictResponse) -> (EventKind, Event) {
-        let prev_kind = self.kind;
-        self.kind = EventKind::Insert(response);
-        (prev_kind, self)
-    }
-
-    fn into_pending(mut self) -> (EventKind, Event) {
-        let prev_kind = self.kind;
-        self.kind = EventKind::Pending;
-        (prev_kind, self)
-    }
-}
-
-struct Batch {
-    features: Vec<f16>,
-    events: Vec<Event>,
-    num_batches: Arc<AtomicUsize>
-}
-
-impl Batch {
-    fn new(features: Vec<f16>, events: Vec<Event>, num_batches: Arc<AtomicUsize>) -> Self {
-        Self { features, events, num_batches }
-    }
-
-    fn forward<P: Predictor>(self, server: &P) -> (Vec<Event>, Vec<PredictResponse>) {
-        let responses = server.predict(&self.features, self.events.len());
-        self.num_batches.fetch_sub(1, Ordering::Release);
-
-        (self.events, responses)
-    }
-}
-
-struct BatcherList {
-    /// The features gathered so far.
-    features: Vec<f16>,
-
-    /// The events gathered so far.
-    events: Vec<Event>,
-}
-
-impl BatcherList {
-    fn new(max_batch_size: usize) -> Self {
-        Self {
-            features: Vec::with_capacity(2 * max_batch_size * features::Default::size()),
-            events: Vec::with_capacity(2 * max_batch_size)
-        }
-    }
-}
-
-#[derive(Clone)]
-struct Batcher {
-    /// The list of features and events gathered so far.
-    list: Arc<Mutex<BatcherList>>,
-
-    /// The number of batches "alive".
-    num_batches: Arc<AtomicUsize>,
-
-    /// The maximum size of a batch.
-    max_batch_size: usize,
-
-    /// The maximum number of allowed batches to be live at the same time.
-    max_batches: usize,
-}
-
-impl Batcher {
-    fn new(max_batches: usize) -> Self {
-        let max_batch_size = *config::BATCH_SIZE;
-
-        Self {
-            list: Arc::new(Mutex::new(BatcherList::new(max_batch_size))),
-            num_batches: Arc::new(AtomicUsize::new(0)),
-            max_batch_size: max_batch_size,
-            max_batches: max_batches
-        }
-    }
-
-    fn push(&self, event: Event, features: Vec<f16>) {
-        let mut list = self.list.lock().expect("could not acquire batch list lock");
-        list.features.extend_from_slice(&features);
-        list.events.push(event);
-    }
-
-    fn push_and_get_batch(&self, event: Event, features: Vec<f16>) -> Option<Batch> {
-        self.push(event, features);
-        self.get_batch(self.max_batch_size)
-    }
-
-    fn get_batch(&self, min_batch_size: usize) -> Option<Batch> {
-        // check so that we're not at capacity already
-        let current = self.num_batches.load(Ordering::Acquire);
-
-        if current >= self.max_batches {
-            None
-        } else {
-            // check so that we're not returning a batch if we've already reached the threshold
-            let mut list = self.list.lock().expect("could not acquire batch list lock");
-            let size = list.events.len();
-
-            if size >= min_batch_size && self.num_batches.compare_exchange_weak(current, current + 1, Ordering::Acquire, Ordering::Relaxed).is_ok() {
-                let split_index = if size >= self.max_batch_size { size - self.max_batch_size } else { 0 };
-
-                Some(
-                    Batch::new(
-                        list.features.split_off(split_index * features::Default::size()),
-                        list.events.split_off(split_index),
-                        self.num_batches.clone()
-                    )
-                )
-            } else {
-                None
-            }
-        }
-    }
-}
-
-/// The shared variables between the master and each worker thread in the `predict` function.
-#[derive(Clone)]
-struct ThreadContext<T: TimeStrategy + Clone + Send> {
-    ///
-    event_queue: Arc<ConcurrentQueue<Event>>,
-
-    /// The root of the monte carlo tree.
-    root: Arc<UnsafeCell<tree::Node>>,
-
-    /// The search options to use.
-    options: Arc<Box<dyn SearchOptions>>,
-
-    /// The initial board position at the root the tree.
-    starting_point: Board,
-
-    /// Time control element
-    time_strategy: T,
-
-    /// Batched MCTS traces for evaluation.
-    predict_batch: Batcher
-}
-
-unsafe impl<T: TimeStrategy + Clone + Send> Send for ThreadContext<T> { }
-
-/// Worker that probes into the given monte carlo search tree until the context
-/// is exhausted.
-///
-/// # Arguments
-///
-/// * `context` -
-/// * `server` -
-///
-fn predict_worker<T, P>(context: ThreadContext<T>, server: P)
-    where T: TimeStrategy + Clone + Send + 'static,
-          P: Predictor
-{
-    let root = unsafe { &mut *context.root.get() };
-    let event_queue = context.event_queue.clone();
-    let options = &**context.options;
-
-    'outer: loop {
-        match event_queue.pop().map(|event| event.into_pending()).ok() {
-            None => {
-                // evaluate anything in the queue so far
-                let event_responses = context.predict_batch
-                    .get_batch(1)
-                    .map(|batch| batch.forward(&server));
-
-                if let Some((events, responses)) = event_responses {
-                    for (event, response) in events.into_iter().zip(responses.into_iter()) {
-                        event_queue.push(event.into_insert(response).1).ok().expect("could not push to event queue");
-                    }
-                } else {
-                    if global_rwlock::read(|| { time_control::is_done(root, &context.time_strategy) }) {
-                        break 'outer;
-                    }
-
-                    // probe the board if there has been an update since we last encountered
-                    // a conflict (or more than 1 ms has passed for deadlock reasons).
-                    let mut board = context.starting_point.clone();
-                    let probe = unsafe { global_rwlock::read(|| { tree::probe(root, &mut board) }) };
-
-                    match probe {
-                        ProbeResult::Found(trace) => {
-                            event_queue.push(Event::predict(&server, board, trace)).ok().expect("could not push to event queue");
-                        },
-                        ProbeResult::Conflict => {
-                            thread::yield_now();
-                        },
-                        ProbeResult::NoResult => {
-                            return;
-                        }
-                    }
-                }
-            },
-            Some((EventKind::Predict(features), event)) => {
-                // add to the end of the queue
-                let event_responses = context.predict_batch
-                    .push_and_get_batch(event, features)
-                    .map(|batch| batch.forward(&server));
-
-                // if we got a batch back from the queue then evaluate it
-                if let Some((events, responses)) = event_responses {
-                    for (event, response) in events.into_iter().zip(responses.into_iter()) {
-                        event_queue.push(event.into_insert(response).1).ok().expect("could not push to event queue");
-                    }
-                }
-            },
-            Some((EventKind::Insert(response), event)) => {
-                let &(_, last_move, _) = event.trace.last().unwrap();
-                let to_move = last_move.opposite();
-                let (mut policy, indices) = create_initial_policy(options, &event.board, to_move);
-                add_valid_candidates(&mut policy, response.policy(), &indices, event.transformation);
-                normalize_policy(&mut policy, 1.0);
-
-                unsafe {
-                    global_rwlock::read(|| { tree::insert(&event.trace, to_move, response.winrate(), policy) });
-                    server.cache().insert(&event.board, to_move, event.transformation, response);
-                }
-            },
-            Some((EventKind::Pending, _)) => {
-                unreachable!();
-            }
-        }
-    }
-}
-
 /// Predicts the _best_ next move according to the given neural network when applied
 /// to a monte carlo tree search.
 ///
 /// # Arguments
 ///
-/// * `server` - the server to use during evaluation
+/// * `pool` - the worker pool to use for evaluation
 /// * `options` -
 /// * `time_control` -
 /// * `starting_tree` -
 /// * `starting_point` -
 /// * `starting_color` -
 ///
-fn predict_aux<T, P>(
-    server: &P,
-    options: Box<dyn SearchOptions>,
-    time_strategy: T,
+pub fn predict(
+    pool: &Pool,
+    options: Box<dyn SearchOptions + Sync>,
+    time_strategy: Box<dyn TimeStrategy + Sync>,
     starting_tree: Option<tree::Node>,
     starting_point: &Board,
     starting_color: Color
 ) -> Option<(f32, usize, tree::Node)>
-    where T: TimeStrategy + Clone + Send + 'static,
-          P: Predictor + 'static
 {
-    let (starting_value, mut starting_policy) = full_forward::<P>(server, &*options, starting_point, starting_color)?;
     let deterministic = options.deterministic();
+    let (starting_value, mut starting_policy) = full_forward(
+        pool.predictor(),
+        options.as_ref(),
+        starting_point,
+        starting_color
+    )?;
 
     // add some dirichlet noise to the root node of the search tree in order to increase
     // the entropy of the search and avoid overfitting to the prior value
@@ -541,42 +287,12 @@ fn predict_aux<T, P>(
         tree::Node::new(starting_color, starting_value, starting_policy)
     };
 
-    // start-up all of the worker threads, and then start listening for requests on the
-    // channel we gave each thread.
-    let num_workers = options.num_workers();
-    let context = ThreadContext {
-        root: Arc::new(UnsafeCell::new(starting_tree)),
-        options: Arc::new(options),
-        starting_point: starting_point.clone(),
-        time_strategy: time_strategy.clone(),
-        predict_batch: Batcher::new(server.max_num_threads()),
-        event_queue: Arc::new(ConcurrentQueue::unbounded())
-    };
-
-    if num_workers <= 1 {
-        let context = context.clone();
-        let server = server.clone();
-
-        predict_worker(context, server);
-    } else {
-        let handles = (0..num_workers).map(|_| {
-            let context = context.clone();
-            let server = server.clone();
-
-            thread::Builder::new()
-                .name("predict_worker".into())
-                .spawn(move || predict_worker(context, server))
-                .unwrap()
-        }).collect::<Vec<JoinHandle<()>>>();
-
-        // wait for all threads to terminate to avoid any zombie processes
-        for handle in handles.into_iter() { handle.join().unwrap(); }
-    }
-
-    assert_eq!(Arc::strong_count(&context.root), 1);
+    // enqueue this tree search
+    let root = UnsafeCell::new(starting_tree);
+    pool.enqueue(root.get(), options, time_strategy, starting_point.clone())?;
 
     // choose the best move according to the search tree
-    let root = UnsafeCell::into_inner(Arc::try_unwrap(context.root).ok().expect("no root"));
+    let root = UnsafeCell::into_inner(root);
     let (value, index) = root.best(if !deterministic && starting_point.count() < 8 {
         *config::TEMPERATURE
     } else {
@@ -587,32 +303,6 @@ fn predict_aux<T, P>(
     eprintln!("{}", tree::to_sgf::<dg_go::utils::sgf::CGoban>(&root, starting_point, true));
 
     Some((value, index, root))
-}
-
-/// Predicts the _best_ next move according to the given neural network when applied
-/// to a monte carlo tree search.
-///
-/// # Arguments
-///
-/// * `server` - the server to use during evaluation
-/// * `options` -
-/// * `time_control` -
-/// * `starting_tree` -
-/// * `starting_point` -
-/// * `starting_color` -
-///
-pub fn predict<T, P>(
-    server: &P,
-    options: Box<dyn SearchOptions>,
-    time_control: T,
-    starting_tree: Option<tree::Node>,
-    starting_point: &Board,
-    starting_color: Color
-) -> Option<(f32, usize, tree::Node)>
-    where T: TimeStrategy + Clone + Send + 'static,
-          P: Predictor + 'static
-{
-    predict_aux::<T, _>(server, options, time_control, starting_tree, starting_point, starting_color)
 }
 
 /// Returns a weighted random komi between `-7.5` to `7.5`, with the most common
@@ -642,12 +332,9 @@ fn get_random_komi() -> f32 {
 #[cfg(test)]
 mod tests {
     use dg_go::{Board, Color};
-    use predict::NoCache;
     use dg_utils::types::f16;
     use super::*;
 
-    use std::sync::Arc;
-    use std::cell::UnsafeCell;
     use options::StandardDeterministicSearch;
 
     #[test]
@@ -663,38 +350,39 @@ mod tests {
 
     #[test]
     fn no_allowed_moves() {
-        let root = Arc::new(UnsafeCell::new(tree::Node::new(Color::Black, 0.0, vec! [1.0; 362])));
-        let context = ThreadContext {
-            root: root.clone(),
-            starting_point: Board::new(7.5),
-            options: Arc::new(Box::new(StandardDeterministicSearch::new(1))),
-            time_strategy: time_control::RolloutLimit::new(100),
-            predict_batch: Batcher::new(1),
-            event_queue: Arc::new(ConcurrentQueue::unbounded())
-        };
+        let pool = Pool::new(Box::new(predict::RandomPredictor::default()));
+        let mut root = tree::Node::new(Color::Black, 0.0, vec! [1.0; 362]);
 
         for i in 0..362 {
-            unsafe { &mut *context.root.get() }.disqualify(i);
+            root.disqualify(i);
         }
 
-        predict_worker::<_, _>(context, predict::RandomPredictor::default());
-        assert_eq!(unsafe { &*root.get() }.best(0.0), (::std::f32::NEG_INFINITY, 361));
+        let (_value, _index, tree) = predict(
+            &pool,
+            Box::new(StandardDeterministicSearch::new(1)),
+            Box::new(time_control::RolloutLimit::new(100)),
+            Some(root),
+            &Board::new(7.5),
+            Color::Black
+        ).expect("could not predict a position");
+
+        assert_eq!(tree.best(0.0), (::std::f32::NEG_INFINITY, 361));
     }
 
     #[derive(Clone, Default)]
-    struct NanPredictor {
-        cache: NoCache
-    }
+    struct NanPredictor;
 
     impl predict::Predictor for NanPredictor {
-        type Cache = NoCache;
-
         fn max_num_threads(&self) -> usize {
             1
         }
 
-        fn cache(&self) -> &Self::Cache {
-            &self.cache
+        fn fetch(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform) -> Option<PredictResponse> {
+            None
+        }
+
+        fn cache(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform, _response: PredictResponse) {
+            // pass
         }
 
         fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<PredictResponse> {
@@ -711,10 +399,10 @@ mod tests {
 
     #[test]
     fn no_finite_candidates() {
-        let (value, index, root) = predict::<_, _>(
-            &NanPredictor::default(),
+        let (value, index, root) = predict(
+            &Pool::new(Box::new(NanPredictor::default())),
             Box::new(StandardDeterministicSearch::new(1)),
-            time_control::RolloutLimit::new(1600),
+            Box::new(time_control::RolloutLimit::new(1600)),
             None,
             &Board::new(7.5),
             Color::Black

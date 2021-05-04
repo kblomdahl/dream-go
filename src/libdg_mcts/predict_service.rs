@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use predict::{Predictor, PredictorCache, PredictResponse};
+use predict::{Predictor, PredictResponse};
 use lru_cache::LruCache;
 use dg_go::utils::symmetry::Transform;
 use dg_go::{Board, Color};
@@ -46,63 +46,40 @@ impl BoardTuple {
 }
 
 #[derive(Clone)]
-pub struct PredictLruCache {
-    table: Arc<Mutex<LruCache<BoardTuple, PredictResponse>>>
-}
-
-impl PredictLruCache {
-    fn new() -> Self {
-        Self {
-            table: Arc::new(Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1)))
-        }
-    }
-}
-
-impl PredictorCache for PredictLruCache {
-    #[inline(always)]
-    fn fetch(&self, board: &Board, to_move: Color, symmetry: Transform) -> Option<PredictResponse> {
-        let key = BoardTuple::new(board, to_move, symmetry);
-
-        self.table.lock().expect("could not acquire cache table lock")
-            .get(&key)
-            .cloned()
-    }
-
-    #[inline(always)]
-    fn insert(&self, board: &Board, to_move: Color, symmetry: Transform, response: PredictResponse) {
-        let key = BoardTuple::new(board, to_move, symmetry);
-
-        self.table.lock().expect("could not acquire cache table lock")
-            .insert(&key, response);
-    }
-}
-
-#[derive(Clone)]
 pub struct PredictService {
-    cache: PredictLruCache,
+    cache_table: Arc<Mutex<LruCache<BoardTuple, PredictResponse>>>,
     network: Network,
     count: Arc<AtomicUsize>
 }
 
 impl PredictService {
     pub fn new(network: Network) -> Self {
-        let cache = PredictLruCache::new();
+        let cache_table = Arc::new(Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1)));
         let count = Arc::new(AtomicUsize::new(0));
 
-        Self { cache, network, count }
+        Self { cache_table, network, count }
     }
 }
 
 impl Predictor for PredictService {
-    type Cache = PredictLruCache;
-
     fn max_num_threads(&self) -> usize {
         let num_devices = Device::all().expect("could not find any compatible devices").len();
         2 * num_devices
     }
 
-    fn cache(&self) -> &Self::Cache {
-        &self.cache
+    fn fetch(&self, board: &Board, to_move: Color, symmetry: Transform) -> Option<PredictResponse> {
+        let key = BoardTuple::new(board, to_move, symmetry);
+
+        self.cache_table.lock().expect("could not acquire cache table lock")
+            .get(&key)
+            .cloned()
+    }
+
+    fn cache(&self, board: &Board, to_move: Color, symmetry: Transform, response: PredictResponse) {
+        let key = BoardTuple::new(board, to_move, symmetry);
+
+        self.cache_table.lock().expect("could not acquire cache table lock")
+            .insert(&key, response);
     }
 
     fn predict(&self, features_list: &[f16], batch_size: usize) -> Vec<PredictResponse> {

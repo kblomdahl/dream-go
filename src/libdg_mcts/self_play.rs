@@ -18,10 +18,10 @@ use dg_go::{Board, Color, Point};
 use dg_utils::{b85, config};
 use super::asm::sum_finite_f32;
 use super::choose::choose;
-use super::predict::Predictor;
 use super::time_control::{TimeStrategy, RolloutLimit};
 use super::{GameResult, get_random_komi};
-use super::{predict_service, predict_aux, full_forward, tree};
+use super::{predict_service, predict, full_forward, tree};
+use super::pool::Pool;
 use dg_nn::Network;
 use options::{StandardSearch, ScoringSearch};
 
@@ -241,20 +241,20 @@ impl Player {
         (m * (max_rollout as f32)) as usize
     }
 
-    fn predict_aux<P: Predictor + 'static, T: TimeStrategy + Clone + Send + 'static>(
+    fn predict_aux(
         &mut self,
         board: &Board,
         allow_pass: bool,
-        server: &P,
+        pool: &Pool,
         num_workers: usize,
-        time_control: T
+        time_strategy: Box<dyn TimeStrategy + Sync>
     ) -> Option<(f32, usize, tree::Node)>
     {
         if !allow_pass {
-            let (value, index, tree) = predict_aux(
-                server,
+            let (value, index, tree) = predict(
+                pool,
                 Box::new(ScoringSearch::new(num_workers)),
-                time_control,
+                time_strategy,
                 self.root.take().map(|mut n| {
                     n.disqualify(361);
                     n
@@ -265,10 +265,10 @@ impl Player {
 
             Some((value, index, tree))
         } else {
-            predict_aux(
-                server,
+            predict(
+                pool,
                 Box::new(StandardSearch::new(num_workers)),
-                time_control,
+                time_strategy,
                 self.root.take(),
                 &board,
                 self.color
@@ -287,21 +287,21 @@ impl Player {
     /// * `server` -
     /// * `num_workers` -
     ///
-    fn ex_it<P: Predictor + 'static>(
+    fn ex_it(
         &mut self,
         board: &Board,
         point: Point,
         allow_pass: bool,
-        server: &P,
+        pool: &Pool,
         num_workers: usize
     ) -> Option<Played>
     {
         let (value, _, tree) = self.predict_aux(
             board,
             allow_pass,
-            server,
+            pool,
             num_workers,
-            RolloutLimit::new((*config::NUM_EX_IT_ROLLOUT).into())
+            Box::new(RolloutLimit::new((*config::NUM_EX_IT_ROLLOUT).into()))
         )?;
 
         debug_assert!(0.0 <= value && value <= 1.0, "{}", value);
@@ -331,15 +331,15 @@ impl Player {
     /// * `board` -
     /// * `allow_pass`  whether we are allowed to pass
     /// * `ex_it` -
-    /// * `server` -
+    /// * `pool` -
     /// * `num_workers` -
     ///
-    fn predict<P: Predictor + 'static>(
+    fn predict(
         &mut self,
         board: &Board,
         allow_pass: bool,
         ex_it: bool,
-        server: &P,
+        pool: &Pool,
         num_workers: usize
     ) -> Option<Played>
     {
@@ -349,9 +349,9 @@ impl Player {
             let (value, index, tree) = self.predict_aux(
                 board,
                 allow_pass,
-                server,
+                pool,
                 num_workers,
-                RolloutLimit::new(num_rollout)
+                Box::new(RolloutLimit::new(num_rollout))
             )?;
 
             if !value.is_finite() {
@@ -366,7 +366,7 @@ impl Player {
             let point = Point::from_packed_parts(index);
             let played =
                 if ex_it && self.is_good_candidate(value, &tree.softmax()) {
-                    self.ex_it(board, point, allow_pass, server, num_workers)?
+                    self.ex_it(board, point, allow_pass, pool, num_workers)?
                 } else {
                     Played::from_mcts(self.color, point, value, &tree)
                 };
@@ -378,9 +378,9 @@ impl Player {
         } else {
             let (value, mut policy) =
                 if allow_pass {
-                    full_forward(server, &StandardSearch::default(), board, self.color)?
+                    full_forward(pool.predictor(), &StandardSearch::default(), board, self.color)?
                 } else {
-                    full_forward(server, &ScoringSearch::default(), board, self.color)?
+                    full_forward(pool.predictor(), &ScoringSearch::default(), board, self.color)?
                 };
             if !allow_pass {
                 policy[361] = ::std::f32::NEG_INFINITY;
@@ -400,7 +400,7 @@ impl Player {
             let point = Point::from_packed_parts(index);
             let played =
                 if ex_it && self.is_good_candidate(value, &policy) {
-                    self.ex_it(board, point, allow_pass, server, num_workers)?
+                    self.ex_it(board, point, allow_pass, pool, num_workers)?
                 } else {
                     Played::from_forward(self.color, point, value, policy)
                 };
@@ -423,12 +423,12 @@ impl Player {
 ///
 /// # Arguments
 ///
-/// * `server` - the server to use during evaluation
+/// * `pool` - the pool to use during evaluation
 /// * `num_parallel` - the number of games that are being played in parallel
 /// * `ex_it` - whether to enable with expert iteration
 ///
-fn self_play_one<P: Predictor + 'static>(
-    server: &P,
+fn self_play_one(
+    pool: &Pool,
     num_parallel: &Arc<AtomicUsize>,
     ex_it: bool
 ) -> Option<GameResult>
@@ -450,7 +450,7 @@ fn self_play_one<P: Predictor + 'static>(
             );
 
         let allow_pass = board.is_scorable();
-        let played = players[0].predict(&mut board, allow_pass, ex_it, server, num_workers)?;
+        let played = players[0].predict(&mut board, allow_pass, ex_it, pool, num_workers)?;
         sgf += &format!("{}", played);
 
         if played.point == Point::default() {  // passing move
@@ -485,9 +485,9 @@ pub fn self_play(
     network: Network,
     num_games: usize,
     ex_it: bool
-) -> (Receiver<GameResult>, predict_service::PredictService)
+) -> (Receiver<GameResult>, Arc<Pool>)
 {
-    let server = predict_service::PredictService::new(network);
+    let pool = Arc::new(Pool::new(Box::new(predict_service::PredictService::new(network))));
 
     // spawn the worker threads that generate the self-play games
     let num_parallel = ::std::cmp::min(num_games, *config::NUM_GAMES);
@@ -499,11 +499,11 @@ pub fn self_play(
         let num_workers = num_workers.clone();
         let processed = processed.clone();
         let sender = sender.clone();
-        let server = server.clone();
+        let pool = pool.clone();
 
         thread::spawn(move || {
             while processed.fetch_add(1, Ordering::AcqRel) < num_games {
-                if let Some(result) = self_play_one(&server, &num_workers, ex_it) {
+                if let Some(result) = self_play_one(pool.as_ref(), &num_workers, ex_it) {
                     if sender.send(result).is_err() {
                         break
                     }
@@ -514,7 +514,7 @@ pub fn self_play(
         });
     }
 
-    (receiver, server)
+    (receiver, pool)
 }
 
 #[cfg(test)]
@@ -571,13 +571,13 @@ mod tests {
 
     #[test]
     fn played_from_mcts() {
-        let server = FakePredictor::new(1, 0.6);
+        let server = Pool::new(Box::new(FakePredictor::new(1, 0.6)));
         let board = Board::new(0.5);
         let (value, index, tree) =
-            predict_aux::<_, _>(
+            predict(
                 &server,
                 Box::new(StandardDeterministicSearch::default()),
-                RolloutLimit::new(10),
+                Box::new(RolloutLimit::new(10)),
                 None,
                 &board,
                 Color::Black

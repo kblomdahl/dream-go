@@ -22,13 +22,14 @@ use dg_go::{Board, Color, Point};
 use dg_utils::config;
 use dg_mcts::predict_service::PredictService;
 use dg_mcts::time_control::{TimeStrategy, TimeStrategyResult};
+use dg_mcts::pool::Pool;
 use dg_mcts::tree;
 use dg_mcts as mcts;
 use dg_nn::Network;
 use dg_mcts::options::StandardSearch;
 
 type SearchTree = tree::Node;
-type PonderResult = Result<(PredictService, SearchTree, Board, Color), &'static str>;
+type PonderResult = Result<(Pool, SearchTree, Board, Color), &'static str>;
 
 /// A very simple _time control_ that thinks until a boolean flag is set to
 /// `false` or the tree has reached its maximum size.
@@ -39,13 +40,7 @@ pub struct PonderTimeControl {
 }
 
 impl TimeStrategy for PonderTimeControl {
-    fn try_extend<F: Fn() -> bool>(
-        &self,
-        root: &tree::Node,
-        _predicate: F,
-        _factor: f32
-    ) -> TimeStrategyResult
-    {
+    fn try_extend(&self, root: &tree::Node) -> TimeStrategyResult {
         if self.is_running.load(Ordering::Relaxed) {
             let total_visits = root.size();
 
@@ -66,14 +61,14 @@ impl TimeStrategy for PonderTimeControl {
 ///
 /// # Arguments
 ///
-/// * `service` - the neural network service used for inference
+/// * `pool` - the neural network service used for inference
 /// * `search_tree` - the search tree to probe into
 /// * `board` - the board state at the root of the search tree
 /// * `to_move` - the color of the player whose turn it is to play
 /// * `is_running` - the boolean used to determine when to terminate the search
 ///
 fn ponder_worker(
-    service: PredictService,
+    pool: Pool,
     search_tree: Option<SearchTree>,
     board: Board,
     to_move: Color,
@@ -83,16 +78,16 @@ fn ponder_worker(
     let start_time = ProcessTime::now();
     let max_tree_size = (*config::NUM_ROLLOUT).user_defined_or(500_000);
     let result = mcts::predict(
-        &service,
+        &pool,
         Box::new(StandardSearch::default()),
-        PonderTimeControl { is_running, max_tree_size },
+        Box::new(PonderTimeControl { is_running, max_tree_size }),
         search_tree,
         &board,
         to_move,
     );
 
     if let Some((_value, _index, next_tree)) = result {
-        (Ok((service, next_tree, board, to_move)), start_time.elapsed())
+        (Ok((pool, next_tree, board, to_move)), start_time.elapsed())
     } else {
         (Err("unrecognized error"), start_time.elapsed())
     }
@@ -137,9 +132,9 @@ impl PonderService {
             is_running: is_running,
             worker: Some(thread::spawn(move || {
                 if let Some(network) = Network::new() {
-                    let service = PredictService::new(network);
+                    let pool = Pool::new(Box::new(PredictService::new(network)));
 
-                    ponder_worker(service, None, board, to_move, is_running_worker)
+                    ponder_worker(pool, None, board, to_move, is_running_worker)
                 } else {
                     (Err("unable to load network weights"), Duration::new(0, 0))
                 }
@@ -168,7 +163,7 @@ impl PonderService {
     /// * `callback` - the callback to execute during the pause
     ///
     pub fn service<F, T>(&mut self, callback: F) -> Result<T, &'static str>
-        where F: FnOnce(&PredictService, SearchTree, (Board, Color)) -> (T, Option<SearchTree>, (Board, Color))
+        where F: FnOnce(&Pool, SearchTree, (Board, Color)) -> (T, Option<SearchTree>, (Board, Color))
     {
         let handle = match self.worker.take() {
             Some(x) => x,
@@ -184,10 +179,10 @@ impl PonderService {
 
                 Err(reason)
             },
-            (Ok((service, search_tree, board, to_move)), duration) => {
+            (Ok((pool, search_tree, board, to_move)), duration) => {
                 let start_time = ProcessTime::now();
                 let (result, search_tree, (board, to_move)) = callback(
-                    &service,
+                    &pool,
                     search_tree,
                     (board, to_move)
                 );
@@ -199,7 +194,7 @@ impl PonderService {
                 self.cpu_time += start_time.elapsed() + duration;
                 self.is_running.store(!*config::NO_PONDER, Ordering::Relaxed);
                 self.worker = Some(thread::spawn(move || {
-                    ponder_worker(service, search_tree, board, to_move, is_running_worker)
+                    ponder_worker(pool, search_tree, board, to_move, is_running_worker)
                 }));
 
                 Ok(result)

@@ -16,10 +16,10 @@ use dg_nn::Network;
 use dg_utils::config;
 use dg_go::utils::sgf::{self, Sgf};
 use dg_go::{Board, Color, Point};
-use super::{GameResult, Played, predict_aux, greedy_score};
+use super::{GameResult, Played, predict, greedy_score};
 use super::predict_service;
-use super::predict::Predictor;
 use super::time_control::RolloutLimit;
+use super::pool::Pool;
 use options::StandardSearch;
 
 use crossbeam_channel;
@@ -28,6 +28,7 @@ use std::fs::File;
 use std::sync::mpsc;
 use std::io::{BufRead, BufReader};
 use std::thread;
+use std::sync::Arc;
 
 struct Candidate {
     board: Board,
@@ -69,16 +70,16 @@ fn collect_candidates_from_line(content: &str, komi: f32) -> Vec<Candidate> {
 /// * `server` -
 /// * `candidate` -
 ///
-fn reanalyze_single_candidate<P: Predictor + 'static>(
-    server: &P,
+fn reanalyze_single_candidate(
+    pool: &Pool,
     candidate: &Candidate
 ) -> Option<Played>
 {
     let num_workers = std::cmp::max(1, *config::NUM_THREADS / *config::NUM_GAMES);
-    let result = predict_aux(
-        server,
+    let result = predict(
+        pool,
         Box::new(StandardSearch::new(num_workers)),
-        RolloutLimit::new(usize::from(*config::NUM_ROLLOUT)),
+        Box::new(RolloutLimit::new(usize::from(*config::NUM_ROLLOUT))),
         None,
         &candidate.board,
         candidate.to_move
@@ -112,8 +113,8 @@ fn is_good_candidate(candidate: &Candidate) -> Option<&Candidate> {
 /// * `server` -
 /// * `content` -
 ///
-fn reanalyze_single_line<P: Predictor + 'static>(
-    server: &P,
+fn reanalyze_single_line(
+    pool: &Pool,
     content: String
 ) -> Option<GameResult>
 {
@@ -125,7 +126,7 @@ fn reanalyze_single_line<P: Predictor + 'static>(
         for cand in &candidates {
             let analyze = is_good_candidate(cand);
 
-            if let Some(played) = analyze.and_then(|cand| reanalyze_single_candidate(server, cand)) {
+            if let Some(played) = analyze.and_then(|cand| reanalyze_single_candidate(pool, cand)) {
                 sgf += &format!("{}", played);
             } else {
                 sgf += &format!("{}", Played::fixed(cand.to_move, cand.point));
@@ -139,7 +140,7 @@ fn reanalyze_single_line<P: Predictor + 'static>(
             let last_played = candidates.last().map(|cand| cand.to_move.opposite());
 
             if let Some(to_move) = last_played {
-                let (greedy_board, _) = greedy_score(server, &board, to_move);
+                let (greedy_board, _) = greedy_score(pool.predictor(), &board, to_move);
 
                 Some(GameResult::Ended(sgf, greedy_board))
             } else {
@@ -196,9 +197,9 @@ fn spawn_file_workers(files: &[String]) -> crossbeam_channel::Receiver<String> {
 pub fn reanalyze(
     network: Network,
     files: &[String]
-) -> (mpsc::Receiver<GameResult>, predict_service::PredictService)
+) -> (mpsc::Receiver<GameResult>, Arc<Pool>)
 {
-    let server = predict_service::PredictService::new(network);
+    let pool = Arc::new(Pool::new(Box::new(predict_service::PredictService::new(network))));
     let lines = spawn_file_workers(files);
 
     // spawn the worker threads that generate the self-play games
@@ -208,18 +209,18 @@ pub fn reanalyze(
     for _ in 0..num_parallel {
         let sender = sender.clone();
         let lines = lines.clone();
-        let server = server.clone();
+        let pool = pool.clone();
 
         thread::spawn(move || {
             for line in &lines {
-                if let Some(result) = reanalyze_single_line(&server, line) {
+                if let Some(result) = reanalyze_single_line(pool.as_ref(), line) {
                     sender.send(result).unwrap();
                 }
             }
         });
     }
 
-    (receiver, server)
+    (receiver, pool)
 }
 
 #[cfg(test)]

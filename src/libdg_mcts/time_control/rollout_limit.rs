@@ -33,13 +33,7 @@ impl RolloutLimit {
 }
 
 impl TimeStrategy for RolloutLimit {
-    fn try_extend<F: Fn() -> bool>(
-        &self,
-        root: &tree::Node,
-        _predicate: F,
-        _factor: f32
-    ) -> TimeStrategyResult
-    {
+    fn try_extend(&self, root: &tree::Node) -> TimeStrategyResult {
         if root.total_count < self.limit {
             let remaining = self.limit - root.total_count;
 

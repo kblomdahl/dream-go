@@ -16,27 +16,28 @@ use bench::{Benchmark, BenchmarkExecutor};
 use dg_go::utils::sgf::SgfEntry;
 use dg_mcts::options::StandardSearch;
 use dg_mcts::predict_service::PredictService;
+use dg_mcts::pool::Pool;
 use dg_mcts::predict;
 use dg_mcts::time_control::RolloutLimit;
 use dg_nn::Network;
 use dg_utils::config;
 
 pub struct MctsBenchmarkExecutor {
-    server: PredictService
+    pool: Pool
 }
 
 impl BenchmarkExecutor for MctsBenchmarkExecutor {
     fn new(network: Network) -> Self {
-        let server = PredictService::new(network);
+        let pool = Pool::new(Box::new(PredictService::new(network)));
 
-        Self { server }
+        Self { pool }
     }
 
     fn call(&mut self, entry: SgfEntry) -> usize {
         let (_value, _, tree) = predict(
-            &self.server,
+            &self.pool,
             Box::new(StandardSearch::default()),
-            RolloutLimit::new(usize::from(*config::NUM_ROLLOUT)),
+            Box::new(RolloutLimit::new(usize::from(*config::NUM_ROLLOUT))),
             None,
             &entry.board,
             entry.color
