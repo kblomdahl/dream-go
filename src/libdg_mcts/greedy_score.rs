@@ -17,7 +17,7 @@ use ordered_float::OrderedFloat;
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color, Point};
 use super::predict::Predictor;
-use super::{full_forward, ScoringSearch};
+use super::{full_forward, ScoringSearch, SearchOptions};
 
 
 /// Play the given board until the end using the policy of the neural network
@@ -31,7 +31,7 @@ use super::{full_forward, ScoringSearch};
 /// * `to_move` - the color of the player whose turn it is to play
 ///
 pub fn greedy_score(predictor: &dyn Predictor, board: &Board, mut to_move: Color) -> (Board, String) {
-    let options = ScoringSearch::default();
+    let options: Box<dyn SearchOptions + Sync> = Box::new(ScoringSearch::default());
     let mut board = board.clone();
     let mut sgf = String::new();
     let mut pass_count = 0;

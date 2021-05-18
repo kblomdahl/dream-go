@@ -14,8 +14,10 @@
 
 mod batch;
 mod event;
-mod shared_context;
+mod policy_helper;
 mod pool;
+mod shared_context;
 mod worker_thread;
 
+pub use self::policy_helper::*;
 pub use self::pool::Pool;

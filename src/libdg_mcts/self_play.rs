@@ -23,7 +23,7 @@ use super::{GameResult, get_random_komi};
 use super::{predict_service, predict, full_forward, tree};
 use super::pool::Pool;
 use dg_nn::Network;
-use options::{StandardSearch, ScoringSearch};
+use options::{SearchOptions, StandardSearch, ScoringSearch};
 
 use rand::{Rng, thread_rng};
 use std::fmt::{self, Display, Formatter};
@@ -376,12 +376,13 @@ impl Player {
 
             Some(played)
         } else {
-            let (value, mut policy) =
+            let search_options: Box<dyn SearchOptions + Sync> =
                 if allow_pass {
-                    full_forward(pool.predictor(), &StandardSearch::default(), board, self.color)?
+                    Box::new(StandardSearch::default())
                 } else {
-                    full_forward(pool.predictor(), &ScoringSearch::default(), board, self.color)?
+                    Box::new(ScoringSearch::default())
                 };
+            let (value, mut policy) = full_forward(pool.predictor(), &search_options, board, self.color)?;
             if !allow_pass {
                 policy[361] = ::std::f32::NEG_INFINITY;
             }
