@@ -21,20 +21,20 @@ use dg_go::utils::features;
 use dg_utils::config;
 use dg_utils::types::f16;
 
-pub struct Batch {
+pub struct Batch<'a> {
     features: Vec<f16>,
     events: Vec<Event>,
-    num_batches: Arc<AtomicUsize>
+    num_batches: &'a AtomicUsize
 }
 
-impl Batch {
-    pub fn new(features: Vec<f16>, events: Vec<Event>, num_batches: Arc<AtomicUsize>) -> Self {
+impl<'a> Batch<'a> {
+    pub fn new(features: Vec<f16>, events: Vec<Event>, num_batches: &'a AtomicUsize) -> Self {
         Self { features, events, num_batches }
     }
 
     pub fn forward(self, server: &Box<dyn Predictor + Sync>) -> (Vec<Event>, Vec<PredictResponse>) {
         let responses = server.predict(&self.features, self.events.len());
-        self.num_batches.fetch_sub(1, Ordering::Release);
+        self.num_batches.fetch_sub(1, Ordering::AcqRel);
 
         (self.events, responses)
     }
@@ -113,7 +113,7 @@ impl Batcher {
                     Batch::new(
                         list.features.split_off(split_index * features::Default::size()),
                         list.events.split_off(split_index),
-                        self.num_batches.clone()
+                        self.num_batches.as_ref()
                     )
                 )
             } else {

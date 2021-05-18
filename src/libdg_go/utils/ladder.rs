@@ -58,19 +58,22 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, at_point: Point) -> bo
     // that liberty. if no such group exists then this is not a ladder
     // capturing move.
     let opponent = Some(color.opposite());
-    let opponent_index = board.adjacent_to(at_point).filter_map(|other_point| {
-        if board[other_point].color() == opponent {
-            let is_in_atari = !board.has_n_liberty(other_point, 2);
+    let opponent_index = board.adjacent_to(at_point)
+        .filter_map(|other_point| {
+            if board[other_point].color() == opponent {
+                let is_in_atari = !board.has_n_liberty(other_point, 2);
 
-            if is_in_atari && !_can_escape_with_capture(&board, color.opposite(), other_point) {
-                board.get_a_liberty(other_point)
+                if is_in_atari && !_can_escape_with_capture(&board, color.opposite(), other_point) {
+                    board.get_a_liberty(other_point)
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
-        }
-    }).next();
+        })
+        .filter(|&opponent_point| board.is_valid(color.opposite(), opponent_point))
+        .next();
 
     if opponent_index.is_none() {
         return false
@@ -107,7 +110,7 @@ fn _is_ladder_capture(mut board: BoardFast, color: Color, at_point: Point) -> bo
     // in all of its liberties, if we succeed with either then this
     // is a ladder capturing move
     board.adjacent_to(opponent_index).any(|other_point| {
-        board[other_point].color() == None && {
+        board.is_valid(color, other_point) && {
             let other = board.clone();
 
             _is_ladder_capture(other, color, other_point)
@@ -166,7 +169,7 @@ impl Ladder for BoardFast {
 
         // check that we cannot be captured in a ladder from either direction
         self.adjacent_to(at_point).all(|other_point| {
-            self[other_point].color() != None || {
+            !board.is_valid(color.opposite(), other_point) || {
                 let board = board.clone();
 
                 !_is_ladder_capture(board, color.opposite(), other_point)

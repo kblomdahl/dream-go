@@ -267,7 +267,11 @@ fn normalize_policy(policy: &mut [f32], sum_to: f32) {
     let policy_sum: f32 = sum_finite_f32(&policy);
 
     if policy_sum < 1e-6 {  // do not divide by zero
-        policy.fill(1.0 / 362.0);
+        let num_finite = policy.iter().filter(|x| x.is_finite()).count() as f32;
+
+        for x in policy.iter_mut().filter(|x| x.is_finite()) {
+            *x = sum_to / num_finite;
+        }
     } else {
         normalize_finite_f32(policy, policy_sum / sum_to);
     }

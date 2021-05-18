@@ -17,11 +17,11 @@ use std::arch::x86_64::*;
 
 /// Returns the index of the maximum value in the given array. If multiple
 /// indices share the same value, then which is returned is undefined.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `array` -
-/// 
+///
 #[target_feature(enable = "avx,avx2,bmi1")]
 unsafe fn _argmax_f32(original_array: &[f32]) -> Option<usize> {
     debug_assert_eq!(original_array.len() % 8, 0);
@@ -80,11 +80,11 @@ unsafe fn _argmax_f32(original_array: &[f32]) -> Option<usize> {
 
 /// Returns the index of the maximum value in the given array. If multiple
 /// indices share the same value, then which is returned is undefined.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `array` -
-/// 
+///
 #[inline(always)]
 pub fn argmax_f32(array: &[f32]) -> Option<usize> {
     if is_x86_feature_detected!("avx2")  {
