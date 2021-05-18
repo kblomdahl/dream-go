@@ -100,9 +100,9 @@ impl Conv2dBuilder {
         let filter_size = self.filter_shape[2];
 
         cudnn::ConvolutionDescriptor::new(
-            &[filter_size / 2, filter_size / 2], // padding
-            &[1, 1], // stride
-            &[1, 1], // dilation
+            [filter_size / 2, filter_size / 2], // padding
+            [1, 1], // stride
+            [1, 1], // dilation
             cudnn::ConvolutionMode::CrossCorrelation,
             self.compute_type
         )
@@ -112,7 +112,7 @@ impl Conv2dBuilder {
         cudnn::FilterDescriptor::new(
             cudnn::DataType::Half,
             cudnn::TensorFormat::NHWC,
-            &self.filter_shape
+            self.filter_shape.clone()
         )
     }
 

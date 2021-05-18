@@ -75,26 +75,26 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     let in_desc = cudnn::TensorDescriptor::new(
         tensor_format,
         data_type,
-        &[BATCH_SIZE as i32, num_features as i32, 19, 19]
+        [BATCH_SIZE as i32, num_features as i32, 19, 19]
     )?;
     let out_desc = cudnn::TensorDescriptor::new(
         tensor_format,
         data_type,
-        &[BATCH_SIZE as i32, num_features as i32, 19, 19]
+        [BATCH_SIZE as i32, num_features as i32, 19, 19]
     )?;
 
     // the a bias description that match the given configuration
     let offset_desc = cudnn::TensorDescriptor::new(
         if tensor_format == cudnn::TensorFormat::NCHW_VECT_C { cudnn::TensorFormat::NCHW } else { tensor_format },
         offset_type,
-        &[1, num_features as i32, 1, 1]
+        [1, num_features as i32, 1, 1]
     )?;
 
     // the a convolutional description that match the given configuration
     let conv_desc = cudnn::ConvolutionDescriptor::new(
-        &[1, 1],
-        &[1, 1],
-        &[1, 1],
+        [1, 1],
+        [1, 1],
+        [1, 1],
         cudnn::ConvolutionMode::CrossCorrelation,
         conv_type
     )?;
@@ -110,7 +110,7 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     let filter_desc = cudnn::FilterDescriptor::new(
         data_type,
         tensor_format,
-        &[num_features as i32, num_features as i32, 3, 3]
+        [num_features as i32, num_features as i32, 3, 3]
     )?;
 
     // figure out how large of a workspace we need given the convolution

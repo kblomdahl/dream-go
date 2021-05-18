@@ -340,7 +340,7 @@ impl<'a> Features for V2<'a> {
         let c_komi = T::from(self.self_komi(to_move));
         let o = O::new(Self::num_features());
 
-        let mut out = vec! [c_0; 16 * 361];
+        let mut out = vec! [c_0; Self::size()];
         let symmetry_table = symmetry.get_table();
         let opponent = to_move.opposite();
         let benson_our = BensonImpl::new(self.board, to_move);
@@ -440,7 +440,7 @@ impl<'a> Features for LzFeatures<'a> {
         let c_1 = T::from(1.0);
         let o = O::new(Self::num_features());
 
-        let mut out = vec! [c_0; 6498];
+        let mut out = vec! [c_0; Self::size()];
         let symmetry_table = symmetry.get_table();
         let opposite = to_move.opposite();
 

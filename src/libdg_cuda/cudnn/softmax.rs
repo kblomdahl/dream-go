@@ -43,7 +43,7 @@ impl Softmax {
         mode: SoftmaxMode,
         x: TensorDescriptor,
         y: TensorDescriptor,
-        alpha: &[f32]
+        alpha: [f32; 2]
     ) -> Result<Self, Status>
     {
         let alpha = [alpha[0], alpha[1]];

@@ -110,23 +110,23 @@ impl FilterDescriptor {
     /// This function creates a filter descriptor object by allocating the
     /// memory needed to hold its opaque structure. For more information, see
     /// `cudnnFilterDescriptor_t`.
-    /// 
+    ///
     /// * `K` is the number of output feature maps
     /// * `C` is the number of input feature maps
     /// * `R` is the number of rows per filter
     /// * `S` is the number of columns per filter
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `data_type` -
     /// * `format` - Order of the data in the filter, `NCHW` is `KCRS`, and
     ///              `NHWC` is `KRSC`.
     /// * `shape` - Shape in KCHW order.
-    /// 
+    ///
     pub fn new(
         data_type: DataType,
         format: TensorFormat,
-        shape: &[i32]
+        shape: [i32; 4]
     ) -> Result<Self, Status>
     {
         debug_assert_eq!(shape.len(), 4);
@@ -157,9 +157,9 @@ impl FilterDescriptor {
         GetFilter4dDescriptor::new(self.filter_desc).map(|out| out.format)
     }
 
-    pub fn shape(&self) -> Result<Vec<i32>, Status> {
+    pub fn shape(&self) -> Result<[i32; 4], Status> {
         GetFilter4dDescriptor::new(self.filter_desc).map(
-            |out| vec! [out.k, out.c, out.r, out.s]
+            |out| [out.k, out.c, out.r, out.s]
         )
     }
 }
@@ -173,7 +173,7 @@ mod tests {
         let filter_desc = FilterDescriptor::new(
             DataType::Half,
             TensorFormat::NHWC,
-            &vec! [128, 128, 3, 3]
+            [128, 128, 3, 3]
         );
 
         assert!(filter_desc.is_ok());
@@ -184,11 +184,11 @@ mod tests {
         let filter_desc = FilterDescriptor::new(
             DataType::Half,
             TensorFormat::NHWC,
-            &vec! [128, 32, 5, 5]
+            [128, 32, 5, 5]
         ).unwrap();
 
         assert_eq!(filter_desc.data_type(), Ok(DataType::Half));
         assert_eq!(filter_desc.format(), Ok(TensorFormat::NHWC));
-        assert_eq!(filter_desc.shape(), Ok(vec! [128, 32, 5, 5]));
+        assert_eq!(filter_desc.shape(), Ok([128, 32, 5, 5]));
     }
 }

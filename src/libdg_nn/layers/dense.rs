@@ -83,13 +83,13 @@ impl DenseBuilder {
         cudnn::Transform::new(
             cudnn::TensorDescriptor::new_ex(
                 cudnn::DataType::Half,
-                &[num_outputs, num_inputs, 1, 1],
-                &[1, num_outputs, 1, 1],
+                [num_outputs, num_inputs, 1, 1],
+                [1, num_outputs, 1, 1],
             )?,
             cudnn::TensorDescriptor::new_ex(
                 cudnn::DataType::Half,
-                &[num_outputs, num_inputs, 1, 1],
-                &[num_inputs, 1, 1, 1],
+                [num_outputs, num_inputs, 1, 1],
+                [num_inputs, 1, 1, 1],
             )?,
             &[1.0, 0.0]
         )
@@ -107,9 +107,9 @@ impl DenseBuilder {
     /// 32-bit compute type.
     fn create_convolution_descriptor(&self) -> Result<cudnn::ConvolutionDescriptor, cudnn::Status> {
         cudnn::ConvolutionDescriptor::new(
-            &[0, 0],
-            &[1, 1],
-            &[1, 1],
+            [0, 0],
+            [1, 1],
+            [1, 1],
             cudnn::ConvolutionMode::CrossCorrelation,
             cudnn::DataType::Float
         )
@@ -130,7 +130,7 @@ impl DenseBuilder {
         cudnn::FilterDescriptor::new(
             cudnn::DataType::Half,
             cudnn::TensorFormat::NCHW,
-            &[num_outputs, num_inputs, 1, 1]
+            [num_outputs, num_inputs, 1, 1]
         )
     }
 

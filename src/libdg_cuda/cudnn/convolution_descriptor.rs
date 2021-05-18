@@ -134,17 +134,13 @@ impl ConvolutionDescriptor {
     }
 
     pub fn new(
-        pad: &[i32],
-        stride: &[i32],
-        dilation: &[i32],
+        pad: [i32; 2],
+        stride: [i32; 2],
+        dilation: [i32; 2],
         mode: ConvolutionMode,
         compute_type: DataType
     ) -> Result<Self, Status>
     {
-        debug_assert_eq!(pad.len(), 2);
-        debug_assert_eq!(stride.len(), 2);
-        debug_assert_eq!(dilation.len(), 2);
-
         Self::empty().and_then(|out| {
             let status =
                 unsafe {
@@ -208,16 +204,16 @@ impl ConvolutionDescriptor {
         status.into_result(out)
     }
 
-    pub fn pad(&self) -> Result<Vec<i32>, Status> {
-        GetConvolution2dDescriptor::new(self.conv_desc).map(|out| vec! [out.pad_h, out.pad_w])
+    pub fn pad(&self) -> Result<[i32; 2], Status> {
+        GetConvolution2dDescriptor::new(self.conv_desc).map(|out| [out.pad_h, out.pad_w])
     }
 
-    pub fn stride(&self) -> Result<Vec<i32>, Status> {
-        GetConvolution2dDescriptor::new(self.conv_desc).map(|out| vec! [out.u, out.v])
+    pub fn stride(&self) -> Result<[i32; 2], Status> {
+        GetConvolution2dDescriptor::new(self.conv_desc).map(|out| [out.u, out.v])
     }
 
-    pub fn dilation(&self) -> Result<Vec<i32>, Status> {
-        GetConvolution2dDescriptor::new(self.conv_desc).map(|out| vec! [out.dilation_h, out.dilation_w])
+    pub fn dilation(&self) -> Result<[i32; 2], Status> {
+        GetConvolution2dDescriptor::new(self.conv_desc).map(|out| [out.dilation_h, out.dilation_w])
     }
 
     pub fn mode(&self) -> Result<ConvolutionMode, Status> {
@@ -236,9 +232,9 @@ mod tests {
     #[test]
     fn can_create() {
         let conv_desc = ConvolutionDescriptor::new(
-            &[0, 0],
-            &[1, 1],
-            &[1, 1],
+            [0, 0],
+            [1, 1],
+            [1, 1],
             ConvolutionMode::CrossCorrelation,
             DataType::Float
         );
@@ -249,17 +245,17 @@ mod tests {
     #[test]
     fn get_conv_descriptor() {
         let conv_desc = ConvolutionDescriptor::new(
-            &[1, 1],
-            &[2, 2],
-            &[3, 3],
+            [1, 1],
+            [2, 2],
+            [3, 3],
             ConvolutionMode::CrossCorrelation,
             DataType::Half
         ).unwrap();
 
         assert_eq!(conv_desc.math_type(), Ok(if supports_tensor_cores().unwrap() { MathType::TensorOpMath } else { MathType::DefaultMath }));
-        assert_eq!(conv_desc.pad(), Ok(vec! [1, 1]));
-        assert_eq!(conv_desc.stride(), Ok(vec! [2, 2]));
-        assert_eq!(conv_desc.dilation(), Ok(vec! [3, 3]));
+        assert_eq!(conv_desc.pad(), Ok([1, 1]));
+        assert_eq!(conv_desc.stride(), Ok([2, 2]));
+        assert_eq!(conv_desc.dilation(), Ok([3, 3]));
         assert_eq!(conv_desc.mode(), Ok(ConvolutionMode::CrossCorrelation));
         assert_eq!(conv_desc.compute_type(), Ok(DataType::Half));
     }

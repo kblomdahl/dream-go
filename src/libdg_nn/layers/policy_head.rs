@@ -72,7 +72,7 @@ impl PolicyLayer {
             cudnn::SoftmaxMode::Instance,
             create_dense_descriptor(batch_size, num_channels)?,
             create_dense_descriptor(batch_size, num_channels)?,
-            &[1.0, 0.0]
+            [1.0, 0.0]
         )
     }
 

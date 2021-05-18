@@ -100,17 +100,17 @@ mod tests {
         let x = TensorDescriptor::new(
             TensorFormat::NHWC,
             DataType::Float,
-            &[16, 256, 19, 19]
+            [16, 256, 19, 19]
         ).unwrap();
         let w = FilterDescriptor::new(
             DataType::Float,
             TensorFormat::NHWC,
-            &[256, 256, 3, 3]
+            [256, 256, 3, 3]
         ).unwrap();
         let conv = ConvolutionDescriptor::new(
-            &[2, 2],
-            &[1, 1],
-            &[2, 2],
+            [2, 2],
+            [1, 1],
+            [2, 2],
             ConvolutionMode::CrossCorrelation,
             DataType::Float
         ).unwrap();

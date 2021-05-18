@@ -62,7 +62,7 @@ pub fn create_tensor_descriptor(batch_size: i32, num_channels: i32, width_height
     cudnn::TensorDescriptor::new(
         cudnn::TensorFormat::NHWC,
         cudnn::DataType::Half,
-        &[batch_size, num_channels, width_height, width_height]
+        [batch_size, num_channels, width_height, width_height]
     )
 }
 
@@ -77,7 +77,7 @@ pub fn create_offset_descriptor(num_channels: i32) -> Result<cudnn::TensorDescri
     cudnn::TensorDescriptor::new(
         cudnn::TensorFormat::NHWC,
         cudnn::DataType::Half,
-        &[1, num_channels, 1, 1]
+        [1, num_channels, 1, 1]
     )
 }
 
@@ -93,6 +93,6 @@ pub fn create_dense_descriptor(batch_size: i32, size: i32) -> Result<cudnn::Tens
     cudnn::TensorDescriptor::new(
         cudnn::TensorFormat::NHWC,
         cudnn::DataType::Half,
-        &[batch_size, size, 1, 1]
+        [batch_size, size, 1, 1]
     )
 }

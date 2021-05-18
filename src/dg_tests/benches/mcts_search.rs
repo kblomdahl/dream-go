@@ -58,11 +58,12 @@ fn lee_sedol_alphago_4_78(b: &mut Bencher) {
 
     b.iter(move || {
         let server = mcts::predict::RandomPredictor::default();
+        let pool = mcts::pool::Pool::new(Box::new(server));
 
-        mcts::predict::<_, _>(
-            &server,
+        mcts::predict(
+            &pool,
             Box::new(StandardSearch::default()),
-            RolloutLimit::new(40),
+            Box::new(RolloutLimit::new(40)),
             None,
             &original_board,
             Color::Black

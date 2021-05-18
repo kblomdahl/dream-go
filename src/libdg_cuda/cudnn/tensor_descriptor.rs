@@ -138,17 +138,17 @@ impl TensorDescriptor {
 
     /// Returns a tensor descriptor created by `cudnnSetTensor4dDescriptor()`
     /// with the given `format`, `data_type`, and `shape`.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `format` -
     /// * `data_type` -
     /// * `shape` - Shape in NCHW order.
-    /// 
+    ///
     pub fn new(
         format: TensorFormat,
         data_type: DataType,
-        shape: &[i32],
+        shape: [i32; 4],
     ) -> Result<Self, Status>
     {
         debug_assert_eq!(shape.len(), 4);
@@ -173,17 +173,17 @@ impl TensorDescriptor {
 
     /// Returns a tensor descriptor created by `cudnnSetTensor4dDescriptorEx()`
     /// with the given `format`, `data_type`, `shape`, and `stride`.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `data_type` -
     /// * `shape` - Shape in NCHW order.
     /// * `stride` -
-    /// 
+    ///
     pub fn new_ex(
         data_type: DataType,
-        shape: &[i32],
-        stride: &[i32],
+        shape: [i32; 4],
+        stride: [i32; 4],
     ) -> Result<Self, Status>
     {
         debug_assert_eq!(shape.len(), 4);
@@ -214,15 +214,15 @@ impl TensorDescriptor {
         GetTensor4dDescriptor::new(self.tensor_desc).map(|out| out.data_type)
     }
 
-    pub fn shape(&self) -> Result<Vec<i32>, Status> {
+    pub fn shape(&self) -> Result<[i32; 4], Status> {
         GetTensor4dDescriptor::new(self.tensor_desc).map(
-            |out| vec! [out.n, out.c, out.h, out.w]
+            |out| [out.n, out.c, out.h, out.w]
         )
     }
 
-    pub fn stride(&self) -> Result<Vec<i32>, Status> {
+    pub fn stride(&self) -> Result<[i32; 4], Status> {
         GetTensor4dDescriptor::new(self.tensor_desc).map(
-            |out| vec! [out.n_stride, out.c_stride, out.h_stride, out.w_stride]
+            |out| [out.n_stride, out.c_stride, out.h_stride, out.w_stride]
         )
     }
 
@@ -243,7 +243,7 @@ mod tests {
         let tensor_desc = TensorDescriptor::new(
             TensorFormat::NHWC,
             DataType::Float,
-            &vec! [1, 1, 1, 1]
+            [1, 1, 1, 1]
         );
 
         assert!(tensor_desc.is_ok());
@@ -254,12 +254,12 @@ mod tests {
         let tensor_desc = TensorDescriptor::new(
             TensorFormat::NHWC,
             DataType::Float,
-            &vec! [1, 2, 3, 4]
+            [1, 2, 3, 4]
         ).unwrap();
 
         assert_eq!(tensor_desc.data_type(), Ok(DataType::Float));
-        assert_eq!(tensor_desc.shape(), Ok(vec! [1, 2, 3, 4]));
-        assert_eq!(tensor_desc.stride(), Ok(vec! [24, 1, 8, 2]));
+        assert_eq!(tensor_desc.shape(), Ok([1, 2, 3, 4]));
+        assert_eq!(tensor_desc.stride(), Ok([24, 1, 8, 2]));
     }
 
     #[test]
@@ -267,12 +267,12 @@ mod tests {
         let tensor_desc = TensorDescriptor::new(
             TensorFormat::NCHW,
             DataType::Float,
-            &vec! [1, 2, 3, 4]
+            [1, 2, 3, 4]
         ).unwrap();
 
         assert_eq!(tensor_desc.data_type(), Ok(DataType::Float));
-        assert_eq!(tensor_desc.shape(), Ok(vec! [1, 2, 3, 4]));
-        assert_eq!(tensor_desc.stride(), Ok(vec! [24, 12, 4, 1]));
+        assert_eq!(tensor_desc.shape(), Ok([1, 2, 3, 4]));
+        assert_eq!(tensor_desc.stride(), Ok([24, 12, 4, 1]));
     }
 
     #[test]
@@ -280,7 +280,7 @@ mod tests {
         let tensor_desc = TensorDescriptor::new(
             TensorFormat::NCHW,
             DataType::Half,
-            &vec! [1, 2, 3, 4]
+            [1, 2, 3, 4]
         ).unwrap();
 
         assert_eq!(tensor_desc.size_in_bytes(), Ok(48));
