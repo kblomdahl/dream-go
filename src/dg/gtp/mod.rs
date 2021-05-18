@@ -21,7 +21,7 @@ use std::time::Instant;
 use dg_go::utils::score::{Score, StoneStatus};
 use dg_go::utils::sgf::Sgf;
 use dg_go::{DEFAULT_KOMI, Board, Color, Point};
-use dg_mcts::time_control::{RolloutLimit, ByoYomi};
+use dg_mcts::time_control::{TimeStrategy, RolloutLimit, ByoYomi};
 use dg_mcts as mcts;
 use dg_utils::config;
 
@@ -335,37 +335,32 @@ impl Gtp {
         let board = self.history.last().unwrap();
         let result = self.ponder.service(|service, search_tree, p_state| {
             let search_tree = if search_tree.to_move != to_move {
-                // passing moves are not recorded in the GTP protocol, so we
-                // will just assume the other player passed once if we are in
-                // this situation
+                // passing moves are not recorded in GTP, so we will just assume
+                // the other player passed once if we are in this situation
                 mcts::tree::Node::forward(search_tree, 361)
             } else {
                 Some(search_tree)
             };
 
-            let result = if main_time.is_finite() && byo_yomi_time.is_finite() {
-                let total_visits = search_tree.as_ref()
-                    .map(|tree| tree.total_count)
-                    .unwrap_or(0);
+            let search_options: Box<dyn TimeStrategy + Sync> =
+                if main_time.is_finite() && byo_yomi_time.is_finite() {
+                    let total_visits = search_tree.as_ref()
+                        .map(|tree| tree.total_count)
+                        .unwrap_or(0);
 
-                mcts::predict(
-                    service,
-                    mode.search_strategy(),
-                    Box::new(ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods)),
-                    search_tree,
-                    &board,
-                    to_move
-                )
-            } else {
-                mcts::predict(
-                    service,
-                    mode.search_strategy(),
-                    Box::new(RolloutLimit::new((*config::NUM_ROLLOUT).into())),
-                    search_tree,
-                    &board,
-                    to_move
-                )
-            };
+                    Box::new(ByoYomi::new(board.count(), total_visits, main_time, byo_yomi_time, byo_yomi_periods))
+                } else {
+                    Box::new(RolloutLimit::new((*config::NUM_ROLLOUT).into()))
+                };
+
+            let result = mcts::predict(
+                service,
+                mode.search_strategy(),
+                search_options,
+                search_tree,
+                &board,
+                to_move
+            );
 
             if result.is_none() {
                 return (None, None, p_state)

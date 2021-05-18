@@ -25,7 +25,12 @@ use dg_go::{Point, Board, Color};
 /// * `board` -
 /// * `color` -
 ///
-pub fn create_initial_policy(options: &Box<dyn SearchOptions + Sync>, board: &Board, to_move: Color) -> (Vec<f32>, Vec<usize>) {
+pub fn create_initial_policy(
+    options: &Box<dyn SearchOptions + Sync>,
+    board: &Board,
+    to_move: Color
+) -> (Vec<f32>, Vec<usize>)
+{
     // mark all illegal moves as -Inf, which effectively ensures they are never selected by
     // the tree search.
     let mut policy = vec! [::std::f32::NEG_INFINITY; 368];

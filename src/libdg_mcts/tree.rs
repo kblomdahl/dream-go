@@ -15,7 +15,7 @@
 use dg_go::utils::sgf::SgfCoordinate;
 use dg_go::{Board, Color, Point};
 use dg_utils::lcb::normal_lcb_m;
-use dg_utils::{config, max};
+use dg_utils::config;
 use super::asm::{argmax_f32, argmax_i32};
 use super::choose::choose;
 use super::parallel::spin::Mutex;
@@ -41,7 +41,7 @@ const MIN_LCB_VISITS: i32 = 80;
 pub struct UCT;
 
 impl UCT {
-    #[inline(always)]
+    #[cfg(not(target_arch = "x86_64"))]
     unsafe fn get_impl<C: Children>(node: &Node, child: &C, value: &mut [f32]) {
         use std::intrinsics::{fadd_fast, fdiv_fast, fmul_fast};
 
@@ -60,10 +60,57 @@ impl UCT {
         }
     }
 
-    #[allow(unused_attributes)]
+    #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn get_avx2<C: Children>(node: &Node, child: &C, value: &mut [f32]) {
-        UCT::get_impl(node, child, value);
+    unsafe fn get_impl<C: Children>(node: &Node, child: &C, value: &mut [f32]) {
+        use std::arch::x86_64::_mm256_cvtepi32_ps;
+        use std::arch::x86_64::_mm256_set1_ps;
+        use std::arch::x86_64::_mm256_set1_epi32;
+        use std::arch::x86_64::_mm256_setr_epi32;
+        use std::arch::x86_64::_mm256_loadu_ps;
+        use std::arch::x86_64::_mm256_storeu_ps;
+        use std::arch::x86_64::_mm256_add_ps;
+        use std::arch::x86_64::_mm256_mul_ps;
+        use std::arch::x86_64::_mm256_cmpeq_epi32;
+        use std::arch::x86_64::_mm256_setzero_si256;
+        use std::arch::x86_64::_mm256_and_ps;
+        use std::arch::x86_64::_mm256_andnot_ps;
+        use std::arch::x86_64::_mm256_div_ps;
+        use std::arch::x86_64::_mm256_or_ps;
+        use std::arch::x86_64::_mm256_add_epi32;
+        use std::arch::x86_64::_mm256_castsi256_ps;
+
+        let n = node.total_count + node.vtotal_count;
+        let sqrt_n = ((1 + n) as f32).sqrt();
+        let uct_exp = config::get_uct_exp(n);
+        let uct_exp_sqrt_n = _mm256_set1_ps(uct_exp * sqrt_n);
+        let zero = _mm256_setzero_si256();
+        let one = _mm256_set1_epi32(1);
+
+        for i in (0..362).step_by(8) {
+            let count = _mm256_setr_epi32(
+                child.total_count(i+0),
+                child.total_count(i+1),
+                child.total_count(i+2),
+                child.total_count(i+3),
+                child.total_count(i+4),
+                child.total_count(i+5),
+                child.total_count(i+6),
+                child.total_count(i+7)
+            );
+            let prior = _mm256_loadu_ps(&node.prior[i]);
+            let value_ = _mm256_loadu_ps(&value[i]);
+            let count_is_zero = _mm256_castsi256_ps(_mm256_cmpeq_epi32(count, zero));
+            let exp_bonus = _mm256_or_ps(
+                _mm256_and_ps(count_is_zero, uct_exp_sqrt_n),
+                _mm256_andnot_ps(count_is_zero, _mm256_div_ps(uct_exp_sqrt_n, _mm256_cvtepi32_ps(_mm256_add_epi32(count, one))))
+            );
+
+            _mm256_storeu_ps(
+                &mut value[i],
+                _mm256_add_ps(value_, _mm256_mul_ps(prior, exp_bonus))
+            );
+        }
     }
 
     /// Update the trace backwards with the given value (and color).
@@ -120,19 +167,10 @@ impl UCT {
     ///
     #[inline(always)]
     fn get(node: &Node, value: &mut [f32]) {
-        if is_x86_feature_detected!("avx2") {
-            unsafe {
-                match node.children {
-                    ChildrenImpl::Small(ref small) => UCT::get_avx2(node, &**small, value),
-                    ChildrenImpl::Big(ref big) => UCT::get_avx2(node, &**big, value),
-                }
-            }
-        } else {
-            unsafe {
-                match node.children {
-                    ChildrenImpl::Small(ref small) => UCT::get_impl(node, &**small, value),
-                    ChildrenImpl::Big(ref big) => UCT::get_impl(node, &**big, value),
-                }
+        unsafe {
+            match node.children {
+                ChildrenImpl::Small(ref small) => UCT::get_impl(node, &**small, value),
+                ChildrenImpl::Big(ref big) => UCT::get_impl(node, &**big, value),
             }
         }
     }
@@ -142,7 +180,9 @@ impl UCT {
 pub struct FPU;
 
 impl FPU {
+    #[cfg(not(target_arch = "x86_64"))]
     unsafe fn apply_impl<C: Children>(value: &mut [f32], child: &C, fpu_reduce: f32) {
+        use dg_utils::max;
         use std::intrinsics::fsub_fast;
 
         for i in 0..368 {
@@ -154,9 +194,49 @@ impl FPU {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn apply_avx2<C: Children>(value: &mut [f32], child: &C, fpu_reduce: f32) {
-        FPU::apply_impl(value, child, fpu_reduce)
+    unsafe fn apply_impl<C: Children>(value: &mut [f32], child: &C, fpu_reduce: f32) {
+        use std::arch::x86_64::_mm256_setr_epi32;
+        use std::arch::x86_64::_mm256_set1_epi32;
+        use std::arch::x86_64::_mm256_setzero_ps;
+        use std::arch::x86_64::_mm256_set1_ps;
+        use std::arch::x86_64::_mm256_cmpeq_epi32;
+        use std::arch::x86_64::_mm256_castsi256_ps;
+        use std::arch::x86_64::_mm256_storeu_ps;
+        use std::arch::x86_64::_mm256_or_ps;
+        use std::arch::x86_64::_mm256_and_ps;
+        use std::arch::x86_64::_mm256_andnot_ps;
+        use std::arch::x86_64::_mm256_loadu_ps;
+        use std::arch::x86_64::_mm256_max_ps;
+        use std::arch::x86_64::_mm256_sub_ps;
+
+        let zero = _mm256_set1_epi32(0);
+        let zero_ps = _mm256_setzero_ps();
+        let fpu_reduce = _mm256_set1_ps(fpu_reduce);
+
+        for i in (0..362).step_by(8) {
+            let count = _mm256_setr_epi32(
+                child.total_count(i+0),
+                child.total_count(i+1),
+                child.total_count(i+2),
+                child.total_count(i+3),
+                child.total_count(i+4),
+                child.total_count(i+5),
+                child.total_count(i+6),
+                child.total_count(i+7)
+            );
+            let count_is_zero = _mm256_castsi256_ps(_mm256_cmpeq_epi32(count, zero));
+            let value_ = _mm256_loadu_ps(&value[i]);
+
+            _mm256_storeu_ps(
+                &mut value[i],
+                _mm256_or_ps(
+                    _mm256_and_ps(count_is_zero, _mm256_max_ps(_mm256_sub_ps(value_, fpu_reduce), zero_ps)),
+                    _mm256_andnot_ps(count_is_zero, value_)
+                )
+            );
+        }
     }
 
     /// Apply the first play urgency reduction to all elements in `value` if `count`
@@ -170,11 +250,7 @@ impl FPU {
     ///
     #[inline(always)]
     pub fn apply<C: Children>(value: &mut [f32], child: &C, fpu_reduce: f32) {
-        if is_x86_feature_detected!("avx2") {
-            unsafe { FPU::apply_avx2(value, child, fpu_reduce) }
-        } else {
-            unsafe { FPU::apply_impl(value, child, fpu_reduce) }
-        }
+        unsafe { FPU::apply_impl(value, child, fpu_reduce) }
     }
 }
 
@@ -1672,6 +1748,7 @@ pub fn to_pretty(root: &Node) -> ToPretty {
 
 #[cfg(test)]
 mod tests {
+    use test::{black_box, Bencher};
     use rand::rngs::SmallRng;
     use rand::{Rng, SeedableRng};
     use dg_go::*;
@@ -1867,5 +1944,67 @@ mod tests {
     #[test]
     fn undo_trace() {
         unsafe { unsafe_undo_trace() }
+    }
+
+    #[bench]
+    fn small_uct2(b: &mut Bencher) {
+        let node = black_box(Node::new(Color::Black, 0.0, vec! [1.0; 362]));
+
+        b.iter(move || {
+            let mut value = node.children.value(node.initial_value);
+
+            UCT::get(&node, &mut value);
+            value
+        })
+    }
+
+    #[bench]
+    fn big_uct2(b: &mut Bencher) {
+        let mut node = black_box(Node::new(Color::Black, 0.0, vec! [1.0; 362]));
+        let big = match &node.children {
+            ChildrenImpl::Small(x) => unsafe { BigChildrenImpl::from_small(x, node.initial_value) },
+            _ => unreachable!()
+        };
+        node.children = ChildrenImpl::Big(Box::new(big));
+
+        b.iter(move || {
+            let mut value = node.children.value(node.initial_value);
+
+            UCT::get(&node, &mut value);
+            value
+        })
+    }
+
+    #[bench]
+    fn small_fpu(b: &mut Bencher) {
+        let node = black_box(Node::new(Color::Black, 0.0, vec! [1.0; 362]));
+
+        b.iter(move || {
+            let mut value = node.children.value(node.initial_value);
+
+            match node.children {
+                ChildrenImpl::Big(ref big) => FPU::apply(&mut value, &**big, 0.5),
+                ChildrenImpl::Small(ref small) => FPU::apply(&mut value, &**small, 0.5)
+            }
+        })
+    }
+
+    #[bench]
+    fn big_fpu(b: &mut Bencher) {
+        let mut node = black_box(Node::new(Color::Black, 0.0, vec! [1.0; 362]));
+        let big = match &node.children {
+            ChildrenImpl::Small(x) => unsafe { BigChildrenImpl::from_small(x, node.initial_value) },
+            _ => unreachable!()
+        };
+        node.children = ChildrenImpl::Big(Box::new(big));
+
+        b.iter(move || {
+            let mut value = node.children.value(node.initial_value);
+
+            match node.children {
+                ChildrenImpl::Big(ref big) => FPU::apply(&mut value, &**big, 0.5),
+                ChildrenImpl::Small(ref small) => FPU::apply(&mut value, &**small, 0.5)
+            }
+        })
     }
 }
