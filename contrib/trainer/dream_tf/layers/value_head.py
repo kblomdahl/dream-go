@@ -61,3 +61,16 @@ def value_head(x, mode, params):
 
 def value_offset_op(shape, dtype=None, partition_info=None):
     return np.array([-0.00502319782])
+
+
+def ownership_loss(*, labels=None, logits=None):
+    categorical_labels = tf.stack([(1 + labels) / 2, (1 - labels) / 2], axis=2)
+    categorical_logits = tf.stack([logits, -logits], axis=2)
+    loss = tf.compat.v1.losses.softmax_cross_entropy(
+        categorical_labels,
+        categorical_logits,
+        label_smoothing=0.2,
+        reduction=tf.compat.v1.losses.Reduction.NONE
+    )
+
+    return tf.reduce_mean(input_tensor=loss, axis=[1], keepdims=True)

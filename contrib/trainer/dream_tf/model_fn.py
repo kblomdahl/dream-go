@@ -23,9 +23,9 @@ import tensorflow as tf
 from .hooks.dump import DUMP_OPS, DUMP_STR_OPS
 from .hooks.learning_rate import LEARNING_RATE, LOSS
 from .layers.batch_norm import batch_norm_conv2d
-from .layers.tower import tower
-from .layers.ownership_head import ownership_loss
 from .layers.leela_zero import leela_zero
+from .layers.tower import tower
+from .layers.value_head import ownership_loss
 
 dream_go_module = tf.load_op_library('libdg_tf.so')
 

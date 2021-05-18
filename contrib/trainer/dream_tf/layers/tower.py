@@ -26,7 +26,6 @@ from .batch_norm import batch_norm_conv2d
 from .policy_head import policy_head
 from .residual_block import residual_block
 from .value_head import value_head
-from .ownership_head import ownership_head
 
 
 def tower(x, mode, params):
