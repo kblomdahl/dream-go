@@ -16,13 +16,12 @@ use dg_go::utils::score::Score;
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color, Point};
 use dg_utils::{b85, config};
+use super::{predict, full_forward, tree, GameResult, get_random_komi};
 use super::asm::sum_finite_f32;
 use super::choose::choose;
-use super::time_control::{TimeStrategy, RolloutLimit};
-use super::{GameResult, get_random_komi};
-use super::{predict_service, predict, full_forward, tree};
 use super::pool::Pool;
-use dg_nn::Network;
+use super::predictors::DefaultPredictor;
+use super::time_control::{TimeStrategy, RolloutLimit};
 use options::{SearchOptions, StandardSearch, ScoringSearch};
 
 use rand::{Rng, thread_rng};
@@ -483,12 +482,11 @@ fn self_play_one(
 /// * `ex_it` - whether to enable with expert iteration
 ///
 pub fn self_play(
-    network: Network,
     num_games: usize,
     ex_it: bool
 ) -> (Receiver<GameResult>, Arc<Pool>)
 {
-    let pool = Arc::new(Pool::new(Box::new(predict_service::PredictService::new(network))));
+    let pool = Arc::new(Pool::new(Box::new(DefaultPredictor::default())));
 
     // spawn the worker threads that generate the self-play games
     let num_parallel = ::std::cmp::min(num_games, *config::NUM_GAMES);
@@ -521,7 +519,7 @@ pub fn self_play(
 #[cfg(test)]
 mod tests {
     use ::options::StandardDeterministicSearch;
-    use ::predict::FakePredictor;
+    use ::predictors::FakePredictor;
     use super::*;
 
     #[test]

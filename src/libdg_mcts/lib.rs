@@ -39,8 +39,8 @@ mod lru_cache;
 mod greedy_score;
 pub mod options;
 pub mod parallel;
-pub mod predict_service;
-pub mod predict;
+pub mod predictor;
+pub mod predictors;
 mod reanalyze;
 mod self_play;
 pub mod tree;
@@ -65,7 +65,7 @@ use dg_go::{Board, Color};
 use self::options::{SearchOptions, ScoringSearch};
 use self::time_control::TimeStrategy;
 use self::tree::NodeTrace;
-use self::predict::{Predictor, PredictResponse};
+use self::predictor::{Predictor, Prediction};
 use dg_utils::config;
 use dg_utils::types::f16;
 use self::pool::*;
@@ -226,10 +226,10 @@ fn get_random_komi() -> f32 {
 #[cfg(test)]
 mod tests {
     use dg_go::{Board, Color};
-    use dg_utils::types::f16;
     use super::*;
 
     use options::StandardDeterministicSearch;
+    use predictors::{RandomPredictor, NanPredictor};
 
     #[test]
     fn valid_komi() {
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn no_allowed_moves() {
-        let pool = Pool::new(Box::new(predict::RandomPredictor::default()));
+        let pool = Pool::new(Box::new(RandomPredictor::default()));
         let mut root = tree::Node::new(Color::Black, 0.0, vec! [1.0; 362]);
 
         for i in 0..362 {
@@ -261,34 +261,6 @@ mod tests {
         ).expect("could not predict a position");
 
         assert_eq!(tree.best(0.0), (::std::f32::NEG_INFINITY, 361));
-    }
-
-    #[derive(Clone, Default)]
-    struct NanPredictor;
-
-    impl predict::Predictor for NanPredictor {
-        fn max_num_threads(&self) -> usize {
-            1
-        }
-
-        fn fetch(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform) -> Option<PredictResponse> {
-            None
-        }
-
-        fn cache(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform, _response: PredictResponse) {
-            // pass
-        }
-
-        fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<PredictResponse> {
-            (0..batch_size)
-                .map(|_| {
-                    PredictResponse::new(
-                        f16::from(0.0),
-                        vec! [f16::from(::std::f32::NEG_INFINITY); 362]
-                    )
-                })
-                .collect()
-        }
     }
 
     #[test]

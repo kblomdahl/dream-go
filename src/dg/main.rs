@@ -27,17 +27,6 @@ mod gtp;
 
 use dg_utils::config::{self, Procedure};
 
-/// Returns the network weights, panics if it failed to load the weights.
-fn load_network() -> dg_nn::Network {
-    match dg_nn::Network::new() {
-        Some(network) => network,
-        None => {
-            println!("Could not load network weights!");
-            ::std::process::exit(1);
-        }
-    }
-}
-
 /// Main function.
 fn main() {
     match &*config::PROCEDURE {
@@ -66,7 +55,7 @@ fn main() {
         },
 
         Procedure::Benchmark => {
-            let network = load_network();
+            let network = dg_nn::Network::new().expect("could not load neural network weights");
 
             for sgf_file in config::get_args() {
                 println!("{}:", sgf_file);
@@ -79,7 +68,7 @@ fn main() {
         },
 
         Procedure::Reanalyze(files) => {
-            let (receiver, _server) = dg_mcts::reanalyze(load_network(), files);
+            let (receiver, _server) = dg_mcts::reanalyze(files);
 
             for result in receiver.iter() {
                 eprint!(".");
@@ -88,7 +77,7 @@ fn main() {
         },
 
         Procedure::SelfPlay(n, ex_it) => {
-            let (receiver, _server) = dg_mcts::self_play(load_network(), *n, *ex_it);
+            let (receiver, _server) = dg_mcts::self_play(*n, *ex_it);
 
             for result in receiver.iter() {
                 eprint!(".");

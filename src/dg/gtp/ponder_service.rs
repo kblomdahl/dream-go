@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use dg_go::{Board, Color, Point};
 use dg_utils::config;
-use dg_mcts::predict_service::PredictService;
+use dg_mcts::predictors::DefaultPredictor;
 use dg_mcts::time_control::{TimeStrategy, TimeStrategyResult};
 use dg_mcts::pool::Pool;
 use dg_mcts::tree;
@@ -132,7 +132,7 @@ impl PonderService {
             is_running: is_running,
             worker: Some(thread::spawn(move || {
                 if let Some(network) = Network::new() {
-                    let pool = Pool::new(Box::new(PredictService::new(network)));
+                    let pool = Pool::new(Box::new(DefaultPredictor::new(network)));
 
                     ponder_worker(pool, None, board, to_move, is_running_worker)
                 } else {

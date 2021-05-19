@@ -1,4 +1,4 @@
-// Copyright 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2021 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use predict::{Predictor, PredictResponse};
+use predictor::{Predictor, Prediction};
 use lru_cache::LruCache;
 use dg_go::utils::symmetry::Transform;
 use dg_go::{Board, Color};
@@ -31,28 +31,34 @@ const MAX_CACHE_SIZE: usize = 200_000;
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct BoardTuple {
     board_hash: u64,
-    to_move: Color,
-    symmetry: Transform
+    to_move: Color
 }
 
 impl BoardTuple {
-    fn new(board: &Board, to_move: Color, symmetry: Transform) -> Self {
+    fn new(board: &Board, to_move: Color) -> Self {
         Self {
             board_hash: board.zobrist_hash(),
-            to_move: to_move,
-            symmetry: symmetry
+            to_move: to_move
         }
     }
 }
 
 #[derive(Clone)]
-pub struct PredictService {
-    cache_table: Arc<Mutex<LruCache<BoardTuple, PredictResponse>>>,
+pub struct NnPredictor {
+    cache_table: Arc<Mutex<LruCache<BoardTuple, Prediction>>>,
     network: Network,
     count: Arc<AtomicUsize>
 }
 
-impl PredictService {
+impl Default for NnPredictor {
+    fn default() -> Self {
+        let network = Network::new().expect("could not load network weights");
+
+        Self::new(network)
+    }
+}
+
+impl NnPredictor {
     pub fn new(network: Network) -> Self {
         let cache_table = Arc::new(Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1)));
         let count = Arc::new(AtomicUsize::new(0));
@@ -61,28 +67,28 @@ impl PredictService {
     }
 }
 
-impl Predictor for PredictService {
+impl Predictor for NnPredictor {
     fn max_num_threads(&self) -> usize {
         let num_devices = Device::all().expect("could not find any compatible devices").len();
         2 * num_devices
     }
 
-    fn fetch(&self, board: &Board, to_move: Color, symmetry: Transform) -> Option<PredictResponse> {
-        let key = BoardTuple::new(board, to_move, symmetry);
+    fn fetch(&self, board: &Board, to_move: Color, symmetry: Transform) -> Option<Prediction> {
+        let key = BoardTuple::new(board, to_move);
 
         self.cache_table.lock().expect("could not acquire cache table lock")
             .get(&key)
-            .cloned()
+            .map(|resp| Prediction::with_transform(&resp, symmetry))
     }
 
-    fn cache(&self, board: &Board, to_move: Color, symmetry: Transform, response: PredictResponse) {
-        let key = BoardTuple::new(board, to_move, symmetry);
+    fn cache(&self, board: &Board, to_move: Color, symmetry: Transform, response: Prediction) {
+        let key = BoardTuple::new(board, to_move);
 
         self.cache_table.lock().expect("could not acquire cache table lock")
-            .insert(&key, response);
+            .insert(&key, Prediction::with_transform(&response, symmetry.inverse()));
     }
 
-    fn predict(&self, features_list: &[f16], batch_size: usize) -> Vec<PredictResponse> {
+    fn predict(&self, features_list: &[f16], batch_size: usize) -> Vec<Prediction> {
         assert!(batch_size > 0);
 
         let devices = Device::all().expect("could not find any compatible devices");
@@ -100,7 +106,7 @@ impl Predictor for PredictService {
                 value_list
                     .into_iter()
                     .zip(policy_iter)
-                    .map(|(value, policy)| PredictResponse::new(value, policy))
+                    .map(|(value, policy)| Prediction::new(value, policy))
                     .collect()
             )
         });

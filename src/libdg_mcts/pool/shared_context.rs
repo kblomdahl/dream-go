@@ -16,7 +16,7 @@ use dg_go::Board;
 use crate::options::SearchOptions;
 use crate::time_control::TimeStrategy;
 use crate::tree;
-use crate::predict::Predictor;
+use crate::predictor::Predictor;
 use super::batch::Batcher;
 use super::event::Event;
 

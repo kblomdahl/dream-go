@@ -15,7 +15,7 @@
 use bench::{Benchmark, BenchmarkExecutor};
 use dg_go::utils::sgf::SgfEntry;
 use dg_mcts::options::StandardSearch;
-use dg_mcts::predict_service::PredictService;
+use dg_mcts::predictors::DefaultPredictor;
 use dg_mcts::pool::Pool;
 use dg_mcts::predict;
 use dg_mcts::time_control::RolloutLimit;
@@ -28,7 +28,7 @@ pub struct MctsBenchmarkExecutor {
 
 impl BenchmarkExecutor for MctsBenchmarkExecutor {
     fn new(network: Network) -> Self {
-        let pool = Pool::new(Box::new(PredictService::new(network)));
+        let pool = Pool::new(Box::new(DefaultPredictor::new(network)));
 
         Self { pool }
     }
