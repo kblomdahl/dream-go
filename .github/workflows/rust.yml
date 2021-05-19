@@ -1,4 +1,4 @@
-name: Rust
+name: check
 
 on:
   push:
@@ -24,3 +24,4 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: check
+        args: --all-targets
