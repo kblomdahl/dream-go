@@ -146,16 +146,7 @@ lazy_static! {
     ///
     /// When trying to improve the GPU utilization you should prefer to
     /// increase the `NUM_GAMES` variable instead as that scaled much better.
-    pub static ref NUM_THREADS: usize = {
-        let num_threads = get_opt("--num-threads").unwrap_or(16);
-
-        assert!(
-            num_threads >= *NUM_GAMES,
-            "The number of threads must be at least the same as the number of games"
-        );
-
-        num_threads
-    };
+    pub static ref NUM_THREADS: usize = get_opt("--num-threads").unwrap_or(16);
 
     /// The number of samples to extract from each game record.
     pub static ref NUM_SAMPLES: SamplingStrategy = get_opt("--num-samples")

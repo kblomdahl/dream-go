@@ -245,14 +245,13 @@ impl Player {
         board: &Board,
         allow_pass: bool,
         pool: &Pool,
-        num_workers: usize,
         time_strategy: Box<dyn TimeStrategy + Sync>
     ) -> Option<(f32, usize, tree::Node)>
     {
         if !allow_pass {
             let (value, index, tree) = predict(
                 pool,
-                Box::new(ScoringSearch::new(num_workers)),
+                Box::new(ScoringSearch::new()),
                 time_strategy,
                 self.root.take().map(|mut n| {
                     n.disqualify(361);
@@ -266,7 +265,7 @@ impl Player {
         } else {
             predict(
                 pool,
-                Box::new(StandardSearch::new(num_workers)),
+                Box::new(StandardSearch::new()),
                 time_strategy,
                 self.root.take(),
                 &board,
@@ -284,7 +283,6 @@ impl Player {
     /// * `point` -
     /// * `allow_pass` -
     /// * `server` -
-    /// * `num_workers` -
     ///
     fn ex_it(
         &mut self,
@@ -292,14 +290,12 @@ impl Player {
         point: Point,
         allow_pass: bool,
         pool: &Pool,
-        num_workers: usize
     ) -> Option<Played>
     {
         let (value, _, tree) = self.predict_aux(
             board,
             allow_pass,
             pool,
-            num_workers,
             Box::new(RolloutLimit::new((*config::NUM_EX_IT_ROLLOUT).into()))
         )?;
 
@@ -331,7 +327,6 @@ impl Player {
     /// * `allow_pass`  whether we are allowed to pass
     /// * `ex_it` -
     /// * `pool` -
-    /// * `num_workers` -
     ///
     fn predict(
         &mut self,
@@ -339,7 +334,6 @@ impl Player {
         allow_pass: bool,
         ex_it: bool,
         pool: &Pool,
-        num_workers: usize
     ) -> Option<Played>
     {
         let num_rollout = self.num_rollout();
@@ -349,7 +343,6 @@ impl Player {
                 board,
                 allow_pass,
                 pool,
-                num_workers,
                 Box::new(RolloutLimit::new(num_rollout))
             )?;
 
@@ -365,7 +358,7 @@ impl Player {
             let point = Point::from_packed_parts(index);
             let played =
                 if ex_it && self.is_good_candidate(value, &tree.softmax()) {
-                    self.ex_it(board, point, allow_pass, pool, num_workers)?
+                    self.ex_it(board, point, allow_pass, pool)?
                 } else {
                     Played::from_mcts(self.color, point, value, &tree)
                 };
@@ -400,7 +393,7 @@ impl Player {
             let point = Point::from_packed_parts(index);
             let played =
                 if ex_it && self.is_good_candidate(value, &policy) {
-                    self.ex_it(board, point, allow_pass, pool, num_workers)?
+                    self.ex_it(board, point, allow_pass, pool)?
                 } else {
                     Played::from_forward(self.color, point, value, policy)
                 };
@@ -429,7 +422,6 @@ impl Player {
 ///
 fn self_play_one(
     pool: &Pool,
-    num_parallel: &Arc<AtomicUsize>,
     ex_it: bool
 ) -> Option<GameResult>
 {
@@ -443,14 +435,8 @@ fn self_play_one(
     ];
 
     while board.count() < 722 {
-        let num_workers =
-            ::std::cmp::max(
-                1,
-                *config::NUM_THREADS / num_parallel.load(Ordering::Relaxed)
-            );
-
         let allow_pass = board.is_scorable();
-        let played = players[0].predict(&mut board, allow_pass, ex_it, pool, num_workers)?;
+        let played = players[0].predict(&mut board, allow_pass, ex_it, pool)?;
         sgf += &format!("{}", played);
 
         if played.point == Point::default() {  // passing move
@@ -491,25 +477,21 @@ pub fn self_play(
     // spawn the worker threads that generate the self-play games
     let num_parallel = ::std::cmp::min(num_games, *config::NUM_GAMES);
     let (sender, receiver) = sync_channel(3 * num_parallel);
-    let num_workers = Arc::new(AtomicUsize::new(num_parallel));
     let processed = Arc::new(AtomicUsize::new(0));
 
     for _ in 0..num_parallel {
-        let num_workers = num_workers.clone();
         let processed = processed.clone();
         let sender = sender.clone();
         let pool = pool.clone();
 
         thread::spawn(move || {
             while processed.fetch_add(1, Ordering::AcqRel) < num_games {
-                if let Some(result) = self_play_one(pool.as_ref(), &num_workers, ex_it) {
+                if let Some(result) = self_play_one(pool.as_ref(), ex_it) {
                     if sender.send(result).is_err() {
                         break
                     }
                 }
             }
-
-            num_workers.fetch_sub(1, Ordering::AcqRel);
         });
     }
 

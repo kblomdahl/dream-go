@@ -253,7 +253,7 @@ mod tests {
 
         let (_value, _index, tree) = predict(
             &pool,
-            Box::new(StandardDeterministicSearch::new(1)),
+            Box::new(StandardDeterministicSearch::new()),
             Box::new(time_control::RolloutLimit::new(100)),
             Some(root),
             &Board::new(7.5),
@@ -267,7 +267,7 @@ mod tests {
     fn no_finite_candidates() {
         let (value, index, root) = predict(
             &Pool::new(Box::new(NanPredictor::default())),
-            Box::new(StandardDeterministicSearch::new(1)),
+            Box::new(StandardDeterministicSearch::new()),
             Box::new(time_control::RolloutLimit::new(1600)),
             None,
             &Board::new(7.5),
