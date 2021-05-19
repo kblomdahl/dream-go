@@ -74,10 +74,9 @@ fn reanalyze_single_candidate(
     candidate: &Candidate
 ) -> Option<Played>
 {
-    let num_workers = std::cmp::max(1, *config::NUM_THREADS / *config::NUM_GAMES);
     let result = predict(
         pool,
-        Box::new(StandardSearch::new(num_workers)),
+        Box::new(StandardSearch::new()),
         Box::new(RolloutLimit::new(usize::from(*config::NUM_ROLLOUT))),
         None,
         &candidate.board,

@@ -14,7 +14,6 @@
 
 use dg_go::utils::benson::BensonImpl;
 use dg_go::{Board, Color, Point, IsPartOf};
-use dg_utils::config;
 
 pub trait PolicyChecker {
     /// Returns true if the given move should be considered during search.
@@ -37,9 +36,6 @@ pub trait SearchOptions {
     ///
     fn policy_checker(&self, board: &Board, to_move: Color) -> Box<dyn PolicyChecker>;
 
-    /// Returns the number of worker threads to use.
-    fn num_workers(&self) -> usize;
-
     /// Returns true if the search should be deterministic.
     fn deterministic(&self) -> bool;
 }
@@ -61,19 +57,17 @@ impl PolicyChecker for StandardPolicyChecker {
 }
 
 #[derive(Clone)]
-pub struct StandardSearch {
-    num_workers: usize
-}
+pub struct StandardSearch;
 
 impl StandardSearch {
-    pub fn new(num_workers: usize) -> Self {
-        Self { num_workers }
+    pub fn new() -> Self {
+        Self { }
     }
 }
 
 impl Default for StandardSearch {
     fn default() -> Self {
-        Self::new(*config::NUM_THREADS)
+        Self::new()
     }
 }
 
@@ -85,26 +79,20 @@ impl SearchOptions for StandardSearch {
     fn deterministic(&self) -> bool {
         false
     }
-
-    fn num_workers(&self) -> usize {
-        self.num_workers
-    }
 }
 
 #[derive(Clone)]
-pub struct StandardDeterministicSearch {
-    num_workers: usize
-}
+pub struct StandardDeterministicSearch;
 
 impl StandardDeterministicSearch {
-    pub fn new(num_workers: usize) -> Self {
-        Self { num_workers }
+    pub fn new() -> Self {
+        Self { }
     }
 }
 
 impl Default for StandardDeterministicSearch {
     fn default() -> Self {
-        Self::new(*config::NUM_THREADS)
+        Self::new()
     }
 }
 
@@ -115,10 +103,6 @@ impl SearchOptions for StandardDeterministicSearch {
 
     fn deterministic(&self) -> bool {
         true
-    }
-
-    fn num_workers(&self) -> usize {
-        self.num_workers
     }
 }
 
@@ -154,19 +138,17 @@ impl PolicyChecker for ScoringPolicyChecker {
 }
 
 #[derive(Clone)]
-pub struct ScoringSearch {
-    num_workers: usize
-}
+pub struct ScoringSearch;
 
 impl ScoringSearch {
-    pub fn new(num_workers: usize) -> Self {
-        Self { num_workers }
+    pub fn new() -> Self {
+        Self { }
     }
 }
 
 impl Default for ScoringSearch {
     fn default() -> Self {
-        Self::new(*config::NUM_THREADS)
+        Self::new()
     }
 }
 
@@ -177,10 +159,6 @@ impl SearchOptions for ScoringSearch {
 
     fn deterministic(&self) -> bool {
         true
-    }
-
-    fn num_workers(&self) -> usize {
-        self.num_workers
     }
 }
 
