@@ -20,7 +20,7 @@ use super::policy_helper::*;
 use super::shared_context::{SharedContext, SearchContext};
 
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 enum TryProbeResult {
@@ -46,7 +46,7 @@ impl Worker {
         Self { shared_context }
     }
 
-    pub fn run(&self, mut searches: Vec<Arc<SearchContext>>) {
+    pub fn run(&self, searches: Arc<RwLock<Vec<Arc<SearchContext>>>>) {
         let batcher = &self.shared_context.batcher;
         let event_queue = &self.shared_context.event_queue;
         let is_running = &self.shared_context.is_running;
@@ -68,13 +68,17 @@ impl Worker {
                             break 'outer;
                         }
                         TryProbeResult::Done { to_remove } => {
-                            let index = searches.iter()
-                                .position(|search_context| search_context.id == to_remove)
-                                .expect("could not locate `search_context`");
-                            let search_context = searches.swap_remove(index);
+                            let mut searches_guard = searches.write().expect("could not acquire write lock");
 
-                            match search_context.response_channel.send(()) {
-                                _ => {}  // this is ok to fail
+                            if let Some(index) = searches_guard.iter().position(|search_context| search_context.id == to_remove) {
+                                let search_context = searches_guard.swap_remove(index);
+                                drop(searches_guard);
+
+                                match search_context.response_channel.send(()) {
+                                    _ => {}  // this is ok to fail
+                                }
+                            } else {
+                                // someone else got here before us :-(
                             }
                         }
                     }
@@ -114,16 +118,16 @@ impl Worker {
 
     fn try_probe(
         &self,
-        searches: &Vec<Arc<SearchContext>>,
+        searches: &Arc<RwLock<Vec<Arc<SearchContext>>>>,
         mut index: usize
     ) -> TryProbeResult
     {
         let predictor = &self.shared_context.predictor;
+        let searches = searches.read().expect("could not acquire read lock");
 
         loop {
             if let Some(search_context) = searches.get(index) {
                 // evaluate anything in the queue so far
-                let root = unsafe { &mut *search_context.root };
                 let event_responses = self.shared_context.batcher
                     .get_batch(1)
                     .map(|batch| batch.forward(predictor));
@@ -136,6 +140,7 @@ impl Worker {
 
                     return TryProbeResult::Retry { next_index: index + 1 }
                 } else {
+                    let root = unsafe { &mut *search_context.root };
                     if global_rwlock::read(|| { time_control::is_done(root, &search_context.time_strategy) }) {
                         return TryProbeResult::Done { to_remove: search_context.id };
                     }
