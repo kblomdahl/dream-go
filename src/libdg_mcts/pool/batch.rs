@@ -15,7 +15,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::{Predictor, PredictResponse};
+use crate::{Predictor, Prediction};
 use super::event::Event;
 use dg_go::utils::features;
 use dg_utils::config;
@@ -32,7 +32,7 @@ impl<'a> Batch<'a> {
         Self { features, events, num_batches }
     }
 
-    pub fn forward(self, server: &Box<dyn Predictor + Sync>) -> (Vec<Event>, Vec<PredictResponse>) {
+    pub fn forward(self, server: &Box<dyn Predictor + Sync>) -> (Vec<Event>, Vec<Prediction>) {
         let responses = server.predict(&self.features, self.events.len());
         self.num_batches.fetch_sub(1, Ordering::AcqRel);
 

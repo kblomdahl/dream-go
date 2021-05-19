@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Predictor, PredictResponse, NodeTrace};
+use crate::{Predictor, Prediction, NodeTrace};
 use super::shared_context::SearchContext;
 use dg_go::utils::features::{self, HWC, Features};
 use dg_go::utils::symmetry;
@@ -26,7 +26,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub enum EventKind {
     Predict(Vec<f16>),
-    Insert(PredictResponse),
+    Insert(Prediction),
     Pending
 }
 
@@ -58,7 +58,7 @@ impl Event {
         Self { kind, search_context, board, transformation, trace }
     }
 
-    pub fn into_insert(mut self, response: PredictResponse) -> (EventKind, Event) {
+    pub fn into_insert(mut self, response: Prediction) -> (EventKind, Event) {
         let prev_kind = self.kind;
         self.kind = EventKind::Insert(response);
         (prev_kind, self)

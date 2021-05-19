@@ -16,7 +16,7 @@ use ordered_float::OrderedFloat;
 
 use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color, Point};
-use super::predict::Predictor;
+use super::predictor::Predictor;
 use super::{full_forward, ScoringSearch, SearchOptions};
 
 

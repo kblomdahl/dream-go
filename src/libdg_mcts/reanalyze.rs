@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_nn::Network;
 use dg_utils::config;
 use dg_go::utils::sgf::{self, Sgf};
 use dg_go::{Board, Color, Point};
 use super::{GameResult, Played, predict, greedy_score};
-use super::predict_service;
-use super::time_control::RolloutLimit;
 use super::pool::Pool;
+use super::predictors::DefaultPredictor;
+use super::time_control::RolloutLimit;
 use options::StandardSearch;
 
 use crossbeam_channel;
@@ -195,11 +194,10 @@ fn spawn_file_workers(files: &[String]) -> crossbeam_channel::Receiver<String> {
 }
 
 pub fn reanalyze(
-    network: Network,
     files: &[String]
 ) -> (mpsc::Receiver<GameResult>, Arc<Pool>)
 {
-    let pool = Arc::new(Pool::new(Box::new(predict_service::PredictService::new(network))));
+    let pool = Arc::new(Pool::new(Box::new(DefaultPredictor::default())));
     let lines = spawn_file_workers(files);
 
     // spawn the worker threads that generate the self-play games

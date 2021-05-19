@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::predict::Predictor;
+use crate::predictor::Predictor;
 use crate::options::SearchOptions;
 use crate::time_control::TimeStrategy;
 use crate::tree;
@@ -79,10 +79,25 @@ impl Pool {
         }
     }
 
+    /// Returns the predictor that this pool encapsule.
     pub fn predictor(&self) -> &dyn Predictor {
         self.shared_context.predictor.as_ref()
     }
 
+    /// Enqueue a search tree to be probed into the worker pool, we will probe
+    /// until the `time_strategy` is _done_ after which this function
+    /// returns. The `root` is modified in-place.
+    ///
+    /// After this function returns the `root` is guaranteed to not be modified
+    /// by any worker thread anymore.
+    ///
+    /// # Arguments
+    ///
+    /// * `root` -
+    /// * `options` -
+    /// * `time_strategy` -
+    /// * `starting_point` -
+    ///
     pub fn enqueue(
         &self,
         root: *mut tree::Node,
