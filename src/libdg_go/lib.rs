@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(const_fn, core_intrinsics)]
+#![feature(core_intrinsics)]
 #![feature(test)]
 
 extern crate dg_utils;
