@@ -53,13 +53,6 @@ pub struct NnPredictor {
 impl Default for NnPredictor {
     fn default() -> Self {
         let network = Network::new().expect("could not load network weights");
-
-        Self::new(network)
-    }
-}
-
-impl NnPredictor {
-    pub fn new(network: Network) -> Self {
         let cache_table = Arc::new(Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1)));
         let count = Arc::new(AtomicUsize::new(0));
 

@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use dg_go::utils::sgf::{self, Sgf, SgfEntry};
-use dg_nn::Network;
 
 use std::fs::File;
 use std::time::Instant;
 use std::io::{BufRead, BufReader};
 
 pub trait BenchmarkExecutor {
-    fn new(network: Network) -> Self;
+    fn new() -> Self;
     fn call(&mut self, entry: SgfEntry) -> usize;
 }
 
@@ -29,9 +28,9 @@ pub struct Benchmark<B: BenchmarkExecutor> {
 }
 
 impl<B: BenchmarkExecutor> Benchmark<B> {
-    pub fn new(network: &Network) -> Self {
+    pub fn new() -> Self {
         Self {
-            executor: B::new(network.clone())
+            executor: B::new()
         }
     }
 

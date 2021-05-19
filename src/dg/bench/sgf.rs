@@ -14,12 +14,11 @@
 
 use bench::{Benchmark, BenchmarkExecutor};
 use dg_go::utils::sgf::SgfEntry;
-use dg_nn::Network;
 
 pub struct SgfBenchmarkExecutor;
 
 impl BenchmarkExecutor for SgfBenchmarkExecutor {
-    fn new(_network: Network) -> Self {
+    fn new() -> Self {
         Self {}
     }
 

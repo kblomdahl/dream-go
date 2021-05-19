@@ -25,7 +25,6 @@ use dg_mcts::time_control::{TimeStrategy, TimeStrategyResult};
 use dg_mcts::pool::Pool;
 use dg_mcts::tree;
 use dg_mcts as mcts;
-use dg_nn::Network;
 use dg_mcts::options::StandardSearch;
 
 type SearchTree = tree::Node;
@@ -131,13 +130,9 @@ impl PonderService {
         PonderService {
             is_running: is_running,
             worker: Some(thread::spawn(move || {
-                if let Some(network) = Network::new() {
-                    let pool = Pool::new(Box::new(DefaultPredictor::new(network)));
+                let pool = Pool::new(Box::new(DefaultPredictor::default()));
 
-                    ponder_worker(pool, None, board, to_move, is_running_worker)
-                } else {
-                    (Err("unable to load network weights"), Duration::new(0, 0))
-                }
+                ponder_worker(pool, None, board, to_move, is_running_worker)
             })),
             last_error: "",
             cpu_time: Duration::new(0, 0)

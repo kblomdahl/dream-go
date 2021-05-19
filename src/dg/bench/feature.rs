@@ -16,13 +16,12 @@ use bench::{Benchmark, BenchmarkExecutor};
 use dg_go::utils::features::{self, HWC, Features};
 use dg_go::utils::sgf::SgfEntry;
 use dg_go::utils::symmetry::Transform;
-use dg_nn::Network;
 use dg_utils::types::f16;
 
 pub struct FeatureBenchmarkExecutor;
 
 impl BenchmarkExecutor for FeatureBenchmarkExecutor {
-    fn new(_network: Network) -> Self {
+    fn new() -> Self {
         Self {}
     }
 
