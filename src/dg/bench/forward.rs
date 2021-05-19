@@ -26,8 +26,9 @@ pub struct ForwardBenchmarkExecutor {
 }
 
 impl BenchmarkExecutor for ForwardBenchmarkExecutor {
-    fn new(network: Network) -> Self {
+    fn new() -> Self {
         let batch_size = *config::BATCH_SIZE;
+        let network = Network::new().expect("could not load neural network weights");
         let _workspace = network.get_workspace(batch_size).expect("could not create `Workspace` from `Network`");
 
         Self { batch_size, network }

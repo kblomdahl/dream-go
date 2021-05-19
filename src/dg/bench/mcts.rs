@@ -19,7 +19,6 @@ use dg_mcts::predictors::DefaultPredictor;
 use dg_mcts::pool::Pool;
 use dg_mcts::predict;
 use dg_mcts::time_control::RolloutLimit;
-use dg_nn::Network;
 use dg_utils::config;
 
 pub struct MctsBenchmarkExecutor {
@@ -27,8 +26,8 @@ pub struct MctsBenchmarkExecutor {
 }
 
 impl BenchmarkExecutor for MctsBenchmarkExecutor {
-    fn new(network: Network) -> Self {
-        let pool = Pool::new(Box::new(DefaultPredictor::new(network)));
+    fn new() -> Self {
+        let pool = Pool::new(Box::new(DefaultPredictor::default()));
 
         Self { pool }
     }
