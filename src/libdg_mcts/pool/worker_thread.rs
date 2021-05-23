@@ -20,7 +20,7 @@ use super::policy_helper::*;
 use super::shared_context::{SharedContext, SearchContext};
 
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 
 enum TryProbeResult {
@@ -40,8 +40,9 @@ impl Drop for Worker {
 }
 
 impl Worker {
-    pub fn new(shared_context: Arc<SharedContext>) -> Self {
+    pub fn new(shared_context: Arc<SharedContext>, has_started: Arc<Barrier>) -> Self {
         shared_context.num_running.fetch_add(1, Ordering::AcqRel);
+        has_started.wait();
 
         Self { shared_context }
     }
@@ -65,7 +66,8 @@ impl Worker {
                             index = next_index
                         },
                         TryProbeResult::Quit => {
-                            break 'outer;
+                            index = 0;
+                            thread::yield_now();
                         }
                         TryProbeResult::Done { to_remove } => {
                             let mut searches_guard = searches.write().expect("could not acquire write lock");
@@ -123,45 +125,46 @@ impl Worker {
     ) -> TryProbeResult
     {
         let predictor = &self.shared_context.predictor;
-        let searches = searches.read().expect("could not acquire read lock");
 
         loop {
-            if let Some(search_context) = searches.get(index) {
-                // evaluate anything in the queue so far
-                let event_responses = self.shared_context.batcher
-                    .get_batch(1)
-                    .map(|batch| batch.forward(predictor));
+            // evaluate anything in the queue so far
+            let event_responses = self.shared_context.batcher
+                .get_batch(1)
+                .map(|batch| batch.forward(predictor));
 
-                if let Some((events, responses)) = event_responses {
-                    let event_queue = &self.shared_context.event_queue;
-                    for (event, response) in events.into_iter().zip(responses.into_iter()) {
-                        event_queue.push(event.into_insert(response).1).ok().expect("could not push to event queue");
-                    }
+            if let Some((events, responses)) = event_responses {
+                let event_queue = &self.shared_context.event_queue;
+                for (event, response) in events.into_iter().zip(responses.into_iter()) {
+                    event_queue.push(event.into_insert(response).1).ok().expect("could not push to event queue");
+                }
+            }
 
-                    return TryProbeResult::Retry { next_index: index + 1 }
-                } else {
-                    let root = unsafe { &mut *search_context.root };
-                    if global_rwlock::read(|| { time_control::is_done(root, &search_context.time_strategy) }) {
-                        return TryProbeResult::Done { to_remove: search_context.id };
-                    }
+            // try to probe for something new
+            let searches = searches.read().expect("could not acquire read lock");
 
-                    // probe the board if there has been an update since we last encountered
-                    // a conflict (or more than 1 ms has passed for deadlock reasons).
-                    let mut board = search_context.starting_point.clone();
-                    let probe = unsafe { global_rwlock::read(|| { tree::probe(root, &mut board) }) };
+            if let Some(search_context) = searches.get(index).cloned() {
+                drop(searches);
 
-                    return match probe {
-                        ProbeResult::Found(trace) => {
-                            self.shared_context.event_queue.push(Event::predict(predictor, search_context.clone(), board, trace)).ok().expect("could not push to event queue");
-                            TryProbeResult::Retry { next_index: index + 1 }
-                        },
-                        ProbeResult::Conflict => {
-                            thread::yield_now();
-                            TryProbeResult::Retry { next_index: index + 1 }
-                        },
-                        ProbeResult::NoResult => {
-                            TryProbeResult::Done { to_remove: search_context.id }
-                        }
+                let root = unsafe { &mut *search_context.root };
+                if global_rwlock::read(|| { time_control::is_done(root, &search_context.time_strategy) }) {
+                    return TryProbeResult::Done { to_remove: search_context.id };
+                }
+
+                // probe the board if there has been an update since we last encountered
+                // a conflict (or more than 1 ms has passed for deadlock reasons).
+                let mut board = search_context.starting_point.clone();
+                let probe = unsafe { global_rwlock::read(|| { tree::probe(root, &mut board) }) };
+
+                return match probe {
+                    ProbeResult::Found(trace) => {
+                        self.shared_context.event_queue.push(Event::predict(predictor, search_context, board, trace)).ok().expect("could not push to event queue");
+                        TryProbeResult::Retry { next_index: index + 1 }
+                    },
+                    ProbeResult::Conflict => {
+                        TryProbeResult::Retry { next_index: index + 1 }
+                    },
+                    ProbeResult::NoResult => {
+                        TryProbeResult::Done { to_remove: search_context.id }
                     }
                 }
             } else if searches.is_empty() {

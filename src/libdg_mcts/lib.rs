@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn no_allowed_moves() {
-        let pool = Pool::new(Box::new(RandomPredictor::default()));
+        let pool = Pool::with_capacity(Box::new(RandomPredictor::default()), 1);
         let mut root = tree::Node::new(Color::Black, 0.0, vec! [1.0; 362]);
 
         for i in 0..362 {
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn no_finite_candidates() {
         let (value, index, root) = predict(
-            &Pool::new(Box::new(NanPredictor::default())),
+            &Pool::with_capacity(Box::new(NanPredictor::default()), 1),
             Box::new(StandardDeterministicSearch::new()),
             Box::new(time_control::RolloutLimit::new(1600)),
             None,

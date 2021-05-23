@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn played_from_mcts() {
-        let server = Pool::new(Box::new(FakePredictor::new(1, 0.6)));
+        let server = Pool::with_capacity(Box::new(FakePredictor::new(1, 0.6)), 1);
         let board = Board::new(0.5);
         let (value, index, tree) =
             predict(

@@ -22,7 +22,7 @@ use dg_utils::config;
 use crossbeam_channel;
 use crossbeam_utils::Backoff;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 
 use super::shared_context::{SharedContext, SearchContext};
@@ -33,17 +33,26 @@ pub struct Pool {
     shared_context: Arc<SharedContext>,
     searches_count: Arc<AtomicUsize>,
     searches: Arc<RwLock<Vec<Arc<SearchContext>>>>,
-    handles: Arc<Mutex<Vec<JoinHandle<()>>>>
+    handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    capacity: usize
 }
 
 impl Pool {
     pub fn new(predictor: Box<dyn Predictor + Sync>) -> Self {
-        Self {
+        Self::with_capacity(predictor, *config::NUM_THREADS)
+    }
+
+    pub fn with_capacity(predictor: Box<dyn Predictor + Sync>, capacity: usize) -> Self {
+        let out = Self {
             shared_context: Arc::new(SharedContext::new(predictor)),
             searches_count: Arc::new(AtomicUsize::new(0)),
             searches: Arc::new(RwLock::new(Vec::with_capacity(8))),
-            handles: Arc::new(Mutex::new(Vec::with_capacity(64)))
-        }
+            handles: Arc::new(Mutex::new(Vec::with_capacity(64))),
+            capacity
+        };
+
+        out.ensure_threads();
+        out
     }
 }
 
@@ -60,16 +69,16 @@ impl Drop for Pool {
 impl Pool {
     fn ensure_threads(&self) {
         let shared_context = self.shared_context.as_ref();
-        let num_threads = *config::NUM_THREADS;
         let mut handles = self.handles.lock().expect("could not acquire lock");
 
-        // start-up new threads with the latest `searches` list
-        shared_context.is_running.store(true, Ordering::Release);
-        while shared_context.is_running.load(Ordering::Acquire) && shared_context.num_running.load(Ordering::Acquire) < num_threads {
+        while shared_context.is_running.load(Ordering::Acquire) && shared_context.num_running.load(Ordering::Acquire) < self.capacity {
+            let has_started_leader = Arc::new(Barrier::new(2));
+            let has_started = has_started_leader.clone();
             let shared_context = self.shared_context.clone();
             let searches = self.searches.clone();
 
-            handles.push(thread::spawn(move || Worker::new(shared_context).run(searches)));
+            handles.push(thread::spawn(move || Worker::new(shared_context, has_started).run(searches)));
+            has_started_leader.wait();
         }
     }
 
@@ -117,7 +126,6 @@ impl Pool {
         self.searches.write()
             .expect("could not acquire write lock")
             .push(search_context.clone());
-
         self.ensure_threads();
 
         // wait for the worker pool to finish their work
@@ -127,10 +135,6 @@ impl Pool {
         // wait until everyone has dropped the `search_context` from their
         // stack.
         let backoff = Backoff::new();
-
-        self.searches.write()
-            .expect("could not acquire write lock")
-            .retain(|search_context| search_context.id != next_id);
 
         while Arc::strong_count(&search_context) > 1 {
             backoff.snooze();
