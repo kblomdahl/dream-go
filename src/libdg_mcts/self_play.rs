@@ -475,7 +475,7 @@ pub fn self_play(
     let pool = Arc::new(Pool::new(Box::new(DefaultPredictor::default())));
 
     // spawn the worker threads that generate the self-play games
-    let num_parallel = ::std::cmp::min(num_games, *config::NUM_GAMES);
+    let num_parallel = num_games.min(*config::NUM_GAMES);
     let (sender, receiver) = sync_channel(3 * num_parallel);
     let processed = Arc::new(AtomicUsize::new(0));
 

@@ -71,7 +71,7 @@ impl Kind {
                     if i < 8 {
                         examples.iter().take(i + 1).map(|cand| &cand.board).collect()
                     } else {
-                        let start = ::std::cmp::max(0, i as i32 - 7) as usize;
+                        let start = (i as i32 - 7).max(0) as usize;
                         examples.iter().skip(start).take(8).map(|cand| &cand.board).collect()
                     };
                 board_history.reverse();

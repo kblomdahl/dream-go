@@ -25,33 +25,3 @@ pub mod config;
 pub mod json;
 pub mod lcb;
 pub mod types;
-
-/// Returns the smallest of `x` and `y`.
-///
-/// # Arguments
-///
-/// * `x` -
-/// * `y` -
-///
-pub fn min(x: f32, y: f32) -> f32 {
-    if x < y {
-        x
-    } else {
-        y
-    }
-}
-
-/// Returns the largest of `x` and `y`.
-///
-/// # Arguments
-///
-/// * `x` -
-/// * `y` -
-///
-pub fn max(x: f32, y: f32) -> f32 {
-    if x > y {
-        x
-    } else {
-        y
-    }
-}

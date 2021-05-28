@@ -200,7 +200,7 @@ pub fn reanalyze(
     let lines = spawn_file_workers(files);
 
     // spawn the worker threads that generate the self-play games
-    let num_parallel = ::std::cmp::max(1, *config::NUM_GAMES);
+    let num_parallel = config::NUM_GAMES.max(1);
     let (sender, receiver) = mpsc::channel();
 
     for _ in 0..num_parallel {

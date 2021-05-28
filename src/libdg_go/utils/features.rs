@@ -16,7 +16,6 @@ use board::Board;
 use color::Color;
 use point::Point;
 use point_state::Vertex;
-use dg_utils::{max, min};
 
 use super::benson::BensonImpl;
 use super::ladder::Ladder;
@@ -181,20 +180,14 @@ impl<'a> Features for V1<'a> {
 
             if self.board.inner[index].color() != None {
                 let start = if self.board.inner[index].color() == Some(to_move) { 5 } else { 17 };
-                let num_liberties = ::std::cmp::min(
-                    self.board.inner.get_n_liberty(index),
-                    6
-                );
+                let num_liberties = self.board.inner.get_n_liberty(index).min(6);
 
                 for i in 0..num_liberties {
                     features[o.index(start+i, other)] = c_1;
                 }
             } else {
                 if self.board.inner.is_valid(to_move, index) {
-                    let num_liberties = ::std::cmp::min(
-                        self.board.inner.get_n_liberty_if(to_move, index),
-                        6
-                    );
+                    let num_liberties = self.board.inner.get_n_liberty_if(to_move, index).min(6);
 
                     for i in 0..num_liberties {
                         features[o.index(11+i, other)] = c_1;
@@ -202,10 +195,7 @@ impl<'a> Features for V1<'a> {
                 }
 
                 if self.board.inner.is_valid(opponent, index) {
-                    let num_liberties = ::std::cmp::min(
-                        self.board.inner.get_n_liberty_if(opponent, index),
-                        6
-                    );
+                    let num_liberties = self.board.inner.get_n_liberty_if(opponent, index).min(6);
 
                     for i in 0..num_liberties {
                         features[o.index(23+i, other)] = c_1;
@@ -243,7 +233,7 @@ impl<'a> Features for V1<'a> {
         }
 
         // global properties
-        let c_komi = T::from(max(min(0.5 + (0.5 * self.board.komi) / 7.5, 1.0), 0.0));
+        let c_komi = T::from((0.5 + (0.5 * self.board.komi) / 7.5).min(1.0).max(0.0));
 
         let is_black = if to_move == Color::Black { c_komi } else { c_0 };
         let is_white = if to_move == Color::White { c_komi } else { c_0 };

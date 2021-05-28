@@ -182,14 +182,13 @@ pub struct FPU;
 impl FPU {
     #[cfg(not(target_arch = "x86_64"))]
     unsafe fn apply_impl<C: Children>(value: &mut [f32], child: &C, fpu_reduce: f32) {
-        use dg_utils::max;
         use std::intrinsics::fsub_fast;
 
         for i in 0..368 {
             let count = child.total_count(i);
 
             if count == 0 {
-                value[i] = max(0.0, fsub_fast(value[i], fpu_reduce));
+                value[i] = fsub_fast(value[i], fpu_reduce).max(0.0);
             }
         }
     }
