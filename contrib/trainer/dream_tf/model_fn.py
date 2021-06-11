@@ -71,12 +71,10 @@ def model_fn(features, labels, mode, params):
         #
         #     -1.0 / log (1 / num_classes)
         #
-        loss_unboosted = 0.12 * check_numerics(loss_policy, 'loss_policy') \
-                         + 1.00 * check_numerics(loss_value, 'loss_value') \
-                         + 1.00 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership']
-
-        loss = tf.reduce_mean(input_tensor=loss_unboosted)
-        tf.compat.v1.add_to_collection(LOSS, loss_unboosted)
+        loss = tf.reduce_mean(0.12 * check_numerics(loss_policy, 'loss_policy')) \
+               + tf.reduce_mean(1.00 * check_numerics(loss_value, 'loss_value')) \
+               + tf.reduce_sum(3.32 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership']) / (tf.reduce_sum(labels['has_ownership']) + 1e-5)
+        tf.compat.v1.add_to_collection(LOSS, loss)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             # set an initial learning rate and then rely on the `LearningRateScheduler`
@@ -175,7 +173,7 @@ def model_fn(features, labels, mode, params):
             'accuracy/policy_3': tf.compat.v1.metrics.mean(policy_3),
             'accuracy/policy_5': tf.compat.v1.metrics.mean(policy_5),
             'accuracy/value': tf.compat.v1.metrics.mean(value_1),
-            'accuracy/ownership': tf.compat.v1.metrics.mean(ownership_1),
+            'accuracy/ownership': tf.compat.v1.metrics.mean(tf.reshape(ownership_1, [-1]), weights=tf.repeat(labels['has_ownership'], 361)),
             'loss/policy': tf.compat.v1.metrics.mean(loss_policy),
             'loss/value': tf.compat.v1.metrics.mean(loss_value),
             'loss/ownership': tf.compat.v1.metrics.mean(loss_ownership),
