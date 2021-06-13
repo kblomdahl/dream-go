@@ -38,6 +38,7 @@ def model_fn(features, labels, mode, params):
 
             labels['value'] = tf.cast(lz_value_hat, tf.float32)
             labels['policy'] = tf.cast(lz_policy_hat, tf.float32)
+            labels['has_ownership'] = tf.zeros_like(labels['has_ownership'])
 
         # determine the loss for each of the components:
         #
@@ -166,7 +167,7 @@ def model_fn(features, labels, mode, params):
         tf.compat.v1.summary.scalar('accuracy/policy_3', tf.reduce_mean(input_tensor=policy_3))
         tf.compat.v1.summary.scalar('accuracy/policy_5', tf.reduce_mean(input_tensor=policy_5))
         tf.compat.v1.summary.scalar('accuracy/value', tf.reduce_mean(input_tensor=value_1))
-        tf.compat.v1.summary.scalar('accuracy/ownership', tf.reduce_sum(input_tensor=ownership_1) / (361 * tf.reduce_sum(input_tensor=labels['has_ownership'])))
+        tf.compat.v1.summary.scalar('accuracy/ownership', tf.reduce_sum(input_tensor=ownership_1) / (361 * tf.reduce_sum(input_tensor=labels['has_ownership']) + 1e-5))
 
         eval_metric_ops = {
             'accuracy/policy_1': tf.compat.v1.metrics.mean(policy_1),
