@@ -40,36 +40,27 @@ def leela_zero(x, mode, params):
 
     x = tf.cast(x, data_type)
 
-    with tf.compat.v1.variable_scope('lz', reuse=tf.compat.v1.AUTO_REUSE):
-        # upsample
-        with tf.compat.v1.name_scope('first_conv'):
-            y = tf.nn.relu(conv2d(x, 'first_conv'))
+    # upsample
+    y = tf.nn.relu(conv2d(x, 'first_conv'))
 
-        # residual blocks
-        for i in range(num_blocks):
-            original = tf.identity(y)
-            with tf.compat.v1.name_scope(f'res_{i}_conv_1'):
-                y = tf.nn.relu(conv2d(y, f'res_{i}_conv_1'))
-            with tf.compat.v1.name_scope(f'res_{i}_conv_2'):
-                y = tf.nn.relu(conv2d(y, f'res_{i}_conv_2') + original)
+    # residual blocks
+    for i in range(num_blocks):
+        original = tf.identity(y)
+        y = tf.nn.relu(conv2d(y, f'res_{i}_conv_1'))
+        y = tf.nn.relu(conv2d(y, f'res_{i}_conv_2') + original)
 
-        # policy head
-        with tf.compat.v1.name_scope('policy_head'):
-            p = tf.nn.relu(conv2d(y, 'policy_head'))
-            p = tf.transpose(a=p, perm=[0, 3, 1, 2]) # NHWC -> NCHW
-            p = tf.reshape(p, [-1, 722])
-        with tf.compat.v1.name_scope('fc_1'):
-            p = tf.nn.softmax(dense(p, 'w_fc_1'))
+    # policy head
+    p = tf.nn.relu(conv2d(y, 'policy_head'))
+    p = tf.transpose(a=p, perm=[0, 3, 1, 2]) # NHWC -> NCHW
+    p = tf.reshape(p, [-1, 722])
+    p = tf.nn.softmax(dense(p, 'w_fc_1'))
 
-        # value head
-        with tf.compat.v1.name_scope('value_head'):
-            v = tf.nn.relu(conv2d(y, 'value_head'))
-            v = tf.transpose(a=v, perm=[0, 3, 1, 2]) # NHWC -> NCHW
-            v = tf.reshape(v, [-1, 361])
-        with tf.compat.v1.name_scope('fc_2'):
-            v = tf.nn.relu(dense(v, 'w_fc_2'))
-        with tf.compat.v1.name_scope('fc_3'):
-            v = tf.nn.tanh(dense(v, 'w_fc_3'))
+    # value head
+    v = tf.nn.relu(conv2d(y, 'value_head'))
+    v = tf.transpose(a=v, perm=[0, 3, 1, 2]) # NHWC -> NCHW
+    v = tf.reshape(v, [-1, 361])
+    v = tf.nn.relu(dense(v, 'w_fc_2'))
+    v = tf.nn.tanh(dense(v, 'w_fc_3'))
 
     return tf.stop_gradient(v), tf.stop_gradient(p), tf.stop_gradient(y)
 
