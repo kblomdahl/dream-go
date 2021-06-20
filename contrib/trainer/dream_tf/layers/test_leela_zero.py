@@ -19,30 +19,18 @@
 # SOFTWARE.
 
 import tensorflow as tf
-import numpy as np
 import unittest
 
-from .test_common import TestUtils
+from ..test_common import TestUtils
 from .leela_zero import leela_zero
 
 class LzTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
-        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, 18])
-        np.random.seed(12345)
-        tf.compat.v1.set_random_seed(67890)
-
-    def tearDown(self):
-        tf.compat.v1.reset_default_graph()
-
-    @property
-    def params(self):
-        return {
-            'lz_weights': 'fixtures/d645af9.gz'
-        }
+        self.x = tf.zeros([self.batch_size, 19, 19, 18], tf.float16)
 
     def test_shape(self):
-        v, p, y = leela_zero(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+        v, p, y = leela_zero(self.x, 'fixtures/d645af9.gz')
 
         self.assertEqual(v.shape, [self.batch_size, 1])
         self.assertEqual(p.shape, [self.batch_size, 362])

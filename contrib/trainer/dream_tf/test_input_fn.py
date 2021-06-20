@@ -23,11 +23,9 @@ import unittest
 
 from .input_fn import input_fn
 from .layers import NUM_FEATURES
+from .test_common import TestUtils
 
-class CommonInputFnTest:
-    def tearDown(self):
-        tf.compat.v1.reset_default_graph()
-
+class CommonInputFnTest(TestUtils):
     def test_shape(self):
         features, labels = self.dataset.element_spec
 

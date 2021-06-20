@@ -21,12 +21,11 @@
 import numpy as np
 import tensorflow as tf
 
-from .ffi.libdg_go import set_seed
 from .layers import NUM_FEATURES
 
 dream_go_module = tf.load_op_library('libdg_tf.so')
 
-def _parse(is_deterministic):
+def _parse():
     def __do_parse(line):
         lz_features, features, policy, next_policy, value, ownership, komi, boost, has_ownership = dream_go_module.sgf_to_features(line)
 
@@ -42,13 +41,6 @@ def _parse(is_deterministic):
         }
 
         return features, labels
-
-    # by default the random number generator is seeded from entropy, but if we
-    # are running deterministically. Seed it manually instead*.
-    #
-    # * Since the Tensorflow graph seed has not been set yet :'(
-    if is_deterministic:
-        set_seed(0x454f1317)
 
     return __do_parse
 
@@ -138,11 +130,11 @@ def _fix_history(features, labels):
     return features, labels
 
 
-def get_dataset(files, is_deterministic=False):
+def get_dataset(files):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
     with tf.device('cpu:0'):
-        num_parallel_calls = tf.data.experimental.AUTOTUNE if not is_deterministic else 1
+        num_parallel_calls = tf.data.experimental.AUTOTUNE
 
         if len(files) > 1:
             file_names = tf.data.Dataset.from_tensor_slices(files)
@@ -154,29 +146,20 @@ def get_dataset(files, is_deterministic=False):
             )
         else:
             dataset = tf.data.TextLineDataset(files)
-        dataset = dataset.map(_parse(is_deterministic), num_parallel_calls=num_parallel_calls)
+        dataset = dataset.map(_parse(), num_parallel_calls=num_parallel_calls)
         dataset = dataset.filter(_legal_policy)
 
         return dataset
 
 
-def input_fn(files, batch_size, features_mask, is_training, num_test_batches=10, is_deterministic=False):
-    dataset = get_dataset(files, is_deterministic)
-
-    if features_mask is not None:
-        features_mask = tf.constant(features_mask, tf.float16, (1, 1, NUM_FEATURES))
-
-        def _mask_features(features, labels):
-            return features * features_mask, labels
-
-        dataset = dataset.map(_mask_features)
+def input_fn(files, batch_size, is_training, num_test_batches=10):
+    dataset = get_dataset(files, )
 
     if is_training:
-        num_parallel_calls = tf.data.experimental.AUTOTUNE if not is_deterministic else 1
+        num_parallel_calls = tf.data.experimental.AUTOTUNE
 
         dataset = dataset.skip(num_test_batches * batch_size)
         dataset = dataset.shuffle(262144)
-        dataset = dataset.repeat()
         dataset = dataset.map(_augment, num_parallel_calls=num_parallel_calls)
         dataset = dataset.map(_fix_history, num_parallel_calls=num_parallel_calls)
     else:

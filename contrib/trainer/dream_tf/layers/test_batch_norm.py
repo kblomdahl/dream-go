@@ -21,43 +21,28 @@
 import tensorflow as tf
 import unittest
 
-from .batch_norm import batch_norm
+from ..test_common import TestUtils
+from .batch_norm import BatchNormConv2D
 
-class BatchNormTestBase:
+class BatchNormTestBase(TestUtils):
     def setUp(self):
-        self.batch_size = 2048
-        self.num_channels = 128
-        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
-        self.weights = tf.compat.v1.placeholder(tf.float32, [3, 3, self.num_channels, self.num_channels])
-
-    def tearDown(self):
-        tf.compat.v1.reset_default_graph()
-
-    @property
-    def mode(self):
-        return tf.estimator.ModeKeys.EVAL
-
-    @property
-    def params(self):
-        return {
-            "num_channels": self.num_channels
-        }
+        self.x = tf.zeros([16, 19, 19, 64], tf.float16)
 
     def test_shape(self):
         self.assertEqual(
-            batch_norm(self.x, self.weights, 'test', self.mode, self.params).shape,
+            BatchNormConv2D()(self.x, training=self.training).shape,
             self.x.shape
         )
 
 class BatchNormEvalTest(BatchNormTestBase, unittest.TestCase):
     @property
-    def mode(self):
-        return tf.estimator.ModeKeys.EVAL
+    def training(self):
+        return False
 
 class BatchNormTrainTest(BatchNormTestBase, unittest.TestCase):
     @property
-    def mode(self):
-        return tf.estimator.ModeKeys.TRAIN
+    def training(self):
+        return True
 
 if __name__ == '__main__':
     unittest.main()

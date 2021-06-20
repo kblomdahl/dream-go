@@ -21,12 +21,11 @@
 import numpy as np
 import tensorflow as tf
 
-from .batch_norm import batch_norm_conv2d
-from .dense import dense
-from .recompute_grad import recompute_grad
+from tensorflow.keras.layers import Dense
+from .batch_norm import BatchNormConv2D
 
 
-def policy_head(x, mode, params):
+class PolicyHead(tf.keras.layers.Layer):
     """
     The policy head attached after the residual blocks as described by DeepMind:
 
@@ -37,21 +36,30 @@ def policy_head(x, mode, params):
        corresponding to logit probabilities for all intersections and the pass
        move
     """
-    num_channels = params['num_channels']
-    num_samples = params['num_samples']
 
-    def _forward(x, is_recomputing=False):
-        """ Returns the result of the forward inference pass on `x` """
-        y = batch_norm_conv2d(x, 'conv_1', (3, 3, num_channels, num_samples), mode, params, is_recomputing=is_recomputing)
+    def __init__(self, *, num_samples):
+        super(PolicyHead, self).__init__()
+
+        self.num_samples = num_samples
+
+    def as_dict(self, prefix):
+        return {
+            **self.conv_1.as_dict(f'{prefix}/conv_1'),
+            **self.linear_2.as_dict(f'{prefix}/linear_2')
+        }
+
+    def build(self, input_shapes):
+        self.conv_1 = BatchNormConv2D(kernel_size=3, filters=self.num_samples)
+        self.linear_2 = Dense(362, use_bias=True, bias_initializer=policy_offset_op)
+
+    def call(self, x, training=True):
+        y = self.conv_1(x, training=training)
         y = tf.nn.relu(y)
 
-        y = tf.reshape(y, (-1, 361 * num_samples))
-        y = dense(y, 'linear_1', (361 * num_samples, 362), policy_offset_op, mode, params, is_recomputing=is_recomputing)
+        y = tf.reshape(y, [-1, 361 * self.num_samples])
+        y = self.linear_2(y)
 
         return tf.cast(y, tf.float32)
-
-    return recompute_grad(_forward)(x)
-
 
 def policy_offset_op(shape, dtype=None, partition_info=None):
     """ Initial value for the policy offset, this should roughly correspond to

@@ -3,6 +3,10 @@ CARGO=cargo
 all: libdg_go.so libdg_tf/libdg_tf.so
 
 test:
+	python -m pyflakes dream_tf/
+	CUDA_VISIBLE_DEVICES= python3 -m unittest
+
+test-gpu:
 	python3 -m unittest
 
 clean:

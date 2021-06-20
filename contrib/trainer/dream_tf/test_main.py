@@ -18,22 +18,26 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
+import tempfile
+import unittest
 
-from ..hooks.dump import DUMP_OPS
-from .moving_average import moving_average
-from .orthogonal_initializer import orthogonal_initializer
-from . import cast_to_compute_type
+from .__main__ import main
+from .test_common import TestUtils
 
-def dense(x, op_name, shape, offset_init_op, mode, params, is_recomputing=False):
-    if offset_init_op is None:
-        offset_init_op = tf.compat.v1.zeros_initializer()
+class FakeModel:
+    def __init__(self, *args, **kwargs):
+        pass
 
-    weights = tf.compat.v1.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), collections=[tf.compat.v1.GraphKeys.GLOBAL_VARIABLES, tf.compat.v1.GraphKeys.WEIGHTS], use_resource=True)
-    offset = tf.compat.v1.get_variable(op_name + '/offset', (shape[-1],), tf.float32, offset_init_op, use_resource=True)
+    def load_weights(self, *args, **kwargs):
+        pass
 
-    if not is_recomputing and 'no_dump' not in params:
-        tf.compat.v1.add_to_collection(DUMP_OPS, [weights.name, moving_average(weights, f'{op_name}/moving_avg', mode), 'f2'])
-        tf.compat.v1.add_to_collection(DUMP_OPS, [offset.name, moving_average(offset, f'{op_name}/offset/moving_avg', mode), 'f2'])
+    def fit(self, *args, **kwargs):
+        pass
 
-    return tf.matmul(x, cast_to_compute_type(weights)) + cast_to_compute_type(offset)
+class MainTest(unittest.TestCase, TestUtils):
+    def test_main(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            main(['--start', '--model', temp_dir, 'x'], model_fn=FakeModel)
+
+if __name__ == '__main__':
+    unittest.main()

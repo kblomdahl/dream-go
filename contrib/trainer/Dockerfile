@@ -5,5 +5,7 @@ ENV LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/usr/local/lib/python3.6/dist-packages/t
 ENV LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/app/libdg_tf"
 ENV LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/app"
 
+ENV TF_XLA_FLAGS "--tf_xla_enable_xla_devices"
+
 EXPOSE 6006
 WORKDIR /app

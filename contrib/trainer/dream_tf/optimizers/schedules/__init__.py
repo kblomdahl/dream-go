@@ -1,4 +1,4 @@
-# Copyright (c) 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+# Copyright (c) 2021 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -18,33 +18,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
-
-
-def recompute_grad(func):
-    @tf.custom_gradient
-    def _forward(x):
-        # calculate the forward pass, while keeping track of which variables
-        # were accessed
-        with tf.GradientTape():
-            y = func(x, is_recomputing=False)
-
-        def grad_fn(output_grad, variables=None):
-            # re-calculate the gradient
-            in_var = tf.identity(x)
-
-            with tf.control_dependencies([output_grad]):
-                y = func(in_var, is_recomputing=True)
-
-            grads = tf.gradients(
-                ys=[y],
-                xs=[in_var] + variables,
-                grad_ys=[output_grad],
-                gate_gradients=True,
-                aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N)
-
-            return grads[:1], grads[1:]
-
-        return y, grad_fn
-
-    return _forward

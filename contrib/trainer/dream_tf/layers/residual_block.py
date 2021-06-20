@@ -20,14 +20,11 @@
 
 import tensorflow as tf
 
-from . import cast_to_compute_type
-from ..hooks.dump import DUMP_OPS
-from .batch_norm import batch_norm_conv2d
-from .moving_average import moving_average
+from .batch_norm import BatchNormConv2D
 from .recompute_grad import recompute_grad
 
 
-def residual_block(x, mode, params):
+class ResidualBlock(tf.keras.layers.Layer):
     """
     A single residual block as described by DeepMind.
 
@@ -39,28 +36,30 @@ def residual_block(x, mode, params):
     6. A skip connection that adds the input to the block
     7. A rectifier non-linearity
     """
-    half_op = tf.compat.v1.constant_initializer(0.5)
-    num_channels = params['num_channels']
 
-    alpha = tf.compat.v1.get_variable('alpha', (), tf.float32, half_op, constraint=unit_constraint, trainable=True, use_resource=True)
-    tf.compat.v1.add_to_collection(DUMP_OPS, [alpha.name, moving_average(alpha, 'alpha/moving_avg', mode), 'f4'])
+    def __init__(self):
+        super(ResidualBlock, self).__init__()
 
-    def _forward(x, is_recomputing=False):
-        """ Returns the result of the forward inference pass on `x` """
+    def as_dict(self, prefix):
+        return {
+            **self.conv_1.as_dict(f'{prefix}/conv_1'),
+            **self.conv_2.as_dict(f'{prefix}/conv_2')
+        }
 
-        # the 1st convolution
-        y = batch_norm_conv2d(x, 'conv_1', (3, 3, num_channels, num_channels), mode, params, is_recomputing=is_recomputing)
-        y = tf.nn.relu(y)
+    def build(self, input_shape):
+        self.conv_1 = BatchNormConv2D(kernel_size=3)
+        self.conv_2 = BatchNormConv2D(kernel_size=3)
 
-        # the 2nd convolution
-        y = batch_norm_conv2d(y, 'conv_2', (3, 3, num_channels, num_channels), mode, params, is_recomputing=is_recomputing)
-        y = tf.nn.relu(cast_to_compute_type(alpha) * y + cast_to_compute_type(1.0 - alpha) * x)
+    def call(self, x, training=True):
+        def _forward(x, is_recomputing=False):
+            """ Returns the result of the forward inference pass on `x` """
 
-        return y
+            # the 1st convolution
+            y = self.conv_1(x, training=training, is_recomputing=is_recomputing)
+            y = tf.nn.relu(y)
 
-    return recompute_grad(_forward)(x)
+            # the 2nd convolution
+            y = self.conv_2(y, training=training, is_recomputing=is_recomputing)
+            return tf.nn.relu(x + y)
 
-
-def unit_constraint(x):
-    """ Return a constraint that clip `x` to the range [0, 1] """
-    return tf.clip_by_value(x, 0.0, 1.0)
+        return recompute_grad(_forward)(x)

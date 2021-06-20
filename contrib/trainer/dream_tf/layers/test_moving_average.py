@@ -19,18 +19,14 @@
 # SOFTWARE.
 
 import tensorflow as tf
-import numpy as np
 import unittest
 
-from .test_common import TestUtils
+from ..test_common import TestUtils
 from .moving_average import moving_average
 
 class MovingAverageTest(unittest.TestCase, TestUtils):
     def setUp(self):
-        self.x = tf.compat.v1.placeholder(tf.float16, [2, 3, 64, 32])
-
-    def tearDown(self):
-        tf.compat.v1.reset_default_graph()
+        self.x = tf.zeros([2, 3, 64, 32], tf.float16)
 
     def test_moving_average(self):
         y = moving_average(self.x, 'x/moving_avg', tf.estimator.ModeKeys.TRAIN)

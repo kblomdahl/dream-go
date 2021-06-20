@@ -20,52 +20,72 @@
 
 import tensorflow as tf
 
-from . import conv2d, cast_to_compute_type, NUM_FEATURES
-from ..hooks.dump import DUMP_OPS, DUMP_STR_OPS
-from .batch_norm import batch_norm_conv2d
-from .policy_head import policy_head
-from .residual_block import residual_block
-from .value_head import value_head
+from .batch_norm import BatchNormConv2D
+from .policy_head import PolicyHead
+from .residual_block import ResidualBlock
+from .value_head import ValueHead
 
 
-def tower(x, mode, params):
+class Tower(tf.keras.layers.Layer):
     """ The full neural network used to predict the value and policy tensors for
     a mini-batch of board positions. """
-    num_blocks = params['num_blocks']
-    num_channels = params['num_channels']
-    num_samples = params['num_samples']
-    num_inputs = NUM_FEATURES
 
-    # store the number of channels in the JSON output so that we do not have to derive
-    # this from the shape later.
-    num_blocks_ = tf.Variable(num_blocks, False, name='num_blocks', dtype=tf.int32)
-    num_channels_ = tf.Variable(num_channels, False, name='num_channels', dtype=tf.int32)
-    num_samples_ = tf.Variable(num_samples, False, name='num_samples', dtype=tf.int32)
-    model_name_ = tf.constant(params['model_name'], tf.string, ())
+    def __init__(
+        self,
+        *,
+        num_blocks,
+        num_channels,
+        num_policy_channels=8,
+        num_value_channels=2
+    ):
+        super(Tower, self).__init__()
 
-    tf.compat.v1.add_to_collection(DUMP_OPS, ['num_blocks:0', num_blocks_, 'i4'])
-    tf.compat.v1.add_to_collection(DUMP_OPS, ['num_channels:0', num_channels_, 'i4'])
-    tf.compat.v1.add_to_collection(DUMP_OPS, ['num_samples:0', num_samples_, 'i4'])
-    tf.compat.v1.add_to_collection(DUMP_STR_OPS, ['model_name:0', model_name_])
-    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.MODEL_VARIABLES, num_blocks_)
-    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.MODEL_VARIABLES, num_channels_)
-    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.MODEL_VARIABLES, num_samples_)
+        self.num_blocks = num_blocks
+        self.num_channels = num_channels
+        self.num_policy_channels = num_policy_channels
+        self.num_value_channels = num_value_channels
 
-    with tf.compat.v1.variable_scope('01_upsample', reuse=tf.compat.v1.AUTO_REUSE):
-        y = cast_to_compute_type(x)
-        y = batch_norm_conv2d(y, 'conv_1', (3, 3, num_inputs, num_channels), mode, params)
-        y = tf.nn.relu(y)
+    def as_dict(self):
+        out = {
+            **self.conv_1.as_dict('01_upsample'),
+            **self.policy_head.as_dict(f'{self.num_blocks + 2:02}p_policy'),
+            **self.value_head.as_dict(f'{self.num_blocks + 2:02}v_value')
+        }
 
-    for i in range(num_blocks):
-        with tf.compat.v1.variable_scope('{:02d}_residual'.format(2 + i), reuse=tf.compat.v1.AUTO_REUSE):
-            y = residual_block(y, mode, params)
+        for i, residual_block in enumerate(self.residual_blocks):
+            out |= residual_block.as_dict(f'{i + 2:02}_residual')
 
-    # policy head
-    with tf.compat.v1.variable_scope('{:02d}p_policy'.format(2 + num_blocks), reuse=tf.compat.v1.AUTO_REUSE):
-        p = policy_head(y, mode, params)
+        return out
 
-    # value head and ownership head
-    with tf.compat.v1.variable_scope('{:02d}v_value'.format(2 + num_blocks), reuse=tf.compat.v1.AUTO_REUSE):
-        v, vo, vy = value_head(y, mode, params)
+    @property
+    def l2_weights(self):
+        out = list(self.conv_1.trainable_weights)
+        for residual_block in self.residual_blocks:
+            out.extend(residual_block.trainable_weights)
 
-    return v, vy, p, vo, y
+        return out
+
+    def build(self, input_shapes):
+        self.num_blocks_ = tf.Variable(self.num_blocks, False, name='num_blocks', dtype=tf.int32)
+        self.num_channels_ = tf.Variable(self.num_channels, False, name='num_channels', dtype=tf.int32)
+        self.num_samples_ = tf.Variable(self.num_policy_channels, False, name='num_samples', dtype=tf.int32)
+
+        self.conv_1 = BatchNormConv2D(filters=self.num_channels)
+        self.residual_blocks = list([
+            ResidualBlock()
+            for _ in range(self.num_blocks)
+        ])
+
+        self.policy_head = PolicyHead(num_samples=self.num_policy_channels)
+        self.value_head = ValueHead(num_samples=self.num_value_channels)
+
+    def call(self, x, training=True):
+        y = tf.nn.relu(self.conv_1(x, training=training))
+
+        for residual_block in self.residual_blocks:
+            y = residual_block(y, training=training)
+
+        p = self.policy_head(y, training=training)
+        v, vo, vy = self.value_head(y, training=training)
+
+        return v, vy, p, vo, y

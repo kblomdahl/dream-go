@@ -22,15 +22,20 @@ import tensorflow as tf
 
 from .hooks.dump import DUMP_OPS, DUMP_STR_OPS
 from .hooks.learning_rate import LEARNING_RATE, LOSS
-from .layers.batch_norm import batch_norm_conv2d
 from .layers.leela_zero import leela_zero
-from .layers.tower import tower
-from .layers.value_head import ownership_loss
+from .layers.tower import Tower
 
 dream_go_module = tf.load_op_library('libdg_tf.so')
 
 def model_fn(features, labels, mode, params):
-    value_hat, value_ownership_hat, policy_hat, ownership_hat, tower_hat = tower(features, mode, params)
+    tower = Tower(
+        num_blocks=params['num_blocks'],
+        num_channels=params['num_channels']
+    )
+    value_hat, value_ownership_hat, policy_hat, ownership_hat, tower_hat = tower(
+        features,
+        training=(mode == tf.estimator.ModeKeys.TRAIN)
+    )
 
     if labels:
         if mode == tf.estimator.ModeKeys.TRAIN and 'lz_weights' in params and params['lz_weights']:
@@ -59,12 +64,12 @@ def model_fn(features, labels, mode, params):
             reduction=tf.compat.v1.losses.Reduction.NONE
         ), (-1, 1))
 
-        loss_ownership = tf.reshape(ownership_loss(
-            labels=check_numerics(labels['ownership'], 'ownership_labels'),
-            logits=check_numerics(ownership_hat, 'ownership_hat')
-        ), (-1, 1))
+        # loss_ownership = tf.reshape(ownership_loss(
+        #     labels=check_numerics(labels['ownership'], 'ownership_labels'),
+        #     logits=check_numerics(ownership_hat, 'ownership_hat')
+        # ), (-1, 1))
 
-        variables_l2 = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.WEIGHTS)
+        variables_l2 = tower.l2_weights
         loss_l2 = tf.math.accumulate_n([tf.nn.l2_loss(var) for var in variables_l2])
 
         # normalize and sum the individual losses such that the expected value
@@ -74,7 +79,7 @@ def model_fn(features, labels, mode, params):
         #
         loss = tf.reduce_mean(0.12 * check_numerics(loss_policy, 'loss_policy')) \
                + tf.reduce_mean(1.00 * check_numerics(loss_value, 'loss_value')) \
-               + tf.reduce_sum(3.32 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership']) / (tf.reduce_sum(labels['has_ownership']) + 1e-5)
+               #+ tf.reduce_sum(3.32 * check_numerics(loss_ownership, 'loss_ownership') * labels['has_ownership']) / (tf.reduce_sum(labels['has_ownership']) + 1e-5)
         tf.compat.v1.add_to_collection(LOSS, loss)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
@@ -98,6 +103,10 @@ def model_fn(features, labels, mode, params):
                     aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N,
                     #colocate_gradients_with_ops=True  # would force _custom gradients_ to the CPU
                 )
+
+                for grad, var in zip(gradients, variables):
+                    if grad is None:
+                        print(f'{var} does not have a gradient')
 
                 gradients = [grad / loss_scale for grad in gradients]
                 update_l2_ops = [tf.compat.v1.assign_sub(var, 1e-4 * var) for var in variables_l2]
@@ -129,7 +138,7 @@ def model_fn(features, labels, mode, params):
 
         tf.compat.v1.summary.scalar('loss/policy', tf.reduce_mean(input_tensor=loss_policy))
         tf.compat.v1.summary.scalar('loss/value', tf.reduce_mean(input_tensor=loss_value))
-        tf.compat.v1.summary.scalar('loss/ownership', tf.reduce_mean(input_tensor=loss_ownership))
+        # tf.compat.v1.summary.scalar('loss/ownership', tf.reduce_mean(input_tensor=loss_ownership))
         tf.compat.v1.summary.scalar('loss/l2', tf.reduce_mean(input_tensor=loss_l2))
 
         # image metrics
@@ -177,7 +186,7 @@ def model_fn(features, labels, mode, params):
             'accuracy/ownership': tf.compat.v1.metrics.mean(tf.reshape(ownership_1, [-1]), weights=tf.repeat(labels['has_ownership'], 361)),
             'loss/policy': tf.compat.v1.metrics.mean(loss_policy),
             'loss/value': tf.compat.v1.metrics.mean(loss_value),
-            'loss/ownership': tf.compat.v1.metrics.mean(loss_ownership),
+            # 'loss/ownership': tf.compat.v1.metrics.mean(loss_ownership),
             'loss/l2': tf.compat.v1.metrics.mean(loss_l2)
         }
     else:
@@ -211,7 +220,6 @@ def model_fn(features, labels, mode, params):
         train_op,
         eval_metric_ops
     )
-
 
 def check_numerics(tensor, message, name=None):
     return tf.debugging.check_numerics(tensor, message, name)

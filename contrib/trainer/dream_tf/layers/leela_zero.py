@@ -22,10 +22,10 @@ import tensorflow as tf
 import numpy as np
 import gzip
 
-def leela_zero(x, mode, params):
+def leela_zero(x, weights_path):
     data_type = tf.float16
     lz_init_op, num_blocks = read_lz_weights(
-        params['lz_weights'],
+        weights_path,
         {
             'num_inputs': x.shape[3],
             'data_type': data_type

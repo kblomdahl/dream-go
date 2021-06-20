@@ -22,35 +22,21 @@ import tensorflow as tf
 import unittest
 
 from . import NUM_FEATURES
-from .tower import tower
+from ..test_common import TestUtils
+from .tower import Tower
 
-class TowerTest(unittest.TestCase):
+class TowerTest(unittest.TestCase, TestUtils):
     def setUp(self):
-        self.batch_size = 2048
-        self.num_channels = 128
-        self.num_samples = 8
-        self.num_blocks = 6
-        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, NUM_FEATURES])
-
-    def tearDown(self):
-        tf.compat.v1.reset_default_graph()
-
-    @property
-    def params(self):
-        return {
-            "num_blocks": self.num_blocks,
-            "num_channels": self.num_channels,
-            "num_samples": self.num_samples,
-            "model_name": 'test'
-        }
+        self.batch_size = 16
+        self.x = tf.zeros([self.batch_size, 19, 19, NUM_FEATURES], tf.float16)
 
     def test_shape(self):
-        v, vo, p, o, y = tower(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+        v, vo, p, o, y = Tower(num_blocks=6, num_channels=64)(self.x, training=True)
         self.assertEqual(v.shape, [self.batch_size, 1])
         self.assertEqual(vo.shape, [self.batch_size, 361, 2])
         self.assertEqual(p.shape, [self.batch_size, 362])
         self.assertEqual(o.shape, [self.batch_size, 361])
-        self.assertEqual(y.shape, [self.batch_size, 19, 19, self.num_channels])
+        self.assertEqual(y.shape, [self.batch_size, 19, 19, 64])
 
 
 if __name__ == '__main__':
