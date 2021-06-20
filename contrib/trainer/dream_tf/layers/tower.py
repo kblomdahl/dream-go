@@ -47,13 +47,13 @@ class Tower(tf.keras.layers.Layer):
 
     def as_dict(self):
         out = {
-            **self.conv_1.as_dict('01_upsample'),
+            **self.conv_1.as_dict('01_upsample/conv_1'),
             **self.policy_head.as_dict(f'{self.num_blocks + 2:02}p_policy'),
             **self.value_head.as_dict(f'{self.num_blocks + 2:02}v_value')
         }
 
         for i, residual_block in enumerate(self.residual_blocks):
-            out |= residual_block.as_dict(f'{i + 2:02}_residual')
+            out.update(residual_block.as_dict(f'{i + 2:02}_residual'))
 
         return out
 

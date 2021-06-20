@@ -21,6 +21,7 @@
 import tensorflow as tf
 
 from . import normalize_constraint
+from .to_dict import tensor_to_dict
 
 class BatchNormConv2D(tf.keras.layers.Layer):
     def __init__(self, *, filters=None, kernel_size=3):
@@ -44,6 +45,7 @@ class BatchNormConv2D(tf.keras.layers.Layer):
         self.mean = self.add_weight('mean', (self.filters,), tf.float32, zeros_op, experimental_autocast=False, trainable=False)
         self.variance = self.add_weight('variance', (self.filters,), tf.float32, ones_op, experimental_autocast=False, trainable=False)
 
+    def as_dict(self, prefix):
         # fold the batch normalization into the convolutional weights and one
         # additional bias term. By scaling the weights and the mean by the
         # term `scale / sqrt(variance + 0.001)`.
@@ -55,8 +57,8 @@ class BatchNormConv2D(tf.keras.layers.Layer):
         # a given output feature are scaled by that features term.
         #
         std_ = tf.sqrt(self.variance + 0.001)
-        self.offset_ = self.offset - self.mean / std_
-        self.filter_ = tf.multiply(
+        offset_ = self.offset - self.mean / std_
+        filter_ = tf.multiply(
             self.filter._variable,
             tf.reshape(self.scale / std_, (1, 1, 1, self.filters))
         )
@@ -66,7 +68,12 @@ class BatchNormConv2D(tf.keras.layers.Layer):
         #
         # tensorflow: [h, w, in, out]
         # cudnn:      [out, in, h, w]
-        self.filter_ = tf.transpose(self.filter_, perm=[3, 0, 1, 2])
+        filter_ = tf.transpose(filter_, perm=[3, 0, 1, 2])
+
+        return {
+            f'{prefix}:0': tensor_to_dict(filter_),
+            f'{prefix}/offset:0': tensor_to_dict(offset_),
+        }
 
     def call(self, x, training=True, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """

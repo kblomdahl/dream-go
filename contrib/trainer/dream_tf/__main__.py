@@ -29,7 +29,7 @@ from .input_fn import input_fn
 from .model import DreamGoNet, CustomTensorBoardCallback
 from .optimizers.schedules.learning_rate_schedule import WarmupExponentialDecaySchedule
 
-def main(args, *, model_fn=DreamGoNet):
+def main(args=None, *, model_fn=DreamGoNet):
     tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
     for physical_device in tf.config.list_physical_devices('GPU'):
         tf.config.experimental.set_memory_growth(physical_device, True)
@@ -62,7 +62,7 @@ def main(args, *, model_fn=DreamGoNet):
     # try to restore the most recent model
     try:
         model.load_weights(model_savepath)
-    except ImportError:
+    except tf.errors.NotFoundError:
         pass
 
     if config.is_start() or config.is_resume():
@@ -85,7 +85,7 @@ def main(args, *, model_fn=DreamGoNet):
                 batch_size=config.batch_size,
                 is_training=True
             ),
-            epochs=250,
+            epochs=500,
             verbose=0,
             callbacks=[
                 CustomTensorBoardCallback(model_dir, hparams=config.hparams, early_stopping=early_stopping, learning_rate=learning_rate),
@@ -122,4 +122,4 @@ def main(args, *, model_fn=DreamGoNet):
 
 
 if __name__ == '__main__':
-    main(sys.argv)
+    main()

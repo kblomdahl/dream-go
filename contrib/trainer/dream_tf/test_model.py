@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import io
 import tensorflow as tf
 import unittest
 
@@ -85,6 +86,32 @@ class DreamGoNetBase(TestUtils):
         self.assertIn('accuracy/policy_3', metrics)
         self.assertIn('accuracy/policy_5', metrics)
         self.assertIn('accuracy/ownership', metrics)
+
+    def test_as_dict(self):
+        out = io.StringIO('')
+        self.model(self.inputs)
+        self.model.dump_to(out)
+
+        self.assertIn('num_channels:0', out.getvalue())
+        self.assertIn('num_samples:0', out.getvalue())
+        self.assertIn('01_upsample/conv_1:0', out.getvalue())
+        self.assertIn('01_upsample/conv_1/offset:0', out.getvalue())
+        self.assertIn('02_residual/conv_1:0', out.getvalue())
+        self.assertIn('02_residual/conv_1/offset:0', out.getvalue())
+        self.assertIn('02_residual/conv_2:0', out.getvalue())
+        self.assertIn('02_residual/conv_2/offset:0', out.getvalue())
+        self.assertIn('03_residual/conv_1:0', out.getvalue())
+        self.assertIn('03_residual/conv_1/offset:0', out.getvalue())
+        self.assertIn('03_residual/conv_2:0', out.getvalue())
+        self.assertIn('03_residual/conv_2/offset:0', out.getvalue())
+        self.assertIn('04v_value/conv_1:0', out.getvalue())
+        self.assertIn('04v_value/conv_1/offset:0', out.getvalue())
+        self.assertIn('04v_value/linear_2:0', out.getvalue())
+        self.assertIn('04v_value/linear_2/offset:0', out.getvalue())
+        self.assertIn('04p_policy/conv_1:0', out.getvalue())
+        self.assertIn('04p_policy/conv_1/offset:0', out.getvalue())
+        self.assertIn('04p_policy/linear_2:0', out.getvalue())
+        self.assertIn('04p_policy/linear_2/offset:0', out.getvalue())
 
 class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
     def setUp(self):

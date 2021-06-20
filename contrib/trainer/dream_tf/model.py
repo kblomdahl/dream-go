@@ -43,7 +43,7 @@ class DreamGoNet(tf.keras.Model):
         super(DreamGoNet, self).__init__()
 
         self.num_channels = num_channels
-        self.num_samples = num_policy_channels
+        self.num_policy_channels = num_policy_channels
         self.weight_decay = weight_decay
         self.label_smoothing = label_smoothing
         self.learning_rate = learning_rate_schedule
@@ -83,9 +83,8 @@ class DreamGoNet(tf.keras.Model):
     def dump_to(self, out):
         json.dump(
             {
-                'num_blocks': self.num_blocks,
-                'num_channels': self.num_channels,
-                'num_samples': self.num_samples,
+                'num_channels:0': self.num_channels,
+                'num_samples:0': self.num_policy_channels,
                 **self.tower.as_dict()
             },
             fp=out,
