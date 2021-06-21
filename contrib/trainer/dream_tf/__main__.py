@@ -85,7 +85,7 @@ def main(args=None, *, model_fn=DreamGoNet):
                 batch_size=config.batch_size,
                 is_training=True
             ),
-            epochs=500,
+            epochs=config.epochs,
             verbose=0,
             callbacks=[
                 CustomTensorBoardCallback(model_dir, hparams=config.hparams, early_stopping=early_stopping, learning_rate=learning_rate),

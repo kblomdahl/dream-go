@@ -96,6 +96,9 @@ class ConfigTest(unittest.TestCase, TestUtils):
     def test_max_es_slope(self):
         self.assertEqual(Config(['--start', '--max-es-slope', '-0.0001'], exit_on_error=False).max_es_slope, -0.0001)
 
+    def test_epochs(self):
+        self.assertEqual(Config(['--start', '--epochs', '100'], exit_on_error=False).epochs, 100)
+
     def test_hparams(self):
         self.assertIsNotNone(Config(['--start']).hparams)
 

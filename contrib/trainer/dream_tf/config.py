@@ -37,8 +37,9 @@ class Config:
     HP_LR_DECAY_STEPS = hp.HParam('lr_decay_steps', hp.IntInterval(0, 100000))
     HP_LR_DECAY_RATE = hp.HParam('lr_decay_rate', hp.RealInterval(0.0, 1.0))
     HP_ES_NUM_WARMUP_STEPS = hp.HParam('es_num_warmup_steps', hp.IntInterval(0, 100000))
-    HP_ES_NUM_SAMPLES = hp.HParam('es_num_sampples', hp.IntInterval(3, 100000))
+    HP_ES_NUM_SAMPLES = hp.HParam('es_num_samples', hp.IntInterval(3, 100000))
     HP_ES_MAX_SLOPE = hp.HParam('es_max_slope', hp.RealInterval(-1.0, 0.0))
+    HP_EPOCHS = hp.HParam('epochs', hp.IntInterval(0, 100000))
     HP_LZ_WEIGHTS = hp.HParam('lz_weights')
     HP_FILES = hp.HParam('files')
     HP_WARM_START = hp.HParam('warm_start')
@@ -63,7 +64,8 @@ class Config:
             self.HP_ES_MAX_SLOPE: self.args.max_es_slope,
             self.HP_LZ_WEIGHTS: self.args.lz_weights or '',
             self.HP_FILES: ','.join(self.args.files) or '',
-            self.HP_WARM_START: self.args.warm_start or ''
+            self.HP_WARM_START: self.args.warm_start or '',
+            self.HP_EPOCHS: self.args.epochs
         }
 
     def parse_args(self, args, exit_on_error=True):
@@ -92,11 +94,12 @@ class Config:
         opt_group.add_argument('--initial-learning-rate', default=1e-4, nargs='?', type=float, metavar='N', help='the initial learning rate')
         opt_group.add_argument('--max-learning-rate', default=0.01, nargs='?', type=float, metavar='N', help='the maximum learning rate after warmup')
         opt_group.add_argument('--num-warmup-steps', default=2500, nargs='?', type=int, metavar='N', help='the number of warmup steps')
-        opt_group.add_argument('--num-decay-steps', default=70, nargs='?', type=int, metavar='N', help='the number of steps per learning rate decay')
+        opt_group.add_argument('--num-decay-steps', default=240, nargs='?', type=int, metavar='N', help='the number of steps per learning rate decay')
         opt_group.add_argument('--decay-rate', default=0.97, nargs='?', type=float, metavar='N', help='the learning rate decay')
         opt_group.add_argument('--num-es-warmup-steps', default=5000, nargs='?', type=int, metavar='N', help='the number of steps to ignore in early stopping')
         opt_group.add_argument('--num-es-samples', default=50, nargs='?', type=int, metavar='N', help='the number of values to take into account during early stopping')
         opt_group.add_argument('--max-es-slope', default=-1e-7, nargs='?', type=float, metavar='N', help='the minimum slope allowed before early stopping')
+        opt_group.add_argument('--epochs', default=500, nargs='?', type=int, metavar='N', help='the maximum epochs to train for')
 
         op_group = parser.add_mutually_exclusive_group(required=True)
         op_group.add_argument('--start', action='store_true', help='start training of a new model')
@@ -201,6 +204,10 @@ class Config:
     @property
     def max_es_slope(self):
         return self.hparams[self.HP_ES_MAX_SLOPE]
+
+    @property
+    def epochs(self):
+        return self.hparams[self.HP_EPOCHS]
 
 def most_recent_model():
     """ Returns the directory in `models/` that is the most recent """
