@@ -18,8 +18,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
 import unittest
+
+import tensorflow as tf
 
 from . import NUM_FEATURES
 from ..test_common import TestUtils

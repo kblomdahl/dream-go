@@ -18,14 +18,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
+from time import time
 import json
+
+import tensorflow as tf
+from tensorboard.plugins.hparams import api as hp
 
 from .layers.leela_zero import leela_zero
 from .layers.tower import Tower
 from .optimizers.schedules.learning_rate_schedule import WarmupExponentialDecaySchedule
-from tensorboard.plugins.hparams import api as hp
-from time import time
 
 class DreamGoNet(tf.keras.Model):
     def __init__(

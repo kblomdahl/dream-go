@@ -18,11 +18,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+from collections import deque
+
 import tensorflow as tf
 import numpy as np
 import scipy.stats
-
-from collections import deque
 
 class EarlyStoppingCallback(tf.keras.callbacks.Callback):
     def __init__(

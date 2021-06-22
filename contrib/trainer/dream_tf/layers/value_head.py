@@ -20,8 +20,8 @@
 
 import numpy as np
 import tensorflow as tf
-
 from tensorflow.keras.layers import Conv2D
+
 from .batch_norm import BatchNormConv2D
 from .dense import Dense
 

@@ -45,7 +45,7 @@ class PolicyHead(tf.keras.layers.Layer):
     def as_dict(self, prefix):
         return {
             **self.conv_1.as_dict(f'{prefix}/conv_1'),
-            **self.linear_2.as_dict(f'{prefix}/linear_2')
+            **self.linear_2.as_dict(f'{prefix}/linear_1')
         }
 
     def build(self, input_shapes):

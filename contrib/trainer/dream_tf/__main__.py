@@ -18,10 +18,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
-
 import json
 import sys
+
+import tensorflow as tf
 
 from .callbacks.early_stopping import EarlyStoppingCallback
 from .config import Config, most_recent_model

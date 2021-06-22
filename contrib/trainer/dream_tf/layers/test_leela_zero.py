@@ -18,8 +18,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
 import unittest
+
+import tensorflow as tf
 
 from ..test_common import TestUtils
 from .leela_zero import leela_zero

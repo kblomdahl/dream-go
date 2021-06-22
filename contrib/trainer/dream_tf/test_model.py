@@ -19,8 +19,9 @@
 # SOFTWARE.
 
 import io
-import tensorflow as tf
 import unittest
+
+import tensorflow as tf
 
 from .layers import NUM_FEATURES
 from .model import DreamGoNet
@@ -110,8 +111,8 @@ class DreamGoNetBase(TestUtils):
         self.assertIn('04v_value/linear_2/offset:0', out.getvalue())
         self.assertIn('04p_policy/conv_1:0', out.getvalue())
         self.assertIn('04p_policy/conv_1/offset:0', out.getvalue())
-        self.assertIn('04p_policy/linear_2:0', out.getvalue())
-        self.assertIn('04p_policy/linear_2/offset:0', out.getvalue())
+        self.assertIn('04p_policy/linear_1:0', out.getvalue())
+        self.assertIn('04p_policy/linear_1/offset:0', out.getvalue())
 
 class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
     def setUp(self):

@@ -59,7 +59,7 @@ class BatchNormConv2D(tf.keras.layers.Layer):
         std_ = tf.sqrt(self.variance + 0.001)
         offset_ = self.offset - self.mean / std_
         filter_ = tf.multiply(
-            self.filter._variable,
+            normalize_constraint(self.filter._variable),
             tf.reshape(self.scale / std_, (1, 1, 1, self.filters))
         )
 

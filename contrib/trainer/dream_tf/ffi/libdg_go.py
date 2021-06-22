@@ -20,7 +20,6 @@
 
 from cffi import FFI
 
-
 def load_shared_library(ffi):
     for library_name in ['./libdg_go.so', './dg_go.dll']:
         try:
