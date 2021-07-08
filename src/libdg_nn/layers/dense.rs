@@ -17,7 +17,7 @@ use dg_cuda as cuda;
 use std::collections::HashMap;
 
 use crate::tensor::Tensor;
-use crate::layers::{create_dense_descriptor, create_offset_descriptor};
+use crate::layers::{create_dense_descriptor, create_strided_dense_descriptor, create_offset_descriptor};
 use crate::Error;
 
 pub struct Dense {
@@ -32,6 +32,9 @@ pub struct DenseBuilder {
     shape: [i32; 2],
     alpha: [f32; 2],
     act_desc: Option<cudnn::ActivationDescriptor>,
+    input_strides: Option<[i32; 4]>,
+    output_strides: Option<[i32; 4]>,
+    skip_strides: Option<[i32; 4]>,
     filter: Option<Tensor>,
     offset: Option<Tensor>,
 }
@@ -43,6 +46,9 @@ impl DenseBuilder {
             shape: shape,
             alpha: [1.0, 0.0],
             act_desc: None,
+            input_strides: None,
+            output_strides: None,
+            skip_strides: None,
             filter: None,
             offset: None
         }
@@ -56,6 +62,21 @@ impl DenseBuilder {
     pub fn with_tensors(mut self, tensors: &HashMap<String, Tensor>, name: &str) -> Self {
         self.filter = Some(tensors.get(&format!("{}:0", name)).cloned().expect("no filter available"));
         self.offset = Some(tensors.get(&format!("{}/offset:0", name)).cloned().expect("no offset available"));
+        self
+    }
+
+    pub fn with_input_strides(mut self, strides: [i32; 4]) -> Self {
+        self.input_strides = Some(strides);
+        self
+    }
+
+    pub fn with_output_strides(mut self, strides: [i32; 4]) -> Self {
+        self.output_strides = Some(strides);
+        self
+    }
+
+    pub fn with_skip_strides(mut self, strides: [i32; 4]) -> Self {
+        self.skip_strides = Some(strides);
         self
     }
 
@@ -141,13 +162,14 @@ impl DenseBuilder {
         cudnn::ConvolutionBiasActivation::new(
             handle,
             self.alpha[0],
-            create_dense_descriptor(self.batch_size, num_inputs)?,
+            self.input_strides.map(|x| create_strided_dense_descriptor(self.batch_size, num_inputs, x)).or_else(|| Some(create_dense_descriptor(self.batch_size, num_inputs))).unwrap()?,
             self.create_filter_descriptor()?,
             self.create_convolution_descriptor()?,
             self.alpha[1],
             create_offset_descriptor(num_outputs)?,
             self.create_activation_descriptor()?,
-            create_dense_descriptor(self.batch_size, num_outputs)?,
+            self.output_strides.map(|x| create_strided_dense_descriptor(self.batch_size, num_outputs, x)).or_else(|| Some(create_dense_descriptor(self.batch_size, num_outputs))).unwrap()?,
+            self.skip_strides.map(|x| create_strided_dense_descriptor(self.batch_size, num_outputs, x)).or_else(|| Some(create_dense_descriptor(self.batch_size, num_outputs))).unwrap()?,
         )
     }
 
@@ -212,6 +234,32 @@ impl Dense {
             self.filter.get().as_ptr(),
             workspace.as_ptr(), workspace.size_in_bytes(),
             output.as_ptr(),
+            self.offset.get().as_ptr(),
+            output.as_ptr()
+        )?;
+
+        Ok(output)
+    }
+
+    pub fn forward_skip<A: cuda::Allocator + Clone>(
+        &self,
+        handle: &cudnn::Handle,
+        input: &cuda::SmartPtr<A>,
+        skip_input: &cuda::SmartPtr<A>,
+        allocator: &A,
+        stream: &cuda::Stream
+    ) -> Result<cuda::SmartPtr<A>, Error>
+    {
+        let workspace = cuda::malloc(self.conv_desc.fwd_algo_perf().memory(), allocator)?;
+        let output = cuda::malloc(self.conv_desc.output().size_in_bytes()?, allocator)?;
+
+        self.prepare(handle, allocator, stream)?;
+        self.conv_desc.forward(
+            handle,
+            input.as_ptr(),
+            self.filter.get().as_ptr(),
+            workspace.as_ptr(), workspace.size_in_bytes(),
+            skip_input.as_ptr(),
             self.offset.get().as_ptr(),
             output.as_ptr()
         )?;

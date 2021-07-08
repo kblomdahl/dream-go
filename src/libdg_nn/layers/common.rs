@@ -96,3 +96,20 @@ pub fn create_dense_descriptor(batch_size: i32, size: i32) -> Result<cudnn::Tens
         [batch_size, size, 1, 1]
     )
 }
+
+/// Returns a `TensorDescriptor` for a dense tensor for the given `batch_size`
+/// and `size`.
+///
+/// # Arguments
+///
+/// * `batch_size` -
+/// * `size` -
+/// * `strides` -
+///
+pub fn create_strided_dense_descriptor(batch_size: i32, size: i32, strides: [i32; 4]) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+    cudnn::TensorDescriptor::new_ex(
+        cudnn::DataType::Half,
+        [batch_size, size, 1, 1],
+        strides
+    )
+}

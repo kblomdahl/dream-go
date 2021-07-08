@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod bottleneck_block;
 mod common;
 mod conv2d;
 mod dense;
+mod mixer_block;
 mod policy_head;
 mod residual_block;
 mod up_block;
 mod value_head;
 
+pub use self::bottleneck_block::*;
 pub use self::common::*;
 pub use self::conv2d::*;
 pub use self::dense::*;
+pub use self::mixer_block::*;
 pub use self::policy_head::*;
 pub use self::residual_block::*;
 pub use self::up_block::*;

@@ -82,6 +82,11 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
         data_type,
         [BATCH_SIZE as i32, num_features as i32, 19, 19]
     )?;
+    let skip_desc = cudnn::TensorDescriptor::new(
+        tensor_format,
+        data_type,
+        [BATCH_SIZE as i32, num_features as i32, 19, 19]
+    )?;
 
     // the a bias description that match the given configuration
     let offset_desc = cudnn::TensorDescriptor::new(
@@ -154,7 +159,8 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
         0.0,
         offset_desc,
         relu,
-        out_desc
+        out_desc,
+        skip_desc
     )?;
 
     bencher.iter(move || {

@@ -24,7 +24,7 @@ use concurrent_queue::ConcurrentQueue;
 use crossbeam_channel::Sender;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-///
+/// The per-search tree context.
 pub struct SearchContext {
     pub id: usize,
     pub root: *mut tree::Node,

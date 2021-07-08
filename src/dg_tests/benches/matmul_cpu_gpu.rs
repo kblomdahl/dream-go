@@ -62,6 +62,11 @@ unsafe fn gpu_matmul(
         data_type,
         [batch_size, num_outputs, 1, 1]
     )?;
+    let skip_desc = cudnn::TensorDescriptor::new(
+        tensor_format,
+        data_type,
+        [batch_size, num_outputs, 1, 1]
+    )?;
 
     // the a bias description that match the given configuration
     let offset_desc = cudnn::TensorDescriptor::new(
@@ -130,7 +135,8 @@ unsafe fn gpu_matmul(
         0.0,
         offset_desc,
         relu,
-        out_desc
+        out_desc,
+        skip_desc
     )?;
 
     bencher.iter(move || {

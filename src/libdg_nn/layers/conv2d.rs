@@ -137,6 +137,7 @@ impl Conv2dBuilder {
             self.alpha[1],
             create_offset_descriptor(num_outputs)?,
             self.create_activation_descriptor()?,
+            create_tensor_descriptor(self.batch_size, num_outputs, self.width_height)?,
             create_tensor_descriptor(self.batch_size, num_outputs, self.width_height)?
         )
     }

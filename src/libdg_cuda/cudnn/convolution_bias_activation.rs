@@ -43,6 +43,7 @@ extern {
 pub struct ConvolutionBiasActivation {
     x: TensorDescriptor,
     y: TensorDescriptor,
+    z: TensorDescriptor,
     w: FilterDescriptor,
     conv: ConvolutionDescriptor,
     offset: TensorDescriptor,
@@ -62,6 +63,7 @@ impl ConvolutionBiasActivation {
         offset: TensorDescriptor,
         activation: ActivationDescriptor,
         y: TensorDescriptor,
+        z: TensorDescriptor,
     ) -> Result<Self, Status>
     {
         let fwd_algo_perf = ConvolutionFwdAlgoPerf::new(handle, &x, &w, &conv, &y)?;
@@ -70,6 +72,7 @@ impl ConvolutionBiasActivation {
         Ok(Self {
             x,
             y,
+            z,
             w,
             conv,
             offset,
@@ -140,7 +143,7 @@ impl ConvolutionBiasActivation {
             &self.conv, self.fwd_algo_perf.algo(),
             workspace, workspace_size_in_bytes,
             &self.alpha[1] as *const _ as *const c_void,
-            &self.y, z_data,
+            &self.z, z_data,
             &self.offset, offset_data,
             &self.activation,
             &self.y, y_data
