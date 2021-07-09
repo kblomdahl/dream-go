@@ -47,6 +47,15 @@ impl MixerLayer {
         tensors: &HashMap<String, Tensor>
     ) -> Result<Option<Self>, Error>
     {
+        let linear_1 = tensors.get(&format!("{:02}_mixer/mlp_1/linear_1:0", i));
+        let linear_2 = tensors.get(&format!("{:02}_mixer/mlp_1/linear_2:0", i));
+        let linear_3 = tensors.get(&format!("{:02}_mixer/mlp_2/linear_1:0", i));
+        let linear_4 = tensors.get(&format!("{:02}_mixer/mlp_2/linear_2:0", i));
+
+        if linear_1.is_none() || linear_2.is_none() || linear_3.is_none() || linear_4.is_none() {
+            return Ok(None)
+        }
+
         let token_mlp_dims = 361;
         let channels_mlp_dims = get_num_channels(tensors);
 
