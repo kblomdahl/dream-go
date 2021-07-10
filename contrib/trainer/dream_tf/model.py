@@ -22,6 +22,7 @@ from time import time
 import json
 
 import tensorflow as tf
+import tensorflow_addons as tfa
 from tensorboard.plugins.hparams import api as hp
 
 from .layers.leela_zero import leela_zero
@@ -59,10 +60,9 @@ class DreamGoNet(tf.keras.Model):
         if self.learning_rate is None:
             self.learning_rate = WarmupExponentialDecaySchedule()
 
-        self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(
-            tf.keras.optimizers.Adam(learning_rate=self.learning_rate),
-            initial_scale=128
-        )
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
+        self.optimizer = tfa.optimizers.SWA(self.optimizer)
+        self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer, initial_scale=128)
 
         # compile the keras model
         self.compile(optimizer=self.optimizer)
@@ -80,6 +80,18 @@ class DreamGoNet(tf.keras.Model):
         self.accuracy_policy_5_metric = tf.keras.metrics.TopKCategoricalAccuracy(k=5, name='accuracy/policy_5')
         self.accuracy_value_metric = tf.keras.metrics.Accuracy(name='accuracy/value')
         self.accuracy_ownership_metric = tf.keras.metrics.Accuracy(name='accuracy/ownership')
+
+    def assign_average_vars(self, xs):
+        """ Averaging Weights Leads to Wider Optima and Better Generalization [1]
+
+        [1] https://arxiv.org/abs/1803.05407 """
+
+        self.optimizer.assign_average_vars(self.tower.get_weights())
+
+        # re-compute batch normalization statistics by walking through the
+        # dataset in training mode.
+        for (x, _) in xs:
+            self.tower(x, training=True)
 
     def dump_to(self, out):
         json.dump(

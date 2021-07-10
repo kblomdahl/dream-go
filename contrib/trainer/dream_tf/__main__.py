@@ -116,6 +116,7 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
             indent=4
         ))
     elif config.is_dump():
+        model.assign_average_vars(xs=input_fn(files=config.files, batch_size=max(1, config.batch_size // 8), is_training=None))
         model.dump_to(sys.stdout)
 
 
