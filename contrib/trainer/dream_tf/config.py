@@ -110,10 +110,13 @@ class Config:
 
         return parser.parse_args(args)
 
-    def get_model_dir(self, default=None):
+    def has_model(self):
+        return self.args.model is not None
+
+    def get_model_dir(self, base_model_dir='models', default=None):
         model_dir = self.args.model
         if not model_dir and default is None:
-            model_dir = 'models/' + datetime.now().strftime('%Y%m%d.%H%M')
+            model_dir = base_model_dir + '/' + datetime.now().strftime('%Y%m%d.%H%M')
 
             if self.args.name:
                 model_dir += '-' + self.args.name + '/'
@@ -123,16 +126,16 @@ class Config:
         return model_dir or default
 
     def is_start(self):
-        return self.args.start is not None
+        return self.args.start
 
     def is_resume(self):
-        return self.args.resume is not None
+        return self.args.resume
 
     def is_verify(self):
-        return self.args.verify is not None
+        return self.args.verify
 
     def is_dump(self):
-        return self.args.dump is not None
+        return self.args.dump
 
     @property
     def files(self):

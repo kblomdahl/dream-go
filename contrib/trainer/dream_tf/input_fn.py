@@ -155,14 +155,14 @@ def get_dataset(files):
 def input_fn(files, batch_size, is_training, num_test_batches=10):
     dataset = get_dataset(files, )
 
-    if is_training:
+    if is_training is True:
         num_parallel_calls = tf.data.experimental.AUTOTUNE
 
         dataset = dataset.skip(num_test_batches * batch_size)
         dataset = dataset.shuffle(262144)
         dataset = dataset.map(_augment, num_parallel_calls=num_parallel_calls)
         dataset = dataset.map(_fix_history, num_parallel_calls=num_parallel_calls)
-    else:
+    elif is_training is False:
         dataset = dataset.take(num_test_batches * batch_size)
 
     dataset = dataset.batch(batch_size)
