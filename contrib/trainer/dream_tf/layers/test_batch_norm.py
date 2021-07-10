@@ -23,24 +23,60 @@ import unittest
 import tensorflow as tf
 
 from ..test_common import TestUtils
-from .batch_norm import BatchNormConv2D
+from .batch_norm import BatchNormConv2D, BatchNormDense
 
-class BatchNormTestBase(TestUtils):
+class BatchNormConv2DTestBase(TestUtils):
     def setUp(self):
         self.x = tf.zeros([16, 19, 19, 64], tf.float16)
+        self.conv = BatchNormConv2D()
+
+    def test_dtype(self):
+        self.assertEqual(
+            self.conv(self.x, training=self.training).dtype,
+            self.x.dtype
+        )
 
     def test_shape(self):
         self.assertEqual(
-            BatchNormConv2D()(self.x, training=self.training).shape,
+            self.conv(self.x, training=self.training).shape,
             self.x.shape
         )
 
-class BatchNormEvalTest(BatchNormTestBase, unittest.TestCase):
+class BatchNormConv2DEvalTest(BatchNormConv2DTestBase, unittest.TestCase):
     @property
     def training(self):
         return False
 
-class BatchNormTrainTest(BatchNormTestBase, unittest.TestCase):
+class BatchNormConv2DTrainTest(BatchNormConv2DTestBase, unittest.TestCase):
+    @property
+    def training(self):
+        return True
+
+class BatchNormDenseTestBase(TestUtils):
+    def setUp(self):
+        self.batch_size = 4
+        self.out_dims = 16
+        self.x = tf.zeros([self.batch_size, 361, 64], tf.float16)
+        self.dense = BatchNormDense(out_dims=self.out_dims)
+
+    def test_dtype(self):
+        self.assertEqual(
+            self.dense(self.x, training=self.training).dtype,
+            self.x.dtype
+        )
+
+    def test_shape(self):
+        self.assertEqual(
+            self.dense(self.x, training=self.training).shape,
+            [self.batch_size, 361, self.out_dims]
+        )
+
+class BatchNormDenseEvalTest(BatchNormDenseTestBase, unittest.TestCase):
+    @property
+    def training(self):
+        return False
+
+class BatchNormDenseTrainTest(BatchNormDenseTestBase, unittest.TestCase):
     @property
     def training(self):
         return True

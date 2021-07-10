@@ -23,6 +23,58 @@ import tensorflow as tf
 from . import normalize_constraint
 from .to_dict import tensor_to_dict
 
+class BatchNormDense(tf.keras.layers.Layer):
+    def __init__(self, out_dims=None):
+        super(BatchNormDense, self).__init__()
+
+        self.out_dims = out_dims
+
+    def build(self, input_shape):
+        in_dims = input_shape[-1]
+
+        init_op = tf.keras.initializers.GlorotUniform()
+        ones_op = tf.keras.initializers.Ones()
+        zeros_op = tf.keras.initializers.Zeros()
+
+        self.kernel = self.add_weight('kernel', (in_dims, self.out_dims), tf.float32, init_op)
+        self.offset = self.add_weight('offset', (self.out_dims,), tf.float32, zeros_op, experimental_autocast=False, trainable=True)
+        self.scale = self.add_weight('scale', (self.out_dims,), tf.float32, ones_op, experimental_autocast=False, trainable=False)
+        self.mean = self.add_weight('mean', (self.out_dims,), tf.float32, zeros_op, experimental_autocast=False, trainable=False)
+        self.variance = self.add_weight('variance', (self.out_dims,), tf.float32, ones_op, experimental_autocast=False, trainable=False)
+        self.epsilon = 0.001
+
+    def as_dict(self, prefix):
+        std_ = tf.sqrt(self.variance + self.epsilon)
+        offset_ = self.offset - self.mean / std_
+        kernel_ = tf.multiply(
+            normalize_constraint(self.kernel._variable),
+            tf.reshape(self.scale / std_, (1, self.out_dims))
+        )
+
+        return {
+            f'{prefix}:0': tensor_to_dict(kernel_),
+            f'{prefix}/offset:0': tensor_to_dict(offset_)
+        }
+
+    def call(self, x, training=True, is_recomputing=False):
+        y = tf.linalg.matmul(x, normalize_constraint(self.kernel))
+
+        if training:
+            b_mean, b_variance = tf.nn.moments(tf.cast(y, tf.float32), axes=list(range(len(y.shape) - 1)))
+            y = tf.nn.batch_normalization(y, b_mean, b_variance, self.offset, self.scale, self.epsilon)
+
+            if not is_recomputing:
+                with tf.device(None):
+                    update_mean_op = self.mean.assign_sub(0.01 * (self.mean - b_mean), use_locking=True)
+                    update_variance_op = self.variance.assign_sub(0.01 * (self.variance - b_variance), use_locking=True)
+
+                    with tf.control_dependencies([update_mean_op, update_variance_op]):
+                        y = tf.identity(y)
+        else:
+            y = tf.nn.batch_normalization(y, self.mean, self.variance, self.offset, self.scale, self.epsilon)
+
+        return y
+
 class BatchNormConv2D(tf.keras.layers.Layer):
     def __init__(self, *, filters=None, kernel_size=3):
         super(BatchNormConv2D, self).__init__()
@@ -44,6 +96,7 @@ class BatchNormConv2D(tf.keras.layers.Layer):
         self.scale = self.add_weight('scale', (self.filters,), tf.float32, ones_op, experimental_autocast=False, trainable=False)
         self.mean = self.add_weight('mean', (self.filters,), tf.float32, zeros_op, experimental_autocast=False, trainable=False)
         self.variance = self.add_weight('variance', (self.filters,), tf.float32, ones_op, experimental_autocast=False, trainable=False)
+        self.epsilon = 0.001
 
     def as_dict(self, prefix):
         # fold the batch normalization into the convolutional weights and one
@@ -56,7 +109,7 @@ class BatchNormConv2D(tf.keras.layers.Layer):
         # The weights are scaled using broadcasting, where all input weights for
         # a given output feature are scaled by that features term.
         #
-        std_ = tf.sqrt(self.variance + 0.001)
+        std_ = tf.sqrt(self.variance + self.epsilon)
         offset_ = self.offset - self.mean / std_
         filter_ = tf.multiply(
             normalize_constraint(self.filter._variable),
@@ -81,15 +134,8 @@ class BatchNormConv2D(tf.keras.layers.Layer):
         y = tf.nn.conv2d(x, normalize_constraint(self.filter), 1, 'SAME', 'NHWC')
 
         if training:
-            y, b_mean, b_variance = tf.compat.v1.nn.fused_batch_norm(
-                y,
-                self.scale,
-                self.offset,
-                None,
-                None,
-                data_format='NHWC',
-                is_training=True
-            )
+            b_mean, b_variance = tf.nn.moments(tf.cast(y, tf.float32), axes=[0, 1, 2])
+            y = tf.nn.batch_normalization(y, b_mean, b_variance, self.offset, self.scale, self.epsilon)
 
             if not is_recomputing:
                 with tf.device(None):
@@ -99,14 +145,6 @@ class BatchNormConv2D(tf.keras.layers.Layer):
                     with tf.control_dependencies([update_mean_op, update_variance_op]):
                         y = tf.identity(y)
         else:
-            y, _, _ = tf.compat.v1.nn.fused_batch_norm(
-                y,
-                self.scale,
-                self.offset,
-                self.mean,
-                self.variance,
-                data_format='NHWC',
-                is_training=False
-            )
+            y = tf.nn.batch_normalization(y, self.mean, self.variance, self.offset, self.scale, self.epsilon)
 
         return y
