@@ -43,6 +43,25 @@ class WarmupExponentialDecaySchedule(tf.keras.optimizers.schedules.LearningRateS
         self.num_decay_steps = num_decay_steps
         self.decay_rate = decay_rate
 
+    @classmethod
+    def from_config(config):
+        return WarmupExponentialDecaySchedule(
+            initial_learning_rate=config['initial_learning_rate'],
+            max_learning_rate=config['max_learning_rate'],
+            num_warmup_steps=config['num_warmup_steps'],
+            num_decay_steps=config['num_decay_steps'],
+            decay_rate=config['decay_rate']
+        )
+
+    def get_config(self):
+        return {
+            'initial_learning_rate': self.initial_learning_rate,
+            'max_learning_rate': self.max_learning_rate,
+            'num_warmup_steps': self.num_warmup_steps,
+            'num_decay_steps': self.num_decay_steps,
+            'decay_rate': self.decay_rate
+        }
+
     def warmup_learning_rate(self, step):
         alpha = step / self.num_warmup_steps
 
