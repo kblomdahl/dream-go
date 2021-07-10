@@ -21,6 +21,7 @@
 import tensorflow as tf
 
 from .batch_norm import BatchNormConv2D
+from .mixer_block import MixerBlock
 from .policy_head import PolicyHead
 from .residual_block import ResidualBlock
 from .value_head import ValueHead
@@ -48,22 +49,30 @@ class Tower(tf.keras.layers.Layer):
     def as_dict(self):
         out = {
             **self.conv_1.as_dict('01_upsample/conv_1'),
-            **self.policy_head.as_dict(f'{self.num_blocks + 2:02}p_policy'),
-            **self.value_head.as_dict(f'{self.num_blocks + 2:02}v_value')
+            **self.policy_head.as_dict(f'{self.num_blocks + 3:02}p_policy'),
+            **self.value_head.as_dict(f'{self.num_blocks + 3:02}v_value')
         }
 
-        for i, residual_block in enumerate(self.residual_blocks):
-            out.update(residual_block.as_dict(f'{i + 2:02}_residual'))
+        for i, layer in enumerate(self.stem):
+            out.update(layer.as_dict(f'{i + 2:02}_{layer.suffix}'))
 
         return out
 
     @property
     def l2_weights(self):
         out = list(self.conv_1.trainable_weights)
-        for residual_block in self.residual_blocks:
-            out.extend(residual_block.trainable_weights)
+        for layer in self.stem:
+            out.extend(layer.trainable_weights)
+        out.extend(self.policy_head.trainable_weights)
+        out.extend(self.value_head.trainable_weights)
 
         return out
+
+    def build_stem_layer(self, input_shapes, i):
+        if i % 2 == 0:
+            return ResidualBlock()
+        else:
+            return MixerBlock(tokens_mlp_dims=361, channels_mlp_dims=self.num_channels)
 
     def build(self, input_shapes):
         self.num_blocks_ = tf.Variable(self.num_blocks, False, name='num_blocks', dtype=tf.int32)
@@ -71,9 +80,9 @@ class Tower(tf.keras.layers.Layer):
         self.num_samples_ = tf.Variable(self.num_policy_channels, False, name='num_samples', dtype=tf.int32)
 
         self.conv_1 = BatchNormConv2D(filters=self.num_channels)
-        self.residual_blocks = list([
-            ResidualBlock()
-            for _ in range(self.num_blocks)
+        self.stem = list([
+            self.build_stem_layer(input_shapes, i)
+            for i in range(self.num_blocks)
         ])
 
         self.policy_head = PolicyHead(num_samples=self.num_policy_channels)
@@ -82,8 +91,8 @@ class Tower(tf.keras.layers.Layer):
     def call(self, x, training=True):
         y = tf.nn.relu(self.conv_1(x, training=training))
 
-        for residual_block in self.residual_blocks:
-            y = residual_block(y, training=training)
+        for layer in self.stem:
+            y = layer(y, training=training)
 
         p = self.policy_head(y, training=training)
         v, vo, vy = self.value_head(y, training=training)

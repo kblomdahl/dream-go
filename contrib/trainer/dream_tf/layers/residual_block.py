@@ -40,6 +40,10 @@ class ResidualBlock(tf.keras.layers.Layer):
     def __init__(self):
         super(ResidualBlock, self).__init__()
 
+    @property
+    def suffix(self):
+        return 'residual'
+
     def as_dict(self, prefix):
         return {
             **self.conv_1.as_dict(f'{prefix}/conv_1'),
