@@ -24,10 +24,12 @@ import sys
 import tensorflow as tf
 
 from .callbacks.early_stopping import EarlyStoppingCallback
+from .callbacks.save_model_checkpoint import CustomSaveModelCheckpoint
 from .config import Config, most_recent_model
 from .input_fn import input_fn
 from .model import DreamGoNet, CustomTensorBoardCallback
 from .optimizers.schedules.learning_rate_schedule import WarmupExponentialDecaySchedule
+from .ffi.libdg_go import get_num_features
 
 def setUp():
     tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
@@ -42,26 +44,32 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
     else:
         model_dir = config.get_model_dir(base_model_dir=base_model_dir, default=most_recent_model())
 
-    if config.has_model():
-        model = tf.keras.models.load_model(f'{model_dir}/model.h5')
-    else:
-        learning_rate = WarmupExponentialDecaySchedule(
-            initial_learning_rate=config.initial_learning_rate,
-            max_learning_rate=config.max_learning_rate,
-            num_warmup_steps=config.num_warmup_steps,
-            num_decay_steps=config.num_decay_steps,
-            decay_rate=config.decay_rate
-        )
-        model = model_fn(
-            num_blocks=config.num_blocks,
-            num_channels=config.num_channels,
-            num_value_channels=config.num_value_channels,
-            num_policy_channels=config.num_policy_channels,
-            weight_decay=config.weight_decay,
-            label_smoothing=config.label_smoothing,
-            learning_rate_schedule=learning_rate,
-            lz_weights=config.lz_weights
-        )
+    learning_rate = WarmupExponentialDecaySchedule(
+        initial_learning_rate=config.initial_learning_rate,
+        max_learning_rate=config.max_learning_rate,
+        num_warmup_steps=config.num_warmup_steps,
+        num_decay_steps=config.num_decay_steps,
+        decay_rate=config.decay_rate
+    )
+    model = model_fn(
+        num_blocks=config.num_blocks,
+        num_channels=config.num_channels,
+        num_value_channels=config.num_value_channels,
+        num_policy_channels=config.num_policy_channels,
+        weight_decay=config.weight_decay,
+        label_smoothing=config.label_smoothing,
+        learning_rate_schedule=learning_rate,
+        lz_weights=config.lz_weights
+    )
+
+    if config.has_model() or not config.is_start():
+        # this will build all of the necessary variables in the model
+        _ = model(tf.zeros([1, 19, 19, get_num_features()], tf.float16), training=False)
+        _ = model.optimizer.iterations
+
+        # restore the checkpoint
+        latest_checkpoint = tf.train.latest_checkpoint(model_dir)
+        model.load_weights(latest_checkpoint)
 
     if config.is_start() or config.is_resume():
         early_stopping = EarlyStoppingCallback(
@@ -85,8 +93,7 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
             verbose=0,
             callbacks=[
                 CustomTensorBoardCallback(model_dir, hparams=config.hparams, early_stopping=early_stopping, learning_rate=learning_rate),
-                tf.keras.callbacks.ModelCheckpoint(f'{model_dir}/model.h5', monitor='val_loss', save_weights_only=False, save_best_only=True),
-                tf.keras.callbacks.ModelCheckpoint(f'{model_dir}/weights.{{epoch:03d}}', monitor='val_loss', save_weights_only=True, save_best_only=True),
+                CustomSaveModelCheckpoint(f'{model_dir}', monitor='val_loss', save_best_only=True),
                 early_stopping
             ],
             validation_data=input_fn(

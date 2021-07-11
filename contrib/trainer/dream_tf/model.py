@@ -62,7 +62,6 @@ class DreamGoNet(tf.keras.Model):
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
         self.optimizer = tfa.optimizers.SWA(self.optimizer)
-        self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer, initial_scale=128)
 
         # compile the keras model
         self.compile(optimizer=self.optimizer)
@@ -183,6 +182,17 @@ class DreamGoNet(tf.keras.Model):
             labels['policy'] = tf.cast(lz_policy_hat, tf.float32)
             labels['has_ownership'] = tf.zeros_like(labels['has_ownership'])
 
+    def get_scaled_loss(self, loss):
+        return 128.0 * loss
+
+    def get_unscaled_gradients(self, gradients):
+        recip_loss_scale = 1 / 128.0
+
+        return list([
+            recip_loss_scale * gradient
+            for gradient in gradients
+        ])
+
     @property
     def metrics(self):
         return [
@@ -219,11 +229,11 @@ class DreamGoNet(tf.keras.Model):
         with tf.GradientTape() as tape:
             y_hat = self(x, training=True)
             loss, losses = self.custom_loss(labels, y_hat)
-            loss = self.optimizer.get_scaled_loss(loss)
+            loss = self.get_scaled_loss(loss)
 
         trainable_vars = self.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
-        gradients = self.optimizer.get_unscaled_gradients(gradients)
+        gradients = self.get_unscaled_gradients(gradients)
         weight_decay_ops = [var.assign_sub(self.weight_decay * var) for var in self.tower.l2_weights]
 
         with tf.control_dependencies(weight_decay_ops):

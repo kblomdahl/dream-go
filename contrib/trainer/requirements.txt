@@ -1,4 +1,5 @@
 cffi
 numpy
-scipy
 pyflakes
+scipy
+tensorflow_addons

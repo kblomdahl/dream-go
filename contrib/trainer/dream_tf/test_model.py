@@ -19,6 +19,8 @@
 # SOFTWARE.
 
 import io
+import os.path
+import tempfile
 import unittest
 
 import tensorflow as tf
@@ -112,6 +114,12 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
         self.num_channels = 48
         self.model = DreamGoNet(num_blocks=2, num_channels=self.num_channels, label_smoothing=0.0)
         self.x = tf.zeros([self.batch_size, 19, 19, NUM_FEATURES], tf.float16)
+
+    def test_save_weights(self):
+        self.model(self.x, training=False)  # build the layers
+        with tempfile.TemporaryDirectory() as dir_name:
+            self.model.save_weights(f'{dir_name}/weights.001')
+            self.assertTrue(os.path.isfile(f'{dir_name}/weights.001.index'))
 
     def test_metrics(self):
         inputs = self.inputs
