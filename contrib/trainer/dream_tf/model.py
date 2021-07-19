@@ -21,6 +21,7 @@
 from time import time
 import json
 
+import numpy as np
 import tensorflow as tf
 import tensorflow_addons as tfa
 from tensorboard.plugins.hparams import api as hp
@@ -44,6 +45,7 @@ class DreamGoNet(tf.keras.Model):
     ):
         super(DreamGoNet, self).__init__()
 
+        self.dg_module = tf.load_op_library('libdg_tf.so')
         self.num_channels = num_channels
         self.num_policy_channels = num_policy_channels
         self.weight_decay = weight_decay
@@ -222,6 +224,26 @@ class DreamGoNet(tf.keras.Model):
         self.accuracy_value_metric.update_state(tf.sign(y_true['value']), tf.sign(y_pred['value']))
         self.accuracy_ownership_metric.update_state(tf.sign(y_true['ownership']), tf.sign(y_pred['ownership']), sample_weight=tf.repeat(y_true['has_ownership'], 361, axis=1))
 
+    def custom_image_metrics(self, x, y_true, y_pred):
+        def to_heat_image(x, heat):
+            return self.dg_module.tensor_to_heat_image(
+                x[:, :, 5],
+                x[:, :, 17],
+                heat
+            )
+
+        additional_metrics = {}
+
+        for i in range(5):
+            additional_metrics.update({
+                f'ownership/predictions_{i}': to_heat_image(x[i, :, :, :], tf.reshape(y_pred['ownership'][i, :], [19, 19])),
+                f'ownership/labels_{i}': to_heat_image(x[i, :, :, :], tf.reshape(y_true['ownership'][i, :], [19, 19])),
+                f'policy/predictions_{i}': to_heat_image(x[i, :, :, :], tf.reshape(tf.nn.softmax(y_pred['policy'][i, :361]), [19, 19])),
+                f'policy/labels_{i}': to_heat_image(x[i, :, :, :], tf.reshape(y_true['policy'][i, :361], [19, 19]))
+            })
+
+        return additional_metrics
+
     def train_step(self, data):
         x, labels = data
         self.apply_lz_labels(labels)
@@ -252,11 +274,13 @@ class DreamGoNet(tf.keras.Model):
         y_hat = self(x, training=False)
         loss, losses = self.custom_loss(labels, y_hat)
         self.custom_metrics(labels, y_hat, losses=losses)
-
-        return {
+        additional_metrics = self.custom_image_metrics(x, labels, y_hat)
+        additional_metrics.update({
             metric.name: metric.result()
             for metric in self.metrics
-        }
+        })
+
+        return additional_metrics
 
 
 class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
@@ -301,14 +325,21 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
 
         self.global_step_sec.update_state(1.0 / elapsed_sec)
 
+    def on_test_batch_end(self, batch, logs):
+        with self.writer_eval.as_default():
+            for name, value in logs.items():
+                if isinstance(value, (np.ndarray, np.generic)):
+                    tf.summary.image(name, value, step=self.step(), max_outputs=100)
+
     def on_epoch_end(self, epoch, logs):
         for name, value in logs.items():
-            if name.startswith('val_'):
-                with self.writer_eval.as_default():
-                    tf.summary.scalar(name[4:], value, step=self.step())
-            else:
-                with self.writer.as_default():
-                    tf.summary.scalar(name, value, step=self.step())
+            if isinstance(value, (int, float)):
+                if name.startswith('val_'):
+                    with self.writer_eval.as_default():
+                        tf.summary.scalar(name[4:], value, step=self.step())
+                else:
+                    with self.writer.as_default():
+                        tf.summary.scalar(name, value, step=self.step())
 
         # custom metrics
         with self.writer.as_default():

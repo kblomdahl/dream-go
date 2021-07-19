@@ -110,7 +110,7 @@ class DreamGoNetBase(TestUtils):
 
 class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
     def setUp(self):
-        self.batch_size = 2
+        self.batch_size = 5
         self.num_channels = 48
         self.model = DreamGoNet(num_blocks=2, num_channels=self.num_channels, label_smoothing=0.0)
         self.x = tf.zeros([self.batch_size, 19, 19, NUM_FEATURES], tf.float16)
@@ -150,7 +150,7 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
 
 class DreamGoNetLzTest(unittest.TestCase, DreamGoNetBase):
     def setUp(self):
-        self.batch_size = 2
+        self.batch_size = 5
         self.num_channels = 48
         self.model = DreamGoNet(num_blocks=2, num_channels=self.num_channels, lz_weights='fixtures/d645af9.gz')
         self.x = tf.zeros([self.batch_size, 19, 19, NUM_FEATURES], tf.float16)
