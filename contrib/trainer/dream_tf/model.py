@@ -62,11 +62,11 @@ class DreamGoNet(tf.keras.Model):
         if self.learning_rate is None:
             self.learning_rate = WarmupExponentialDecaySchedule()
 
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
-        self.optimizer = tfa.optimizers.SWA(self.optimizer)
+        self.adam_optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
+        self.swa_optimizer = tfa.optimizers.SWA(self.adam_optimizer)
 
         # compile the keras model
-        self.compile(optimizer=self.optimizer)
+        self.compile(optimizer=self.swa_optimizer)
 
         # loss metrics
         self.loss_metric = tf.keras.metrics.Mean(name='loss')
@@ -87,7 +87,7 @@ class DreamGoNet(tf.keras.Model):
 
         [1] https://arxiv.org/abs/1803.05407 """
 
-        self.optimizer.assign_average_vars(self.tower.get_weights())
+        self.swa_optimizer.assign_average_vars(self.tower.get_weights())
 
         # re-compute batch normalization statistics by walking through the
         # dataset in training mode.
