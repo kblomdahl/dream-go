@@ -20,6 +20,8 @@
 
 import json
 import sys
+import os
+import os.path
 
 import tensorflow as tf
 
@@ -35,6 +37,13 @@ def setUp():
     tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
     for physical_device in tf.config.list_physical_devices('GPU'):
         tf.config.experimental.set_memory_growth(physical_device, True)
+
+def get_latest_checkpoint(checkpoint_dir):
+    files = [file for file in os.listdir(checkpoint_dir) if file.endswith('.h5')]
+    latest_checkpoint = max(files, key=lambda file: os.path.getmtime(f'{checkpoint_dir}/{file}'))
+
+    if latest_checkpoint is not None:
+        return f'{checkpoint_dir}/{latest_checkpoint}'
 
 def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
     config = Config(args)
@@ -68,7 +77,7 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
         _ = model.optimizer.iterations
 
         # restore the checkpoint
-        latest_checkpoint = tf.train.latest_checkpoint(model_dir)
+        latest_checkpoint = get_latest_checkpoint(model_dir)
         model.load_weights(latest_checkpoint)
 
     if config.is_start() or config.is_resume():
@@ -80,7 +89,7 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
         )
 
         if config.warm_start:
-            latest_checkpoint = tf.train.latest_checkpoint(config.warm_start)
+            latest_checkpoint = get_latest_checkpoint(config.warm_start)
             model.load_weights(latest_checkpoint, skip_mismatch=True)
 
         model.fit(
