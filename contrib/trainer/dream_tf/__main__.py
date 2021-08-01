@@ -114,6 +114,7 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
     elif config.is_verify():
         # iterate over the entire dataset and collect the metric, which we will
         # then pretty-print as a JSON object to standard output
+        model.assign_average_vars(xs=input_fn(files=config.files, batch_size=max(1, config.batch_size // 8), is_training=None))
         results = model.evaluate(
             x=input_fn(
                 files=config.files,

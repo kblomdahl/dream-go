@@ -47,11 +47,12 @@ class MlpBlock(tf.keras.layers.Layer):
 class MixerBlock(tf.keras.layers.Layer):
     """ https://arxiv.org/abs/2105.01601 """
 
-    def __init__(self, *, tokens_mlp_dims, channels_mlp_dims):
+    def __init__(self, *, tokens_mlp_dims, channels_mlp_dims, residual=True):
         super(MixerBlock, self).__init__()
 
         self.tokens_mlp_dims = tokens_mlp_dims
         self.channels_mlp_dims = channels_mlp_dims
+        self.residual = residual
 
     @property
     def suffix(self):
@@ -69,6 +70,12 @@ class MixerBlock(tf.keras.layers.Layer):
         self.mlp_block_2 = MlpBlock(self.channels_mlp_dims)
         self.restore = Reshape(input_shapes[1:])
 
+    def residual_connection(self, x, z):
+        if self.residual:
+            return x + z
+        else:
+            return x
+
     def call(self, x, training=True):
         def _forward(x, is_recomputing=False):
             """ Returns the result of the forward inference pass on `x` """
@@ -78,9 +85,9 @@ class MixerBlock(tf.keras.layers.Layer):
             y = tf.transpose(z, [0, 2, 1])
             y = self.mlp_block_1(y, training=training, is_recomputing=is_recomputing)
             y = tf.transpose(y, [0, 2, 1])
-            z = tf.nn.relu(z + y)
+            z = tf.nn.relu(self.residual_connection(y, z))
             y = self.mlp_block_2(z, training=training, is_recomputing=is_recomputing)
 
-            return tf.nn.relu(x + self.restore(y))
+            return tf.nn.relu(self.residual_connection(self.restore(y), x))
 
         return recompute_grad(_forward)(x)

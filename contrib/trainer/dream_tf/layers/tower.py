@@ -21,7 +21,6 @@
 import tensorflow as tf
 
 from .batch_norm import BatchNormConv2D
-from .mixer_block import MixerBlock
 from .policy_head import PolicyHead
 from .residual_block import ResidualBlock
 from .value_head import ValueHead
@@ -69,10 +68,7 @@ class Tower(tf.keras.layers.Layer):
         return out
 
     def build_stem_layer(self, input_shapes, i):
-        if i % 2 == 0:
-            return ResidualBlock()
-        else:
-            return MixerBlock(tokens_mlp_dims=361, channels_mlp_dims=self.num_channels)
+        return ResidualBlock()
 
     def build(self, input_shapes):
         self.num_blocks_ = tf.Variable(self.num_blocks, False, name='num_blocks', dtype=tf.int32)
