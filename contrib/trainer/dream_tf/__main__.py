@@ -34,6 +34,8 @@ from .optimizers.schedules.learning_rate_schedule import WarmupExponentialDecayS
 from .ffi.libdg_go import get_num_features
 
 def setUp():
+    if os.getenv('DG_CHECK_NUMERICS'):
+        tf.debugging.enable_check_numerics()
     tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
     for physical_device in tf.config.list_physical_devices('GPU'):
         tf.config.experimental.set_memory_growth(physical_device, True)
@@ -62,17 +64,24 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
     )
     model = model_fn(
         num_blocks=config.num_blocks,
+        num_dynamics_blocks=config.num_dynamics_blocks,
+        num_unrolls=config.num_unrolls,
         num_channels=config.num_channels,
+        num_dynamics_channels=config.num_dynamics_channels,
         num_value_channels=config.num_value_channels,
         num_policy_channels=config.num_policy_channels,
+        batch_size=config.batch_size // config.num_unrolls,
+        discount_factor=config.discount_factor,
         weight_decay=config.weight_decay,
         label_smoothing=config.label_smoothing,
+        clipnorm=config.clipnorm,
         learning_rate_schedule=learning_rate,
-        lz_weights=config.lz_weights
+        lz_weights=config.lz_weights,
+        run_eagerly=config.run_eagerly
     )
 
     if config.has_model() or not config.is_start():
-        # this will build all of the necessary variables in the model
+        # this will build all of the necessary variables in the model and optimizer
         _ = model(tf.zeros([1, 19, 19, get_num_features()], tf.float16), training=False)
         _ = model.optimizer.iterations
 
@@ -95,7 +104,8 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
         model.fit(
             x=input_fn(
                 files=config.files,
-                batch_size=config.batch_size,
+                batch_size=config.batch_size // config.num_unrolls,
+                num_unrolls=config.num_unrolls,
                 is_training=True
             ),
             epochs=config.epochs,
@@ -107,18 +117,20 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
             ],
             validation_data=input_fn(
                 files=config.files,
-                batch_size=config.batch_size,
+                batch_size=config.batch_size // config.num_unrolls,
+                num_unrolls=config.num_unrolls,
                 is_training=False
             )
         )
     elif config.is_verify():
         # iterate over the entire dataset and collect the metric, which we will
         # then pretty-print as a JSON object to standard output
-        model.assign_average_vars(xs=input_fn(files=config.files, batch_size=max(1, config.batch_size // 8), is_training=None))
+        model.assign_average_vars(xs=input_fn(files=config.files, batch_size=max(1, config.batch_size // (8 * config.num_unrolls)), is_training=None))
         results = model.evaluate(
             x=input_fn(
                 files=config.files,
-                batch_size=config.batch_size,
+                batch_size=config.batch_size // config.num_unrolls,
+                num_unrolls=config.num_unrolls,
                 is_training=False
             ),
             verbose=0,
@@ -133,7 +145,7 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
             indent=4
         ))
     elif config.is_dump():
-        model.assign_average_vars(xs=input_fn(files=config.files, batch_size=max(1, config.batch_size // 8), is_training=None))
+        model.assign_average_vars(xs=input_fn(files=config.files, batch_size=max(1, config.batch_size // (8 * config.num_unrolls)), num_unrolls=config.num_unrolls, is_training=None))
         model.dump_to(sys.stdout)
 
 

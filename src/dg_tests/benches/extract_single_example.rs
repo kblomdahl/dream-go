@@ -34,7 +34,7 @@ fn all_succeed(b: &mut Bencher) {
     b.iter(move || {
         for line in &lines {
             let code = unsafe {
-                extract_single_example(line.as_ptr(), &mut example)
+                extract_single_example(line.as_ptr(), &mut example, 1)
             };
 
             assert_eq!(code, 0, "Code {}: {:?}", code, line);

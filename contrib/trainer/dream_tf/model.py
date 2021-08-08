@@ -26,35 +26,56 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 from tensorboard.plugins.hparams import api as hp
 
+from .layers import NUM_FEATURES
 from .layers.leela_zero import leela_zero
-from .layers.tower import Tower
+from .layers.dynamics import Dynamics
+from .layers.predictions import Predictions
+from .layers.features_to_repr import FeaturesToRepr
 from .optimizers.schedules.learning_rate_schedule import WarmupExponentialDecaySchedule
 
 class DreamGoNet(tf.keras.Model):
     def __init__(
         self,
         *,
+        batch_size,
         num_blocks,
+        num_dynamics_blocks,
         num_channels,
+        num_dynamics_channels=None,
         num_policy_channels=8,
         num_value_channels=2,
+        num_unrolls=1,
+        discount_factor=1.0,
         weight_decay=1e-5,
         label_smoothing=0.2,
+        clipnorm=1.0,
         learning_rate_schedule=None,
-        lz_weights=None
+        lz_weights=None,
+        run_eagerly=False
     ):
         super(DreamGoNet, self).__init__()
 
         self.dg_module = tf.load_op_library('libdg_tf.so')
+        self.batch_size = batch_size
         self.num_channels = num_channels
+        self.num_dynamics_channels = num_dynamics_channels or num_channels
         self.num_policy_channels = num_policy_channels
+        self.num_unrolls = num_unrolls
+        self.discount_factor = discount_factor
         self.weight_decay = weight_decay
         self.label_smoothing = label_smoothing
         self.learning_rate = learning_rate_schedule
         self.lz_weights = lz_weights
-        self.tower = Tower(
+        self.features_to_repr = FeaturesToRepr(
             num_blocks=num_blocks,
             num_channels=num_channels,
+            num_output_channels=self.num_dynamics_channels
+        )
+        self.dynamics = Dynamics(
+            num_blocks=num_dynamics_blocks,
+            num_channels=self.num_dynamics_channels
+        )
+        self.predictions = Predictions(
             num_policy_channels=num_policy_channels,
             num_value_channels=num_value_channels
         )
@@ -62,11 +83,17 @@ class DreamGoNet(tf.keras.Model):
         if self.learning_rate is None:
             self.learning_rate = WarmupExponentialDecaySchedule()
 
-        self.adam_optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
+        self.adam_optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate, clipnorm=clipnorm)
         self.swa_optimizer = tfa.optimizers.SWA(self.adam_optimizer)
 
         # compile the keras model
-        self.compile(optimizer=self.swa_optimizer)
+        self.compile(
+            run_eagerly=run_eagerly,
+            optimizer=tf.keras.mixed_precision.LossScaleOptimizer(
+                self.swa_optimizer,
+                initial_scale=128.0
+            )
+        )
 
         # loss metrics
         self.loss_metric = tf.keras.metrics.Mean(name='loss')
@@ -82,32 +109,72 @@ class DreamGoNet(tf.keras.Model):
         self.accuracy_value_metric = tf.keras.metrics.Accuracy(name='accuracy/value')
         self.accuracy_ownership_metric = tf.keras.metrics.Accuracy(name='accuracy/ownership')
 
+    @property
+    def l2_weights(self):
+        return self.features_to_repr.l2_weights + self.dynamics.l2_weights + self.predictions.l2_weights
+
     def assign_average_vars(self, xs):
         """ Averaging Weights Leads to Wider Optima and Better Generalization [1]
 
         [1] https://arxiv.org/abs/1803.05407 """
 
-        self.swa_optimizer.assign_average_vars(self.tower.get_weights())
+        self.swa_optimizer.assign_average_vars(self.features_to_repr.get_weights())
+        self.swa_optimizer.assign_average_vars(self.dynamics.get_weights())
+        self.swa_optimizer.assign_average_vars(self.predictions.get_weights())
 
         # re-compute batch normalization statistics by walking through the
         # dataset in training mode.
-        for (x, _) in xs:
-            self.tower(x, training=True)
+        for (x, labels) in xs:
+            self(x, labels=labels, training=True)
 
     def dump_to(self, out):
         json.dump(
             {
                 'num_channels:0': self.num_channels,
                 'num_samples:0': self.num_policy_channels,
-                **self.tower.as_dict()
+                **self.features_to_repr.as_dict(),
+                **self.dynamics.as_dict(),
+                **self.predictions.as_dict(),
             },
             fp=out,
             sort_keys=True
         )
 
-    def call(self, inputs, training=True):
-        value_hat, value_ownership_hat, policy_hat, ownership_hat, tower_hat = self.tower(
-            inputs,
+    def merge_unrolls(self, x):
+        shape = tf.shape(x)
+
+        return tf.reshape(
+            x,
+            tf.concat(
+                [
+                    [shape[0] * shape[1]],
+                    shape[2:]
+                ],
+                axis=0
+            )
+        )
+
+    def call(self, inputs, labels=None, training=True):
+        if labels is None:
+            flat_states = self.features_to_repr(
+                self.merge_unrolls(inputs),
+                training=training
+            )
+        else:
+            states = [
+                self.features_to_repr(inputs[:, 0, :, :, :], training=training)
+            ]
+
+            for i in range(1, self.num_unrolls):
+                states.append(
+                    self.dynamics([states[-1], inputs[:, i, :, :, :]], training=training)
+                )
+
+            flat_states = tf.stack(states, axis=1)
+            flat_states = self.merge_unrolls(flat_states)
+
+        value_hat, value_ownership_hat, policy_hat, ownership_hat, tower_hat = self.predictions(
+            flat_states,
             training=training
         )
 
@@ -120,7 +187,7 @@ class DreamGoNet(tf.keras.Model):
         }
 
     def ownership_loss(self, y_true, y_pred, *, mask):
-        y_true = tf.stack([(1 + y_true) / 2, (1 - y_true) / 2], axis=2)
+        y_true = tf.stack([(1 + y_true) / 2, (1 - y_true) / 2], axis=2)  # y_true is -1 or +1 depending on ownership
         y_pred = tf.stack([y_pred, -y_pred], axis=2)
         loss = tf.keras.losses.CategoricalCrossentropy(
             reduction=tf.keras.losses.Reduction.NONE,
@@ -139,28 +206,37 @@ class DreamGoNet(tf.keras.Model):
         return tf.reshape(loss * mask * mask_scale, [-1])
 
     def custom_loss(self, y_true, y_pred):
+        discounts = tf.reshape(
+            tf.repeat(
+                tf.constant([pow(self.discount_factor, i) for i in range(self.num_unrolls)], tf.float32),
+                tf.size(y_true['value']) // self.num_unrolls,
+                axis=0
+            ),
+            [-1]
+        )
+
         loss_policy = tf.reduce_mean(tf.keras.losses.categorical_crossentropy(
-            y_true['policy'],
+            self.merge_unrolls(y_true['policy']),
             y_pred['policy'],
             from_logits=True,
             label_smoothing=self.label_smoothing
-        ))
+        ) * discounts)
 
         loss_value = tf.reduce_mean(tf.keras.losses.huber(
-            y_true['value'],
+            self.merge_unrolls(y_true['value']),
             y_pred['value']
-        ))
+        ) * discounts)
 
         loss_ownership = tf.reduce_mean(self.ownership_loss(
-            y_true['ownership'],
+            self.merge_unrolls(y_true['ownership']),
             y_pred['ownership'],
-            mask=y_true['has_ownership']
-        ))
+            mask=self.merge_unrolls(y_true['has_ownership'])
+        ) * discounts)
 
         loss_l2 = tf.math.accumulate_n(
             [
                 tf.nn.l2_loss(weight)
-                for weight in self.tower.l2_weights
+                for weight in self.l2_weights
             ]
         )
 
@@ -178,22 +254,12 @@ class DreamGoNet(tf.keras.Model):
 
     def apply_lz_labels(self, labels):
         if self.lz_weights:
-            lz_value_hat, lz_policy_hat, lz_tower_hat = leela_zero(labels['lz_features'], self.lz_weights)
+            lz_features = self.merge_unrolls(labels['lz_features'])
+            lz_value_hat, lz_policy_hat, lz_tower_hat = leela_zero(lz_features, self.lz_weights)
 
-            labels['value'] = tf.cast(lz_value_hat, tf.float32)
-            labels['policy'] = tf.cast(lz_policy_hat, tf.float32)
+            labels['value'] = tf.reshape(tf.cast(lz_value_hat, tf.float32), labels['value'].shape)
+            labels['policy'] = tf.reshape(tf.cast(lz_policy_hat, tf.float32), labels['policy'].shape)
             labels['has_ownership'] = tf.zeros_like(labels['has_ownership'])
-
-    def get_scaled_loss(self, loss):
-        return 128.0 * loss
-
-    def get_unscaled_gradients(self, gradients):
-        recip_loss_scale = 1 / 128.0
-
-        return list([
-            recip_loss_scale * gradient
-            for gradient in gradients
-        ])
 
     @property
     def metrics(self):
@@ -218,11 +284,11 @@ class DreamGoNet(tf.keras.Model):
         self.loss_ownership_metric.update_state(losses['loss/ownership'])
         self.loss_l2_metric.update_state(losses['loss/l2'])
 
-        self.accuracy_policy_1_metric.update_state(y_true['policy'], y_pred['policy'])
-        self.accuracy_policy_3_metric.update_state(y_true['policy'], y_pred['policy'])
-        self.accuracy_policy_5_metric.update_state(y_true['policy'], y_pred['policy'])
-        self.accuracy_value_metric.update_state(tf.sign(y_true['value']), tf.sign(y_pred['value']))
-        self.accuracy_ownership_metric.update_state(tf.sign(y_true['ownership']), tf.sign(y_pred['ownership']), sample_weight=tf.repeat(y_true['has_ownership'], 361, axis=1))
+        self.accuracy_policy_1_metric.update_state(self.merge_unrolls(y_true['policy']), y_pred['policy'])
+        self.accuracy_policy_3_metric.update_state(self.merge_unrolls(y_true['policy']), y_pred['policy'])
+        self.accuracy_policy_5_metric.update_state(self.merge_unrolls(y_true['policy']), y_pred['policy'])
+        self.accuracy_value_metric.update_state(tf.sign(self.merge_unrolls(y_true['value'])), tf.sign(y_pred['value']))
+        self.accuracy_ownership_metric.update_state(tf.sign(self.merge_unrolls(y_true['ownership'])), tf.sign(y_pred['ownership']), sample_weight=tf.repeat(self.merge_unrolls(y_true['has_ownership']), 361, axis=1))
 
     def custom_image_metrics(self, x, y_true, y_pred):
         def to_heat_image(x, heat):
@@ -234,29 +300,45 @@ class DreamGoNet(tf.keras.Model):
 
         additional_metrics = {}
 
-        for i in range(5):
+        for i in range(self.num_unrolls):
             additional_metrics.update({
-                f'ownership/predictions_{i}': to_heat_image(x[i, :, :, :], tf.reshape(y_pred['ownership'][i, :], [19, 19])),
-                f'ownership/labels_{i}': to_heat_image(x[i, :, :, :], tf.reshape(y_true['ownership'][i, :], [19, 19])),
-                f'policy/predictions_{i}': to_heat_image(x[i, :, :, :], tf.reshape(tf.nn.softmax(y_pred['policy'][i, :361]), [19, 19])),
-                f'policy/labels_{i}': to_heat_image(x[i, :, :, :], tf.reshape(y_true['policy'][i, :361], [19, 19]))
+                f'ownership/predictions_{i}': to_heat_image(x[0, i, :, :, :], tf.reshape(y_pred['ownership'][i, :], [19, 19])),
+                f'ownership/labels_{i}': to_heat_image(x[0, i, :, :, :], tf.reshape(y_true['ownership'][0, i, :], [19, 19])),
+                f'policy/predictions_{i}': to_heat_image(x[0, i, :, :, :], tf.reshape(tf.nn.softmax(y_pred['policy'][i, :361]), [19, 19])),
+                f'policy/labels_{i}': to_heat_image(x[0, i, :, :, :], tf.reshape(y_true['policy'][0, i, :361], [19, 19]))
             })
 
+        for i in range(self.num_dynamics_channels):
+            additional_metrics.update({
+                f'representation/{i:03}': to_heat_image(x[0, 0, :, :, :], tf.cast(y_pred['tower'][0, :, :, i], tf.float32))
+            })
+
+        for i in range(self.num_unrolls):
+            for j in range(NUM_FEATURES):
+                additional_metrics.update({
+                    f'features/{i:02}_{j:02}': to_heat_image(x[0, i, :, :, :], tf.cast(x[0, i, :, :, j], tf.float32))
+                })
+
         return additional_metrics
+
+    def custom_gradient(self, tape, loss):
+        trainable_variables = self.trainable_variables
+        gradients = tape.gradient(loss, trainable_variables)
+
+        return gradients, trainable_variables
 
     def train_step(self, data):
         x, labels = data
         self.apply_lz_labels(labels)
 
         with tf.GradientTape() as tape:
-            y_hat = self(x, training=True)
+            y_hat = self(x, labels=labels, training=True)
             loss, losses = self.custom_loss(labels, y_hat)
-            loss = self.get_scaled_loss(loss)
+            loss = self.optimizer.get_scaled_loss(loss)
 
-        trainable_vars = self.trainable_variables
-        gradients = tape.gradient(loss, trainable_vars)
-        gradients = self.get_unscaled_gradients(gradients)
-        weight_decay_ops = [var.assign_sub(self.weight_decay * var) for var in self.tower.l2_weights]
+        gradients, trainable_vars = self.custom_gradient(tape, loss)
+        gradients = self.optimizer.get_unscaled_gradients(gradients)
+        weight_decay_ops = [var.assign_sub(self.weight_decay * var) for var in self.l2_weights]
 
         with tf.control_dependencies(weight_decay_ops):
             self.optimizer.apply_gradients(zip(gradients, trainable_vars))
@@ -271,7 +353,7 @@ class DreamGoNet(tf.keras.Model):
         x, labels = data
         self.apply_lz_labels(labels)
 
-        y_hat = self(x, training=False)
+        y_hat = self(x, labels=labels, training=False)
         loss, losses = self.custom_loss(labels, y_hat)
         self.custom_metrics(labels, y_hat, losses=losses)
         additional_metrics = self.custom_image_metrics(x, labels, y_hat)
@@ -322,6 +404,7 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
 
         with self.writer.as_default():
             tf.summary.scalar('learning_rate', self.learning_rate(self.step()), step=self.step())
+            tf.summary.scalar('loss_scale', self.model.optimizer.loss_scale, step=self.step())
 
         self.global_step_sec.update_state(1.0 / elapsed_sec)
 
@@ -330,6 +413,16 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
             for name, value in logs.items():
                 if isinstance(value, (np.ndarray, np.generic)):
                     tf.summary.image(name, value, step=self.step(), max_outputs=100)
+        self.writer_eval.flush()
+
+    def on_epoch_begin(self, epoch, logs=None):
+        with self.writer.as_default():
+            for weight in self.model.trainable_variables:
+                tf.summary.scalar(f'norms/{weight.name}', tf.norm(weight), step=self.step())
+            for weight in self.model.non_trainable_weights:
+                if weight.dtype == tf.float32 or weight.dtype == tf.float16:
+                    tf.summary.scalar(f'norms/{weight.name}', tf.norm(weight), step=self.step())
+        self.writer.flush()
 
     def on_epoch_end(self, epoch, logs):
         for name, value in logs.items():
@@ -350,6 +443,9 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
                 tf.summary.scalar('learning_rate/p_decreasing_90', self.early_stopping.is_decreasing(q=90), step=self.step())
                 tf.summary.scalar('learning_rate/slope', self.early_stopping.slope(), step=self.step())
                 tf.summary.scalar('learning_rate/slope_90', self.early_stopping.slope(q=90), step=self.step())
+
+        self.writer.flush()
+        self.writer_eval.flush()
 
         # reset statistics
         self.global_step_sec = tf.keras.metrics.Mean('global_step/sec')

@@ -60,7 +60,7 @@ class TestUtils(object):
             outputs=outputs(input_layer)
         )
         model.compile(
-            optimizer=tf.keras.optimizers.SGD(learning_rate or 1e-4),
+            optimizer=tf.keras.optimizers.SGD(learning_rate or 0.01, clipnorm=20.0),
             loss=loss
         )
 

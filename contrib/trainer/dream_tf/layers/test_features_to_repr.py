@@ -1,4 +1,4 @@
-# Copyright (c) 2020 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+# Copyright (c) 2021 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,35 +24,34 @@ import tensorflow as tf
 import numpy as np
 
 from ..test_common import TestUtils
-from .value_head import ValueHead
+from .features_to_repr import FeaturesToRepr
 
-class ValueHeadTest(unittest.TestCase, TestUtils):
+class FeaturesToReprTest(unittest.TestCase, TestUtils):
     def setUp(self):
-        self.batch_size = 1
-        self.num_channels = 32
+        self.batch_size = 2
+        self.num_channels = 16
+        self.num_output_channels = 8
         self.x = tf.zeros([self.batch_size, 19, 19, self.num_channels], tf.float16)
-        self.value_head = ValueHead(num_samples=2)
+        self.layer = FeaturesToRepr(num_blocks=2, num_channels=self.num_channels, num_output_channels=self.num_output_channels)
 
     def test_shape(self):
-        value_hat, ownership_hat, value_ownership_hat = self.value_head(self.x, training=True)
-        self.assertEqual(value_hat.shape, [self.batch_size, 1])
-        self.assertEqual(ownership_hat.shape, [self.batch_size, 361])
-        self.assertEqual(value_ownership_hat.shape, [self.batch_size, 361, 2])
+        y = self.layer(self.x)
 
-    def test_data_type(self):
-        value_hat, ownership_hat, value_ownership_hat = self.value_head(self.x, training=True)
-        self.assertEqual(value_hat.dtype, tf.float32)
-        self.assertEqual(ownership_hat.dtype, tf.float32)
-        self.assertEqual(value_ownership_hat.dtype, tf.float32)
+        self.assertEqual(y.shape, [self.batch_size, 19, 19, self.num_output_channels])
+
+    def test_dtype(self):
+        y = self.layer(self.x)
+
+        self.assertEqual(y.dtype, tf.float16)
 
     def test_fit(self):
         history = self.fit_regression(
             inputs= \
                 np.random.random([1, 19, 19, self.num_channels])
                     .repeat(self.batch_size, axis=0),
-            outputs=self.value_head,
+            outputs=self.layer,
             labels= \
-                (2.0 * np.random.random([1, 1]) - 1.0)
+                np.random.random([1, 19, 19, self.num_output_channels])
                     .repeat(self.batch_size, axis=0)
         )
 

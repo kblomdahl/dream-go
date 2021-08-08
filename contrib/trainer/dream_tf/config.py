@@ -26,10 +26,14 @@ from tensorboard.plugins.hparams import api as hp
 
 class Config:
     HP_BATCH_SIZE = hp.HParam('batch_size', hp.IntInterval(1, 8196))
+    HP_NUM_UNROLLS = hp.HParam('num_unrolls', hp.IntInterval(0, 32))
     HP_NUM_BLOCKS = hp.HParam('num_blocks', hp.IntInterval(0, 80))
+    HP_NUM_DYNAMICS_BLOCKS = hp.HParam('num_dynamics_blocks', hp.IntInterval(0, 80))
     HP_NUM_CHANNELS = hp.HParam('num_channels', hp.IntInterval(1, 2048))
+    HP_NUM_DYNAMICS_CHANNELS = hp.HParam('num_dynamics_channels', hp.IntInterval(1, 2048))
     HP_NUM_POLICY_CHANNELS = hp.HParam('num_policy_channels', hp.IntInterval(1, 2048))
     HP_NUM_VALUE_CHANNELS = hp.HParam('num_value_channels', hp.IntInterval(1, 2048))
+    HP_DISCOUNT_FACTOR = hp.HParam('discount_factor', hp.RealInterval(0.0, 1.0))
     HP_WEIGHT_DECAY = hp.HParam('weight_decay', hp.RealInterval(0.0, 1.0))
     HP_LABEL_SMOOTHING = hp.HParam('label_smoothing', hp.RealInterval(0.0, 1.0))
     HP_INITIAL_LR = hp.HParam('initial_lr', hp.RealInterval(0.0, 1.0))
@@ -40,6 +44,7 @@ class Config:
     HP_ES_NUM_WARMUP_STEPS = hp.HParam('es_num_warmup_steps', hp.IntInterval(0, 100000))
     HP_ES_NUM_SAMPLES = hp.HParam('es_num_samples', hp.IntInterval(3, 100000))
     HP_ES_MAX_SLOPE = hp.HParam('es_max_slope', hp.RealInterval(-1.0, 0.0))
+    HP_CLIPNORM = hp.HParam('clipnorm', hp.RealInterval(0.0, 1000.0))
     HP_EPOCHS = hp.HParam('epochs', hp.IntInterval(0, 100000))
     HP_LZ_WEIGHTS = hp.HParam('lz_weights')
     HP_FILES = hp.HParam('files')
@@ -49,10 +54,14 @@ class Config:
         self.args = self.parse_args(args, exit_on_error=exit_on_error)
         self.hparams = {
             self.HP_BATCH_SIZE: self.args.batch_size,
+            self.HP_NUM_UNROLLS: self.args.num_unrolls,
             self.HP_NUM_BLOCKS: self.args.num_blocks,
+            self.HP_NUM_DYNAMICS_BLOCKS: self.args.num_dynamics_blocks,
             self.HP_NUM_CHANNELS: self.args.num_channels,
+            self.HP_NUM_DYNAMICS_CHANNELS: self.args.num_dynamics_channels,
             self.HP_NUM_POLICY_CHANNELS: self.args.num_policy_channels,
             self.HP_NUM_VALUE_CHANNELS: self.args.num_value_channels,
+            self.HP_DISCOUNT_FACTOR: self.args.discount_factor,
             self.HP_WEIGHT_DECAY: self.args.weight_decay,
             self.HP_LABEL_SMOOTHING: self.args.label_smoothing,
             self.HP_INITIAL_LR: self.args.initial_learning_rate,
@@ -63,6 +72,7 @@ class Config:
             self.HP_ES_NUM_WARMUP_STEPS: self.args.num_es_warmup_steps,
             self.HP_ES_NUM_SAMPLES: self.args.num_es_samples,
             self.HP_ES_MAX_SLOPE: self.args.max_es_slope,
+            self.HP_CLIPNORM: self.args.clipnorm,
             self.HP_LZ_WEIGHTS: self.args.lz_weights or '',
             self.HP_FILES: ','.join(self.args.files) or '',
             self.HP_WARM_START: self.args.warm_start or '',
@@ -83,23 +93,29 @@ class Config:
         opt_group.add_argument('--name', nargs='?', help='the name of this session')
         opt_group.add_argument('--warm-start', nargs='?', help='the model to warm-start from')
         opt_group.add_argument('--lz-weights', nargs='?', help='leela-zero weights to use for semi-supervised learning')
+        opt_group.add_argument('--run-eagerly', action='store_true', help='run the model in eager mode')
 
         opt_group = parser.add_argument_group(title='model configuration')
         opt_group.add_argument('--batch-size', default=2048, nargs='?', type=int, metavar='N', help='the number of examples per mini-batch')
+        opt_group.add_argument('--num-unrolls', default=8, nargs='?', type=int, metavar='N', help='the number of board states per example')
         opt_group.add_argument('--num-channels', default=128, nargs='?', type=int, metavar='N', help='the number of channels per residual block')
-        opt_group.add_argument('--num-blocks', default=9, nargs='?', type=int, metavar='N', help='the number of residual blocks')
+        opt_group.add_argument('--num-blocks', default=9, nargs='?', type=int, metavar='N', help='the number of residual blocks in the representation')
+        opt_group.add_argument('--num-dynamics-blocks', default=9, nargs='?', type=int, metavar='N', help='the number of residual blocks in the dynamics')
+        opt_group.add_argument('--num-dynamics-channels', default=128, nargs='?', type=int, metavar='N', help='the number of channels in the dynamics')
         opt_group.add_argument('--num-value-channels', default=2, nargs='?', type=int, metavar='N', help='the number of channels in the value head')
         opt_group.add_argument('--num-policy-channels', default=8, nargs='?', type=int, metavar='N', help='the number of channels in the policy head')
-        opt_group.add_argument('--weight-decay', default=1e-5, nargs='?', type=float, metavar='N', help='the weight decay')
+        opt_group.add_argument('--discount-factor', default=1.0, nargs='?', type=float, metavar='N', help='the lambda discount factor')
+        opt_group.add_argument('--weight-decay', default=1e-6, nargs='?', type=float, metavar='N', help='the weight decay')
         opt_group.add_argument('--label-smoothing', default=0.2, nargs='?', type=float, metavar='N', help='the label smoothing')
         opt_group.add_argument('--initial-learning-rate', default=1e-4, nargs='?', type=float, metavar='N', help='the initial learning rate')
-        opt_group.add_argument('--max-learning-rate', default=0.01, nargs='?', type=float, metavar='N', help='the maximum learning rate after warmup')
+        opt_group.add_argument('--max-learning-rate', default=3e-4, nargs='?', type=float, metavar='N', help='the maximum learning rate after warmup')
         opt_group.add_argument('--num-warmup-steps', default=2500, nargs='?', type=int, metavar='N', help='the number of warmup steps')
         opt_group.add_argument('--num-decay-steps', default=240, nargs='?', type=int, metavar='N', help='the number of steps per learning rate decay')
         opt_group.add_argument('--decay-rate', default=0.97, nargs='?', type=float, metavar='N', help='the learning rate decay')
         opt_group.add_argument('--num-es-warmup-steps', default=5000, nargs='?', type=int, metavar='N', help='the number of steps to ignore in early stopping')
         opt_group.add_argument('--num-es-samples', default=50, nargs='?', type=int, metavar='N', help='the number of values to take into account during early stopping')
         opt_group.add_argument('--max-es-slope', default=-1e-7, nargs='?', type=float, metavar='N', help='the minimum slope allowed before early stopping')
+        opt_group.add_argument('--clipnorm', default=5.0, nargs='?', type=float, metavar='N', help='the gradient scaling norm')
         opt_group.add_argument('--epochs', default=500, nargs='?', type=int, metavar='N', help='the maximum epochs to train for')
 
         op_group = parser.add_mutually_exclusive_group(required=True)
@@ -138,6 +154,10 @@ class Config:
         return self.args.dump
 
     @property
+    def run_eagerly(self):
+        return self.args.run_eagerly
+
+    @property
     def files(self):
         return self.args.files
 
@@ -154,12 +174,24 @@ class Config:
         return self.hparams[self.HP_BATCH_SIZE]
 
     @property
+    def num_unrolls(self):
+        return self.hparams[self.HP_NUM_UNROLLS]
+
+    @property
     def num_blocks(self):
         return self.hparams[self.HP_NUM_BLOCKS]
 
     @property
+    def num_dynamics_blocks(self):
+        return self.hparams[self.HP_NUM_DYNAMICS_BLOCKS]
+
+    @property
     def num_channels(self):
         return self.hparams[self.HP_NUM_CHANNELS]
+
+    @property
+    def num_dynamics_channels(self):
+        return self.hparams[self.HP_NUM_DYNAMICS_CHANNELS]
 
     @property
     def num_policy_channels(self):
@@ -168,6 +200,10 @@ class Config:
     @property
     def num_value_channels(self):
         return self.hparams[self.HP_NUM_VALUE_CHANNELS]
+
+    @property
+    def discount_factor(self):
+        return self.hparams[self.HP_DISCOUNT_FACTOR]
 
     @property
     def weight_decay(self):
@@ -208,6 +244,10 @@ class Config:
     @property
     def max_es_slope(self):
         return self.hparams[self.HP_ES_MAX_SLOPE]
+
+    @property
+    def clipnorm(self):
+        return self.hparams[self.HP_CLIPNORM]
 
     @property
     def epochs(self):

@@ -26,22 +26,26 @@ def recompute_grad(func):
     def _forward(x):
         # calculate the forward pass, while keeping track of which variables
         # were accessed
-        with tf.GradientTape():
-            y = func(x, is_recomputing=False)
+        with tf.GradientTape() as tape:
+            with tape.stop_recording():
+                y = func(x, is_recomputing=False)
 
         def grad_fn(output_grad, variables=None):
             # re-calculate the gradient
             in_var = tf.identity(x)
 
-            with tf.control_dependencies([output_grad]):
-                y = func(in_var, is_recomputing=True)
+            with tf.GradientTape() as tape:
+                tape.watch(in_var)
+                tape.watch(variables)
 
-            grads = tf.gradients(
-                ys=[y],
-                xs=[in_var] + variables,
-                grad_ys=[output_grad],
-                gate_gradients=True,
-                aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N)
+                with tf.control_dependencies([output_grad]):
+                    y = func(in_var, is_recomputing=True)
+
+            grads = tape.gradient(
+                target=[y],
+                sources=[in_var] + variables,
+                output_gradients=[output_grad]
+            )
 
             return grads[:1], grads[1:]
 

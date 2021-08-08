@@ -27,10 +27,8 @@ using Eigen::half;
 
 struct Example {
     int index;
-    int index_next;
     int color;
     float policy[362];
-    float policy_next[362];
     float ownership[361];
     int winner;
     int number;
@@ -42,7 +40,8 @@ struct Example {
 extern "C" int get_num_features();
 extern "C" int extract_single_example(
     const char* raw_sgf_content,
-    Example* example
+    Example* examples,
+    int num_examples
 );
 
 /**
@@ -58,6 +57,7 @@ class SgfToFeaturesOp : public OpKernel {
 
         void Compute(OpKernelContext* context) override {
             const Tensor* sgf_tensor;
+            const Tensor* num_examples_tensor;
 
             OP_REQUIRES_OK(context, context->input("sgf", &sgf_tensor));
             OP_REQUIRES(
@@ -69,22 +69,42 @@ class SgfToFeaturesOp : public OpKernel {
                 )
             );
 
+            OP_REQUIRES_OK(context, context->input("num_examples", &num_examples_tensor));
+            OP_REQUIRES(
+                context,
+                TensorShapeUtils::IsScalar(num_examples_tensor->shape()),
+                errors::InvalidArgument(
+                    "Input `num_examples` should be a scalar but received shape: ",
+                    num_examples_tensor->shape().DebugString()
+                )
+            );
+            OP_REQUIRES(
+                context,
+                num_examples_tensor->flat<int>()(0) >= 1,
+                errors::InvalidArgument(
+                    "Input `num_examples` must be at least 1 but received: ",
+                    num_examples_tensor->flat<int>()(0)
+                )
+            );
+
             // run the internal operation
             const auto num_features = get_num_features();
             const auto features_size = 361 * num_features;
-            Example* example = (Example*)malloc(sizeof(Example) + sizeof(half) * features_size);
+            const auto num_examples = num_examples_tensor->flat<int>()(0);
+            const auto sizeof_example = sizeof(Example) + sizeof(half) * features_size;
+            Example* examples = (Example*)malloc(sizeof_example * num_examples);
             const auto sgf = sgf_tensor->flat<tstring>();
 
             const auto status = extract_single_example(
                 sgf(0).c_str(),
-                example
+                examples,
+                num_examples
             );
 
             // allocate output
             Tensor* lz_features_tensor;
             Tensor* features_tensor;
             Tensor* policy_tensor;
-            Tensor* policy_next_tensor;
             Tensor* winner_tensor;
             Tensor* ownership_tensor;
             Tensor* komi_tensor;
@@ -95,7 +115,7 @@ class SgfToFeaturesOp : public OpKernel {
                 context,
                 context->allocate_output(
                     0,
-                    TensorShape({19, 19, 18}),
+                    TensorShape({num_examples, 19, 19, 18}),
                     &lz_features_tensor
                 )
             );
@@ -104,7 +124,7 @@ class SgfToFeaturesOp : public OpKernel {
                 context,
                 context->allocate_output(
                     1,
-                    TensorShape({19, 19, num_features}),
+                    TensorShape({num_examples, 19, 19, num_features}),
                     &features_tensor
                 )
             );
@@ -113,7 +133,7 @@ class SgfToFeaturesOp : public OpKernel {
                 context,
                 context->allocate_output(
                     2,
-                    TensorShape({362}),
+                    TensorShape({num_examples, 362}),
                     &policy_tensor
                 )
             );
@@ -122,16 +142,7 @@ class SgfToFeaturesOp : public OpKernel {
                 context,
                 context->allocate_output(
                     3,
-                    TensorShape({362}),
-                    &policy_next_tensor
-                )
-            );
-
-            OP_REQUIRES_OK(
-                context,
-                context->allocate_output(
-                    4,
-                    TensorShape({1}),
+                    TensorShape({num_examples, 1}),
                     &winner_tensor
                 )
             );
@@ -139,8 +150,8 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    5,
-                    TensorShape({361}),
+                    4,
+                    TensorShape({num_examples, 361}),
                     &ownership_tensor
                 )
             );
@@ -148,8 +159,8 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    6,
-                    TensorShape({1}),
+                    5,
+                    TensorShape({num_examples, 1}),
                     &komi_tensor
                 )
             );
@@ -157,8 +168,8 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    7,
-                    TensorShape({1}),
+                    6,
+                    TensorShape({num_examples, 1}),
                     &boost_tensor
                 )
             );
@@ -166,172 +177,145 @@ class SgfToFeaturesOp : public OpKernel {
             OP_REQUIRES_OK(
                 context,
                 context->allocate_output(
-                    8,
-                    TensorShape({1}),
+                    7,
+                    TensorShape({num_examples, 1}),
                     &has_ownership_tensor
                 )
             );
 
+            auto lz_features = lz_features_tensor->flat<half>();
+            auto features = features_tensor->flat<half>();
+            auto policy = policy_tensor->flat<float>();
+            auto winner = winner_tensor->flat<float>();
+            auto ownership = ownership_tensor->flat<float>();
+            auto komi = komi_tensor->flat<float>();
+            auto boost = boost_tensor->flat<float>();
+            auto has_ownership = has_ownership_tensor->flat<float>();
+
             if (status == 0) {
-                // copy the leela-zero style features
-                auto lz_features = lz_features_tensor->flat<half>();
+                for (auto n = 0; n < num_examples; ++n) {
+                    auto example = (Example*)((char*)examples + n * sizeof_example);
 
-                for (auto i = 0; i < 6498; ++i) {
-                    lz_features(i) = example->lz_features[i];
-                }
-
-                // copy the features
-                auto features = features_tensor->flat<half>();
-
-                for (auto i = 0; i < features_size; ++i) {
-                    features(i) = example->features[i];
-                }
-
-                // copy policy and fix them up in case they are incomplete
-                auto policy = policy_tensor->flat<float>();
-                auto policy_next = policy_next_tensor->flat<float>();
-                float total_policy = 0.0;
-                float total_policy_next = 0.0;
-
-                for (auto i = 0; i < 362; ++i) {
-                    policy(i) = example->policy[i];
-                    policy_next(i) = example->policy_next[i];
-
-                    total_policy += policy(i);
-                    total_policy_next += policy_next(i);
-                }
-
-                OP_REQUIRES(
-                    context,
-                    total_policy >= 0.0 && total_policy <= 1.0,
-                    errors::InvalidArgument(
-                        "Output `policy` has invalid sum: ",
-                        total_policy
-                    )
-                );
-
-                OP_REQUIRES(
-                    context,
-                    example->index >= 0 && example->index < 362,
-                    errors::InvalidArgument(
-                        "Output `policy` has invalid index: ",
-                        example->index
-                    )
-                );
-
-                OP_REQUIRES(
-                    context,
-                    total_policy_next >= 0.0 && total_policy_next <= 1.0,
-                    errors::InvalidArgument(
-                        "Output `policy_next` has invalid sum: ",
-                        total_policy_next
-                    )
-                );
-
-                OP_REQUIRES(
-                    context,
-                    example->index_next >= 0 && example->index_next < 362,
-                    errors::InvalidArgument(
-                        "Output `policy_next` has invalid index: ",
-                        example->index_next
-                    )
-                );
-
-                policy(example->index) += 1.0 - total_policy;
-                policy_next(example->index_next) += 1.0 - total_policy_next;
-
-                // calculate the winner
-                auto winner = winner_tensor->flat<float>();
-
-                if (example->color == example->winner) {
-                    winner(0) = 1.0;
-                } else {
-                    winner(0) = -1.0;
-                }
-
-                // set ownership
-                auto ownership = ownership_tensor->flat<float>();
-                auto has_ownership = has_ownership_tensor->flat<float>();
-
-                has_ownership(0) = 0.0;
-                for (auto i = 0; i < 361; ++i) {
-                    ownership(i) = example->ownership[i];
-                    if (example->ownership[i] != 0.0) {
-                        has_ownership(0) = 1.0;
+                    for (auto i = 0; i < 6498; ++i) {
+                        lz_features(n * 6498 + i) = example->lz_features[i];
                     }
+
+                    // copy the features
+                    for (auto i = 0; i < features_size; ++i) {
+                        features(n * features_size + i) = example->features[i];
+                    }
+
+                    // copy policy and fix them up in case they are incomplete
+                    float total_policy = 0.0;
+
+                    for (auto i = 0; i < 362; ++i) {
+                        policy(n * 362 + i) = example->policy[i];
+
+                        total_policy += policy(n * 362 + i);
+                    }
+
+                    OP_REQUIRES(
+                        context,
+                        total_policy >= 0.0 && total_policy <= 1.0,
+                        errors::InvalidArgument(
+                            "Output `policy` has invalid sum: ",
+                            total_policy
+                        )
+                    );
+
+                    OP_REQUIRES(
+                        context,
+                        example->index >= 0 && example->index < 362,
+                        errors::InvalidArgument(
+                            "Output `policy` has invalid index: ",
+                            example->index
+                        )
+                    );
+
+                    policy(n * 362 + example->index) += 1.0 - total_policy;
+
+                    // calculate the winner
+                    if (example->color == example->winner) {
+                        winner(n) = 1.0;
+                    } else {
+                        winner(n) = -1.0;
+                    }
+
+                    // set ownership
+                    has_ownership(n) = 0.0;
+                    for (auto i = 0; i < 361; ++i) {
+                        ownership(n * 361 + i) = example->ownership[i];
+                        if (example->ownership[i] != 0.0) {
+                            has_ownership(n) = 1.0;
+                        }
+                    }
+
+                    // set komi
+                    komi(n) = example->komi;
+                    if (example->color == 1) { // is black
+                        komi(n) = -komi(n);
+                    }
+
+                    // set boost
+                    boost(n) = boost_for_move_number(example->number);
                 }
-
-                // set komi
-                auto komi = komi_tensor->flat<float>();
-
-                komi(0) = example->komi;
-                if (example->color == 1) { // is black
-                    komi(0) = -komi(0);
-                }
-
-                // set boost
-                auto boost = boost_tensor->flat<float>();
-
-                boost(0) = boost_for_move_number(example->number);
             } else {
                 // zero out the labels, which we use to determine if it
                 // succeeded or not.
                 //
                 // do not bother with the features, since they are large and
                 // we do not check them anyway.
-                auto policy = policy_tensor->flat<float>();
-                auto policy_next = policy_next_tensor->flat<float>();
-                auto winner = winner_tensor->flat<float>();
-                auto ownership = ownership_tensor->flat<float>();
-                auto komi = komi_tensor->flat<float>();
-                auto boost = boost_tensor->flat<float>();
-                auto has_ownership = has_ownership_tensor->flat<float>();
+                for (auto n = 0; n < num_examples; ++n) {
+                    for (auto i = 0; i < 6498; ++i) {
+                        lz_features(n * 6498 + i) = Eigen::half(0.0f);
+                    }
 
-                for (auto i = 0; i < 362; ++i) {
-                    policy(i) = 0.0;
-                    policy_next(i) = 0.0;
+                    for (auto i = 0; i < features_size; ++i) {
+                        features(n * features_size + i) = Eigen::half(0.0f);
+                    }
+
+                    for (auto i = 0; i < 362; ++i) {
+                        policy(n * 362 + i) = 0;
+                    }
+
+                    for (auto i = 0; i < 361; ++i) {
+                        ownership(n * 361 + i) = 0;
+                    }
+
+                    winner(n) = 0.0;
+                    komi(n) = 0.0;
+                    boost(n) = 0.0;
+                    has_ownership(n) = 0.0;
                 }
-
-                for (auto i = 0; i < 361; ++i) {
-                    ownership(i) = 0.0;
-                }
-
-                winner(0) = 0.0;
-                komi(0) = 0.0;
-                boost(0) = 0.0;
-                has_ownership(0) = 0.0;
             }
 
-            free(example);
+            free(examples);
         }
 };
 
 REGISTER_OP("SgfToFeatures")
     .Input("sgf: string")
+    .Input("num_examples: int32")
     .Output("lz_features: float16")
     .Output("features: float16")
     .Output("policy: float32")
-    .Output("policy_next: float32")
     .Output("winner: float32")
     .Output("ownership: float32")
     .Output("komi: float32")
     .Output("boost: float32")
     .Output("has_ownership: float32")
     .SetShapeFn([](InferenceContext* c) {
-        std::vector<DimensionHandle> dims;
-        dims.emplace_back(c->MakeDim(19));
-        dims.emplace_back(c->MakeDim(19));
-        dims.emplace_back(c->MakeDim(get_num_features()));
+        DimensionHandle n;
+        TF_RETURN_IF_ERROR(c->MakeDimForScalarInput(1, &n));
 
-        c->set_output(0, c->MakeShape({19, 19, 18})); // features
-        c->set_output(1, c->MakeShape(dims)); // features
-        c->set_output(2, c->MakeShape({362})); // policy
-        c->set_output(3, c->MakeShape({362})); // policy_next
-        c->set_output(4, c->MakeShape({1})); // value
-        c->set_output(5, c->MakeShape({361})); // ownership
-        c->set_output(6, c->MakeShape({1})); // komi
-        c->set_output(7, c->MakeShape({1})); // boost
-        c->set_output(8, c->MakeShape({1})); // has_ownership
+        c->set_output(0, c->MakeShape({n, 19, 19, 18})); // lz_features
+        c->set_output(1, c->MakeShape({n, 19, 19, get_num_features()})); // features
+        c->set_output(2, c->MakeShape({n, 362})); // policy
+        c->set_output(3, c->MakeShape({n, 1})); // value
+        c->set_output(4, c->MakeShape({n, 361})); // ownership
+        c->set_output(5, c->MakeShape({n, 1})); // komi
+        c->set_output(6, c->MakeShape({n, 1})); // boost
+        c->set_output(7, c->MakeShape({n, 1})); // has_ownership
 
         return Status::OK();
     });

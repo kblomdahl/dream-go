@@ -57,17 +57,29 @@ class ConfigTest(unittest.TestCase, TestUtils):
     def test_batch_size(self):
         self.assertEqual(Config(['--start', '--batch-size', '32'], exit_on_error=False).batch_size, 32)
 
+    def test_num_unrolls(self):
+        self.assertEqual(Config(['--start', '--num-unrolls', '2'], exit_on_error=False).num_unrolls, 2)
+
     def test_num_channels(self):
         self.assertEqual(Config(['--start', '--num-channels', '8'], exit_on_error=False).num_channels, 8)
 
+    def test_num_dynamics_channels(self):
+        self.assertEqual(Config(['--start', '--num-dynamics-channels', '8'], exit_on_error=False).num_dynamics_channels, 8)
+
     def test_num_blocks(self):
         self.assertEqual(Config(['--start', '--num-blocks', '6'], exit_on_error=False).num_blocks, 6)
+
+    def test_num_dynamics_blocks(self):
+        self.assertEqual(Config(['--start', '--num-dynamics-blocks', '2'], exit_on_error=False).num_dynamics_blocks, 2)
 
     def test_num_value_channels(self):
         self.assertEqual(Config(['--start', '--num-value-channels', '4'], exit_on_error=False).num_value_channels, 4)
 
     def test_num_policy_channels(self):
         self.assertEqual(Config(['--start', '--num-policy-channels', '16'], exit_on_error=False).num_policy_channels, 16)
+
+    def test_discount_factor(self):
+        self.assertEqual(Config(['--start', '--discount-factor', '0.5'], exit_on_error=False).discount_factor, 0.5)
 
     def test_weight_decay(self):
         self.assertEqual(Config(['--start', '--weight-decay', '0.01'], exit_on_error=False).weight_decay, 0.01)
@@ -96,8 +108,14 @@ class ConfigTest(unittest.TestCase, TestUtils):
     def test_max_es_slope(self):
         self.assertEqual(Config(['--start', '--max-es-slope', '-0.0001'], exit_on_error=False).max_es_slope, -0.0001)
 
+    def test_clipnorm(self):
+        self.assertEqual(Config(['--start', '--clipnorm', '0.1'], exit_on_error=False).clipnorm, 0.1)
+
     def test_epochs(self):
         self.assertEqual(Config(['--start', '--epochs', '100'], exit_on_error=False).epochs, 100)
+
+    def test_run_eagerly(self):
+        self.assertEqual(Config(['--start', '--run-eagerly'], exit_on_error=False).run_eagerly, True)
 
     def test_hparams(self):
         self.assertIsNotNone(Config(['--start']).hparams)

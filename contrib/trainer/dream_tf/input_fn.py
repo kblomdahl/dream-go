@@ -25,19 +25,18 @@ from .layers import NUM_FEATURES
 
 dream_go_module = tf.load_op_library('libdg_tf.so')
 
-def _parse():
+def _parse(num_unrolls):
     def __do_parse(line):
-        lz_features, features, policy, next_policy, value, ownership, komi, boost, has_ownership = dream_go_module.sgf_to_features(line)
+        lz_features, features, policy, value, ownership, komi, boost, has_ownership = dream_go_module.sgf_to_features(line, num_unrolls)
 
         labels = {
             'lz_features': lz_features,
-            'boost': tf.reshape(boost, [1]),
-            'value': tf.reshape(value, [1]),
-            'policy': tf.reshape(policy, [362]),
-            'next_policy': tf.reshape(next_policy, [362]),
-            'ownership': tf.reshape(ownership, [361]),
-            'has_ownership': tf.reshape(has_ownership, [1]),
-            'komi': tf.reshape(komi, [1])
+            'boost': boost,
+            'value': value,
+            'policy': policy,
+            'ownership': ownership,
+            'has_ownership': has_ownership,
+            'komi': komi
         }
 
         return features, labels
@@ -50,29 +49,32 @@ def _legal_policy(features, labels):
 
 
 def _apply_symmetry(symmetry_index, x):
+    """ Augment an [n, 19, 19, c] tensor by applying the same transformation to
+    each image. """
+
     def _identity(image):
         return tf.identity(image)
 
     def _flip_lr(image):
-        return tf.reverse(image, [1])
+        return tf.reverse(image, [2])
 
     def _flip_ud(image):
-        return tf.reverse(image, [0])
+        return tf.reverse(image, [1])
 
     def _transpose_main(image):
-        return tf.transpose(a=image, perm=[1, 0, 2])
+        return tf.transpose(a=image, perm=[0, 2, 1, 3])
 
     def _transpose_anti(image):
-        return tf.reverse(tf.transpose(a=image, perm=[1, 0, 2]), [0, 1])
+        return tf.reverse(tf.transpose(a=image, perm=[0, 2, 1, 3]), [1, 2])
 
     def _rot90(image):
-        return tf.transpose(a=tf.reverse(image, [1]), perm=[1, 0, 2])
+        return tf.transpose(a=tf.reverse(image, [2]), perm=[0, 2, 1, 3])
 
     def _rot180(image):
-        return tf.reverse(image, [0, 1])
+        return tf.reverse(image, [1, 2])
 
     def _rot270(image):
-        return tf.reverse(tf.transpose(a=image, perm=[1, 0, 2]), [1])
+        return tf.reverse(tf.transpose(a=image, perm=[0, 2, 1, 3]), [2])
 
     return tf.case(
         [
@@ -89,26 +91,32 @@ def _apply_symmetry(symmetry_index, x):
         exclusive=True
     )
 
+def _augment_board(symmetry_index, original_board):
+    """ Augment an `[n, 361]` tensor as if it was a `[n, 19, 19, 1]` tensor. """
+    return tf.reshape(
+        _apply_symmetry(symmetry_index, tf.reshape(original_board, [-1, 19, 19, 1])),
+        [-1, 361]
+    )
+
+
+def _augment_policy(symmetry_index, original_policy):
+    """ Augment an `[n, 362]` tensor as a board by ignoring the last element. """
+    policy, policy_pass = tf.split(original_policy, [361, 1], axis=1)
+    policy = _augment_board(symmetry_index, policy)
+
+    return tf.concat([policy, policy_pass], axis=1)
+
 
 def _augment(features, labels):
-    # apply a random transformation to the input features
+    """ Apply a random transformation to the features and each label (where
+    relevant) """
+
     symmetry_index = tf.random.uniform((), 0, 8, tf.int32)
     features = _apply_symmetry(symmetry_index, features)
-    lz_features = _apply_symmetry(symmetry_index, labels['lz_features'])
 
-    # transforming the policy is _harder_ since it has an extra pass
-    # element at the end, so we temporarily remove it while the tensor gets
-    # a random transformation applied
-    policy, policy_pass = tf.split(labels['policy'], (361, 1))
-    policy = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(policy, [19, 19, 1])), [361])
-    next_policy, next_policy_pass = tf.split(labels['next_policy'], (361, 1))
-    next_policy = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(next_policy, [19, 19, 1])), [361])
-    ownership = tf.reshape(_apply_symmetry(symmetry_index, tf.reshape(labels['ownership'], [19, 19, 1])), [361])
-
-    labels['lz_features'] = lz_features
-    labels['policy'] = tf.concat([policy, policy_pass], 0)
-    labels['next_policy'] = tf.concat([next_policy, next_policy_pass], 0)
-    labels['ownership'] = ownership
+    labels['lz_features'] = _apply_symmetry(symmetry_index, labels['lz_features'])
+    labels['policy'] = _augment_policy(symmetry_index, labels['policy'])
+    labels['ownership'] = _augment_board(symmetry_index, labels['ownership'])
 
     return features, labels
 
@@ -117,7 +125,7 @@ def _fix_history(features, labels):
     """ Zeros out the history planes for 25% of the features. """
     zero_history_mask = np.asarray([1.0] * NUM_FEATURES, 'f2')
     zero_history_mask[3:5] = 0.0
-    zero_history_mask = tf.constant(zero_history_mask, tf.float16, (1, 1, NUM_FEATURES))
+    zero_history_mask = tf.constant(zero_history_mask, tf.float16, [1, 1, 1, NUM_FEATURES])
 
     random = tf.random.uniform((), 0, 100, tf.int32)
     features = tf.case(
@@ -130,7 +138,7 @@ def _fix_history(features, labels):
     return features, labels
 
 
-def get_dataset(files):
+def get_dataset(files, *, num_unrolls=1):
     """ Returns a tf.DataSet initializable iterator over the given files """
 
     with tf.device('cpu:0'):
@@ -146,20 +154,20 @@ def get_dataset(files):
             )
         else:
             dataset = tf.data.TextLineDataset(files)
-        dataset = dataset.map(_parse(), num_parallel_calls=num_parallel_calls)
+        dataset = dataset.map(_parse(num_unrolls), num_parallel_calls=num_parallel_calls)
         dataset = dataset.filter(_legal_policy)
 
         return dataset
 
 
-def input_fn(files, batch_size, is_training, num_test_batches=10):
-    dataset = get_dataset(files, )
+def input_fn(files, batch_size, is_training, *, num_unrolls=1, num_test_batches=10):
+    dataset = get_dataset(files, num_unrolls=num_unrolls)
 
     if is_training is True:
         num_parallel_calls = tf.data.experimental.AUTOTUNE
 
         dataset = dataset.skip(num_test_batches * batch_size)
-        dataset = dataset.shuffle(262144)
+        dataset = dataset.shuffle(262144 // num_unrolls)
         dataset = dataset.map(_augment, num_parallel_calls=num_parallel_calls)
         dataset = dataset.map(_fix_history, num_parallel_calls=num_parallel_calls)
     elif is_training is False:

@@ -37,10 +37,8 @@ use ordered_float::OrderedFloat;
 #[repr(C)]
 pub struct Example {
     pub index: c_int,
-    pub next_index: c_int,
     pub color: c_int,
     pub policy: [f32; 362],
-    pub next_policy: [f32; 362],
     pub ownership: [f32; 361],
     pub winner: c_int,
     pub number: c_int,
@@ -89,10 +87,8 @@ impl Default for Example {
     fn default() -> Example {
         Example {
             index: 0,
-            next_index: 0,
             color: 0,
             policy: [f32::from(0.0); 362],
-            next_policy: [f32::from(0.0); 362],
             ownership: [f32::from(0.0); 361],
             winner: 0,
             number: 0,
@@ -166,7 +162,8 @@ pub unsafe extern fn set_seed(seed: i32) {
 #[no_mangle]
 pub unsafe extern fn extract_single_example(
     raw_sgf_content: *const c_char,
-    out: *mut Example
+    out: *mut Example,
+    num_examples: c_int
 ) -> c_int
 {
     CStr::from_ptr(raw_sgf_content as *const _).to_str().map(|content| {
@@ -218,8 +215,8 @@ pub unsafe extern fn extract_single_example(
             return -31;
         }
 
-        choose_example(&examples, has_policy).map(|i| {
-            copy_candidates_to(content, &examples, i, &mut *out)
+        choose_examples(&examples, has_policy, num_examples as usize).map(|i| {
+            copy_candidates_to(content, &examples, i, num_examples as usize, out)
         }).unwrap_or(-32)
     }).unwrap_or(-1) as c_int
 }
@@ -232,8 +229,9 @@ pub unsafe extern fn extract_single_example(
 /// * `examples` -
 /// * `has_policy` -
 ///
-fn choose_example(examples: &[Candidate], has_policy: bool) -> Option<usize> {
-    let candidate_examples: Vec<usize> = (0..examples.len())
+fn choose_examples(examples: &[Candidate], has_policy: bool, num_examples: usize) -> Option<usize> {
+    let max_examples = if examples.len() > num_examples { examples.len() - num_examples } else { 0 };
+    let candidate_examples: Vec<usize> = (0..max_examples)
         .filter(|&i| !has_policy || examples[i].has_policy())
         .collect();
 
@@ -265,7 +263,38 @@ fn choose_example(examples: &[Candidate], has_policy: bool) -> Option<usize> {
     }
 }
 
-/// Set the given example values according to the given SGF and chosen examples.
+/// Copy the `i`:th features, and correct future values, in addition to the next
+/// `num_examples` from the given SGF, into the given `Example`'s array.
+///
+/// # Arguments
+///
+/// * `content` -
+/// * `examples` -
+/// * `i` -
+/// * `num_examples` -
+/// * `out` -
+///
+unsafe fn copy_candidates_to(
+    content: &str,
+    examples: &[Candidate],
+    i: usize,
+    num_examples: usize,
+    out: *mut Example
+) -> c_int
+{
+    for j in 0..num_examples {
+        let result = copy_candidate_to(content, &examples, i + j, &mut *out.add(j));
+
+        if result != 0 {
+            return result;
+        }
+    }
+
+    0
+}
+
+/// Copy the `i`:th feature, and correct future value from the given SGF, into
+/// the given `Example`.
 ///
 /// # Arguments
 ///
@@ -275,7 +304,7 @@ fn choose_example(examples: &[Candidate], has_policy: bool) -> Option<usize> {
 /// * `i` -
 /// * `out` -
 ///
-fn copy_candidates_to(
+fn copy_candidate_to(
     content: &str,
     examples: &[Candidate],
     i: usize,
@@ -289,14 +318,12 @@ fn copy_candidates_to(
             Ok(re) => re,
             Err(code) => { return code; }
         };
-    let next_example = examples.get(i+1);
     let lz_features = Kind::Lz.extract(examples, i);
     let features = Kind::Default.extract(examples, i);
 
     out.lz_features.clone_from_slice(&lz_features);
     out.features.clone_from_slice(&features);
     out.index = examples[i].index as c_int;
-    out.next_index = next_example.map(|example| example.index).unwrap_or(361) as c_int;
     out.color = examples[i].color as c_int;
     out.ownership.clone_from_slice(&get_vertex_ownership(content, examples[i].color));
     out.winner = winner as c_int;
@@ -310,16 +337,6 @@ fn copy_candidates_to(
         },
         None => {
             out.policy.copy_from_slice(&EMPTY_POLICY);
-        }
-    };
-
-    match next_example.and_then(|example| example.policy) {
-        Some(ref policy) => {
-            assert_eq!(policy.len(), 905, "illegal next_policy -- {:?}", policy);
-            out.next_policy.copy_from_slice(&b85::decode::<f16, f32>(policy).unwrap());
-        },
-        None => {
-            out.next_policy.copy_from_slice(&EMPTY_POLICY);
         }
     };
 

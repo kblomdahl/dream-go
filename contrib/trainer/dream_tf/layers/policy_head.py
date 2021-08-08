@@ -49,17 +49,16 @@ class PolicyHead(tf.keras.layers.Layer):
         }
 
     def build(self, input_shapes):
-        self.conv_1 = BatchNormConv2D(kernel_size=3, filters=self.num_samples)
-        self.linear_2 = Dense(362, use_bias=True, bias_initializer=policy_offset_op)
+        self.conv_1 = BatchNormConv2D(kernel_size=1, filters=self.num_samples)
+        self.linear_2 = Dense(362, use_bias=True, bias_initializer=policy_offset_op, dtype='float32')
 
     def call(self, x, training=True):
-        y = self.conv_1(x, training=training)
-        y = tf.nn.relu(y)
+        y = tf.nn.relu(self.conv_1(x, training=training))
 
         y = tf.reshape(y, [-1, 361 * self.num_samples])
-        y = self.linear_2(y)
+        y = self.linear_2(y, training=training)
 
-        return tf.cast(y, tf.float32)
+        return y
 
 def policy_offset_op(shape, dtype=None, partition_info=None):
     """ Initial value for the policy offset, this should roughly correspond to

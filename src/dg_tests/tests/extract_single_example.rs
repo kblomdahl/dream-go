@@ -30,7 +30,7 @@ fn all_succeed() {
         if let Ok(line) = line {
             let c_string = CString::new(line).unwrap();
             let code = unsafe {
-                extract_single_example(c_string.as_ptr(), &mut example)
+                extract_single_example(c_string.as_ptr(), &mut example, 1)
             };
 
             assert_eq!(code, 0, "Line {}, Code {}: {:?}", line_nr, code, c_string);

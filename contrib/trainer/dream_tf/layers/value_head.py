@@ -48,9 +48,9 @@ class ValueHead(tf.keras.layers.Layer):
         }
 
     def build(self, input_shapes):
-        self.conv_1 = BatchNormConv2D(filters=self.num_samples, kernel_size=3)
-        self.conv_2 = Conv2D(filters=1, kernel_size=1, use_bias=False, data_format='channels_last')
-        self.linear_2 = Dense(1, use_bias=True, bias_initializer=value_offset_op)
+        self.conv_1 = BatchNormConv2D(filters=self.num_samples, kernel_size=1)
+        self.conv_2 = Conv2D(filters=1, kernel_size=1, use_bias=False, dtype='float32', data_format='channels_last')
+        self.linear_2 = Dense(1, use_bias=True, bias_initializer=value_offset_op, dtype='float32')
 
     def call(self, x, training=True):
         y = tf.nn.relu(self.conv_1(x, training=training))
@@ -62,7 +62,7 @@ class ValueHead(tf.keras.layers.Layer):
         z = tf.reshape(y, [-1, 361 * self.num_samples])
         z = tf.nn.tanh(self.linear_2(z, training=training))
 
-        return tf.cast(z, tf.float32), tf.cast(zo, tf.float32), tf.cast(y, tf.float32)
+        return z, zo, tf.cast(y, tf.float32)
 
 
 def value_offset_op(shape, dtype=None, partition_info=None):

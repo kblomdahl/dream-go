@@ -30,15 +30,14 @@ class CommonInputFnTest(TestUtils):
     def test_shape(self):
         features, labels = self.dataset.element_spec
 
-        self.assertEqual(features.shape.as_list(), [None, 19, 19, NUM_FEATURES])
-        self.assertEqual(labels['lz_features'].shape.as_list(), [None, 19, 19, 18])
-        self.assertEqual(labels['boost'].shape.as_list(), [None, 1])
-        self.assertEqual(labels['value'].shape.as_list(), [None, 1])
-        self.assertEqual(labels['policy'].shape.as_list(), [None, 362])
-        self.assertEqual(labels['next_policy'].shape.as_list(), [None, 362])
-        self.assertEqual(labels['ownership'].shape.as_list(), [None, 361])
-        self.assertEqual(labels['has_ownership'].shape.as_list(), [None, 1])
-        self.assertEqual(labels['komi'].shape.as_list(), [None, 1])
+        self.assertEqual(features.shape.as_list(), [None, self.num_unrolls, 19, 19, NUM_FEATURES])
+        self.assertEqual(labels['lz_features'].shape.as_list(), [None, self.num_unrolls, 19, 19, 18])
+        self.assertEqual(labels['boost'].shape.as_list(), [None, self.num_unrolls, 1])
+        self.assertEqual(labels['value'].shape.as_list(), [None, self.num_unrolls, 1])
+        self.assertEqual(labels['policy'].shape.as_list(), [None, self.num_unrolls, 362])
+        self.assertEqual(labels['ownership'].shape.as_list(), [None, self.num_unrolls, 361])
+        self.assertEqual(labels['has_ownership'].shape.as_list(), [None, self.num_unrolls, 1])
+        self.assertEqual(labels['komi'].shape.as_list(), [None, self.num_unrolls, 1])
 
     def test_data_type(self):
         features, labels = self.dataset.element_spec
@@ -48,18 +47,19 @@ class CommonInputFnTest(TestUtils):
         self.assertEqual(labels['boost'].dtype, tf.float32)
         self.assertEqual(labels['value'].dtype, tf.float32)
         self.assertEqual(labels['policy'].dtype, tf.float32)
-        self.assertEqual(labels['next_policy'].dtype, tf.float32)
         self.assertEqual(labels['ownership'].dtype, tf.float32)
         self.assertEqual(labels['has_ownership'].dtype, tf.float32)
         self.assertEqual(labels['komi'].dtype, tf.float32)
 
 class InputFnTrainingModeTest(unittest.TestCase, CommonInputFnTest):
     def setUp(self):
-        self.dataset = input_fn('', 2, None, True)
+        self.num_unrolls = 1
+        self.dataset = input_fn('', 2, True, num_unrolls=self.num_unrolls)
 
 class InputFnTestModeTest(unittest.TestCase, CommonInputFnTest):
     def setUp(self):
-        self.dataset = input_fn('', 2, None, False)
+        self.num_unrolls = 1
+        self.dataset = input_fn('', 2, False, num_unrolls=self.num_unrolls)
 
 
 if __name__ == '__main__':
