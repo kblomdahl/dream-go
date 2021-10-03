@@ -21,7 +21,6 @@
 import unittest
 
 import tensorflow as tf
-import numpy as np
 
 from ..test_common import TestUtils
 from .dynamics import Dynamics
@@ -44,19 +43,6 @@ class DynamicsTest(unittest.TestCase, TestUtils):
         y = self.layer([self.x, self.state])
 
         self.assertEqual(y.dtype, tf.float16)
-
-    def test_fit(self):
-        history = self.fit_regression(
-            inputs= \
-                np.random.random([1, 19, 19, self.num_channels])
-                    .repeat(self.batch_size, axis=0),
-            outputs=self.layer,
-            labels= \
-                np.random.random([1, 19, 19, self.num_channels])
-                    .repeat(self.batch_size, axis=0)
-        )
-
-        self.assertDecreasing(history)
 
 if __name__ == '__main__':
     unittest.main()

@@ -50,19 +50,14 @@ class Dynamics(tf.keras.layers.Layer):
         return ResidualBlock()
 
     def build(self, input_shapes):
-        self.conv_1 = BatchNormConv2D(filters=self.num_channels)
+        self.conv_1 = BatchNormConv2D(filters=self.num_channels, kernel_size=1)
         self.stem = list([
             self.build_stem_layer(input_shapes, i)
             for i in range(self.num_blocks)
         ])
 
     def call(self, xs, training=True):
-        y = tf.concat([
-            xs[0],
-            tf.reshape(xs[1][:, :361], [-1, 19, 19, 1])
-        ], axis=3)
-
-        y = tf.nn.relu(self.conv_1(y, training=training))
+        y = tf.nn.relu(self.conv_1(xs[1], training=training) + xs[0])
 
         for layer in self.stem:
             y = layer(y, training=training)

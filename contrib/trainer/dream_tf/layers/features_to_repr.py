@@ -58,6 +58,9 @@ class FeaturesToRepr(tf.keras.layers.Layer):
         for layer in self.stem:
             out.extend(layer.trainable_weights)
 
+        if self.num_channels != self.num_output_channels:
+            out.extend(self.conv_2.trainable_weights)
+
         return out
 
     def build_stem_layer(self, input_shapes, i):
