@@ -1,4 +1,4 @@
-FROM tensorflow/tensorflow:2.4.3-gpu
+FROM tensorflow/tensorflow:2.6.0-gpu
 ENV TF_CPP_MIN_LOG_LEVEL 3
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
