@@ -96,7 +96,7 @@ class Config:
         opt_group.add_argument('--run-eagerly', action='store_true', help='run the model in eager mode')
 
         opt_group = parser.add_argument_group(title='model configuration')
-        opt_group.add_argument('--batch-size', default=2048, nargs='?', type=int, metavar='N', help='the number of examples per mini-batch')
+        opt_group.add_argument('--batch-size', default=3072, nargs='?', type=int, metavar='N', help='the number of examples per mini-batch')
         opt_group.add_argument('--num-unrolls', default=8, nargs='?', type=int, metavar='N', help='the number of board states per example')
         opt_group.add_argument('--num-channels', default=128, nargs='?', type=int, metavar='N', help='the number of channels per residual block')
         opt_group.add_argument('--num-blocks', default=9, nargs='?', type=int, metavar='N', help='the number of residual blocks in the representation')
