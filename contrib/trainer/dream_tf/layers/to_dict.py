@@ -24,6 +24,9 @@ import numpy as np
 import tensorflow as tf
 
 def tensor_to_dict(tensor, as_type='f2'):
+    if tensor is None:
+        return None
+
     max_value = tf.reduce_max(tensor).numpy()
     max_value = np.asarray(max_value).astype('f4').tobytes()
     value = tensor.numpy().astype(as_type).tobytes()

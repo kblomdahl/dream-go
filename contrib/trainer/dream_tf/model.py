@@ -91,7 +91,7 @@ class DreamGoNet(tf.keras.Model):
             run_eagerly=run_eagerly,
             optimizer=tf.keras.mixed_precision.LossScaleOptimizer(
                 self.swa_optimizer,
-                initial_scale=128.0
+                initial_scale=32768
             )
         )
 

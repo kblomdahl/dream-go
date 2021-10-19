@@ -96,7 +96,7 @@ class Config:
         opt_group.add_argument('--run-eagerly', action='store_true', help='run the model in eager mode')
 
         opt_group = parser.add_argument_group(title='model configuration')
-        opt_group.add_argument('--batch-size', default=3072, nargs='?', type=int, metavar='N', help='the number of examples per mini-batch')
+        opt_group.add_argument('--batch-size', default=2048, nargs='?', type=int, metavar='N', help='the number of examples per mini-batch')
         opt_group.add_argument('--num-unrolls', default=8, nargs='?', type=int, metavar='N', help='the number of board states per example')
         opt_group.add_argument('--num-channels', default=128, nargs='?', type=int, metavar='N', help='the number of channels per residual block')
         opt_group.add_argument('--num-blocks', default=9, nargs='?', type=int, metavar='N', help='the number of residual blocks in the representation')
@@ -106,7 +106,7 @@ class Config:
         opt_group.add_argument('--num-policy-channels', default=8, nargs='?', type=int, metavar='N', help='the number of channels in the policy head')
         opt_group.add_argument('--discount-factor', default=1.0, nargs='?', type=float, metavar='N', help='the lambda discount factor')
         opt_group.add_argument('--weight-decay', default=1e-6, nargs='?', type=float, metavar='N', help='the weight decay')
-        opt_group.add_argument('--label-smoothing', default=0.2, nargs='?', type=float, metavar='N', help='the label smoothing')
+        opt_group.add_argument('--label-smoothing', default=0.1, nargs='?', type=float, metavar='N', help='the label smoothing')
         opt_group.add_argument('--initial-learning-rate', default=1e-4, nargs='?', type=float, metavar='N', help='the initial learning rate')
         opt_group.add_argument('--max-learning-rate', default=3e-4, nargs='?', type=float, metavar='N', help='the maximum learning rate after warmup')
         opt_group.add_argument('--num-warmup-steps', default=2500, nargs='?', type=int, metavar='N', help='the number of warmup steps')
