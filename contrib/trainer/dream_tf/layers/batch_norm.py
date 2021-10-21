@@ -70,11 +70,27 @@ class BatchNormConv2D(tf.keras.layers.Layer):
 
         init_op = tf.keras.initializers.GlorotUniform()
 
-        self.filter = self.add_weight('filter', (self.kernel_size, self.kernel_size, in_channels, self.filters), tf.float32, init_op, experimental_autocast=False)
-        self.filter_constraint = tf.identity #tf.keras.constraints.MinMaxNorm(0.001, 1.0 / sqrt(self.filters), axis=[0, 1, 2])
+        self.filter_nxn = self.add_weight('filter_nxn', (self.kernel_size, self.kernel_size, in_channels, self.filters), tf.float32, init_op, experimental_autocast=False)
+        self.filter_1x1 = self.add_weight('filter_1x1', (1, 1, in_channels, self.filters), tf.float32, init_op, experimental_autocast=False)
+        self.filter_constraint_nxn = tf.identity #tf.keras.constraints.MinMaxNorm(0.001, 1.0 / sqrt(self.filters), axis=[0, 1, 2])
+        self.filter_constraint_1x1 = tf.identity #tf.keras.constraints.MinMaxNorm(0.001, 1.0 / sqrt(self.filters), axis=[0, 1, 2])
         self.batch_norm = tf.keras.layers.BatchNormalization(scale=False)
 
+    def pad_to_nxn(self, weights):
+        return tf.pad(
+            weights,
+            [
+                [self.kernel_size // 2, self.kernel_size // 2],
+                [self.kernel_size // 2, self.kernel_size // 2],
+                [0, 0],
+                [0, 0]
+            ]
+        )
+
     def as_dict(self, prefix):
+        filter_nxn = self.filter_constraint_nxn(self.filter_nxn)
+        filter_1x1 = self.filter_constraint_1x1(self.filter_1x1)
+
         # fold the batch normalization into the convolutional weights and one
         # additional bias term. By scaling the weights and the mean by the
         # term `scale / sqrt(variance + 0.001)`.
@@ -88,7 +104,7 @@ class BatchNormConv2D(tf.keras.layers.Layer):
         std_ = tf.sqrt(self.batch_norm.moving_variance + self.batch_norm.epsilon)
         offset_ = self.batch_norm.beta - self.batch_norm.moving_mean / std_
         filter_ = tf.multiply(
-            self.filter_constraint(self.filter),
+            filter_nxn + self.pad_to_nxn(filter_1x1),
             tf.reshape(1.0 / std_, (1, 1, 1, self.filters))
         )
 
@@ -107,7 +123,9 @@ class BatchNormConv2D(tf.keras.layers.Layer):
     def call(self, x, training=True, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """
 
-        filter = tf.cast(self.filter_constraint(self.filter), x.dtype)
-        y = tf.nn.conv2d(x, filter, 1, 'SAME', 'NHWC')
+        filter_nxn = tf.cast(self.filter_constraint_nxn(self.filter_nxn), x.dtype)
+        filter_1x1 = tf.cast(self.filter_constraint_1x1(self.filter_1x1), x.dtype)
+        y_nxn = tf.nn.conv2d(x, filter_nxn, 1, 'SAME', 'NHWC')
+        y_1x1 = tf.nn.conv2d(x, filter_1x1, 1, 'SAME', 'NHWC')
 
-        return self.batch_norm(y, training=training)
+        return self.batch_norm(y_nxn + y_1x1, training=training)
