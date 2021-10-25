@@ -51,7 +51,7 @@ class ValueHead(tf.keras.layers.Layer):
         }
 
     def build(self, input_shapes):
-        self.conv_1 = BatchNormConv2D(filters=self.num_samples, kernel_size=1)
+        self.conv_1 = BatchNormConv2D(filters=self.num_samples, kernel_size=3)
         self.conv_o = Conv2D(filters=1, kernel_size=1, use_bias=False, dtype='float32', data_format='channels_last')
 
         self.linear_1 = Dense(361 + self.num_additional_tokens, use_bias=True, dtype='float32')

@@ -50,7 +50,7 @@ class Dynamics(tf.keras.layers.Layer):
         return ResidualBlock()
 
     def build(self, input_shapes):
-        self.conv_1 = BatchNormConv2D(filters=self.num_channels, kernel_size=1)
+        self.conv_1 = BatchNormConv2D(filters=self.num_channels, kernel_size=3)
         self.stem = list([
             self.build_stem_layer(input_shapes, i)
             for i in range(self.num_blocks)

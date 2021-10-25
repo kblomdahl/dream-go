@@ -49,7 +49,7 @@ class PolicyHead(tf.keras.layers.Layer):
         }
 
     def build(self, input_shapes):
-        self.conv_1 = BatchNormConv2D(kernel_size=1, filters=self.num_samples)
+        self.conv_1 = BatchNormConv2D(kernel_size=3, filters=self.num_samples)
         self.linear_1 = Dense(362, use_bias=True, bias_initializer=policy_offset_op, dtype='float32')
 
     def call(self, x, training=True):
