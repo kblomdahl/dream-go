@@ -78,6 +78,15 @@ class ConfigTest(unittest.TestCase, TestUtils):
     def test_num_policy_channels(self):
         self.assertEqual(Config(['--start', '--num-policy-channels', '16'], exit_on_error=False).num_policy_channels, 16)
 
+    def test_policy_coefficient(self):
+        self.assertEqual(Config(['--start', '--policy-coefficient', '0.2'], exit_on_error=False).policy_coefficient, 0.2)
+
+    def test_value_coefficient(self):
+        self.assertEqual(Config(['--start', '--value-coefficient', '0.2'], exit_on_error=False).value_coefficient, 0.2)
+
+    def test_ownership_coefficient(self):
+        self.assertEqual(Config(['--start', '--ownership-coefficient', '0.2'], exit_on_error=False).ownership_coefficient, 0.2)
+
     def test_discount_factor(self):
         self.assertEqual(Config(['--start', '--discount-factor', '0.5'], exit_on_error=False).discount_factor, 0.5)
 

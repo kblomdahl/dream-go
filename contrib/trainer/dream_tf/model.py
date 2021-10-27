@@ -44,6 +44,9 @@ class DreamGoNet(tf.keras.Model):
         num_dynamics_channels=None,
         num_policy_channels=8,
         num_value_channels=2,
+        policy_coefficient=1.0,
+        value_coefficient=1.0,
+        ownership_coefficient=0.1,
         num_unrolls=1,
         discount_factor=1.0,
         weight_decay=1e-5,
@@ -60,6 +63,9 @@ class DreamGoNet(tf.keras.Model):
         self.num_channels = num_channels
         self.num_dynamics_channels = num_dynamics_channels or num_channels
         self.num_policy_channels = num_policy_channels
+        self.policy_coefficient = policy_coefficient
+        self.value_coefficient = value_coefficient
+        self.ownership_coefficient = ownership_coefficient
         self.num_unrolls = num_unrolls
         self.discount_factor = discount_factor
         self.weight_decay = weight_decay
@@ -240,9 +246,9 @@ class DreamGoNet(tf.keras.Model):
             ]
         )
 
-        total_loss = 0.12 * loss_policy \
-            + 1.00 * loss_value \
-            + 1.00 * loss_ownership
+        total_loss = self.policy_coefficient * loss_policy \
+            + self.value_coefficient * loss_value \
+            + self.ownership_coefficient * loss_ownership
 
         return total_loss, {
             'loss': total_loss,

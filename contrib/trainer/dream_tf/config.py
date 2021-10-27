@@ -33,6 +33,9 @@ class Config:
     HP_NUM_DYNAMICS_CHANNELS = hp.HParam('num_dynamics_channels', hp.IntInterval(1, 2048))
     HP_NUM_POLICY_CHANNELS = hp.HParam('num_policy_channels', hp.IntInterval(1, 2048))
     HP_NUM_VALUE_CHANNELS = hp.HParam('num_value_channels', hp.IntInterval(1, 2048))
+    HP_POLICY_COEF = hp.HParam('policy_coefficient', hp.RealInterval(0.0, 1.0))
+    HP_VALUE_COEF = hp.HParam('value_coefficient', hp.RealInterval(0.0, 1.0))
+    HP_OWNERSHIP_COEF = hp.HParam('ownership_coefficient', hp.RealInterval(0.0, 1.0))
     HP_DISCOUNT_FACTOR = hp.HParam('discount_factor', hp.RealInterval(0.0, 1.0))
     HP_WEIGHT_DECAY = hp.HParam('weight_decay', hp.RealInterval(0.0, 1.0))
     HP_LABEL_SMOOTHING = hp.HParam('label_smoothing', hp.RealInterval(0.0, 1.0))
@@ -61,6 +64,9 @@ class Config:
             self.HP_NUM_DYNAMICS_CHANNELS: self.args.num_dynamics_channels,
             self.HP_NUM_POLICY_CHANNELS: self.args.num_policy_channels,
             self.HP_NUM_VALUE_CHANNELS: self.args.num_value_channels,
+            self.HP_POLICY_COEF: self.args.policy_coefficient,
+            self.HP_VALUE_COEF: self.args.value_coefficient,
+            self.HP_OWNERSHIP_COEF: self.args.ownership_coefficient,
             self.HP_DISCOUNT_FACTOR: self.args.discount_factor,
             self.HP_WEIGHT_DECAY: self.args.weight_decay,
             self.HP_LABEL_SMOOTHING: self.args.label_smoothing,
@@ -104,7 +110,10 @@ class Config:
         opt_group.add_argument('--num-dynamics-channels', default=128, nargs='?', type=int, metavar='N', help='the number of channels in the dynamics')
         opt_group.add_argument('--num-value-channels', default=2, nargs='?', type=int, metavar='N', help='the number of channels in the value head')
         opt_group.add_argument('--num-policy-channels', default=8, nargs='?', type=int, metavar='N', help='the number of channels in the policy head')
-        opt_group.add_argument('--discount-factor', default=1.0, nargs='?', type=float, metavar='N', help='the lambda discount factor')
+        opt_group.add_argument('--policy-coefficient', default=1.0, nargs='?', type=float, metavar='N', help='the policy coefficient in the total loss')
+        opt_group.add_argument('--value-coefficient', default=1.0, nargs='?', type=float, metavar='N', help='the value coefficient in the total loss')
+        opt_group.add_argument('--ownership-coefficient', default=0.1, nargs='?', type=float, metavar='N', help='the ownership coefficient in the total loss')
+        opt_group.add_argument('--discount-factor', default=0.97, nargs='?', type=float, metavar='N', help='the lambda discount factor')
         opt_group.add_argument('--weight-decay', default=1e-6, nargs='?', type=float, metavar='N', help='the weight decay')
         opt_group.add_argument('--label-smoothing', default=0.1, nargs='?', type=float, metavar='N', help='the label smoothing')
         opt_group.add_argument('--initial-learning-rate', default=1e-4, nargs='?', type=float, metavar='N', help='the initial learning rate')
@@ -200,6 +209,18 @@ class Config:
     @property
     def num_value_channels(self):
         return self.hparams[self.HP_NUM_VALUE_CHANNELS]
+
+    @property
+    def policy_coefficient(self):
+        return self.hparams[self.HP_POLICY_COEF]
+
+    @property
+    def value_coefficient(self):
+        return self.hparams[self.HP_VALUE_COEF]
+
+    @property
+    def ownership_coefficient(self):
+        return self.hparams[self.HP_OWNERSHIP_COEF]
 
     @property
     def discount_factor(self):
