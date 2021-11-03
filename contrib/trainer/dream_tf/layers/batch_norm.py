@@ -20,9 +20,16 @@
 
 import tensorflow as tf
 
+from math import sqrt
 from .to_dict import tensor_to_dict
 
-class BatchNormDense(tf.keras.layers.Layer):
+class XavierOrthogonalInitializer:
+    def xavier_orthogonal_initializer(self, fan_in, fan_out):
+        limit = sqrt(6.0 / (fan_in + fan_out))
+
+        return tf.keras.initializers.Orthogonal(limit)
+
+class BatchNormDense(XavierOrthogonalInitializer, tf.keras.layers.Layer):
     def __init__(self, out_dims=None):
         super(BatchNormDense, self).__init__()
 
@@ -31,7 +38,7 @@ class BatchNormDense(tf.keras.layers.Layer):
     def build(self, input_shape):
         in_dims = input_shape[-1]
 
-        init_op = tf.keras.initializers.GlorotUniform()
+        init_op = self.xavier_orthogonal_initializer(in_dims, self.out_dims)
 
         self.kernel = self.add_weight('kernel', (in_dims, self.out_dims), tf.float32, init_op, experimental_autocast=False)
         self.kernel_constraint = tf.identity  # tf.keras.constraints.MaxNorm(2.0, axis=0)
@@ -56,7 +63,7 @@ class BatchNormDense(tf.keras.layers.Layer):
 
         return self.batch_norm(y, training=training)
 
-class BatchNormConv2D(tf.keras.layers.Layer):
+class BatchNormConv2D(XavierOrthogonalInitializer, tf.keras.layers.Layer):
     def __init__(self, *, filters=None, kernel_size=3):
         super(BatchNormConv2D, self).__init__()
 
@@ -68,7 +75,7 @@ class BatchNormConv2D(tf.keras.layers.Layer):
             self.filters = input_shape[3]
         in_channels = input_shape[3]
 
-        init_op = tf.keras.initializers.GlorotUniform()
+        init_op = self.xavier_orthogonal_initializer(in_channels, self.filters)
 
         self.filter_nxn = self.add_weight('filter_nxn', (self.kernel_size, self.kernel_size, in_channels, self.filters), tf.float32, init_op, experimental_autocast=False)
         self.filter_1x1 = self.add_weight('filter_1x1', (1, 1, in_channels, self.filters), tf.float32, init_op, experimental_autocast=False)
@@ -125,7 +132,7 @@ class BatchNormConv2D(tf.keras.layers.Layer):
 
         filter_nxn = tf.cast(self.filter_constraint_nxn(self.filter_nxn), x.dtype)
         filter_1x1 = tf.cast(self.filter_constraint_1x1(self.filter_1x1), x.dtype)
-        y_nxn = tf.nn.conv2d(x, filter_nxn, 1, 'SAME', 'NHWC')
-        y_1x1 = tf.nn.conv2d(x, filter_1x1, 1, 'SAME', 'NHWC')
+        y_nxn = tf.nn.conv2d(x, filter_nxn, 1, 'SAME', data_format='NHWC')
+        y_1x1 = tf.nn.conv2d(x, filter_1x1, 1, 'SAME', data_format='NHWC')
 
         return self.batch_norm(y_nxn + y_1x1, training=training)
