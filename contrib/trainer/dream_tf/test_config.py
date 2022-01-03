@@ -87,6 +87,9 @@ class ConfigTest(unittest.TestCase, TestUtils):
     def test_ownership_coefficient(self):
         self.assertEqual(Config(['--start', '--ownership-coefficient', '0.2'], exit_on_error=False).ownership_coefficient, 0.2)
 
+    def test_similarity_coefficient(self):
+        self.assertEqual(Config(['--start', '--similarity-coefficient', '0.2'], exit_on_error=False).similarity_coefficient, 0.2)
+
     def test_discount_factor(self):
         self.assertEqual(Config(['--start', '--discount-factor', '0.5'], exit_on_error=False).discount_factor, 0.5)
 

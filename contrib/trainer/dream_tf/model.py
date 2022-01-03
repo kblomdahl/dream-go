@@ -47,6 +47,7 @@ class DreamGoNet(tf.keras.Model):
         policy_coefficient=1.0,
         value_coefficient=1.0,
         ownership_coefficient=0.1,
+        similarity_coefficient=0.1,
         num_unrolls=1,
         discount_factor=1.0,
         weight_decay=1e-5,
@@ -66,6 +67,7 @@ class DreamGoNet(tf.keras.Model):
         self.policy_coefficient = policy_coefficient
         self.value_coefficient = value_coefficient
         self.ownership_coefficient = ownership_coefficient
+        self.similarity_coefficient = similarity_coefficient
         self.num_unrolls = num_unrolls
         self.discount_factor = discount_factor
         self.weight_decay = weight_decay
@@ -79,7 +81,7 @@ class DreamGoNet(tf.keras.Model):
         )
         self.dynamics = Dynamics(
             num_blocks=num_dynamics_blocks,
-            num_channels=self.num_dynamics_channels
+            num_channels=num_channels
         )
         self.predictions = Predictions(
             num_policy_channels=num_policy_channels,
@@ -93,6 +95,7 @@ class DreamGoNet(tf.keras.Model):
         self.swa_optimizer = tfa.optimizers.SWA(self.adam_optimizer)
 
         # compile the keras model
+        self.projection = tf.keras.layers.Conv2D(filters=1, kernel_size=1, use_bias=False)
         self.compile(
             run_eagerly=run_eagerly,
             optimizer=tf.keras.mixed_precision.LossScaleOptimizer(
@@ -106,6 +109,7 @@ class DreamGoNet(tf.keras.Model):
         self.loss_policy_metric = tf.keras.metrics.Mean(name='loss/policy')
         self.loss_value_metric = tf.keras.metrics.Mean(name='loss/value')
         self.loss_ownership_metric = tf.keras.metrics.Mean(name='loss/ownership')
+        self.loss_similarity_metric = tf.keras.metrics.Mean(name='loss/similarity')
         self.loss_l2_metric = tf.keras.metrics.Mean(name='loss/l2')
 
         # accuracy metrics
@@ -185,11 +189,13 @@ class DreamGoNet(tf.keras.Model):
         )
 
         return {
+            'proj_repr': self.projection(self.features_to_repr(self.merge_unrolls(inputs), training=training)),
+            'proj_tower': self.projection(flat_states),
             'value': value_hat,
             'value_ownership': value_ownership_hat,
             'policy': policy_hat,
             'ownership': ownership_hat,
-            'tower': tower_hat
+            'tower': flat_states
         }
 
     def ownership_loss(self, y_true, y_pred, *, mask):
@@ -210,6 +216,9 @@ class DreamGoNet(tf.keras.Model):
         mask_scale = tf.cast(tf.size(mask), tf.float32) / (tf.reduce_sum(mask) + 1e-6)
 
         return tf.reshape(loss * mask * mask_scale, [-1])
+
+    def batch_flatten(self, x):
+        return tf.reshape(x, [-1, np.prod(x.shape[1:])])
 
     def custom_loss(self, y_true, y_pred):
         discounts = tf.reshape(
@@ -239,6 +248,13 @@ class DreamGoNet(tf.keras.Model):
             mask=self.merge_unrolls(y_true['has_ownership'])
         ) * discounts)
 
+        loss_similarity = tf.reduce_mean(
+            tf.keras.losses.cosine_similarity(
+                tf.cast(tf.stop_gradient(self.batch_flatten(y_pred['proj_repr'])), tf.float32),
+                tf.cast(self.batch_flatten(y_pred['proj_tower']), tf.float32)
+            )
+        )
+
         loss_l2 = tf.math.accumulate_n(
             [
                 tf.nn.l2_loss(weight)
@@ -248,14 +264,16 @@ class DreamGoNet(tf.keras.Model):
 
         total_loss = self.policy_coefficient * loss_policy \
             + self.value_coefficient * loss_value \
-            + self.ownership_coefficient * loss_ownership
+            + self.ownership_coefficient * loss_ownership \
+            + self.similarity_coefficient * loss_similarity
 
         return total_loss, {
             'loss': total_loss,
             'loss/l2': loss_l2,
             'loss/policy': loss_policy,
             'loss/value': loss_value,
-            'loss/ownership': loss_ownership
+            'loss/ownership': loss_ownership,
+            'loss/similarity': loss_similarity
         }
 
     def apply_lz_labels(self, labels):
@@ -274,6 +292,7 @@ class DreamGoNet(tf.keras.Model):
             self.loss_policy_metric,
             self.loss_value_metric,
             self.loss_ownership_metric,
+            self.loss_similarity_metric,
             self.loss_l2_metric,
 
             self.accuracy_policy_1_metric,
@@ -288,6 +307,7 @@ class DreamGoNet(tf.keras.Model):
         self.loss_policy_metric.update_state(losses['loss/policy'])
         self.loss_value_metric.update_state(losses['loss/value'])
         self.loss_ownership_metric.update_state(losses['loss/ownership'])
+        self.loss_similarity_metric.update_state(losses['loss/similarity'])
         self.loss_l2_metric.update_state(losses['loss/l2'])
 
         self.accuracy_policy_1_metric.update_state(self.merge_unrolls(y_true['policy']), y_pred['policy'])

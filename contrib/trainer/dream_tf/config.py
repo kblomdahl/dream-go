@@ -36,6 +36,7 @@ class Config:
     HP_POLICY_COEF = hp.HParam('policy_coefficient', hp.RealInterval(0.0, 1.0))
     HP_VALUE_COEF = hp.HParam('value_coefficient', hp.RealInterval(0.0, 1.0))
     HP_OWNERSHIP_COEF = hp.HParam('ownership_coefficient', hp.RealInterval(0.0, 1.0))
+    HP_SIMILARITY_COEF = hp.HParam('similarity_coefficient', hp.RealInterval(0.0, 1.0))
     HP_DISCOUNT_FACTOR = hp.HParam('discount_factor', hp.RealInterval(0.0, 1.0))
     HP_WEIGHT_DECAY = hp.HParam('weight_decay', hp.RealInterval(0.0, 1.0))
     HP_LABEL_SMOOTHING = hp.HParam('label_smoothing', hp.RealInterval(0.0, 1.0))
@@ -67,6 +68,7 @@ class Config:
             self.HP_POLICY_COEF: self.args.policy_coefficient,
             self.HP_VALUE_COEF: self.args.value_coefficient,
             self.HP_OWNERSHIP_COEF: self.args.ownership_coefficient,
+            self.HP_SIMILARITY_COEF: self.args.similarity_coefficient,
             self.HP_DISCOUNT_FACTOR: self.args.discount_factor,
             self.HP_WEIGHT_DECAY: self.args.weight_decay,
             self.HP_LABEL_SMOOTHING: self.args.label_smoothing,
@@ -113,6 +115,7 @@ class Config:
         opt_group.add_argument('--policy-coefficient', default=1.0, nargs='?', type=float, metavar='N', help='the policy coefficient in the total loss')
         opt_group.add_argument('--value-coefficient', default=1.0, nargs='?', type=float, metavar='N', help='the value coefficient in the total loss')
         opt_group.add_argument('--ownership-coefficient', default=0.1, nargs='?', type=float, metavar='N', help='the ownership coefficient in the total loss')
+        opt_group.add_argument('--similarity-coefficient', default=0.1, nargs='?', type=float, metavar='N', help='the similarity coefficient in the total loss')
         opt_group.add_argument('--discount-factor', default=0.97, nargs='?', type=float, metavar='N', help='the lambda discount factor')
         opt_group.add_argument('--weight-decay', default=1e-6, nargs='?', type=float, metavar='N', help='the weight decay')
         opt_group.add_argument('--label-smoothing', default=0.1, nargs='?', type=float, metavar='N', help='the label smoothing')
@@ -221,6 +224,10 @@ class Config:
     @property
     def ownership_coefficient(self):
         return self.hparams[self.HP_OWNERSHIP_COEF]
+
+    @property
+    def similarity_coefficient(self):
+        return self.hparams[self.HP_SIMILARITY_COEF]
 
     @property
     def discount_factor(self):

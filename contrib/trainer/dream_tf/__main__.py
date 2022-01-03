@@ -73,6 +73,7 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
         policy_coefficient=config.policy_coefficient,
         value_coefficient=config.value_coefficient,
         ownership_coefficient=config.ownership_coefficient,
+        similarity_coefficient=config.similarity_coefficient,
         batch_size=config.batch_size // config.num_unrolls,
         discount_factor=config.discount_factor,
         weight_decay=config.weight_decay,
