@@ -32,10 +32,6 @@ class BottleneckBlock(tf.keras.layers.Layer):
 
         self.squeeze_factor = squeeze_factor
 
-    @property
-    def suffix(self):
-        return 'bottleneck'
-
     def as_dict(self, prefix):
         return {
             **self.conv_1.as_dict(f'{prefix}/conv_1'),

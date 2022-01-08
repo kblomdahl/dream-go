@@ -37,11 +37,18 @@ class ValueHead(tf.keras.layers.Layer):
     def __init__(self):
         super(ValueHead, self).__init__()
 
-    def as_dict(self, prefix):
-        return {
-            **self.linear_o.as_dict(f'{prefix}/linear_o'),
-            **self.linear_y.as_dict(f'{prefix}/linear_y')
-        }
+    def as_dict(self, prefix=None, flat=True):
+        if flat is True:
+            return {
+                **self.linear_y.as_dict(f'{prefix}/linear_1', flat=True)
+            }
+        else:
+            return {
+                't': 'value',
+                'vs': {
+                    **self.linear_y.as_dict('linear_1', flat=True)
+                }
+            }
 
     def build(self, input_shapes):
         self.linear_o = Dense(361, use_bias=True, dtype='float32')

@@ -30,8 +30,9 @@ from .layers import NUM_FEATURES
 from .layers.batch_norm import XavierOrthogonalInitializer
 from .layers.leela_zero import leela_zero
 from .layers.dynamics import Dynamics
-from .layers.predictions import Predictions
 from .layers.features_to_repr import FeaturesToRepr
+from .layers.predictions import Predictions
+from .layers.rnn import RNN
 from .optimizers.schedules.learning_rate_schedule import WarmupExponentialDecaySchedule
 
 class DreamGoNet(tf.keras.Model, XavierOrthogonalInitializer):
@@ -83,7 +84,7 @@ class DreamGoNet(tf.keras.Model, XavierOrthogonalInitializer):
             num_channels=num_channels if num_dynamics_channels is None else num_dynamics_channels,
             embeddings_size=self.embeddings_size
         )
-        self.gru = tf.keras.layers.GRU(
+        self.rnn = RNN(
             units=self.embeddings_size,
             kernel_initializer=self.xavier_orthogonal_initializer(embeddings_size, embeddings_size),
             recurrent_initializer=self.xavier_orthogonal_initializer(embeddings_size, embeddings_size),
@@ -132,9 +133,7 @@ class DreamGoNet(tf.keras.Model, XavierOrthogonalInitializer):
 
         [1] https://arxiv.org/abs/1803.05407 """
 
-        self.swa_optimizer.assign_average_vars(self.features_to_repr.get_weights())
-        self.swa_optimizer.assign_average_vars(self.dynamics.get_weights())
-        self.swa_optimizer.assign_average_vars(self.predictions.get_weights())
+        self.swa_optimizer.assign_average_vars(self.trainable_variables)
 
         # re-compute batch normalization statistics by walking through the
         # dataset in training mode.
@@ -144,10 +143,15 @@ class DreamGoNet(tf.keras.Model, XavierOrthogonalInitializer):
     def dump_to(self, out):
         json.dump(
             {
-                'num_channels:0': self.num_channels,
-                **self.features_to_repr.as_dict(),
-                **self.dynamics.as_dict(),
-                **self.predictions.as_dict(),
+                'c': {
+                    'embeddings_size': self.embeddings_size,
+                },
+                'n': {
+                    'r': self.features_to_repr.as_dict(),
+                    'd': self.dynamics.as_dict(),
+                    'g': self.rnn.as_dict(),
+                    'p': self.predictions.as_dict(),
+                }
             },
             fp=out,
             sort_keys=True
@@ -181,7 +185,7 @@ class DreamGoNet(tf.keras.Model, XavierOrthogonalInitializer):
             ]
 
             # whole_sequence_output is time_major, i.e. [step, batch, embeddings_size]
-            whole_sequence_output = self.gru(
+            whole_sequence_output = self.rnn(
                 inputs=tf.convert_to_tensor(embeddings),
                 initial_state=initial_states,
                 training=training

@@ -42,7 +42,11 @@ class Dynamics(tf.keras.layers.Layer):
         self.embeddings_size = embeddings_size
 
     def as_dict(self):
-        return {}
+        return [
+            self.conv_1.as_dict(flat=False),
+            *[layer.as_dict() for layer in self.stem],
+            self.to_embeddings.as_dict(flat=False)
+        ]
 
     @property
     def l2_weights(self):

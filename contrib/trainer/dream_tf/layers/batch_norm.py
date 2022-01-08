@@ -44,7 +44,7 @@ class BatchNormDense(XavierOrthogonalInitializer, tf.keras.layers.Layer):
         self.kernel_constraint = tf.identity  # tf.keras.constraints.MaxNorm(2.0, axis=0)
         self.batch_norm = tf.keras.layers.BatchNormalization(scale=False)
 
-    def as_dict(self, prefix):
+    def as_dict(self, prefix=None, flat=False):
         std_ = tf.sqrt(self.batch_norm.moving_variance + self.batch_norm.epsilon)
         offset_ = self.batch_norm.beta - self.batch_norm.moving_mean / std_
         kernel_ = tf.multiply(
@@ -52,10 +52,19 @@ class BatchNormDense(XavierOrthogonalInitializer, tf.keras.layers.Layer):
             tf.reshape(1.0 / std_, (1, self.out_dims))
         )
 
-        return {
-            f'{prefix}:0': tensor_to_dict(kernel_),
-            f'{prefix}/offset:0': tensor_to_dict(offset_)
-        }
+        if flat is True:
+            return {
+                f'{prefix}:0': tensor_to_dict(kernel_),
+                f'{prefix}/offset:0': tensor_to_dict(offset_)
+            }
+        else:
+            return {
+                't': 'dense',
+                'vs': {
+                    'kernel': tensor_to_dict(kernel_),
+                    'offset': tensor_to_dict(offset_)
+                }
+            }
 
     def call(self, x, training=True, is_recomputing=False):
         kernel = tf.cast(self.kernel_constraint(self.kernel), x.dtype)
@@ -94,7 +103,7 @@ class BatchNormConv2D(XavierOrthogonalInitializer, tf.keras.layers.Layer):
             ]
         )
 
-    def as_dict(self, prefix):
+    def as_dict(self, prefix=None, flat=False):
         filter_nxn = self.filter_constraint_nxn(self.filter_nxn)
         filter_1x1 = self.filter_constraint_1x1(self.filter_1x1)
 
@@ -122,10 +131,19 @@ class BatchNormConv2D(XavierOrthogonalInitializer, tf.keras.layers.Layer):
         # cudnn:      [out, in, h, w]
         filter_ = tf.transpose(filter_, perm=[3, 0, 1, 2])
 
-        return {
-            f'{prefix}:0': tensor_to_dict(filter_),
-            f'{prefix}/offset:0': tensor_to_dict(offset_),
-        }
+        if flat is True:
+            return {
+                f'{prefix}': tensor_to_dict(filter_),
+                f'{prefix}/offset': tensor_to_dict(offset_)
+            }
+        else:
+            return {
+                't': 'conv',
+                'vs': {
+                    'filter': tensor_to_dict(filter_),
+                    'offset': tensor_to_dict(offset_)
+                }
+            }
 
     def call(self, x, training=True, is_recomputing=False):
         """ Returns the result of the forward inference pass on `x` """

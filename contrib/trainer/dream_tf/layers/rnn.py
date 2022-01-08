@@ -1,4 +1,4 @@
-# Copyright (c) 2021 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+# Copyright (c) 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,36 +20,24 @@
 
 import tensorflow as tf
 
-from .policy_head import PolicyHead
-from .value_head import ValueHead
+from .to_dict import tensor_to_dict
 
-
-class Predictions(tf.keras.layers.Layer):
-    """ The full neural network used to predict the value and policy tensors for
-    a mini-batch of board positions. """
-
-    def __init__(self):
-        super(Predictions, self).__init__()
-
-    def as_dict(self):
-        return {
-            't': 'pred',
-            'vs': {
-                **self.policy_head.as_dict('policy', flat=True),
-                **self.value_head.as_dict('value', flat=True)
+class RNN(tf.keras.layers.GRU):
+    def as_dict(self, prefix=None, flat=True):
+        if flat is True:
+            return {
+                f'{prefix}/kernel': tensor_to_dict(self.cell.kernel),
+                f'{prefix}/recurrent_kernel': tensor_to_dict(self.cell.recurrent_kernel),
+                f'{prefix}/offset': tensor_to_dict(self.cell.bias[0, :]),
+                f'{prefix}/recurrent_offset': tensor_to_dict(self.cell.bias[1, :])
             }
-        }
-
-    @property
-    def l2_weights(self):
-        return self.policy_head.trainable_weights + self.value_head.trainable_weights
-
-    def build(self, input_shapes):
-        self.policy_head = PolicyHead()
-        self.value_head = ValueHead()
-
-    def call(self, x, training=True):
-        p = self.policy_head(x, training=training)
-        v, vo = self.value_head(x, training=training)
-
-        return v, p, vo, x
+        else:
+            return {
+                't': 'gru',
+                'vs': {
+                    'kernel': tensor_to_dict(self.cell.kernel),
+                    'recurrent_kernel': tensor_to_dict(self.cell.recurrent_kernel),
+                    'offset': tensor_to_dict(self.cell.bias[0, :]),
+                    'recurrent_offset': tensor_to_dict(self.cell.bias[1, :])
+                }
+            }

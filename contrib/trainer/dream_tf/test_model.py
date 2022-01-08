@@ -46,8 +46,8 @@ class DreamGoNetBase(TestUtils):
             'komi': tf.repeat(tf.random.uniform([1, self.num_unrolls, 1], dtype=tf.float32), self.batch_size, axis=0)
         }
 
-    def test_using_cudnn_gru(self):
-        self.assertTrue(self.model.gru._could_use_gpu_kernel)
+    def test_using_cudnn_rnn(self):
+        self.assertTrue(self.model.rnn._could_use_gpu_kernel)
 
     def test_dtype(self):
         y = self.model(self.x, labels=self.labels)

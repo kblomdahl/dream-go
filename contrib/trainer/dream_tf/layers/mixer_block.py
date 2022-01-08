@@ -54,10 +54,6 @@ class MixerBlock(tf.keras.layers.Layer):
         self.channels_mlp_dims = channels_mlp_dims
         self.residual = residual
 
-    @property
-    def suffix(self):
-        return 'mixer'
-
     def as_dict(self, prefix):
         return {
             **self.mlp_block_1.as_dict(f'{prefix}/mlp_1'),

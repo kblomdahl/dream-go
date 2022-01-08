@@ -23,8 +23,17 @@ import tensorflow as tf
 from .to_dict import tensor_to_dict
 
 class Dense(tf.keras.layers.Dense):
-    def as_dict(self, prefix):
-        return {
-            f'{prefix}:0': tensor_to_dict(self.kernel),
-            f'{prefix}/offset:0': tensor_to_dict(self.bias)
-        }
+    def as_dict(self, prefix=None, flat=True):
+        if flat is True:
+            return {
+                f'{prefix}:0': tensor_to_dict(self.kernel),
+                f'{prefix}/offset:0': tensor_to_dict(self.bias)
+            }
+        else:
+            return {
+                't': 'dense',
+                'vs': {
+                    'kernel': tensor_to_dict(self.kernel),
+                    'offset': tensor_to_dict(self.bias)
+                }
+            }

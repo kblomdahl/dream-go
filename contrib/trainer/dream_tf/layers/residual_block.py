@@ -40,14 +40,13 @@ class ResidualBlock(tf.keras.layers.Layer):
     def __init__(self):
         super(ResidualBlock, self).__init__()
 
-    @property
-    def suffix(self):
-        return 'residual'
-
-    def as_dict(self, prefix):
+    def as_dict(self):
         return {
-            **self.conv_1.as_dict(f'{prefix}/conv_1'),
-            **self.conv_2.as_dict(f'{prefix}/conv_2')
+            't': 'residual_block',
+            'vs': {
+                **self.conv_1.as_dict('conv_1', flat=True),
+                **self.conv_2.as_dict('conv_2', flat=True),
+            }
         }
 
     def build(self, input_shape):

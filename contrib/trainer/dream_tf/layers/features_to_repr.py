@@ -43,15 +43,11 @@ class FeaturesToRepr(tf.keras.layers.Layer):
         self.embeddings_size = embeddings_size
 
     def as_dict(self):
-        out = {
-            **self.conv_1.as_dict('01_upsample/conv_1'),
-            **self.to_embeddings.as_dict('01_embeddings')
-        }
-
-        for i, layer in enumerate(self.stem):
-            out.update(layer.as_dict(f'{i + 2:02}_{layer.suffix}'))
-
-        return out
+        return [
+            self.conv_1.as_dict(flat=False),
+            *[layer.as_dict() for layer in self.stem],
+            self.to_embeddings.as_dict(flat=False)
+        ]
 
     @property
     def l2_weights(self):
