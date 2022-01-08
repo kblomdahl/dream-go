@@ -29,19 +29,17 @@ from . import NUM_FEATURES
 class DynamicsTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
-        self.num_channels = 32
-        self.num_output_channels = 16
-        self.x = tf.zeros([self.batch_size, 19, 19, self.num_output_channels], tf.float16)
+        self.embeddings_size = 16
         self.state = tf.zeros([self.batch_size, 19, 19, NUM_FEATURES], tf.float16)
-        self.layer = Dynamics(num_blocks=6, num_channels=self.num_channels)
+        self.layer = Dynamics(num_blocks=1, num_channels=8, embeddings_size=self.embeddings_size)
 
     def test_shape(self):
-        y = self.layer([self.x, self.state])
+        y = self.layer(self.state)
 
-        self.assertEqual(y.shape, [self.batch_size, 19, 19, self.num_output_channels])
+        self.assertEqual(y.shape, [self.batch_size, self.embeddings_size])
 
     def test_dtype(self):
-        y = self.layer([self.x, self.state])
+        y = self.layer(self.state)
 
         self.assertEqual(y.dtype, tf.float16)
 

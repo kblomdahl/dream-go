@@ -20,7 +20,7 @@
 
 import tensorflow as tf
 
-from .batch_norm import BatchNormConv2D
+from .batch_norm import BatchNormConv2D, BatchNormDense
 from .residual_block import ResidualBlock
 
 
@@ -34,17 +34,18 @@ class FeaturesToRepr(tf.keras.layers.Layer):
         *,
         num_blocks,
         num_channels,
-        num_output_channels
+        embeddings_size
     ):
         super(FeaturesToRepr, self).__init__()
 
         self.num_blocks = num_blocks
         self.num_channels = num_channels
-        self.num_output_channels = num_output_channels
+        self.embeddings_size = embeddings_size
 
     def as_dict(self):
         out = {
-            **self.conv_1.as_dict('01_upsample/conv_1')
+            **self.conv_1.as_dict('01_upsample/conv_1'),
+            **self.to_embeddings.as_dict('01_embeddings')
         }
 
         for i, layer in enumerate(self.stem):
@@ -57,9 +58,7 @@ class FeaturesToRepr(tf.keras.layers.Layer):
         out = list(self.conv_1.trainable_weights)
         for layer in self.stem:
             out.extend(layer.trainable_weights)
-
-        if self.num_channels != self.num_output_channels:
-            out.extend(self.conv_2.trainable_weights)
+        out.extend(self.to_embeddings.trainable_weights)
 
         return out
 
@@ -72,9 +71,7 @@ class FeaturesToRepr(tf.keras.layers.Layer):
             self.build_stem_layer(input_shapes, i)
             for i in range(self.num_blocks)
         ])
-
-        if self.num_channels != self.num_output_channels:
-            self.conv_2 = BatchNormConv2D(filters=self.num_output_channels, kernel_size=1)
+        self.to_embeddings = BatchNormDense(out_dims=self.embeddings_size)
 
     def call(self, x, training=True):
         y = tf.nn.relu(self.conv_1(x, training=training))
@@ -82,7 +79,5 @@ class FeaturesToRepr(tf.keras.layers.Layer):
         for layer in self.stem:
             y = layer(y, training=training)
 
-        if self.num_channels != self.num_output_channels:
-            y = tf.nn.relu(self.conv_2(y, training=training))
-
-        return y
+        y = tf.keras.layers.Flatten()(y)
+        return tf.nn.relu(self.to_embeddings(y, training=training))

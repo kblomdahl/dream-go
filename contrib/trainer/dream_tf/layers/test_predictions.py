@@ -28,24 +28,22 @@ from .predictions import Predictions
 class PredictionsTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
-        self.num_channels = 16
-        self.x = tf.zeros([self.batch_size, 19, 19, self.num_channels], tf.float16)
+        self.embeddings_size = 16
+        self.x = tf.zeros([self.batch_size, self.embeddings_size], tf.float16)
         self.layer = Predictions()
 
     def test_shape(self):
-        v, vy, p, vo, x = self.layer(self.x)
+        v, p, vo, x = self.layer(self.x)
 
         self.assertEqual(v.shape, [self.batch_size, 1])
-        self.assertEqual(vy.shape, [self.batch_size, 361, 2])
         self.assertEqual(p.shape, [self.batch_size, 362])
         self.assertEqual(vo.shape, [self.batch_size, 361])
-        self.assertEqual(x.shape, [self.batch_size, 19, 19, self.num_channels])
+        self.assertEqual(x.shape, [self.batch_size, self.embeddings_size])
 
     def test_dtype(self):
-        v, vy, p, vo, x = self.layer(self.x)
+        v, p, vo, x = self.layer(self.x)
 
         self.assertEqual(v.dtype, tf.float32)
-        self.assertEqual(vy.dtype, tf.float32)
         self.assertEqual(p.dtype, tf.float32)
         self.assertEqual(vo.dtype, tf.float32)
         self.assertEqual(x.dtype, tf.float16)

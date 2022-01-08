@@ -20,7 +20,7 @@
 
 import tensorflow as tf
 
-from .batch_norm import BatchNormConv2D
+from .batch_norm import BatchNormDense, BatchNormConv2D
 from .residual_block import ResidualBlock
 
 
@@ -32,12 +32,14 @@ class Dynamics(tf.keras.layers.Layer):
         self,
         *,
         num_blocks,
-        num_channels
+        num_channels,
+        embeddings_size
     ):
         super(Dynamics, self).__init__()
 
         self.num_blocks = num_blocks
         self.num_channels = num_channels
+        self.embeddings_size = embeddings_size
 
     def as_dict(self):
         return {}
@@ -50,16 +52,22 @@ class Dynamics(tf.keras.layers.Layer):
         return ResidualBlock()
 
     def build(self, input_shapes):
-        self.conv_1 = BatchNormConv2D(filters=self.num_channels, kernel_size=3)
-        self.stem = list([
-            self.build_stem_layer(input_shapes, i)
-            for i in range(self.num_blocks)
-        ])
+        if self.num_blocks > 0:
+            self.conv_1 = BatchNormConv2D(filters=self.num_channels, kernel_size=3)
+            self.stem = list([
+                self.build_stem_layer(input_shapes, i)
+                for i in range(self.num_blocks)
+            ])
 
-    def call(self, xs, training=True):
-        y = tf.nn.relu(self.conv_1(xs[1], training=training) + xs[0])
+        self.to_embeddings = BatchNormDense(out_dims=self.embeddings_size)
 
-        for layer in self.stem:
-            y = layer(y, training=training)
+    def call(self, x, training=True):
+        if self.num_blocks > 0:
+            y = tf.nn.relu(self.conv_1(x, training=training))
 
-        return y
+            for layer in self.stem:
+                y = layer(y, training=training)
+        else:
+            y = x
+
+        return tf.nn.relu(self.to_embeddings(tf.keras.layers.Flatten()(y), training=training))

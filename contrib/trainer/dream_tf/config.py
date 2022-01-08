@@ -31,8 +31,7 @@ class Config:
     HP_NUM_DYNAMICS_BLOCKS = hp.HParam('num_dynamics_blocks', hp.IntInterval(0, 80))
     HP_NUM_CHANNELS = hp.HParam('num_channels', hp.IntInterval(1, 2048))
     HP_NUM_DYNAMICS_CHANNELS = hp.HParam('num_dynamics_channels', hp.IntInterval(1, 2048))
-    HP_NUM_POLICY_CHANNELS = hp.HParam('num_policy_channels', hp.IntInterval(1, 2048))
-    HP_NUM_VALUE_CHANNELS = hp.HParam('num_value_channels', hp.IntInterval(1, 2048))
+    HP_EMBEDDINGS_SIZE = hp.HParam('embeddings_size', hp.IntInterval(1, 2048))
     HP_POLICY_COEF = hp.HParam('policy_coefficient', hp.RealInterval(0.0, 1.0))
     HP_VALUE_COEF = hp.HParam('value_coefficient', hp.RealInterval(0.0, 1.0))
     HP_OWNERSHIP_COEF = hp.HParam('ownership_coefficient', hp.RealInterval(0.0, 1.0))
@@ -52,6 +51,7 @@ class Config:
     HP_EPOCHS = hp.HParam('epochs', hp.IntInterval(0, 100000))
     HP_LZ_WEIGHTS = hp.HParam('lz_weights')
     HP_FILES = hp.HParam('files')
+    HP_NAME = hp.HParam('name')
     HP_WARM_START = hp.HParam('warm_start')
 
     def __init__(self, args=None, exit_on_error=True):
@@ -63,8 +63,7 @@ class Config:
             self.HP_NUM_DYNAMICS_BLOCKS: self.args.num_dynamics_blocks,
             self.HP_NUM_CHANNELS: self.args.num_channels,
             self.HP_NUM_DYNAMICS_CHANNELS: self.args.num_dynamics_channels,
-            self.HP_NUM_POLICY_CHANNELS: self.args.num_policy_channels,
-            self.HP_NUM_VALUE_CHANNELS: self.args.num_value_channels,
+            self.HP_EMBEDDINGS_SIZE: self.args.embeddings_size,
             self.HP_POLICY_COEF: self.args.policy_coefficient,
             self.HP_VALUE_COEF: self.args.value_coefficient,
             self.HP_OWNERSHIP_COEF: self.args.ownership_coefficient,
@@ -83,6 +82,7 @@ class Config:
             self.HP_CLIPNORM: self.args.clipnorm,
             self.HP_LZ_WEIGHTS: self.args.lz_weights or '',
             self.HP_FILES: ','.join(self.args.files) or '',
+            self.HP_NAME: self.args.name or '',
             self.HP_WARM_START: self.args.warm_start or '',
             self.HP_EPOCHS: self.args.epochs
         }
@@ -104,14 +104,13 @@ class Config:
         opt_group.add_argument('--run-eagerly', action='store_true', help='run the model in eager mode')
 
         opt_group = parser.add_argument_group(title='model configuration')
-        opt_group.add_argument('--batch-size', default=2048, nargs='?', type=int, metavar='N', help='the number of examples per mini-batch')
+        opt_group.add_argument('--batch-size', default=2816, nargs='?', type=int, metavar='N', help='the number of examples per mini-batch')
         opt_group.add_argument('--num-unrolls', default=8, nargs='?', type=int, metavar='N', help='the number of board states per example')
         opt_group.add_argument('--num-channels', default=128, nargs='?', type=int, metavar='N', help='the number of channels per residual block')
         opt_group.add_argument('--num-blocks', default=9, nargs='?', type=int, metavar='N', help='the number of residual blocks in the representation')
-        opt_group.add_argument('--num-dynamics-blocks', default=9, nargs='?', type=int, metavar='N', help='the number of residual blocks in the dynamics')
-        opt_group.add_argument('--num-dynamics-channels', default=128, nargs='?', type=int, metavar='N', help='the number of channels in the dynamics')
-        opt_group.add_argument('--num-value-channels', default=2, nargs='?', type=int, metavar='N', help='the number of channels in the value head')
-        opt_group.add_argument('--num-policy-channels', default=8, nargs='?', type=int, metavar='N', help='the number of channels in the policy head')
+        opt_group.add_argument('--num-dynamics-blocks', default=6, nargs='?', type=int, metavar='N', help='the number of residual blocks in the dynamics')
+        opt_group.add_argument('--num-dynamics-channels', default=64, nargs='?', type=int, metavar='N', help='the number of channels in the dynamics')
+        opt_group.add_argument('--embeddings-size', default=722, nargs='?', type=int, metavar='N', help='the number of values in the state embedding')
         opt_group.add_argument('--policy-coefficient', default=1.0, nargs='?', type=float, metavar='N', help='the policy coefficient in the total loss')
         opt_group.add_argument('--value-coefficient', default=1.0, nargs='?', type=float, metavar='N', help='the value coefficient in the total loss')
         opt_group.add_argument('--ownership-coefficient', default=0.1, nargs='?', type=float, metavar='N', help='the ownership coefficient in the total loss')
@@ -206,12 +205,8 @@ class Config:
         return self.hparams[self.HP_NUM_DYNAMICS_CHANNELS]
 
     @property
-    def num_policy_channels(self):
-        return self.hparams[self.HP_NUM_POLICY_CHANNELS]
-
-    @property
-    def num_value_channels(self):
-        return self.hparams[self.HP_NUM_VALUE_CHANNELS]
+    def embeddings_size(self):
+        return self.hparams[self.HP_EMBEDDINGS_SIZE]
 
     @property
     def policy_coefficient(self):

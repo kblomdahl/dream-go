@@ -21,7 +21,6 @@
 import numpy as np
 import tensorflow as tf
 
-from .batch_norm import BatchNormConv2D
 from .dense import Dense
 
 
@@ -37,25 +36,19 @@ class PolicyHead(tf.keras.layers.Layer):
        move
     """
 
-    def __init__(self, *, num_samples):
+    def __init__(self):
         super(PolicyHead, self).__init__()
-
-        self.num_samples = num_samples
 
     def as_dict(self, prefix):
         return {
-            **self.conv_1.as_dict(f'{prefix}/conv_1'),
             **self.linear_1.as_dict(f'{prefix}/linear_1')
         }
 
     def build(self, input_shapes):
-        self.conv_1 = BatchNormConv2D(kernel_size=3, filters=self.num_samples)
         self.linear_1 = Dense(362, use_bias=True, bias_initializer=policy_offset_op, dtype='float32')
 
     def call(self, x, training=True):
-        y = tf.nn.relu(self.conv_1(x, training=training))
-        y = tf.reshape(y, [-1, 361 * self.num_samples]) # batch_size, num_samples * 361
-        y = self.linear_1(y, training=training) # batch_size, 362
+        y = self.linear_1(x, training=training) # batch_size, 362
 
         return y
 

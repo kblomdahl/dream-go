@@ -91,6 +91,7 @@ def _apply_symmetry(symmetry_index, x):
         exclusive=True
     )
 
+
 def _augment_board(symmetry_index, original_board):
     """ Augment an `[n, 361]` tensor as if it was a `[n, 19, 19, 1]` tensor. """
     return tf.reshape(

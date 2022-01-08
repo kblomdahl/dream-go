@@ -28,16 +28,8 @@ class Predictions(tf.keras.layers.Layer):
     """ The full neural network used to predict the value and policy tensors for
     a mini-batch of board positions. """
 
-    def __init__(
-        self,
-        *,
-        num_policy_channels=8,
-        num_value_channels=2
-    ):
+    def __init__(self):
         super(Predictions, self).__init__()
-
-        self.num_policy_channels = num_policy_channels
-        self.num_value_channels = num_value_channels
 
     def as_dict(self):
         return {
@@ -50,11 +42,11 @@ class Predictions(tf.keras.layers.Layer):
         return self.policy_head.trainable_weights + self.value_head.trainable_weights
 
     def build(self, input_shapes):
-        self.policy_head = PolicyHead(num_samples=self.num_policy_channels)
-        self.value_head = ValueHead(num_samples=self.num_value_channels)
+        self.policy_head = PolicyHead()
+        self.value_head = ValueHead()
 
     def call(self, x, training=True):
         p = self.policy_head(x, training=training)
-        v, vo, vy = self.value_head(x, training=training)
+        v, vo = self.value_head(x, training=training)
 
-        return v, vy, p, vo, x
+        return v, p, vo, x

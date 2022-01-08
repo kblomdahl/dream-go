@@ -29,9 +29,9 @@ from .policy_head import PolicyHead, policy_offset_op
 class PolicyHeadTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
-        self.num_channels = 32
-        self.x = tf.zeros([self.batch_size, 19, 19, self.num_channels], tf.float16)
-        self.policy_head = PolicyHead(num_samples=8)
+        self.embeddings_size = 32
+        self.x = tf.zeros([self.batch_size, self.embeddings_size], tf.float16)
+        self.policy_head = PolicyHead()
 
     def test_initializer(self):
         self.assertEqual(
@@ -54,7 +54,7 @@ class PolicyHeadTest(unittest.TestCase, TestUtils):
     def test_fit(self):
         history = self.fit_categorical(
             inputs= \
-                np.random.random([1, 19, 19, self.num_channels])
+                np.random.random([1, self.embeddings_size])
                     .repeat(self.batch_size, axis=0),
             outputs=self.policy_head,
             labels=self.create_categorical_labels([1, 362]).repeat(self.batch_size, axis=0),

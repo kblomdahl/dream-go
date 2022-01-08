@@ -72,11 +72,8 @@ class ConfigTest(unittest.TestCase, TestUtils):
     def test_num_dynamics_blocks(self):
         self.assertEqual(Config(['--start', '--num-dynamics-blocks', '2'], exit_on_error=False).num_dynamics_blocks, 2)
 
-    def test_num_value_channels(self):
-        self.assertEqual(Config(['--start', '--num-value-channels', '4'], exit_on_error=False).num_value_channels, 4)
-
-    def test_num_policy_channels(self):
-        self.assertEqual(Config(['--start', '--num-policy-channels', '16'], exit_on_error=False).num_policy_channels, 16)
+    def test_embeddings_size(self):
+        self.assertEqual(Config(['--start', '--embeddings-size', '255'], exit_on_error=False).embeddings_size, 255)
 
     def test_policy_coefficient(self):
         self.assertEqual(Config(['--start', '--policy-coefficient', '0.2'], exit_on_error=False).policy_coefficient, 0.2)
