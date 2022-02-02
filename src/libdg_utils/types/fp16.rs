@@ -20,11 +20,11 @@ pub struct f16(u16);
 
 impl f16 {
     /// Wrap the given bits as an half precision floating point number.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `bits` - the bits to wrap
-    /// 
+    ///
     pub fn from_bits(bits: u16) -> f16 {
         f16(bits)
     }
