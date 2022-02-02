@@ -24,16 +24,25 @@ from .to_dict import tensor_to_dict
 
 class Dense(tf.keras.layers.Dense):
     def as_dict(self, prefix=None, flat=True):
+        # fix the weights so that they appear in the _correct_ order according
+        # to cuDNN when implemented using a 1x1 convolution:
+        #
+        # tensorflow: [in, out]
+        # cudnn:      [out, in]
+        kernel = tf.transpose(self.kernel, [1, 0])
+
         if flat is True:
             return {
-                f'{prefix}:0': tensor_to_dict(self.kernel),
-                f'{prefix}/offset:0': tensor_to_dict(self.bias)
+                f'{prefix}': tensor_to_dict(kernel),
+                f'{prefix}/offset': tensor_to_dict(self.bias),
+                f'{prefix}/shape': tensor_to_dict(kernel.shape, as_type='i4')
             }
         else:
             return {
                 't': 'dense',
                 'vs': {
-                    'kernel': tensor_to_dict(self.kernel),
-                    'offset': tensor_to_dict(self.bias)
+                    'kernel': tensor_to_dict(kernel),
+                    'offset': tensor_to_dict(self.bias),
+                    '/shape': tensor_to_dict(kernel.shape, as_type='i4')
                 }
             }

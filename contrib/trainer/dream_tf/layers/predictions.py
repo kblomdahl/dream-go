@@ -32,13 +32,15 @@ class Predictions(tf.keras.layers.Layer):
         super(Predictions, self).__init__()
 
     def as_dict(self):
-        return {
-            't': 'pred',
-            'vs': {
-                **self.policy_head.as_dict('policy', flat=True),
-                **self.value_head.as_dict('value', flat=True)
+        return [
+            {
+                't': 'pred',
+                'vs': {
+                    **self.policy_head.as_dict('policy', flat=True),
+                    **self.value_head.as_dict('value', flat=True)
+                }
             }
-        }
+        ]
 
     @property
     def l2_weights(self):

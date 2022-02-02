@@ -145,11 +145,14 @@ class DreamGoNet(tf.keras.Model, XavierOrthogonalInitializer):
             {
                 'c': {
                     'embeddings_size': self.embeddings_size,
+                    'num_features': NUM_FEATURES,
+                    'num_repr_channels': self.features_to_repr.num_channels,
+                    'num_dyn_channels': self.dynamics.num_channels
                 },
                 'n': {
                     'r': self.features_to_repr.as_dict(),
                     'd': self.dynamics.as_dict(),
-                    'g': self.rnn.as_dict(),
+                    'g': self.rnn.as_dict(flat=False),
                     'p': self.predictions.as_dict(),
                 }
             },

@@ -52,17 +52,26 @@ class BatchNormDense(XavierOrthogonalInitializer, tf.keras.layers.Layer):
             tf.reshape(1.0 / std_, (1, self.out_dims))
         )
 
+        # fix the weights so that they appear in the _correct_ order according
+        # to cuDNN when implemented using a 1x1 convolution:
+        #
+        # tensorflow: [in, out]
+        # cudnn:      [out, in]
+        kernel_ = tf.transpose(kernel_, [1, 0])
+
         if flat is True:
             return {
-                f'{prefix}:0': tensor_to_dict(kernel_),
-                f'{prefix}/offset:0': tensor_to_dict(offset_)
+                f'{prefix}': tensor_to_dict(kernel_),
+                f'{prefix}/offset': tensor_to_dict(offset_),
+                f'{prefix}/shape': tensor_to_dict(kernel_.shape, as_type='i4')
             }
         else:
             return {
                 't': 'dense',
                 'vs': {
                     'kernel': tensor_to_dict(kernel_),
-                    'offset': tensor_to_dict(offset_)
+                    'offset': tensor_to_dict(offset_),
+                    'shape': tensor_to_dict(kernel_.shape, as_type='i4')
                 }
             }
 
@@ -128,20 +137,22 @@ class BatchNormConv2D(XavierOrthogonalInitializer, tf.keras.layers.Layer):
         # to cuDNN (for NHWC):
         #
         # tensorflow: [h, w, in, out]
-        # cudnn:      [out, in, h, w]
+        # cudnn:      [out, h, w, in] (KRSC)
         filter_ = tf.transpose(filter_, perm=[3, 0, 1, 2])
 
         if flat is True:
             return {
                 f'{prefix}': tensor_to_dict(filter_),
-                f'{prefix}/offset': tensor_to_dict(offset_)
+                f'{prefix}/offset': tensor_to_dict(offset_),
+                f'{prefix}/shape': tensor_to_dict(filter_.shape, as_type='i4')
             }
         else:
             return {
                 't': 'conv',
                 'vs': {
                     'filter': tensor_to_dict(filter_),
-                    'offset': tensor_to_dict(offset_)
+                    'offset': tensor_to_dict(offset_),
+                    'shape': tensor_to_dict(filter_.shape, as_type='i4')
                 }
             }
 

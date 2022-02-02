@@ -32,12 +32,14 @@ class RNN(tf.keras.layers.GRU):
                 f'{prefix}/recurrent_offset': tensor_to_dict(self.cell.bias[1, :])
             }
         else:
-            return {
-                't': 'gru',
-                'vs': {
-                    'kernel': tensor_to_dict(self.cell.kernel),
-                    'recurrent_kernel': tensor_to_dict(self.cell.recurrent_kernel),
-                    'offset': tensor_to_dict(self.cell.bias[0, :]),
-                    'recurrent_offset': tensor_to_dict(self.cell.bias[1, :])
+            return [
+                {
+                    't': 'gru',
+                    'vs': {
+                        'kernel': tensor_to_dict(self.cell.kernel),
+                        'recurrent_kernel': tensor_to_dict(self.cell.recurrent_kernel),
+                        'offset': tensor_to_dict(self.cell.bias[0, :]),
+                        'recurrent_offset': tensor_to_dict(self.cell.bias[1, :])
+                    }
                 }
-            }
+            ]

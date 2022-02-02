@@ -47,7 +47,7 @@ class ValueHead(tf.keras.layers.Layer):
                 't': 'value',
                 'vs': {
                     **self.linear_y.as_dict('linear_1', flat=True)
-                }
+            }
             }
 
     def build(self, input_shapes):
