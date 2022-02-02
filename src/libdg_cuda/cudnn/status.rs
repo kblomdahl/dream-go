@@ -63,6 +63,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn status_not_initialized() {
         let status: Status = unsafe { transmute(1) };
 

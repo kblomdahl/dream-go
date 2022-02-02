@@ -63,6 +63,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn invalid_value() {
         let status: Error = unsafe { transmute(1) };
 

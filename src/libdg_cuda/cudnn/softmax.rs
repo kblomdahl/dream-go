@@ -83,4 +83,3 @@ impl Softmax {
 mod tests {
     // pass
 }
-
