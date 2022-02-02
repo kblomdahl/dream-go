@@ -14,7 +14,6 @@
 #![feature(core_intrinsics, link_llvm_intrinsics)]
 #![feature(test)]
 
-extern crate dashmap;
 #[macro_use] extern crate lazy_static;
 extern crate regex;
 #[cfg(test)] extern crate test;
