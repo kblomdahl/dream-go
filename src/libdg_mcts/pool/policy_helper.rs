@@ -86,7 +86,7 @@ pub fn create_initial_policy(
 ///
 pub fn add_valid_candidates(
     dst: &mut Vec<f32>,
-    src: Vec<f32>,
+    src: &[f32],
     indices: &[usize],
     transform: symmetry::Transform
 ) {

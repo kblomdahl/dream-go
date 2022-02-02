@@ -103,7 +103,7 @@ impl Worker {
                     let &(_, last_move, _) = event.trace.last().unwrap();
                     let to_move = last_move.opposite();
                     let (mut policy, indices) = create_initial_policy(options, &event.board, to_move);
-                    add_valid_candidates(&mut policy, response.policy(), &indices, event.transformation);
+                    add_valid_candidates(&mut policy, &response.policy(), &indices, event.transformation);
                     normalize_policy(&mut policy, 1.0);
 
                     unsafe {

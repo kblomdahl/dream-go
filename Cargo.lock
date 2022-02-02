@@ -151,7 +151,6 @@ dependencies = [
  "dg_utils",
  "lazy_static",
  "libc",
- "ordered-float",
  "regex",
 ]
 

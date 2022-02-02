@@ -92,7 +92,7 @@ fn full_forward(predictor: &dyn Predictor, options: &Box<dyn SearchOptions + Syn
     for &t in &symmetry::ALL {
         if let Some(new_response) = predictor.fetch(board, to_move, t) {
             let mut new_policy = initial_policy.clone();
-            add_valid_candidates(&mut new_policy, new_response.policy(), &indices, t);
+            add_valid_candidates(&mut new_policy, &new_response.policy(), &indices, t);
             normalize_policy(&mut new_policy, 0.125);
 
             value += new_response.winrate() * 0.125;
@@ -115,7 +115,7 @@ fn full_forward(predictor: &dyn Predictor, options: &Box<dyn SearchOptions + Syn
 
         for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
             let mut new_policy = initial_policy.clone();
-            add_valid_candidates(&mut new_policy, new_response.policy(), &indices, t);
+            add_valid_candidates(&mut new_policy, &new_response.policy(), &indices, t);
             normalize_policy(&mut new_policy, 0.125);
 
             value += new_response.winrate() * 0.125;
