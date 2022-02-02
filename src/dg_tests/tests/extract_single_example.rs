@@ -13,7 +13,6 @@
 // limitations under the License.
 
 extern crate dg_go;
-extern crate dg_nn;
 
 use dg_go::utils::extract_example::*;
 
@@ -34,6 +33,23 @@ fn all_succeed() {
             };
 
             assert_eq!(code, 0, "Line {}, Code {}: {:?}", line_nr, code, c_string);
+            for &value in &example.policy {
+                assert!(f32::from(value).is_finite());
+            }
+
+            for &value in &example.ownership {
+                assert!(f32::from(value).is_finite());
+            }
+
+            assert!(f32::from(example.komi).is_finite());
+
+            for &value in &example.lz_features {
+                assert!(f32::from(value).is_finite());
+            }
+
+            for &value in &example.features {
+                assert!(f32::from(value).is_finite());
+            }
         } else {
             panic!();
         }

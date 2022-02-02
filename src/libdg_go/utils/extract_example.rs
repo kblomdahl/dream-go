@@ -230,8 +230,8 @@ pub unsafe extern fn extract_single_example(
 /// * `has_policy` -
 ///
 fn choose_examples(examples: &[Candidate], has_policy: bool, num_examples: usize) -> Option<usize> {
-    let max_examples = if examples.len() > num_examples { examples.len() - num_examples } else { 0 };
-    let candidate_examples: Vec<usize> = (0..max_examples)
+    let max_index = if examples.len() > num_examples { examples.len() - num_examples } else { 0 };
+    let candidate_examples: Vec<usize> = (0..max_index)
         .filter(|&i| !has_policy || examples[i].has_policy())
         .collect();
 

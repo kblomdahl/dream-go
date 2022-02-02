@@ -15,7 +15,6 @@
 
 extern crate dg_cuda;
 extern crate dg_utils;
-extern crate dg_nn;
 extern crate test;
 extern crate libc;
 

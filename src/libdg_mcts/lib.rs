@@ -20,7 +20,7 @@ extern crate concurrent_queue;
 extern crate crossbeam_utils;
 extern crate dg_cuda;
 extern crate dg_go;
-extern crate dg_nn;
+extern crate dg_predict;
 extern crate dg_utils;
 #[macro_use] extern crate lazy_static;
 extern crate ordered_float;

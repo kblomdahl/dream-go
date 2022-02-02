@@ -14,7 +14,6 @@
 //
 
 extern crate dg_go;
-extern crate dg_nn;
 #[macro_use] extern crate lazy_static;
 extern crate regex;
 

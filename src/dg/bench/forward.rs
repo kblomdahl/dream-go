@@ -18,31 +18,30 @@ use dg_go::utils::sgf::SgfEntry;
 use dg_go::utils::symmetry::Transform;
 use dg_utils::config;
 use dg_utils::types::f16;
-use dg_nn::{Network, forward};
+use dg_predict::{Builder, Model};
 
 pub struct ForwardBenchmarkExecutor {
     batch_size: usize,
-    network: Network
+    model: Model
 }
 
 impl BenchmarkExecutor for ForwardBenchmarkExecutor {
     fn new() -> Self {
         let batch_size = *config::BATCH_SIZE;
-        let network = Network::new().expect("could not load neural network weights");
-        let _workspace = network.get_workspace(batch_size).expect("could not create `Workspace` from `Network`");
+        let model = Builder::default()
+            .build()
+            .expect("could not build predictor model");
 
-        Self { batch_size, network }
+        Self { batch_size, model }
     }
 
     fn call(&mut self, entry: SgfEntry) -> usize {
-        let mut workspace = self.network.get_workspace(self.batch_size).unwrap();
         let mut features = features::Default::new(&entry.board).get_features::<HWC, f16>(entry.color, Transform::Identity);
         if self.batch_size > 1 {
             features = features.repeat(self.batch_size);
         }
 
-        let _out = forward(&mut workspace, &features).unwrap();
-
+        let _out = self.model.initial_predict(&features, self.batch_size).unwrap();
         self.batch_size
     }
 }

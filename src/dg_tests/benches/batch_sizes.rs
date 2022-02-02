@@ -14,7 +14,7 @@
 #![feature(test)]
 
 extern crate dg_go;
-extern crate dg_nn;
+extern crate dg_predict;
 extern crate dg_utils;
 extern crate test;
 extern crate rand;
@@ -22,12 +22,12 @@ extern crate rand;
 use test::Bencher;
 use rand::{Rng, thread_rng};
 
+use dg_predict::{Builder, Model};
 use dg_go::utils::features;
-use dg_nn::*;
 use dg_utils::types::f16;
 
 thread_local! {
-    static NETWORK: Network = Network::new().unwrap();
+    static MODEL: Model = Builder::default().build().expect("could not build predictor model");
 }
 
 /// Benchmark the forward pass through the neural network for the given batch
@@ -39,8 +39,7 @@ thread_local! {
 /// * `batch_size` - the batch size to benchmark
 ///
 fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
-    NETWORK.with(|network| {
-        let mut workspace = network.get_workspace(batch_size).expect("Failed to get workspace");
+    MODEL.with(|model| {
         let features = (0..batch_size).flat_map(|_| {
             let mut input = vec! [f16::from(0.0); features::Default::size()];
 
@@ -52,7 +51,7 @@ fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
         }).collect::<Vec<_>>();
 
         b.iter(move || {
-            forward(&mut workspace, &features)
+            model.initial_predict(&features, batch_size)
         });
     });
 }

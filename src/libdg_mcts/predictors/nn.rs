@@ -17,7 +17,7 @@ use lru_cache::LruCache;
 use dg_go::utils::symmetry::Transform;
 use dg_go::{Board, Color};
 use dg_cuda::Device;
-use dg_nn::{self as nn, Network};
+use dg_predict::{Builder, Model};
 use dg_utils::types::f16;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -46,17 +46,20 @@ impl BoardTuple {
 #[derive(Clone)]
 pub struct NnPredictor {
     cache_table: Arc<Mutex<LruCache<BoardTuple, Prediction>>>,
-    network: Network,
+    model: Arc<Model>,
     count: Arc<AtomicUsize>
 }
 
 impl Default for NnPredictor {
     fn default() -> Self {
-        let network = Network::new().expect("could not load network weights");
+        let model = Arc::new(
+            Builder::default().build()
+                .expect("could not build model")
+        );
         let cache_table = Arc::new(Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1)));
         let count = Arc::new(AtomicUsize::new(0));
 
-        Self { cache_table, network, count }
+        Self { cache_table, model, count }
     }
 }
 
@@ -89,21 +92,13 @@ impl Predictor for NnPredictor {
         devices[index].set_current().expect("could not set the device for the current thread");
 
         //
-        let network = &self.network;
-        let result = network.get_workspace(batch_size).and_then(|mut workspace| {
-            let outputs = nn::forward(&mut workspace, features_list)?;
-            let (value_list, policy_list) = outputs.unwrap();
-            let policy_iter = policy_list.chunks(362).map(|p| p.to_vec());
+        let model = &self.model;
+        let outputs = model.initial_predict(features_list, batch_size)
+            .expect("could not execute neural network");
 
-            Ok(
-                value_list
-                    .into_iter()
-                    .zip(policy_iter)
-                    .map(|(value, policy)| Prediction::new(value, policy))
-                    .collect()
-            )
-        });
-
-        result.expect("could not run neural network")
+        outputs.value.iter()
+            .zip(outputs.policy.chunks_exact(362))
+            .map(|(&value, policy)| Prediction::new(value, policy.to_vec()))
+            .collect()
     }
 }

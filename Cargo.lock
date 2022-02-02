@@ -109,7 +109,7 @@ dependencies = [
  "crossbeam-utils",
  "dg_cuda",
  "dg_go",
- "dg_nn",
+ "dg_predict",
  "dg_utils",
  "lazy_static",
  "ordered-float",
@@ -119,15 +119,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "dg_nn"
+name = "dg_predict"
 version = "0.0.0"
 dependencies = [
- "crossbeam-channel",
- "dashmap",
  "dg_cuda",
- "dg_go",
  "dg_utils",
- "libc",
 ]
 
 [[package]]
@@ -137,7 +133,7 @@ dependencies = [
  "dg_cuda",
  "dg_go",
  "dg_mcts",
- "dg_nn",
+ "dg_predict",
  "dg_utils",
  "lazy_static",
  "libc",

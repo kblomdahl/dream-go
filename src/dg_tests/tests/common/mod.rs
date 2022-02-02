@@ -14,16 +14,10 @@
 //
 
 use dg_go::{DEFAULT_KOMI, Board, Color, Point};
-use dg_nn;
 
 use regex::Regex;
 use std::fs::File;
 use std::io::prelude::*;
-
-thread_local! {
-    #[allow(dead_code)]
-    static NETWORK: dg_nn::Network = dg_nn::Network::new().unwrap();
-}
 
 /// Play each move in the given SGF string and return the final board state,
 /// if any of the moves are invalid then it panic.
@@ -94,4 +88,3 @@ pub fn playout_file(filename: &str, max_moves: Option<usize>) -> Board {
 
     playout_game(&contents, max_moves)
 }
-

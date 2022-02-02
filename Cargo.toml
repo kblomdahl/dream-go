@@ -11,6 +11,6 @@ members = [
     "src/libdg_cuda",
     "src/libdg_go",
     "src/libdg_mcts",
-    "src/libdg_nn",
+    "src/libdg_predict",
     "src/libdg_utils"
 ]
