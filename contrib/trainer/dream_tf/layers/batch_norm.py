@@ -37,7 +37,6 @@ class BatchNormDense(XavierOrthogonalInitializer, tf.keras.layers.Layer):
 
     def build(self, input_shape):
         in_dims = input_shape[-1]
-
         init_op = self.xavier_orthogonal_initializer(in_dims, self.out_dims)
 
         self.kernel = self.add_weight('kernel', (in_dims, self.out_dims), tf.float32, init_op, experimental_autocast=False)

@@ -33,9 +33,10 @@ from .layers.dynamics import Dynamics
 from .layers.features_to_repr import FeaturesToRepr
 from .layers.predictions import Predictions
 from .layers.rnn import RNN
+from .layers.quantize import Quantize
 from .optimizers.schedules.learning_rate_schedule import WarmupExponentialDecaySchedule
 
-class DreamGoNet(tf.keras.Model, XavierOrthogonalInitializer):
+class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
     def __init__(
         self,
         *,
@@ -189,8 +190,8 @@ class DreamGoNet(tf.keras.Model, XavierOrthogonalInitializer):
 
             # whole_sequence_output is time_major, i.e. [step, batch, embeddings_size]
             whole_sequence_output = self.rnn(
-                inputs=tf.convert_to_tensor(embeddings),
-                initial_state=initial_states,
+                inputs=self.quantize_and_dequantize(tf.convert_to_tensor(embeddings)),
+                initial_state=self.quantize_and_dequantize(initial_states),
                 training=training
             )
 

@@ -22,9 +22,10 @@ import tensorflow as tf
 
 from .batch_norm import BatchNormDense, BatchNormConv2D
 from .residual_block import ResidualBlock
+from .quantize import Quantize
 
 
-class Dynamics(tf.keras.layers.Layer):
+class Dynamics(tf.keras.layers.Layer, Quantize):
     """ The full neural network used to predict the value and policy tensors for
     a mini-batch of board positions. """
 
