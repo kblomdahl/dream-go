@@ -178,6 +178,15 @@ impl ConvolutionDescriptor {
         }
     }
 
+    pub fn set_default_math_type(&self) -> Result<(), Status> {
+        unsafe {
+            cudnnSetConvolutionMathType(
+                self.conv_desc,
+                MathType::DefaultMath
+            )
+        }.into_result(())
+    }
+
     pub fn math_type(&self) -> Result<MathType, Status> {
         let mut out = MathType::DefaultMath;
         let status = unsafe { cudnnGetConvolutionMathType(self.conv_desc, &mut out) };
