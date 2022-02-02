@@ -80,6 +80,8 @@ pub struct ReduceTensorDescriptor {
     reduce_tensor_desc: cudnnReduceTensorDescriptor_t
 }
 
+unsafe impl Send for ReduceTensorDescriptor {}
+
 impl Drop for ReduceTensorDescriptor {
     fn drop(&mut self) {
         unsafe { cudnnDestroyReduceTensorDescriptor(self.reduce_tensor_desc) };
@@ -105,15 +107,15 @@ impl ReduceTensorDescriptor {
     /// Returns a reduction descriptor created by `cudnnSetReduceTensorDescriptor`
     /// with the given `op`, `comp_type`, `nan_opt`, `indices`, and
     /// `indices_type`.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `op` - 
-    /// * `comp_type` - 
-    /// * `nan_opt` - 
-    /// * `indices` - 
-    /// * `indices_type` - 
-    /// 
+    ///
+    /// * `op` -
+    /// * `comp_type` -
+    /// * `nan_opt` -
+    /// * `indices` -
+    /// * `indices_type` -
+    ///
     pub fn new(
         op: ReduceTensorOp,
         comp_type: DataType,

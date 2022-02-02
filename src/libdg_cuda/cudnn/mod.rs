@@ -16,6 +16,7 @@ mod activation_descriptor;
 mod activation_mode;
 mod activation;
 mod add_tensor;
+pub mod backend;
 mod convolution_bias_activation;
 mod convolution_descriptor;
 mod convolution_fwd_algo;

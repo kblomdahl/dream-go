@@ -114,6 +114,8 @@ pub struct TensorDescriptor {
     tensor_desc: cudnnTensorDescriptor_t
 }
 
+unsafe impl Send for TensorDescriptor {}
+
 impl Drop for TensorDescriptor {
     fn drop(&mut self) {
         unsafe { cudnnDestroyTensorDescriptor(self.tensor_desc) };

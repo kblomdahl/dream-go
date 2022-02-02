@@ -111,6 +111,8 @@ pub struct ConvolutionDescriptor {
     conv_desc: cudnnConvolutionDescriptor_t
 }
 
+unsafe impl Send for ConvolutionDescriptor {}
+
 impl Deref for ConvolutionDescriptor {
     type Target = cudnnConvolutionDescriptor_t;
 

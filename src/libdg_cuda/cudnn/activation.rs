@@ -40,14 +40,14 @@ pub struct Activation {
 impl Activation {
     /// Returns an `Activation` that performs the given `activation_desc` and
     /// tensors.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// * `activation_desc` - 
-    /// * `x` - 
-    /// * `y` - 
-    /// * `alpha` - 
-    /// 
+    ///
+    /// * `activation_desc` -
+    /// * `x` -
+    /// * `y` -
+    /// * `alpha` -
+    ///
     pub fn new(
         activation_desc: ActivationDescriptor,
         x: TensorDescriptor,

@@ -41,6 +41,8 @@ pub struct Ptr {
     size_in_bytes: usize
 }
 
+unsafe impl Send for Ptr {}
+
 impl Default for Ptr {
     fn default() -> Self {
         Self { dev_ptr: ptr::null_mut(), size_in_bytes: 0 }
