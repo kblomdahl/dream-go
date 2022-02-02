@@ -174,6 +174,7 @@ impl<A: Allocator> Allocator for Concurrent<A> {
 
 // -------- SmartPtr --------
 
+#[derive(Default)]
 pub struct SmartPtr<A: Allocator> {
     allocator: A,
     ptr: Option<Ptr>
