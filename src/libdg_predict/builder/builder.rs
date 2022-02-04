@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use crate::{Config, Err, Model};
+#[cfg(test)] use crate::Variable;
 use super::{BuilderParseErr, TestBuilder, LayersBuilder};
 
+#[cfg(test)] use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::convert::TryFrom;
