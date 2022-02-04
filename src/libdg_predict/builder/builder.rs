@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::{Config, Err, Model};
-use super::{BuilderParseErr, LayersBuilder};
+use super::{BuilderParseErr, TestBuilder, LayersBuilder};
 
 use std::env;
 use std::fs::File;
@@ -28,7 +28,8 @@ pub struct Builder {
     representation: LayersBuilder,
     dynamics: LayersBuilder,
     gru: LayersBuilder,
-    prediction: LayersBuilder
+    prediction: LayersBuilder,
+    test: TestBuilder
 }
 
 impl Default for Builder {
@@ -71,6 +72,7 @@ impl Builder {
             dynamics: LayersBuilder::new("d"),
             gru: LayersBuilder::new("g"),
             prediction: LayersBuilder::new("p"),
+            test: TestBuilder::default()
         }
     }
 
@@ -132,6 +134,10 @@ impl Builder {
                     };
                 },
 
+                ([JsonKey::Object(name), stack @ ..], token) if name == "t" => {
+                    out.test.parse(stack, token)?;
+                },
+
                 _ => {
                     return Err(BuilderParseErr::UnrecognizedFormat)?;
                 }
@@ -149,5 +155,18 @@ impl Builder {
         let prediction = self.prediction.build();
 
         Model::new(config, representation, dynamics, gru, prediction)
+    }
+
+    #[cfg(test)]
+    pub fn build_with_tests(self) -> Result<(Model, HashMap<String, Variable>), Err> {
+        let config = self.config.clone();
+        let representation = self.representation.build();
+        let dynamics = self.dynamics.build();
+        let gru = self.gru.build();
+        let prediction = self.prediction.build();
+        let model = Model::new(config, representation, dynamics, gru, prediction)?;
+        let test = self.test.build();
+
+        Ok((model, test))
     }
 }

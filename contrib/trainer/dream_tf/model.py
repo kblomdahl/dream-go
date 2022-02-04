@@ -30,6 +30,7 @@ from .layers import NUM_FEATURES
 from .layers.batch_norm import XavierOrthogonalInitializer
 from .layers.leela_zero import leela_zero
 from .layers.dynamics import Dynamics
+from .layers.to_dict import tensor_to_dict
 from .layers.features_to_repr import FeaturesToRepr
 from .layers.predictions import Predictions
 from .layers.rnn import RNN
@@ -142,6 +143,11 @@ class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
             self(x, labels=labels, training=True)
 
     def dump_to(self, out):
+        fake_features = tf.ones([1, 19, 19, NUM_FEATURES], tf.float16)
+        fake_hidden_states = self.features_to_repr(fake_features, training=False)
+        fake_value, fake_policy, _, _ = self.predictions(fake_hidden_states, training=False)
+        fake_policy = tf.nn.softmax(fake_policy)
+
         json.dump(
             {
                 'c': {
@@ -155,6 +161,10 @@ class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
                     'd': self.dynamics.as_dict(),
                     'g': self.rnn.as_dict(flat=False),
                     'p': self.predictions.as_dict(),
+                },
+                't': {
+                    'v1': tensor_to_dict(fake_value),
+                    'p1': tensor_to_dict(fake_policy),
                 }
             },
             fp=out,

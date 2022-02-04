@@ -140,3 +140,47 @@ impl Model {
         ExecutionPlan::new(&self.allocator)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{builder::Builder, AsSlice};
+    use std::fs::File;
+
+    #[test]
+    fn check_initial_predict() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let file = File::open(&format!("{}/../../dream_go.json", root));
+        if let Ok(file) = file {
+            let (model, tests) = Builder::parse(file)
+                .expect("could not parse model")
+                .build_with_tests()
+                .expect("could not build model");
+            let num_features = model.config.num_features;
+            let fake_features = vec! [f16::from(1.0); 19 * 19 * num_features];
+            let output = model.initial_predict(&fake_features, 1).expect("could not predict model output");
+            let test_policy: &[f16] = tests["p1"].as_slice().expect("could not retrieve policy test values");
+            let test_value: &[f16] = tests["v1"].as_slice().expect("could not retrieve value test values");
+
+            for i in 0..362 {
+                assert!(
+                    f32::from(output.policy[i]) >= f32::from(test_policy[i]) - 1e-4 &&
+                    f32::from(output.policy[i]) <= f32::from(test_policy[i]) + 1e-4,
+                    "{:?} is not almost equal to {:?}, delta is {}",
+                    output.policy[i],
+                    test_policy[i],
+                    (f32::from(output.policy[i]) - f32::from(test_policy[i])).abs()
+                );
+            }
+
+            assert!(
+                f32::from(output.value[0]) >= f32::from(test_value[0]) - 1e-3 &&
+                f32::from(output.value[0]) <= f32::from(test_value[0]) + 1e-3,
+                "{:?} is not almost equal to {:?}, delta is {}",
+                output.value[0],
+                test_value[0],
+                (f32::from(output.value[0]) - f32::from(test_value[0])).abs()
+            );
+        }
+    }
+}

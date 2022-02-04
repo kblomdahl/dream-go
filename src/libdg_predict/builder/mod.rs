@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod builder;
 mod builder_parse_err;
-mod variable_builder;
+mod builder;
 mod layer_builder;
 mod layers_builder;
+mod test_builder;
+mod variable_builder;
 
 pub use self::builder_parse_err::*;
-pub use self::variable_builder::*;
+pub use self::builder::*;
 pub use self::layer_builder::*;
 pub use self::layers_builder::*;
-pub use self::builder::*;
+pub use self::test_builder::*;
+pub use self::variable_builder::*;
