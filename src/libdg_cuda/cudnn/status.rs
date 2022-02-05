@@ -14,7 +14,7 @@
 
 use std::fmt::{self, Debug, Formatter};
 use std::ffi::CStr;
-use libc::c_char;
+use libc::{c_char, c_int};
 
 #[allow(non_camel_case_types)]
 pub(super) type cudnnStatus_t = Status;
@@ -24,15 +24,19 @@ extern {
     fn cudnnGetErrorString(status: cudnnStatus_t) -> *const c_char;
 }
 
-#[repr(i32)]
+#[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
-pub enum Status {
-    Success = 0,
+pub struct Status {
+    value: c_int
 }
 
 impl Status {
+    pub fn success() -> Self {
+        Self { value: 0 }
+    }
+
     pub fn into_result<Ok>(self, ok: Ok) -> Result<Ok, Self> {
-        if self == Status::Success {
+        if self.value == 0 {
             Ok(ok)
         } else {
             Err(self)
@@ -59,11 +63,10 @@ mod tests {
 
     #[test]
     fn success_is_ok() {
-        assert_eq!(Status::Success.into_result(1), Ok(1));
+        assert_eq!(Status::success().into_result(1), Ok(1));
     }
 
     #[test]
-    #[ignore]
     fn status_not_initialized() {
         let status: Status = unsafe { transmute(1) };
 

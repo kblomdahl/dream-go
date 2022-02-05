@@ -14,7 +14,7 @@
 
 use std::fmt::{self, Debug, Formatter};
 use std::ffi::CStr;
-use libc::c_char;
+use libc::{c_char, c_int};
 
 #[allow(non_camel_case_types)]
 pub(super) type cudaError_t = Error;
@@ -24,15 +24,19 @@ extern {
     fn cudaGetErrorName(error: cudaError_t) -> *const c_char;
 }
 
-#[repr(i32)]
+#[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
-pub enum Error {
-    Success = 0,
+pub struct Error {
+    value: c_int
 }
 
 impl Error {
+    pub fn success() -> Self {
+        Self { value: 0 }
+    }
+
     pub fn into_result<Ok>(self, ok: Ok) -> Result<Ok, Self> {
-        if self == Error::Success {
+        if self.value == 0 {
             Ok(ok)
         } else {
             Err(self)
@@ -59,11 +63,10 @@ mod tests {
 
     #[test]
     fn success_is_ok() {
-        assert_eq!(Error::Success.into_result(1), Ok(1));
+        assert_eq!(Error::success().into_result(1), Ok(1));
     }
 
     #[test]
-    #[ignore]
     fn invalid_value() {
         let status: Error = unsafe { transmute(1) };
 
