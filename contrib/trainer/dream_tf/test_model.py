@@ -50,14 +50,14 @@ class DreamGoNetBase(TestUtils):
         self.assertTrue(self.model.rnn._could_use_gpu_kernel)
 
     def test_dtype(self):
-        y = self.model(self.x, labels=self.labels)
+        y = self.model(self.x)
         self.assertEqual(y['value'].dtype, tf.float32)
         self.assertEqual(y['policy'].dtype, tf.float32)
         self.assertEqual(y['ownership'].dtype, tf.float32)
         self.assertEqual(y['tower'].dtype, tf.float16)
 
     def test_shape(self):
-        y = self.model(self.x, labels=self.labels)
+        y = self.model(self.x)
         self.assertEqual(y['value'].shape, [self.batch_size * self.num_unrolls, 1])
         self.assertEqual(y['policy'].shape, [self.batch_size * self.num_unrolls, 362])
         self.assertEqual(y['ownership'].shape, [self.batch_size * self.num_unrolls, 361])
@@ -92,7 +92,7 @@ class DreamGoNetBase(TestUtils):
 
     def test_as_dict(self):
         out = io.StringIO('')
-        self.model(self.inputs, labels=self.labels)
+        self.model(self.inputs)
         self.model.dump_to(out)
 
         #self.assertIn('num_channels:0', out.getvalue())
@@ -118,14 +118,14 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
         self.x = tf.zeros([self.batch_size, self.num_unrolls, 19, 19, NUM_FEATURES], tf.float16)
 
     def test_save_weights(self):
-        self.model(self.x, labels=self.labels, training=False)  # build the layers
+        self.model(self.x, training=False)  # build the layers
         with tempfile.TemporaryDirectory() as dir_name:
             self.model.save_weights(f'{dir_name}/weights.001')
             self.assertTrue(os.path.isfile(f'{dir_name}/weights.001.index'))
 
     def test_metrics(self):
         inputs = self.inputs
-        outputs = self.model(inputs, labels=self.labels, training=False)
+        outputs = self.model(inputs, training=False)
         labels = {
             'value': tf.reshape(outputs['value'], self.labels['value'].shape),
             'policy': tf.reshape(tf.nn.softmax(outputs['policy']), self.labels['policy'].shape),

@@ -140,13 +140,11 @@ class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
         # re-compute batch normalization statistics by walking through the
         # dataset in training mode.
         for (x, labels) in xs:
-            self(x, labels=labels, training=True)
+            self(x, training=True)
 
     def dump_to(self, out):
-        fake_features = tf.ones([1, 19, 19, NUM_FEATURES], tf.float16)
-        fake_hidden_states = self.features_to_repr(fake_features, training=False)
-        fake_value, fake_policy, _, _ = self.predictions(fake_hidden_states, training=False)
-        fake_policy = tf.nn.softmax(fake_policy)
+        fake_features = tf.ones([1, self.num_unrolls, 19, 19, NUM_FEATURES], tf.float16)
+        results = self(fake_features, training=False)
 
         json.dump(
             {
@@ -163,8 +161,12 @@ class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
                     'p': self.predictions.as_dict(),
                 },
                 't': {
-                    'v1': tensor_to_dict(fake_value),
-                    'p1': tensor_to_dict(fake_policy),
+                    'v1': tensor_to_dict(results['value'][0, :]),
+                    'v2': tensor_to_dict(results['value'][1, :]),
+                    'v3': tensor_to_dict(results['value'][2, :]),
+                    'p1': tensor_to_dict(tf.nn.softmax(results['policy'][0, :])),
+                    'p2': tensor_to_dict(tf.nn.softmax(results['policy'][1, :])),
+                    'p3': tensor_to_dict(tf.nn.softmax(results['policy'][2, :])),
                 }
             },
             fp=out,
@@ -185,37 +187,31 @@ class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
             )
         )
 
-    def call(self, inputs, labels=None, training=True):
-        if labels is None:
-            flat_outputs = self.features_to_repr(
-                self.merge_unrolls(inputs),
-                training=training
-            )
-        else:
-            initial_states = self.features_to_repr(inputs[:, 0, :, :, :], training=training)
-            embeddings = [
-                self.dynamics(inputs[:, i, :, :, :], training=training)
-                for i in range(1, self.num_unrolls)
-            ]
+    def call(self, inputs, training=True):
+        initial_states = self.features_to_repr(inputs[:, 0, :, :, :], training=training)
+        embeddings = [
+            self.dynamics(inputs[:, i, :, :, :], training=training)
+            for i in range(1, self.num_unrolls)
+        ]
 
-            # whole_sequence_output is time_major, i.e. [step, batch, embeddings_size]
-            whole_sequence_output = self.rnn(
-                inputs=self.quantize_and_dequantize(tf.convert_to_tensor(embeddings)),
-                initial_state=self.quantize_and_dequantize(initial_states),
-                training=training
-            )
+        # whole_sequence_output is time_major, i.e. [step, batch, embeddings_size]
+        whole_sequence_output = self.rnn(
+            inputs=self.quantize_and_dequantize(tf.convert_to_tensor(embeddings)),
+            initial_state=self.quantize_and_dequantize(initial_states),
+            training=training
+        )
 
-            whole_sequence_output = tf.concat(
-                [
-                    [initial_states],
-                    whole_sequence_output
-                ],
-                axis=0
-            )
+        whole_sequence_output = tf.concat(
+            [
+                [initial_states],
+                whole_sequence_output
+            ],
+            axis=0
+        )
 
-            # flat_outputs is batch_major, i.e. [batch * step, embeddings_size]
-            flat_outputs = tf.transpose(whole_sequence_output, [1, 0, 2])
-            flat_outputs = self.merge_unrolls(flat_outputs)
+        # flat_outputs is batch_major, i.e. [batch * step, embeddings_size]
+        flat_outputs = tf.transpose(whole_sequence_output, [1, 0, 2])
+        flat_outputs = self.merge_unrolls(flat_outputs)
 
         value_hat, policy_hat, ownership_hat, tower_hat = self.predictions(
             flat_outputs,
@@ -386,7 +382,7 @@ class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
         self.apply_lz_labels(labels)
 
         with tf.GradientTape() as tape:
-            y_hat = self(x, labels=labels, training=True)
+            y_hat = self(x, training=True)
             loss, losses = self.custom_loss(labels, y_hat)
             loss = self.optimizer.get_scaled_loss(loss)
 
@@ -407,7 +403,7 @@ class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
         x, labels = data
         self.apply_lz_labels(labels)
 
-        y_hat = self(x, labels=labels, training=False)
+        y_hat = self(x, training=False)
         loss, losses = self.custom_loss(labels, y_hat)
         self.custom_metrics(labels, y_hat, losses=losses)
         additional_metrics = self.custom_image_metrics(x, labels, y_hat)

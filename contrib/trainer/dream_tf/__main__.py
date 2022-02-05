@@ -87,7 +87,6 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
         # this will build all of the necessary variables in the model and optimizer
         _ = model(
             tf.zeros([1, config.num_unrolls, 19, 19, get_num_features()], tf.float16),
-            labels=True,
             training=False
         )
         _ = model.optimizer.iterations
