@@ -38,7 +38,7 @@ pub struct ResidualBlock {
     filter: cuda::PerDevice<[cuda::Ptr; 2]>,
     offset: cuda::PerDevice<[cuda::Ptr; 2]>,
 
-    conv_desc: HashMap<i32, [cudnn::ConvolutionBiasActivation; 2]>
+    conv_desc: cuda::PerDevice<HashMap<i32, [cudnn::ConvolutionBiasActivation; 2]>>
 }
 
 impl ResidualBlock {
@@ -46,7 +46,7 @@ impl ResidualBlock {
         Ok(Self {
             filter: cuda::PerDevice::<_>::new()?,
             offset: cuda::PerDevice::<_>::new()?,
-            conv_desc: HashMap::new()
+            conv_desc: cuda::PerDevice::<_>::new()?,
         })
     }
 
@@ -170,8 +170,8 @@ impl LayerImpl for ResidualBlock {
     ) -> Result<Io, Err>
     {
         let conv_desc = &self.conv_desc[&(inputs.batch_size as i32)];
-        let fwd_algo_perf = conv_desc[0].fwd_algo_perf();
-        let workspace = cuda::malloc(fwd_algo_perf.memory(), allocator)?;
+        let workspace_size_in_bytes = conv_desc[0].fwd_algo_perf().memory().max(conv_desc[1].fwd_algo_perf().memory());
+        let workspace = cuda::malloc(workspace_size_in_bytes, allocator)?;
         let output_0 = cuda::malloc(conv_desc[0].output().size_in_bytes()?, allocator)?;
         let intermediate = inputs.current().as_ptr();
 

@@ -37,8 +37,8 @@ impl LayerFactory for PredictionFactory {
 pub struct Prediction {
     kernel: cuda::PerDevice<[cuda::Ptr; 2]>,
     offset: cuda::PerDevice<[cuda::Ptr; 2]>,
-    conv_desc: HashMap<i32, [cudnn::ConvolutionBiasActivation; 2]>,
-    softmax: HashMap<i32, cudnn::Softmax>
+    conv_desc: cuda::PerDevice<HashMap<i32, [cudnn::ConvolutionBiasActivation; 2]>>,
+    softmax: cuda::PerDevice<HashMap<i32, cudnn::Softmax>>
 }
 
 impl Prediction {
@@ -46,8 +46,8 @@ impl Prediction {
         Ok(Self {
             kernel: cuda::PerDevice::new()?,
             offset: cuda::PerDevice::new()?,
-            conv_desc: HashMap::new(),
-            softmax: HashMap::new()
+            conv_desc: cuda::PerDevice::new()?,
+            softmax: cuda::PerDevice::new()?,
         })
     }
 
@@ -184,17 +184,15 @@ impl LayerImpl for Prediction {
         let conv_desc = &self.conv_desc[&(inputs.batch_size as i32)];
         let softmax = &self.softmax[&(inputs.batch_size as i32)];
         let linear_policy = cuda::malloc(conv_desc[0].output().size_in_bytes()?, allocator)?;
-        let workspace = [
-            cuda::malloc(conv_desc[0].fwd_algo_perf().memory(), allocator)?,
-            cuda::malloc(conv_desc[1].fwd_algo_perf().memory(), allocator)?
-        ];
+        let workspace_size_in_bytes = conv_desc[0].fwd_algo_perf().memory().max(conv_desc[1].fwd_algo_perf().memory());
+        let workspace = cuda::malloc(workspace_size_in_bytes, allocator)?;
 
         conv_desc[0].forward(
             handle,
             inputs.current().as_ptr(),
             self.kernel[0].as_ptr(),
-            workspace[0].as_ptr(),
-            workspace[0].size_in_bytes(),
+            workspace.as_ptr(),
+            workspace.size_in_bytes(),
             linear_policy.as_ptr(),
             self.offset[0].as_ptr(),
             linear_policy.as_ptr()
@@ -210,8 +208,8 @@ impl LayerImpl for Prediction {
             handle,
             inputs.current().as_ptr(),
             self.kernel[1].as_ptr(),
-            workspace[1].as_ptr(),
-            workspace[1].size_in_bytes(),
+            workspace.as_ptr(),
+            workspace.size_in_bytes(),
             inputs.value.as_ptr(),
             self.offset[1].as_ptr(),
             inputs.value.as_ptr()

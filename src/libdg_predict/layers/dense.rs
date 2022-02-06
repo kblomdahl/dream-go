@@ -38,7 +38,7 @@ pub struct Dense {
     kernel: cuda::PerDevice<cuda::Ptr>,
     offset: cuda::PerDevice<cuda::Ptr>,
 
-    conv_desc: HashMap<i32, cudnn::ConvolutionBiasActivation>
+    conv_desc: cuda::PerDevice<HashMap<i32, cudnn::ConvolutionBiasActivation>>
 }
 
 impl Dense {
@@ -46,7 +46,7 @@ impl Dense {
         Ok(Self {
             kernel: cuda::PerDevice::<_>::new()?,
             offset: cuda::PerDevice::<_>::new()?,
-            conv_desc: HashMap::new()
+            conv_desc: cuda::PerDevice::<_>::new()?,
         })
     }
 
