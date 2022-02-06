@@ -91,7 +91,7 @@ unsafe fn gpu_matmul(
         data_type,
         tensor_format,
         [num_outputs as i32, num_inputs as i32, 1, 1]
-)?;
+    )?;
 
     // figure out how large of a workspace we need given the convolution
     // configuration.
@@ -107,17 +107,17 @@ unsafe fn gpu_matmul(
     // allocate the `input` array and initialize it with ones.
     let input_size = (batch_size * num_inputs) as usize;
     let mut input = cuda::malloc(size_of::<f32>() * input_size, &allocator).unwrap();
-    input.copy_from_slice(&vec! [1.0; input_size], &stream).unwrap();
+    input.copy_from_slice(&vec! [1.0f32; input_size], &stream).unwrap();
 
     // allocate the `weights` array and fill it with 0.1's.
     let weights_size = (num_inputs * num_outputs) as usize;
     let mut weights = cuda::malloc(size_of::<f32>() * weights_size, &allocator).unwrap();
-    weights.copy_from_slice(&vec! [0.1; weights_size], &stream).unwrap();
+    weights.copy_from_slice(&vec! [0.1f32; weights_size], &stream).unwrap();
 
     // allocate the `offset` array and initialize it with zeros.
     let offset_size = num_outputs as usize;
     let mut offset = cuda::malloc(size_of::<f32>() * offset_size, &allocator).unwrap();
-    offset.copy_from_slice(&vec! [1.0; offset_size], &stream).unwrap();
+    offset.copy_from_slice(&vec! [1.0f32; offset_size], &stream).unwrap();
 
     // allocate the `output` array, but leave it uninitialized since
     // we will never read into it until after the convolution.
@@ -174,4 +174,24 @@ fn gpu_08_722x1(b: &mut Bencher) {
 #[bench]
 fn gpu_16_722x1(b: &mut Bencher) {
     unsafe { gpu_matmul(b, 16, 722, 1).unwrap(); }
+}
+
+#[bench]
+fn gpu_08_722x722(b: &mut Bencher) {
+    unsafe { gpu_matmul(b, 8, 722, 722).unwrap(); }
+}
+
+#[bench]
+fn gpu_16_722x722(b: &mut Bencher) {
+    unsafe { gpu_matmul(b, 16, 722, 722).unwrap(); }
+}
+
+#[bench]
+fn gpu_08_722x362(b: &mut Bencher) {
+    unsafe { gpu_matmul(b, 8, 722, 362).unwrap(); }
+}
+
+#[bench]
+fn gpu_16_722x362(b: &mut Bencher) {
+    unsafe { gpu_matmul(b, 16, 722, 362).unwrap(); }
 }
