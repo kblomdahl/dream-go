@@ -102,6 +102,23 @@ impl Ptr {
         error.into_result(())
     }
 
+    pub fn copy_from_slice_offset<T: Sized>(&mut self, offset_in_bytes: usize, data: &[T], stream: &Stream) -> Result<(), Error> {
+        debug_assert!(size_of::<T>() * data.len() + offset_in_bytes <= self.size_in_bytes);
+
+        let size_in_bytes = size_of::<T>() * data.len();
+        let error = unsafe {
+            cudaMemcpyAsync(
+                self.dev_ptr.offset(offset_in_bytes as isize),
+                data.as_ptr() as *const _,
+                size_in_bytes,
+                cudaMemcpyKind_t::HostToDevice,
+                **stream
+            )
+        };
+
+        error.into_result(())
+    }
+
     pub fn copy_from_ptr(&mut self, src: &Ptr, size_in_bytes: usize, stream: &Stream) -> Result<(), Error> {
         debug_assert!(size_in_bytes <= self.size_in_bytes);
 
