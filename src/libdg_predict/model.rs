@@ -166,7 +166,8 @@ mod tests {
                 assert!(
                     f32::from(output.policy[i]) >= f32::from(test_policy[i]) - 1e-4 &&
                     f32::from(output.policy[i]) <= f32::from(test_policy[i]) + 1e-4,
-                    "{:?} is not almost equal to {:?}, delta is {}",
+                    "policy[{}]: {:?} is not almost equal to {:?}, delta is {}",
+                    i,
                     output.policy[i],
                     test_policy[i],
                     (f32::from(output.policy[i]) - f32::from(test_policy[i])).abs()

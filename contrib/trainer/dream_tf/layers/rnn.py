@@ -24,22 +24,50 @@ from .to_dict import tensor_to_dict
 
 class RNN(tf.keras.layers.GRU):
     def as_dict(self, prefix=None, flat=True):
+        # This is based on tensorflow [1] internals and is probably subject
+        # to change :'(
+        #
+        # [1] https://github.com/keras-team/keras/blob/a5a6a53eceb4bb0957fcbe577f56941ae8062d8f/keras/layers/cudnn_recurrent.py#L271
+        units = self.cell.units
+        kernel = self.cell.kernel
+        recurrent_kernel = self.cell.recurrent_kernel
+        offset = self.cell.bias[0, :] # shape is (2, 2166)
+        recurrent_offset = self.cell.bias[1, :]
+
         if flat is True:
             return {
-                f'{prefix}/kernel': tensor_to_dict(self.cell.kernel),
-                f'{prefix}/recurrent_kernel': tensor_to_dict(self.cell.recurrent_kernel),
-                f'{prefix}/offset': tensor_to_dict(self.cell.bias[0, :]),
-                f'{prefix}/recurrent_offset': tensor_to_dict(self.cell.bias[1, :])
+                f'{prefix}/units': tensor_to_dict(units, 'i4'),
+                f'{prefix}/reset': tensor_to_dict(kernel[:, units:units * 2]),
+                f'{prefix}/reset/offset': tensor_to_dict(offset[units:units * 2]),
+                f'{prefix}/update': tensor_to_dict(kernel[:, :units]),
+                f'{prefix}/update/offset': tensor_to_dict(offset[:units]),
+                f'{prefix}/candidate': tensor_to_dict(kernel[:, units * 2:]),
+                f'{prefix}/candidate/offset': tensor_to_dict(offset[units * 2:]),
+                f'{prefix}/recurrent_reset': tensor_to_dict(recurrent_kernel[:, units:units * 2]),
+                f'{prefix}/recurrent_reset/offset': tensor_to_dict(recurrent_offset[units:units * 2]),
+                f'{prefix}/recurrent_update': tensor_to_dict(recurrent_kernel[:, :units]),
+                f'{prefix}/recurrent_update/offset': tensor_to_dict(recurrent_offset[:units]),
+                f'{prefix}/recurrent_candidate': tensor_to_dict(recurrent_kernel[:, units * 2:]),
+                f'{prefix}/recurrent_candidate/offset': tensor_to_dict(recurrent_offset[units * 2:])
             }
         else:
             return [
                 {
                     't': 'gru',
                     'vs': {
-                        'kernel': tensor_to_dict(self.cell.kernel),
-                        'recurrent_kernel': tensor_to_dict(self.cell.recurrent_kernel),
-                        'offset': tensor_to_dict(self.cell.bias[0, :]),
-                        'recurrent_offset': tensor_to_dict(self.cell.bias[1, :])
+                        'units': tensor_to_dict(units, 'i4'),
+                        'reset': tensor_to_dict(kernel[:, units:units * 2]),
+                        'reset/offset': tensor_to_dict(offset[units:units * 2]),
+                        'update': tensor_to_dict(kernel[:, :units]),
+                        'update/offset': tensor_to_dict(offset[:units]),
+                        'candidate': tensor_to_dict(kernel[:, units * 2:]),
+                        'candidate/offset': tensor_to_dict(offset[units * 2:]),
+                        'recurrent_reset': tensor_to_dict(recurrent_kernel[:, units:units * 2]),
+                        'recurrent_reset/offset': tensor_to_dict(recurrent_offset[units:units * 2]),
+                        'recurrent_update': tensor_to_dict(recurrent_kernel[:, :units]),
+                        'recurrent_update/offset': tensor_to_dict(recurrent_offset[:units]),
+                        'recurrent_candidate': tensor_to_dict(recurrent_kernel[:, units * 2:]),
+                        'recurrent_candidate/offset': tensor_to_dict(recurrent_offset[units * 2:])
                     }
                 }
             ]

@@ -43,4 +43,9 @@ impl Config {
         self.image_size = image_size;
         self
     }
+
+    pub fn with_embeddings_size(mut self, embeddings_size: usize) -> Self {
+        self.embeddings_size = embeddings_size;
+        self
+    }
 }
