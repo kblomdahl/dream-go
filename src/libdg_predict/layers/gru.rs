@@ -75,7 +75,7 @@ impl Gru {
     {
         Ok(cudnn::RnnDescriptor::new(
             &handle,
-            cudnn::RnnAlgo::Standard,
+            cudnn::RnnAlgo::PersistStatic,
             cudnn::RnnMode::Gru,
             cudnn::RnnBiasMode::DoubleBias,
             cudnn::RnnInputMode::LinearInput,
