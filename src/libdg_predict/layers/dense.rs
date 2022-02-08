@@ -73,11 +73,9 @@ impl Dense {
             [1, 1],
             [1, 1],
             cudnn::ConvolutionMode::CrossCorrelation,
-            cudnn::DataType::Float
+            cudnn::DataType::Half
         )?;
 
-        // when using tensor cores the output is all zeros, so do not use them for now
-        dense_desc.set_default_math_type()?;
         Ok(dense_desc)
     }
 

@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(test)]
+
 extern crate dg_cuda;
 extern crate dg_utils;
+extern crate test;
 
 mod allocator;
 mod builder;

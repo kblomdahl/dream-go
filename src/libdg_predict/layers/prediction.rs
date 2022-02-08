@@ -83,10 +83,9 @@ impl Prediction {
             [1, 1],
             [1, 1],
             cudnn::ConvolutionMode::CrossCorrelation,
-            cudnn::DataType::Float
+            cudnn::DataType::Half
         )?;
 
-        dense_desc.set_default_math_type()?;
         Ok(dense_desc)
     }
 

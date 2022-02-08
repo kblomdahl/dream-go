@@ -145,7 +145,28 @@ impl Model {
 mod tests {
     use super::*;
     use crate::{builder::Builder, AsSlice};
+    use test::Bencher;
     use std::fs::File;
+
+    fn check_array_approx_eq<T>(a: &[T], b: &[T], eps: f32)
+        where f32: From<T>, T: Copy
+    {
+        assert_eq!(a.len(), b.len());
+
+        for i in 0..a.len() {
+            let a = f32::from(a[i]);
+            let b = f32::from(b[i]);
+
+            assert!(
+                a >= b - eps && a <= b + eps,
+                "[{}]: {} is not almost equal to {}, delta is {}",
+                i,
+                a,
+                b,
+                (a - b).abs()
+            );
+        }
+    }
 
     #[test]
     fn check_initial_predict() {
@@ -158,80 +179,68 @@ mod tests {
                 .expect("could not build model");
             let num_features = model.config.num_features;
             let fake_features = vec! [f16::from(1.0); 19 * 19 * num_features];
+
+            // representation
             let output = model.initial_predict(&fake_features, 1).expect("could not predict model output");
             let test_policy: &[f16] = tests["p1"].as_slice().expect("could not retrieve policy test values");
             let test_value: &[f16] = tests["v1"].as_slice().expect("could not retrieve value test values");
 
-            for i in 0..362 {
-                assert!(
-                    f32::from(output.policy[i]) >= f32::from(test_policy[i]) - 1e-4 &&
-                    f32::from(output.policy[i]) <= f32::from(test_policy[i]) + 1e-4,
-                    "policy[{}]: {:?} is not almost equal to {:?}, delta is {}",
-                    i,
-                    output.policy[i],
-                    test_policy[i],
-                    (f32::from(output.policy[i]) - f32::from(test_policy[i])).abs()
-                );
-            }
+            check_array_approx_eq(&output.policy[0..362], &test_policy[0..362], 2e-4);
+            check_array_approx_eq(&output.value[0..1], &test_value[0..1], 2e-3);
 
-            assert!(
-                f32::from(output.value[0]) >= f32::from(test_value[0]) - 1e-3 &&
-                f32::from(output.value[0]) <= f32::from(test_value[0]) + 1e-3,
-                "value: {:?} is not almost equal to {:?}, delta is {}",
-                output.value[0],
-                test_value[0],
-                (f32::from(output.value[0]) - f32::from(test_value[0])).abs()
-            );
-
+            // representation -> dynamics
             let output = model.predict(&output.hidden_states, &fake_features, 1).expect("could not predict model output");
             let test_policy: &[f16] = tests["p2"].as_slice().expect("could not retrieve policy test values");
             let test_value: &[f16] = tests["v2"].as_slice().expect("could not retrieve value test values");
 
-            assert!(
-                f32::from(output.value[0]) >= f32::from(test_value[0]) - 1e-3 &&
-                f32::from(output.value[0]) <= f32::from(test_value[0]) + 1e-3,
-                "value: {:?} is not almost equal to {:?}, delta is {}",
-                output.value[0],
-                test_value[0],
-                (f32::from(output.value[0]) - f32::from(test_value[0])).abs()
-            );
+            check_array_approx_eq(&output.policy[0..362], &test_policy[0..362], 2e-4);
+            check_array_approx_eq(&output.value[0..1], &test_value[0..1], 2e-3);
 
-            for i in 0..362 {
-                assert!(
-                    f32::from(output.policy[i]) >= f32::from(test_policy[i]) - 2e-4 &&
-                    f32::from(output.policy[i]) <= f32::from(test_policy[i]) + 2e-4,
-                    "policy[{}]: {:?} is not almost equal to {:?}, delta is {}",
-                    i,
-                    output.policy[i],
-                    test_policy[i],
-                    (f32::from(output.policy[i]) - f32::from(test_policy[i])).abs()
-                );
-            }
-
+            // dynamics -> dynamics
             let output = model.predict(&output.hidden_states, &fake_features, 1).expect("could not predict model output");
             let test_policy: &[f16] = tests["p3"].as_slice().expect("could not retrieve policy test values");
             let test_value: &[f16] = tests["v3"].as_slice().expect("could not retrieve value test values");
 
-            assert!(
-                f32::from(output.value[0]) >= f32::from(test_value[0]) - 1e-3 &&
-                f32::from(output.value[0]) <= f32::from(test_value[0]) + 1e-3,
-                "value: {:?} is not almost equal to {:?}, delta is {}",
-                output.value[0],
-                test_value[0],
-                (f32::from(output.value[0]) - f32::from(test_value[0])).abs()
-            );
+            check_array_approx_eq(&output.policy[0..362], &test_policy[0..362], 2e-4);
+            check_array_approx_eq(&output.value[0..1], &test_value[0..1], 2e-3);
+        }
+    }
 
-            for i in 0..362 {
-                assert!(
-                    f32::from(output.policy[i]) >= f32::from(test_policy[i]) - 2e-4 &&
-                    f32::from(output.policy[i]) <= f32::from(test_policy[i]) + 2e-4,
-                    "policy[{}]: {:?} is not almost equal to {:?}, delta is {}",
-                    i,
-                    output.policy[i],
-                    test_policy[i],
-                    (f32::from(output.policy[i]) - f32::from(test_policy[i])).abs()
-                );
-            }
+    #[bench]
+    fn initial_predict_01(b: &mut Bencher) {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let file = File::open(&format!("{}/../../dream_go.json", root));
+        if let Ok(file) = file {
+            let model = Builder::parse(file)
+                .expect("could not parse model")
+                .build()
+                .expect("could not build model");
+            let num_features = model.config.num_features;
+            let fake_features = vec! [f16::from(1.0); 19 * 19 * num_features];
+
+            b.iter(|| {
+                model.initial_predict(&fake_features, 1).expect("could not predict model output")
+            });
+        }
+    }
+
+    #[bench]
+    fn predict_01(b: &mut Bencher) {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let file = File::open(&format!("{}/../../dream_go.json", root));
+        if let Ok(file) = file {
+            let model = Builder::parse(file)
+                .expect("could not parse model")
+                .build()
+                .expect("could not build model");
+            let num_features = model.config.num_features;
+            let embeddings_size = model.config.embeddings_size;
+            let fake_features = vec! [f16::from(1.0); 19 * 19 * num_features];
+            let fake_hidden_states = vec! [f16::from(1.0); embeddings_size];
+
+            b.iter(|| {
+                model.predict(&fake_hidden_states, &fake_features, 1).expect("could not predict model output")
+            });
         }
     }
 }
