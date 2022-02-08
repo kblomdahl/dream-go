@@ -51,7 +51,8 @@ fn bench_batch_size(b: &mut Bencher, batch_size: usize) {
         }).collect::<Vec<_>>();
 
         b.iter(move || {
-            model.initial_predict(&features, batch_size)
+            let output = unsafe { model.initial_predict(&features, batch_size).unwrap_unchecked() };
+            model.predict(&output.hidden_states, &features, batch_size)
         });
     });
 }
