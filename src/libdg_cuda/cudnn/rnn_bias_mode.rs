@@ -21,5 +21,5 @@ pub enum RnnBiasMode {
     NoBias = 0,
     SingleInpBias = 1,
     DoubleBias = 2,
-    SinleRecBias = 3
+    SingleRecBias = 3
 }

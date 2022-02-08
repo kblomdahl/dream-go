@@ -78,7 +78,7 @@ impl Gru {
             cudnn::RnnAlgo::Standard,
             cudnn::RnnMode::Gru,
             cudnn::RnnBiasMode::DoubleBias,
-            cudnn::RnnInputMode::SkipInput,
+            cudnn::RnnInputMode::LinearInput,
             cudnn::DataType::Half,
             cudnn::DataType::Float,
             cudnn::MathType::TensorOpMath,
@@ -229,11 +229,11 @@ mod tests {
         1.0 / (1.0 + (-x).exp())
     }
 
-    fn random1<T: From<f32>>(n: usize) -> Vec<T> {
+    fn random1<T: From<f32>>(n: usize, rotate: usize) -> Vec<T> {
         let mut out = vec! [];
 
         for i in 0..n {
-            out.push(T::from((i + 1) as f32 / n as f32));
+            out.push(T::from(((i + rotate + 1) % n) as f32 / n as f32));
         }
 
         out
@@ -245,8 +245,8 @@ mod tests {
         let factory = GruFactory::default();
         let config = Config::default().with_embeddings_size(n);
         let mut plan = ExecutionPlan::new(&cuda::Concurrent::<cuda::Sticky<cuda::Native>>::default())?;
-        let hidden_states = random1::<f16>(n);
-        let intermediate = random1::<f16>(n);
+        let hidden_states = random1::<f16>(n, 0);
+        let intermediate = random1::<f16>(n, n / 2);
         let mut intermediate_ptr = cuda::malloc(2 * n, &mut plan.allocator)?;
         intermediate_ptr.copy_from_slice(&intermediate, &plan.stream)?;
         let mut io = Io::new(1, &config, &mut plan.allocator)?

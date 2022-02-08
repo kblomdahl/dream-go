@@ -196,8 +196,8 @@ class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
 
         # whole_sequence_output is time_major, i.e. [step, batch, embeddings_size]
         whole_sequence_output = self.rnn(
-            inputs=self.quantize_and_dequantize(tf.convert_to_tensor(embeddings)),
-            initial_state=self.quantize_and_dequantize(initial_states),
+            inputs=tf.convert_to_tensor(embeddings),
+            initial_state=initial_states,
             training=training
         )
 

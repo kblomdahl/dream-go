@@ -19,6 +19,8 @@ use std::ptr::{self, null};
 use std::ops::Deref;
 use libc::{c_void, size_t};
 
+const CUDNN_RNN_PADDED_IO_ENABLED: u32 = 1;
+
 #[allow(non_camel_case_types)]
 pub type cudnnRNNDescriptor_t = *const c_void;
 
@@ -209,7 +211,7 @@ impl RnnDescriptor {
                         proj_size,
                         num_layers,
                         *out.dropout_desc,
-                        0
+                        CUDNN_RNN_PADDED_IO_ENABLED
                     )
                 };
 

@@ -25,9 +25,9 @@ from .to_dict import tensor_to_dict
 class RNN(tf.keras.layers.GRU):
     def as_dict(self, prefix=None, flat=True):
         # This is based on tensorflow [1] internals and is probably subject
-        # to change :'(
+        # to change :'(.
         #
-        # [1] https://github.com/keras-team/keras/blob/a5a6a53eceb4bb0957fcbe577f56941ae8062d8f/keras/layers/cudnn_recurrent.py#L271
+        # [1] https://github.com/keras-team/keras/blob/a5a6a53eceb4bb0957fcbe577f56941ae8062d8f/keras/layers/recurrent_v2.py#L629
         units = self.cell.units
         kernel = self.cell.kernel
         recurrent_kernel = self.cell.recurrent_kernel
@@ -37,17 +37,17 @@ class RNN(tf.keras.layers.GRU):
         if flat is True:
             return {
                 f'{prefix}/units': tensor_to_dict(units, 'i4'),
-                f'{prefix}/reset': tensor_to_dict(kernel[:, units:units * 2]),
+                f'{prefix}/reset': tensor_to_dict(tf.transpose(kernel[:, units:units * 2])),
                 f'{prefix}/reset/offset': tensor_to_dict(offset[units:units * 2]),
-                f'{prefix}/update': tensor_to_dict(kernel[:, :units]),
+                f'{prefix}/update': tensor_to_dict(tf.transpose(kernel[:, :units])),
                 f'{prefix}/update/offset': tensor_to_dict(offset[:units]),
-                f'{prefix}/candidate': tensor_to_dict(kernel[:, units * 2:]),
+                f'{prefix}/candidate': tensor_to_dict(tf.transpose(kernel[:, units * 2:])),
                 f'{prefix}/candidate/offset': tensor_to_dict(offset[units * 2:]),
-                f'{prefix}/recurrent_reset': tensor_to_dict(recurrent_kernel[:, units:units * 2]),
+                f'{prefix}/recurrent_reset': tensor_to_dict(tf.transpose(recurrent_kernel[:, units:units * 2])),
                 f'{prefix}/recurrent_reset/offset': tensor_to_dict(recurrent_offset[units:units * 2]),
-                f'{prefix}/recurrent_update': tensor_to_dict(recurrent_kernel[:, :units]),
+                f'{prefix}/recurrent_update': tensor_to_dict(tf.transpose(recurrent_kernel[:, :units])),
                 f'{prefix}/recurrent_update/offset': tensor_to_dict(recurrent_offset[:units]),
-                f'{prefix}/recurrent_candidate': tensor_to_dict(recurrent_kernel[:, units * 2:]),
+                f'{prefix}/recurrent_candidate': tensor_to_dict(tf.transpose(recurrent_kernel[:, units * 2:])),
                 f'{prefix}/recurrent_candidate/offset': tensor_to_dict(recurrent_offset[units * 2:])
             }
         else:
@@ -56,17 +56,17 @@ class RNN(tf.keras.layers.GRU):
                     't': 'gru',
                     'vs': {
                         'units': tensor_to_dict(units, 'i4'),
-                        'reset': tensor_to_dict(kernel[:, units:units * 2]),
+                        'reset': tensor_to_dict(tf.transpose(kernel[:, units:units * 2])),
                         'reset/offset': tensor_to_dict(offset[units:units * 2]),
-                        'update': tensor_to_dict(kernel[:, :units]),
+                        'update': tensor_to_dict(tf.transpose(kernel[:, :units])),
                         'update/offset': tensor_to_dict(offset[:units]),
-                        'candidate': tensor_to_dict(kernel[:, units * 2:]),
+                        'candidate': tensor_to_dict(tf.transpose(kernel[:, units * 2:])),
                         'candidate/offset': tensor_to_dict(offset[units * 2:]),
-                        'recurrent_reset': tensor_to_dict(recurrent_kernel[:, units:units * 2]),
+                        'recurrent_reset': tensor_to_dict(tf.transpose(recurrent_kernel[:, units:units * 2])),
                         'recurrent_reset/offset': tensor_to_dict(recurrent_offset[units:units * 2]),
-                        'recurrent_update': tensor_to_dict(recurrent_kernel[:, :units]),
+                        'recurrent_update': tensor_to_dict(tf.transpose(recurrent_kernel[:, :units])),
                         'recurrent_update/offset': tensor_to_dict(recurrent_offset[:units]),
-                        'recurrent_candidate': tensor_to_dict(recurrent_kernel[:, units * 2:]),
+                        'recurrent_candidate': tensor_to_dict(tf.transpose(recurrent_kernel[:, units * 2:])),
                         'recurrent_candidate/offset': tensor_to_dict(recurrent_offset[units * 2:])
                     }
                 }
