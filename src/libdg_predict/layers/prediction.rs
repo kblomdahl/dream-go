@@ -15,6 +15,7 @@
 use crate::{Allocator, AsSlice, Err, Variable, Io};
 use super::{LayerFactory, LayerImpl};
 
+use dg_utils::types::f16;
 use dg_cuda::{self as cuda, cudnn, cublas_lt};
 
 use std::collections::HashMap;
@@ -37,8 +38,9 @@ impl LayerFactory for PredictionFactory {
 pub struct Prediction {
     kernel: cuda::PerDevice<[cuda::Ptr; 2]>,
     offset: cuda::PerDevice<[cuda::Ptr; 2]>,
-    conv_desc: cuda::PerDevice<HashMap<i32, [cudnn::ConvolutionBiasActivation; 2]>>,
-    softmax: cuda::PerDevice<HashMap<i32, cudnn::Softmax>>
+    conv_desc: cuda::PerDevice<HashMap<i32, [cublas_lt::Matmul<f16>; 2]>>,
+    softmax: cuda::PerDevice<HashMap<i32, cudnn::Softmax>>,
+    tanh: cuda::PerDevice<HashMap<i32, cudnn::Activation>>
 }
 
 impl Prediction {
@@ -48,78 +50,87 @@ impl Prediction {
             offset: cuda::PerDevice::new()?,
             conv_desc: cuda::PerDevice::new()?,
             softmax: cuda::PerDevice::new()?,
+            tanh: cuda::PerDevice::new()?,
         })
     }
 
     fn create_softmax(batch_size: i32, shape: &[i32]) -> Result<cudnn::Softmax, cudnn::Status> {
         cudnn::Softmax::new(
             cudnn::SoftmaxMode::Instance,
-            Self::create_output_descriptor(batch_size, shape)?,
-            Self::create_output_descriptor(batch_size, shape)?,
+            Self::create_output_tensor_descriptor(batch_size, shape)?,
+            Self::create_output_tensor_descriptor(batch_size, shape)?,
             [1.0, 0.0]
         )
     }
 
-    fn create_dense_bias_activation(handle: &cudnn::Handle, batch_size: i32, shape: &[i32], act_desc: cudnn::ActivationDescriptor) -> Result<cudnn::ConvolutionBiasActivation, cudnn::Status> {
+    fn create_tanh(batch_size: i32, shape: &[i32]) -> Result<cudnn::Activation, cudnn::Status> {
+        cudnn::Activation::new(
+            cudnn::ActivationDescriptor::tanh()?,
+            Self::create_output_tensor_descriptor(batch_size, shape)?,
+            Self::create_output_tensor_descriptor(batch_size, shape)?,
+            [1.0, 0.0]
+        )
+    }
+
+    fn create_matmul(handle: &cublas_lt::Handle, batch_size: i32, shape: &[i32]) -> Result<cublas_lt::Matmul<f16>, cublas_lt::Status> {
         assert_eq!(shape.len(), 2, "filter shape must be 2 elements, received {:?}", shape);
 
-        cudnn::ConvolutionBiasActivation::new(
+        cublas_lt::Matmul::<f16>::new(
             handle,
-            1.0,
+            Self::create_matmul_descriptor()?,
+            [1.0, 0.0],
+            Self::create_kernel_descriptor(shape)?,
             Self::create_input_descriptor(batch_size, shape)?,
-            Self::create_filter_descriptor(shape)?,
-            Self::create_dense_descriptor()?,
-            0.0,
-            Self::create_offset_descriptor(shape)?,
-            act_desc,
             Self::create_output_descriptor(batch_size, shape)?,
-            Self::create_output_descriptor(batch_size, shape)?
+            Self::create_output_descriptor(batch_size, shape)?,
         )
     }
 
-    fn create_dense_descriptor() -> Result<cudnn::ConvolutionDescriptor, cudnn::Status> {
-        let dense_desc = cudnn::ConvolutionDescriptor::new(
-            [0, 0],
-            [1, 1],
-            [1, 1],
-            cudnn::ConvolutionMode::CrossCorrelation,
-            cudnn::DataType::Half
-        )?;
-
-        Ok(dense_desc)
+    fn create_matmul_descriptor() -> Result<cublas_lt::MatmulDesc, cublas_lt::Status> {
+        cublas_lt::MatmulDesc::new(
+            cublas_lt::ComputeType::Real16F,
+            cublas_lt::DataType::Real16F
+        ).and_then(|m| {
+            m.with_epilogue(cublas_lt::Epilogue::Bias)?
+             .with_transpose_a(cublas_lt::Operation::Transpose)?
+             .with_transpose_b(cublas_lt::Operation::NonTranspose)
+        })
     }
 
-    fn create_filter_descriptor(shape: &[i32]) -> Result<cudnn::FilterDescriptor, cudnn::Status> {
-        debug_assert_eq!(shape.len(), 2, "filter shape must be 2 elements, received {:?}", shape);
-
-        cudnn::FilterDescriptor::new(
-            cudnn::DataType::Half,
-            cudnn::TensorFormat::NHWC,
-            [shape[0], shape[1], 1, 1]
-        )
-    }
-
-    fn create_offset_descriptor(shape: &[i32]) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+    fn create_kernel_descriptor(shape: &[i32]) -> Result<cublas_lt::MatrixLayout, cublas_lt::Status> {
         debug_assert_eq!(shape.len(), 2, "kernel shape must be 2 elements, received {:?}", shape);
 
-        cudnn::TensorDescriptor::new(
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            [1, shape[0], 1, 1]
+        cublas_lt::MatrixLayout::new(
+            cublas_lt::DataType::Real16F,
+            shape[1] as u64,
+            shape[0] as u64,
+            shape[1] as i64
         )
     }
 
-    fn create_input_descriptor(batch_size: i32, shape: &[i32]) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+    fn create_input_descriptor(batch_size: i32, shape: &[i32]) -> Result<cublas_lt::MatrixLayout, cublas_lt::Status> {
         debug_assert_eq!(shape.len(), 2, "kernel shape must be 2 elements, received {:?}", shape);
 
-        cudnn::TensorDescriptor::new(
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            [batch_size, shape[1], 1, 1]
+        cublas_lt::MatrixLayout::new(
+            cublas_lt::DataType::Real16F,
+            shape[1] as u64,
+            batch_size as u64,
+            shape[1] as i64
         )
     }
 
-    fn create_output_descriptor(batch_size: i32, shape: &[i32]) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+    fn create_output_descriptor(batch_size: i32, shape: &[i32]) -> Result<cublas_lt::MatrixLayout, cublas_lt::Status> {
+        debug_assert_eq!(shape.len(), 2, "kernel shape must be 2 elements, received {:?}", shape);
+
+        cublas_lt::MatrixLayout::new(
+            cublas_lt::DataType::Real16F,
+            shape[0] as u64,
+            batch_size as u64,
+            shape[0] as i64
+        )
+    }
+
+    fn create_output_tensor_descriptor(batch_size: i32, shape: &[i32]) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
         debug_assert_eq!(shape.len(), 2, "kernel shape must be 2 elements, received {:?}", shape);
 
         cudnn::TensorDescriptor::new(
@@ -153,8 +164,8 @@ impl LayerImpl for Prediction {
 
     fn prepare(
         &mut self,
-        _light_handle: &cublas_lt::Handle,
-        handle: &cudnn::Handle,
+        light_handle: &cublas_lt::Handle,
+        _handle: &cudnn::Handle,
         batch_size: i32,
         variables: &HashMap<String, Variable>,
         _stream: &cuda::Stream
@@ -165,10 +176,11 @@ impl LayerImpl for Prediction {
 
         if !self.conv_desc.contains_key(&batch_size) {
             self.conv_desc.insert(batch_size, [
-                Self::create_dense_bias_activation(handle, batch_size, shape_1, cudnn::ActivationDescriptor::identity()?)?,
-                Self::create_dense_bias_activation(handle, batch_size, shape_2, cudnn::ActivationDescriptor::tanh()?)?,
+                Self::create_matmul(light_handle, batch_size, shape_1)?,
+                Self::create_matmul(light_handle, batch_size, shape_2)?,
             ]);
             self.softmax.insert(batch_size, Self::create_softmax(batch_size, shape_1)?);
+            self.tanh.insert(batch_size, Self::create_tanh(batch_size, shape_2)?);
         }
 
         Ok(())
@@ -176,28 +188,31 @@ impl LayerImpl for Prediction {
 
     fn forward(
         &self,
-        _light_handle: &cublas_lt::Handle,
+        light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         inputs: Io,
         allocator: &mut Allocator,
-        _stream: &cuda::Stream,
+        stream: &cuda::Stream,
     ) -> Result<Io, Err>
     {
         let conv_desc = &self.conv_desc[&(inputs.batch_size as i32)];
         let softmax = &self.softmax[&(inputs.batch_size as i32)];
-        let linear_policy = cuda::malloc(conv_desc[0].output().size_in_bytes()?, allocator)?;
-        let workspace_size_in_bytes = conv_desc[0].fwd_algo_perf().memory().max(conv_desc[1].fwd_algo_perf().memory());
+        let tanh = &self.tanh[&(inputs.batch_size as i32)];
+        let linear_policy = cuda::malloc(conv_desc[0].d().size_in_bytes()?, allocator)?;
+        let linear_value = cuda::malloc(conv_desc[1].d().size_in_bytes()?, allocator)?;
+        let workspace_size_in_bytes = conv_desc[0].algo().memory().max(conv_desc[1].algo().memory());
         let workspace = cuda::malloc(workspace_size_in_bytes, allocator)?;
 
+        conv_desc[0].desc().set_bias(&self.offset[0])?;
         conv_desc[0].forward(
-            handle,
-            inputs.current().as_ptr(),
+            light_handle,
             self.kernel[0].as_ptr(),
+            inputs.current().as_ptr(),
+            linear_policy.as_ptr(),
+            linear_policy.as_ptr(),
             workspace.as_ptr(),
             workspace.size_in_bytes(),
-            linear_policy.as_ptr(),
-            self.offset[0].as_ptr(),
-            linear_policy.as_ptr()
+            &stream
         )?;
 
         softmax.forward(
@@ -206,14 +221,21 @@ impl LayerImpl for Prediction {
             inputs.policy.as_ptr()
         )?;
 
+        conv_desc[1].desc().set_bias(&self.offset[1])?;
         conv_desc[1].forward(
-            handle,
-            inputs.current().as_ptr(),
+            light_handle,
             self.kernel[1].as_ptr(),
+            inputs.current().as_ptr(),
+            linear_value.as_ptr(),
+            linear_value.as_ptr(),
             workspace.as_ptr(),
             workspace.size_in_bytes(),
-            inputs.value.as_ptr(),
-            self.offset[1].as_ptr(),
+            &stream
+        )?;
+
+        tanh.forward(
+            handle,
+            linear_value.as_ptr(),
             inputs.value.as_ptr()
         )?;
 

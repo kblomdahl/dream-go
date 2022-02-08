@@ -106,7 +106,7 @@ impl MatrixLayout {
         status.into_result(data_type)
     }
 
-    fn rows(&self) -> Result<usize, Status> {
+    pub fn rows(&self) -> Result<usize, Status> {
         let mut rows: u64 = 0;
         let mut size_written = 0;
         let status = unsafe {
