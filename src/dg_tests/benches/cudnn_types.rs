@@ -49,6 +49,7 @@ impl From<q8> for f32 {
 /// * `bencher` - the benchmarker
 /// * `num_features` - the number of features
 /// * `tensor_format` - the format of the input / output arrays
+/// * `filter_format` - the format of the filter
 /// * `data_type` - the data type of the input / output / weight arrays
 /// * `conv_algo` - the convolutional algorithm to use
 /// * `conv_type` - the data type to use internally in the convolution
@@ -58,6 +59,7 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     bencher: &mut Bencher,
     num_features: usize,
     tensor_format: cudnn::TensorFormat,
+    filter_format: cudnn::TensorFormat,
     data_type: cudnn::DataType,
     offset_type: cudnn::DataType,
     conv_type: cudnn::DataType,
@@ -113,7 +115,7 @@ unsafe fn bench_conv<T: From<f32> + Clone>(
     // create a 3x3 filter description of the given data type
     let filter_desc = cudnn::FilterDescriptor::new(
         data_type,
-        tensor_format,
+        filter_format,
         [num_features as i32, num_features as i32, 3, 3]
     )?;
 
@@ -207,7 +209,7 @@ fn f32_compute_type_f32(b: &mut Bencher) {
         bench_conv::<f32>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NCHW,
+            cudnn::TensorFormat::NCHW, cudnn::TensorFormat::NCHW,
             cudnn::DataType::Float, cudnn::DataType::Float,
             cudnn::DataType::Float,
             cudnn::ReorderType::DefaultReorder
@@ -225,7 +227,7 @@ fn f16_nchw_compute_type_f32(b: &mut Bencher) {
         bench_conv::<f16>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NCHW,
+            cudnn::TensorFormat::NCHW, cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::DataType::Float,
             cudnn::ReorderType::DefaultReorder
@@ -241,10 +243,26 @@ fn f16_nhwc_compute_type_f32(b: &mut Bencher) {
         bench_conv::<f16>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NHWC,
+            cudnn::TensorFormat::NHWC, cudnn::TensorFormat::NHWC,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::DataType::Float,
             cudnn::ReorderType::DefaultReorder
+        ).unwrap();
+    }
+}
+
+#[bench]
+fn f16_nhwc_compute_type_f32_noreorder(b: &mut Bencher) {
+    if !supports_f16() { return }
+
+    unsafe {
+        bench_conv::<f16>(
+            b,
+            NUM_FEATURES,
+            cudnn::TensorFormat::NHWC, cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half, cudnn::DataType::Half,
+            cudnn::DataType::Float,
+            cudnn::ReorderType::NoReorder
         ).unwrap();
     }
 }
@@ -257,7 +275,7 @@ fn f16_nchw_compute_type_f16(b: &mut Bencher) {
         bench_conv::<f16>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NCHW,
+            cudnn::TensorFormat::NCHW, cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::DataType::Half,
             cudnn::ReorderType::DefaultReorder
@@ -273,7 +291,23 @@ fn f16_nhwc_compute_type_f16(b: &mut Bencher) {
         bench_conv::<f16>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NHWC,
+            cudnn::TensorFormat::NHWC, cudnn::TensorFormat::NHWC,
+            cudnn::DataType::Half, cudnn::DataType::Half,
+            cudnn::DataType::Half,
+            cudnn::ReorderType::DefaultReorder
+        ).unwrap();
+    }
+}
+
+#[bench]
+fn f16_nhwc_compute_type_f16_filter_nchw(b: &mut Bencher) {
+    if !supports_f16() { return }
+
+    unsafe {
+        bench_conv::<f16>(
+            b,
+            NUM_FEATURES,
+            cudnn::TensorFormat::NHWC, cudnn::TensorFormat::NCHW,
             cudnn::DataType::Half, cudnn::DataType::Half,
             cudnn::DataType::Half,
             cudnn::ReorderType::DefaultReorder
@@ -291,7 +325,7 @@ fn i8_nhwc(b: &mut Bencher) {
         bench_conv::<q8>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NHWC,
+            cudnn::TensorFormat::NHWC, cudnn::TensorFormat::NHWC,
             cudnn::DataType::Int8, cudnn::DataType::Float,
             cudnn::DataType::Int32,
             cudnn::ReorderType::DefaultReorder
@@ -307,7 +341,7 @@ fn i8x4_nhwcvectc(b: &mut Bencher) {
         bench_conv::<q8>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NCHW_VECT_C,
+            cudnn::TensorFormat::NCHW_VECT_C, cudnn::TensorFormat::NCHW_VECT_C,
             cudnn::DataType::Int8x4, cudnn::DataType::Float,
             cudnn::DataType::Int32,
             cudnn::ReorderType::DefaultReorder
@@ -323,7 +357,7 @@ fn i8x32_nhwcvectc(b: &mut Bencher) {
         bench_conv::<q8>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NCHW_VECT_C,
+            cudnn::TensorFormat::NCHW_VECT_C, cudnn::TensorFormat::NCHW_VECT_C,
             cudnn::DataType::Int8x32, cudnn::DataType::Float,
             cudnn::DataType::Int32,
             cudnn::ReorderType::DefaultReorder
@@ -339,7 +373,7 @@ fn i8x32_nhwcvectc_noreorder(b: &mut Bencher) {
         bench_conv::<q8>(
             b,
             NUM_FEATURES,
-            cudnn::TensorFormat::NCHW_VECT_C,
+            cudnn::TensorFormat::NCHW_VECT_C, cudnn::TensorFormat::NCHW_VECT_C,
             cudnn::DataType::Int8x32, cudnn::DataType::Float,
             cudnn::DataType::Int32,
             cudnn::ReorderType::NoReorder
