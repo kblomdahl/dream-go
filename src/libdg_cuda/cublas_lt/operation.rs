@@ -1,4 +1,4 @@
-// Copyright 2020 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2022 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,24 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(test)]
+#[allow(non_camel_case_types)]
+pub type cublasOperation_t = Operation;
 
-extern crate dg_utils;
-#[cfg(test)] extern crate test;
-extern crate libc;
-
-pub mod cublas_lt;
-pub mod cudnn;
-mod allocator;
-mod devices;
-mod error;
-mod memory;
-mod stream;
-mod per_device;
-
-pub use self::allocator::*;
-pub use self::devices::*;
-pub use self::error::*;
-pub use self::memory::*;
-pub use self::stream::*;
-pub use self::per_device::*;
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Operation {
+    NonTranspose = 0,
+    Transpose = 1,
+    ConjugateTranspose = 2
+}
