@@ -21,3 +21,12 @@ pub enum DataType {
     Real16F = 2,
     Real32F = 0,
 }
+
+impl DataType {
+    pub fn size_in_bytes(&self) -> usize {
+        match *self {
+            DataType::Real16F => 2,
+            DataType::Real32F => 4
+        }
+    }
+}

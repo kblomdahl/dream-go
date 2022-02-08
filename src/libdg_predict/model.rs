@@ -15,8 +15,7 @@
 use crate::{Config, Err, ExecutionPlan, Io, Output};
 use super::Layer;
 
-use dg_cuda as cuda;
-use dg_cuda::cudnn;
+use dg_cuda::{self as cuda, cudnn, cublas_lt};
 use dg_utils::types::f16;
 
 pub struct Model {
@@ -54,17 +53,17 @@ impl Model {
 
     fn build(&mut self) -> Result<(), Err> {
         let mut streams = vec! [];
-        let handle = cudnn::Handle::new()?;
 
         for device in cuda::Device::all()? {
             device.set_current()?;
-
+            let handle = cudnn::Handle::new()?;
+            let light_handle = cublas_lt::Handle::new()?;
             let stream = cuda::Stream::new()?;
 
-            Self::build_layers(&mut self.representation, &handle, &stream)?;
-            Self::build_layers(&mut self.dynamics, &handle, &stream)?;
-            Self::build_layers(&mut self.gru, &handle, &stream)?;
-            Self::build_layers(&mut self.prediction, &handle, &stream)?;
+            Self::build_layers(&mut self.representation, &light_handle, &handle, &stream)?;
+            Self::build_layers(&mut self.dynamics, &light_handle, &handle, &stream)?;
+            Self::build_layers(&mut self.gru, &light_handle, &handle, &stream)?;
+            Self::build_layers(&mut self.prediction, &light_handle, &handle, &stream)?;
 
             streams.push(stream);
         }
@@ -76,9 +75,9 @@ impl Model {
         Ok(())
     }
 
-    fn build_layers(layers: &mut [Layer], handle: &cudnn::Handle, stream: &cuda::Stream) -> Result<(), Err> {
+    fn build_layers(layers: &mut [Layer], light_handle: &cublas_lt::Handle, handle: &cudnn::Handle, stream: &cuda::Stream) -> Result<(), Err> {
         for layer in layers {
-            layer.build(handle, stream)?;
+            layer.build(light_handle, handle, stream)?;
         }
 
         Ok(())
@@ -96,12 +95,12 @@ impl Model {
 
         plan.stream.wait_event(&plan.features_copy_finished)?;
         for layer in &self.representation {
-            io = layer.forward(&plan.handle, io, &mut plan.allocator, &plan.stream)?;
+            io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;
         }
         io = io.with_intermediate_as_hidden_states(&plan.stream)?;
 
         for layer in &self.prediction {
-            io = layer.forward(&plan.handle, io, &mut plan.allocator, &plan.stream)?;
+            io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;
         }
 
         Ok(io.as_outputs(&plan.stream)?)
@@ -121,16 +120,16 @@ impl Model {
 
         plan.stream.wait_event(&plan.features_copy_finished)?;
         for layer in &self.dynamics {
-            io = layer.forward(&plan.handle, io, &mut plan.allocator, &plan.stream)?;
+            io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;
         }
 
         plan.stream.wait_event(&plan.hidden_states_copy_finished)?;
         for layer in &self.gru {
-            io = layer.forward(&plan.handle, io, &mut plan.allocator, &plan.stream)?;
+            io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;
         }
 
         for layer in &self.prediction {
-            io = layer.forward(&plan.handle, io, &mut plan.allocator, &plan.stream)?;
+            io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;
         }
 
         Ok(io.as_outputs(&plan.stream)?)
@@ -185,7 +184,7 @@ mod tests {
             let test_policy: &[f16] = tests["p1"].as_slice().expect("could not retrieve policy test values");
             let test_value: &[f16] = tests["v1"].as_slice().expect("could not retrieve value test values");
 
-            check_array_approx_eq(&output.policy[0..362], &test_policy[0..362], 2e-4);
+            check_array_approx_eq(&output.policy[0..362], &test_policy[0..362], 3e-4);
             check_array_approx_eq(&output.value[0..1], &test_value[0..1], 2e-3);
 
             // representation -> dynamics
@@ -193,7 +192,7 @@ mod tests {
             let test_policy: &[f16] = tests["p2"].as_slice().expect("could not retrieve policy test values");
             let test_value: &[f16] = tests["v2"].as_slice().expect("could not retrieve value test values");
 
-            check_array_approx_eq(&output.policy[0..362], &test_policy[0..362], 2e-4);
+            check_array_approx_eq(&output.policy[0..362], &test_policy[0..362], 5e-4);
             check_array_approx_eq(&output.value[0..1], &test_value[0..1], 2e-3);
 
             // dynamics -> dynamics
@@ -201,7 +200,7 @@ mod tests {
             let test_policy: &[f16] = tests["p3"].as_slice().expect("could not retrieve policy test values");
             let test_value: &[f16] = tests["v3"].as_slice().expect("could not retrieve value test values");
 
-            check_array_approx_eq(&output.policy[0..362], &test_policy[0..362], 2e-4);
+            check_array_approx_eq(&output.policy[0..362], &test_policy[0..362], 5e-4);
             check_array_approx_eq(&output.value[0..1], &test_value[0..1], 2e-3);
         }
     }

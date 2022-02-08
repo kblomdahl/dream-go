@@ -15,7 +15,7 @@
 use crate::{Allocator, Err, Variable, AsSlice, Io};
 use super::{LayerFactory, LayerImpl};
 
-use dg_cuda::{self as cuda, cudnn};
+use dg_cuda::{self as cuda, cudnn, cublas_lt};
 
 use std::collections::HashMap;
 
@@ -128,6 +128,7 @@ impl Conv {
 impl LayerImpl for Conv {
     fn build(
         &mut self,
+        _light_handle: &cublas_lt::Handle,
         _handle: &cudnn::Handle,
         variables: &HashMap<String, Variable>,
         stream: &cuda::Stream
@@ -141,6 +142,7 @@ impl LayerImpl for Conv {
 
     fn prepare(
         &mut self,
+        _light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         batch_size: i32,
         variables: &HashMap<String, Variable>,
@@ -158,6 +160,7 @@ impl LayerImpl for Conv {
 
     fn forward(
         &self,
+        _light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         inputs: Io,
         allocator: &mut Allocator,
@@ -240,9 +243,9 @@ mod tests {
             ("offset".to_string(), Variable::from(offset)),
         ]);
         let mut layer = factory.build(&plan.handle, &variables, &plan.stream)?;
-        layer.build(&plan.handle, &variables, &plan.stream)?;
-        layer.prepare(&plan.handle, 1, &variables, &plan.stream)?;
-        io = layer.forward(&plan.handle, io, &mut plan.allocator, &plan.stream)?;
+        layer.build(&plan.light_handle, &plan.handle, &variables, &plan.stream)?;
+        layer.prepare(&plan.light_handle, &plan.handle, 1, &variables, &plan.stream)?;
+        io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;
 
         assert_eq!(
             io.current().to_vec::<f16>(&plan.stream)?.into_iter().map(|x| f32::from(x)).collect::<Vec<_>>(),

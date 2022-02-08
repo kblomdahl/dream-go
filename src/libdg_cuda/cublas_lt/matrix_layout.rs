@@ -24,7 +24,11 @@ pub type cublasLtMatrixLayout_t = *const c_void;
 #[allow(non_camel_case_types)]
 #[repr(i32)]
 enum cublasLtMatrixLayoutAttribute_t {
-    LayoutOrder = 1
+    DataType = 0,
+    LayoutOrder = 1,
+    Rows = 2,
+    Cols = 3,
+    Ld = 4
 }
 
 #[link(name = "cublasLt")]
@@ -42,6 +46,13 @@ extern {
         attr: cublasLtMatrixLayoutAttribute_t,
         buf: *const c_void,
         size_in_bytes: size_t
+    ) -> cublasStatus_t;
+    fn cublasLtMatrixLayoutGetAttribute(
+        matrix_layout: cublasLtMatrixLayout_t,
+        attr: cublasLtMatrixLayoutAttribute_t,
+        buf: *mut c_void,
+        size_in_bytes: size_t,
+        size_written: *mut size_t
     ) -> cublasStatus_t;
 }
 
@@ -77,6 +88,77 @@ impl MatrixLayout {
         };
 
         status.into_result(out)
+    }
+
+    pub fn data_type(&self) -> Result<DataType, Status> {
+        let mut data_type: DataType = DataType::Real32F;
+        let mut size_written = 0;
+        let status = unsafe {
+            cublasLtMatrixLayoutGetAttribute(
+                self.matrix_layout,
+                cublasLtMatrixLayoutAttribute_t::DataType,
+                &mut data_type as *mut _ as *mut _,
+                ::std::mem::size_of_val(&data_type),
+                &mut size_written as *mut _ as *mut _
+            )
+        };
+
+        status.into_result(data_type)
+    }
+
+    fn rows(&self) -> Result<usize, Status> {
+        let mut rows: u64 = 0;
+        let mut size_written = 0;
+        let status = unsafe {
+            cublasLtMatrixLayoutGetAttribute(
+                self.matrix_layout,
+                cublasLtMatrixLayoutAttribute_t::Rows,
+                &mut rows as *mut _ as *mut _,
+                ::std::mem::size_of_val(&rows),
+                &mut size_written as *mut _ as *mut _
+            )
+        };
+        assert_eq!(size_written, ::std::mem::size_of_val(&rows));
+
+        status.into_result(rows as usize)
+    }
+
+    pub fn cols(&self) -> Result<usize, Status> {
+        let mut cols: u64 = 0;
+        let mut size_written = 0;
+        let status = unsafe {
+            cublasLtMatrixLayoutGetAttribute(
+                self.matrix_layout,
+                cublasLtMatrixLayoutAttribute_t::Cols,
+                &mut cols as *mut _ as *mut _,
+                ::std::mem::size_of_val(&cols),
+                &mut size_written as *mut _ as *mut _
+            )
+        };
+        assert_eq!(size_written, ::std::mem::size_of_val(&cols));
+
+        status.into_result(cols as usize)
+    }
+
+    pub fn ld(&self) -> Result<usize, Status> {
+        let mut ld: i64 = 0;
+        let mut size_written = 0;
+        let status = unsafe {
+            cublasLtMatrixLayoutGetAttribute(
+                self.matrix_layout,
+                cublasLtMatrixLayoutAttribute_t::Ld,
+                &mut ld as *mut _ as *mut _,
+                ::std::mem::size_of_val(&ld),
+                &mut size_written as *mut _ as *mut _
+            )
+        };
+        assert_eq!(size_written, ::std::mem::size_of_val(&ld));
+
+        status.into_result(ld as usize)
+    }
+
+    pub fn size_in_bytes(&self) -> Result<usize, Status> {
+        Ok(self.cols()? * self.ld()? * self.data_type()?.size_in_bytes())
     }
 
     pub fn with_order(self, order: Order) -> Result<Self, Status> {

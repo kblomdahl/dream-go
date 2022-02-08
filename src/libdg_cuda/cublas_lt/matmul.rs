@@ -42,9 +42,9 @@ extern {
     ) -> cublasStatus_t;
 }
 
-pub struct Matmul {
+pub struct Matmul<T: Sized + From<f32>> {
     compute_desc: MatmulDesc,
-    alpha: [f32; 2],
+    alpha: [T; 2],
     a_desc: MatrixLayout,
     b_desc: MatrixLayout,
     c_desc: MatrixLayout,
@@ -52,9 +52,9 @@ pub struct Matmul {
     algo: MatmulAlgo
 }
 
-unsafe impl Send for Matmul {}
+unsafe impl<T: Sized + From<f32>> Send for Matmul<T> {}
 
-impl Matmul {
+impl<T: Sized + From<f32>> Matmul<T> {
     pub fn new(
         light_handle: &Handle,
         compute_desc: MatmulDesc,
@@ -77,13 +77,29 @@ impl Matmul {
 
         Ok(Self {
             compute_desc,
-            alpha,
+            alpha: [T::from(alpha[0]), T::from(alpha[1])],
             a_desc,
             b_desc,
             c_desc,
             d_desc,
             algo
         })
+    }
+
+    pub fn a(&self) -> &MatrixLayout {
+        &self.a_desc
+    }
+
+    pub fn b(&self) -> &MatrixLayout {
+        &self.b_desc
+    }
+
+    pub fn c(&self) -> &MatrixLayout {
+        &self.c_desc
+    }
+
+    pub fn d(&self) -> &MatrixLayout {
+        &self.d_desc
     }
 
     pub fn desc(&self) -> &MatmulDesc {
@@ -110,12 +126,12 @@ impl Matmul {
             cublasLtMatmul(
                 **light_handle,
                 *self.compute_desc,
-                &self.alpha[0] as *const f32 as *const _,
+                &self.alpha[0] as *const _ as *const _,
                 a,
                 *self.a_desc,
                 b,
                 *self.b_desc,
-                &self.alpha[1] as *const f32  as *const _,
+                &self.alpha[1] as *const _  as *const _,
                 c,
                 *self.c_desc,
                 d,
@@ -143,14 +159,13 @@ mod tests {
         let bias = cuda::Ptr::from_slice(&[1.0f32, 2.0f32, 3.0f32, 4.0f32], &stream).unwrap();
         let matmul_desc = MatmulDesc::new(ComputeType::Real32F, DataType::Real32F)?
             .with_epilogue(Epilogue::ReluBias)?
-            .with_bias(&bias)?
             .with_transpose_a(Operation::Transpose)?
             .with_transpose_b(Operation::Transpose)?;
         let a_desc = MatrixLayout::new(DataType::Real32F, 4, 4, 4)?;
         let b_desc = MatrixLayout::new(DataType::Real32F, 4, 4, 4)?;
         let c_desc = MatrixLayout::new(DataType::Real32F, 4, 4, 4)?;
         let d_desc = MatrixLayout::new(DataType::Real32F, 4, 4, 4)?;
-        let matmul = Matmul::new(
+        let matmul = Matmul::<f32>::new(
             &light_handle,
             matmul_desc,
             [1.0, 0.0],
@@ -160,7 +175,7 @@ mod tests {
             d_desc,
         ).unwrap();
 
-        let workspace = cuda::Ptr::new(matmul.algo().workspace_size_in_bytes()).unwrap();
+        let workspace = cuda::Ptr::new(matmul.algo().memory()).unwrap();
         let a = cuda::Ptr::from_slice(&[
             5.0f32, 7.0f32, 9.0f32, 10.0f32,
             2.0f32, 3.0f32, 3.0f32, 8.0f32,
@@ -176,6 +191,7 @@ mod tests {
         let c = cuda::Ptr::from_slice(&[0.0f32; 16], &stream).unwrap();
         let d = cuda::Ptr::from_slice(&[0.0f32; 16], &stream).unwrap();
 
+        matmul.desc().set_bias(&bias)?;
         matmul.forward(
             &light_handle,
             a.as_ptr(),

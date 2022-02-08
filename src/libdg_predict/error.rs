@@ -14,12 +14,13 @@
 
 use crate::BuilderParseErr;
 
-use dg_cuda::{self as cuda, cudnn};
+use dg_cuda::{self as cuda, cudnn, cublas_lt};
 
 #[derive(Debug)]
 pub enum Err {
     Cuda(cuda::Error),
     Cudnn(cudnn::Status),
+    CublasLt(cublas_lt::Status),
     Parse(BuilderParseErr),
     MissingVariable(String),
     UnexpectedValue
@@ -34,6 +35,12 @@ impl From<cuda::Error> for Err {
 impl From<cudnn::Status> for Err {
     fn from(original: cudnn::Status) -> Self {
         Self::Cudnn(original)
+    }
+}
+
+impl From<cublas_lt::Status> for Err {
+    fn from(original: cublas_lt::Status) -> Self {
+        Self::CublasLt(original)
     }
 }
 

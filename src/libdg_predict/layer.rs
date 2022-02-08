@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_cuda::cudnn as cudnn;
-use dg_cuda as cuda;
+use dg_cuda::{self as cuda, cudnn, cublas_lt};
 
 use crate::layers::LayerFactory;
 
@@ -47,6 +46,7 @@ impl Layer {
 
     pub fn build(
         &mut self,
+        light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         stream: &cuda::Stream
     ) -> Result<(), Err>
@@ -56,14 +56,14 @@ impl Layer {
         match &mut *inner {
             LayerInner::Factory { factory } => {
                 let mut layer_impl = factory.build(handle, &self.variables, stream)?;
-                match layer_impl.build(handle, &self.variables, stream) {
+                match layer_impl.build(light_handle, handle, &self.variables, stream) {
                     Err(Err::MissingVariable(path)) => Err(Err::MissingVariable(format!("{}/{}", self.name, path))),
                     other => other
                 }?;
                 *inner = LayerInner::Impl { layer_impl };
             },
             LayerInner::Impl { layer_impl } => {
-                match layer_impl.build(handle, &self.variables, stream) {
+                match layer_impl.build(light_handle, handle, &self.variables, stream) {
                     Err(Err::MissingVariable(path)) => Err(Err::MissingVariable(format!("{}/{}", self.name, path))),
                     other => other
                 }?;
@@ -75,6 +75,7 @@ impl Layer {
 
     pub fn forward(
         &self,
+        light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         inputs: Io,
         allocator: &mut Allocator,
@@ -85,8 +86,8 @@ impl Layer {
 
         match &mut *inner {
             LayerInner::Impl { layer_impl } => {
-                layer_impl.prepare(handle, inputs.batch_size as i32, &self.variables, stream)?;
-                layer_impl.forward(handle, inputs, allocator, stream)
+                layer_impl.prepare(light_handle, handle, inputs.batch_size as i32, &self.variables, stream)?;
+                layer_impl.forward(light_handle, handle, inputs, allocator, stream)
             },
             _ => { unreachable!() }
         }

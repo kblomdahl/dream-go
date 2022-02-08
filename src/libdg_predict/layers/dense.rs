@@ -15,7 +15,8 @@
 use crate::{Allocator, AsSlice, Err, Variable, Io};
 use super::{LayerFactory, LayerImpl};
 
-use dg_cuda::{self as cuda, cudnn};
+use dg_utils::types::f16;
+use dg_cuda::{self as cuda, cudnn, cublas_lt};
 
 use std::collections::HashMap;
 
@@ -38,7 +39,7 @@ pub struct Dense {
     kernel: cuda::PerDevice<cuda::Ptr>,
     offset: cuda::PerDevice<cuda::Ptr>,
 
-    conv_desc: cuda::PerDevice<HashMap<i32, cudnn::ConvolutionBiasActivation>>
+    matmul_desc: cuda::PerDevice<HashMap<i32, cublas_lt::Matmul::<f16>>>
 }
 
 impl Dense {
@@ -46,76 +47,65 @@ impl Dense {
         Ok(Self {
             kernel: cuda::PerDevice::<_>::new()?,
             offset: cuda::PerDevice::<_>::new()?,
-            conv_desc: cuda::PerDevice::<_>::new()?,
+            matmul_desc: cuda::PerDevice::<_>::new()?,
         })
     }
 
-    fn create_dense_bias_activation(handle: &cudnn::Handle, batch_size: i32, shape: &[i32]) -> Result<cudnn::ConvolutionBiasActivation, cudnn::Status> {
+    fn create_matmul(handle: &cublas_lt::Handle, batch_size: i32, shape: &[i32]) -> Result<cublas_lt::Matmul<f16>, cublas_lt::Status> {
         assert_eq!(shape.len(), 2, "filter shape must be 2 elements, received {:?}", shape);
 
-        cudnn::ConvolutionBiasActivation::new(
+        cublas_lt::Matmul::<f16>::new(
             handle,
-            1.0,
+            Self::create_matmul_descriptor()?,
+            [1.0, 0.0],
+            Self::create_kernel_descriptor(shape)?,
             Self::create_input_descriptor(batch_size, shape)?,
-            Self::create_filter_descriptor(shape)?,
-            Self::create_dense_descriptor()?,
-            0.0,
-            Self::create_offset_descriptor(shape)?,
-            cudnn::ActivationDescriptor::relu()?,
             Self::create_output_descriptor(batch_size, shape)?,
-            Self::create_output_descriptor(batch_size, shape)?
+            Self::create_output_descriptor(batch_size, shape)?,
         )
     }
 
-    fn create_dense_descriptor() -> Result<cudnn::ConvolutionDescriptor, cudnn::Status> {
-        let dense_desc = cudnn::ConvolutionDescriptor::new(
-            [0, 0],
-            [1, 1],
-            [1, 1],
-            cudnn::ConvolutionMode::CrossCorrelation,
-            cudnn::DataType::Half
-        )?;
-
-        Ok(dense_desc)
+    fn create_matmul_descriptor() -> Result<cublas_lt::MatmulDesc, cublas_lt::Status> {
+        cublas_lt::MatmulDesc::new(
+            cublas_lt::ComputeType::Real16F,
+            cublas_lt::DataType::Real16F
+        ).and_then(|m| {
+            m.with_epilogue(cublas_lt::Epilogue::ReluBias)?
+             .with_transpose_a(cublas_lt::Operation::Transpose)?
+             .with_transpose_b(cublas_lt::Operation::NonTranspose)
+        })
     }
 
-    fn create_filter_descriptor(shape: &[i32]) -> Result<cudnn::FilterDescriptor, cudnn::Status> {
-        debug_assert_eq!(shape.len(), 2, "filter shape must be 2 elements, received {:?}", shape);
-
-        cudnn::FilterDescriptor::new(
-            cudnn::DataType::Half,
-            cudnn::TensorFormat::NHWC,
-            [shape[0], shape[1], 1, 1]
-        )
-    }
-
-    fn create_offset_descriptor(shape: &[i32]) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+    fn create_kernel_descriptor(shape: &[i32]) -> Result<cublas_lt::MatrixLayout, cublas_lt::Status> {
         debug_assert_eq!(shape.len(), 2, "kernel shape must be 2 elements, received {:?}", shape);
 
-        cudnn::TensorDescriptor::new(
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            [1, shape[0], 1, 1]
+        cublas_lt::MatrixLayout::new(
+            cublas_lt::DataType::Real16F,
+            shape[1] as u64,
+            shape[0] as u64,
+            shape[1] as i64
         )
     }
 
-    fn create_input_descriptor(batch_size: i32, shape: &[i32]) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+    fn create_input_descriptor(batch_size: i32, shape: &[i32]) -> Result<cublas_lt::MatrixLayout, cublas_lt::Status> {
         debug_assert_eq!(shape.len(), 2, "kernel shape must be 2 elements, received {:?}", shape);
 
-        cudnn::TensorDescriptor::new(
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            [batch_size, shape[1], 1, 1]
+        cublas_lt::MatrixLayout::new(
+            cublas_lt::DataType::Real16F,
+            shape[1] as u64,
+            batch_size as u64,
+            shape[1] as i64
         )
     }
 
-    fn create_output_descriptor(batch_size: i32, shape: &[i32]) -> Result<cudnn::TensorDescriptor, cudnn::Status> {
+    fn create_output_descriptor(batch_size: i32, shape: &[i32]) -> Result<cublas_lt::MatrixLayout, cublas_lt::Status> {
         debug_assert_eq!(shape.len(), 2, "kernel shape must be 2 elements, received {:?}", shape);
 
-        cudnn::TensorDescriptor::new(
-            cudnn::TensorFormat::NHWC,
-            cudnn::DataType::Half,
-            [batch_size, shape[0], 1, 1]
+        cublas_lt::MatrixLayout::new(
+            cublas_lt::DataType::Real16F,
+            shape[0] as u64,
+            batch_size as u64,
+            shape[0] as i64
         )
     }
 }
@@ -123,6 +113,7 @@ impl Dense {
 impl LayerImpl for Dense {
     fn build(
         &mut self,
+        _light_handle: &cublas_lt::Handle,
         _handle: &cudnn::Handle,
         variables: &HashMap<String, Variable>,
         stream: &cuda::Stream
@@ -136,7 +127,8 @@ impl LayerImpl for Dense {
 
     fn prepare(
         &mut self,
-        handle: &cudnn::Handle,
+        light_handle: &cublas_lt::Handle,
+        _handle: &cudnn::Handle,
         batch_size: i32,
         variables: &HashMap<String, Variable>,
         _stream: &cuda::Stream
@@ -144,8 +136,8 @@ impl LayerImpl for Dense {
     {
         let shape: &[i32] = variables.get("shape").ok_or_else(|| Err::MissingVariable("shape".to_string()))?.as_slice()?;
 
-        if !self.conv_desc.contains_key(&batch_size) {
-            self.conv_desc.insert(batch_size, Self::create_dense_bias_activation(handle, batch_size, shape)?);
+        if !self.matmul_desc.contains_key(&batch_size) {
+            self.matmul_desc.insert(batch_size, Self::create_matmul(light_handle, batch_size, shape)?);
         }
 
         Ok(())
@@ -153,32 +145,32 @@ impl LayerImpl for Dense {
 
     fn forward(
         &self,
-        handle: &cudnn::Handle,
+        light_handle: &cublas_lt::Handle,
+        _handle: &cudnn::Handle,
         inputs: Io,
         allocator: &mut Allocator,
-        _stream: &cuda::Stream,
+        stream: &cuda::Stream,
     ) -> Result<Io, Err>
     {
-        let conv_desc = &self.conv_desc[&(inputs.batch_size as i32)];
-        let fwd_algo_perf = conv_desc.fwd_algo_perf();
-        let workspace = cuda::malloc(fwd_algo_perf.memory(), allocator)?;
-        let output = cuda::malloc(conv_desc.output().size_in_bytes()?, allocator)?;
+        let matmul_desc = &self.matmul_desc[&(inputs.batch_size as i32)];
+        let workspace = cuda::malloc(matmul_desc.algo().memory(), allocator)?;
+        let output = cuda::malloc(matmul_desc.d().size_in_bytes()?, allocator)?;
 
-        conv_desc.forward(
-            handle,
-            inputs.current().as_ptr(),
+        matmul_desc.desc().set_bias(&self.offset)?;
+        matmul_desc.forward(
+            light_handle,
             self.kernel.as_ptr(),
+            inputs.current().as_ptr(),
+            output.as_ptr(),
+            output.as_ptr(),
             workspace.as_ptr(),
             workspace.size_in_bytes(),
-            output.as_ptr(),
-            self.offset.as_ptr(),
-            output.as_ptr()
+            stream
         )?;
 
         Ok(inputs.with_intermediate(output))
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -222,9 +214,9 @@ mod tests {
             ("offset".to_string(), Variable::from(offset)),
         ]);
         let mut layer = factory.build(&plan.handle, &variables, &plan.stream)?;
-        layer.build(&plan.handle, &variables, &plan.stream)?;
-        layer.prepare(&plan.handle, 1, &variables, &plan.stream)?;
-        io = layer.forward(&plan.handle, io, &mut plan.allocator, &plan.stream)?;
+        layer.build(&plan.light_handle, &plan.handle, &variables, &plan.stream)?;
+        layer.prepare(&plan.light_handle, &plan.handle, 1, &variables, &plan.stream)?;
+        io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;
 
         assert_eq!(
             io.current().to_vec::<f16>(&plan.stream)?.into_iter().map(|x| f32::from(x)).collect::<Vec<_>>(),

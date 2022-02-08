@@ -90,7 +90,7 @@ impl MatmulDesc {
         status.into_result(self)
     }
 
-    pub fn with_bias(self, bias: &cuda::Ptr) -> Result<Self, Status> {
+    pub fn set_bias(&self, bias: &cuda::Ptr) -> Result<(), Status> {
         let bias_ptr = bias.as_ptr();
         let status = unsafe {
             cublasLtMatmulDescSetAttribute(
@@ -101,7 +101,7 @@ impl MatmulDesc {
             )
         };
 
-        status.into_result(self)
+        status.into_result(())
     }
 
     pub fn with_transpose_a(self, op: Operation) -> Result<Self, Status> {

@@ -15,7 +15,7 @@
 use crate::{Allocator, AsSlice, Err, Variable, Io};
 use super::{LayerFactory, LayerImpl};
 
-use dg_cuda::{self as cuda, cudnn};
+use dg_cuda::{self as cuda, cudnn, cublas_lt};
 
 use std::collections::HashMap;
 
@@ -123,6 +123,7 @@ impl ResidualBlock {
 impl LayerImpl for ResidualBlock {
     fn build(
         &mut self,
+        _light_handle: &cublas_lt::Handle,
         _handle: &cudnn::Handle,
         variables: &HashMap<String, Variable>,
         stream: &cuda::Stream
@@ -142,6 +143,7 @@ impl LayerImpl for ResidualBlock {
 
     fn prepare(
         &mut self,
+        _light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         batch_size: i32,
         variables: &HashMap<String, Variable>,
@@ -163,6 +165,7 @@ impl LayerImpl for ResidualBlock {
 
     fn forward(
         &self,
+        _light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         inputs: Io,
         allocator: &mut Allocator,

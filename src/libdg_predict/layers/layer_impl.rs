@@ -14,8 +14,7 @@
 
 use crate::{Allocator, Err, Variable, Io};
 
-use dg_cuda as cuda;
-use dg_cuda::cudnn as cudnn;
+use dg_cuda::{self as cuda, cudnn, cublas_lt};
 use std::collections::HashMap;
 
 pub trait LayerFactory : Send {
@@ -30,6 +29,7 @@ pub trait LayerFactory : Send {
 pub trait LayerImpl : Send {
     fn build(
         &mut self,
+        light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         variables: &HashMap<String, Variable>,
         stream: &cuda::Stream
@@ -37,6 +37,7 @@ pub trait LayerImpl : Send {
 
     fn prepare(
         &mut self,
+        light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         batch_size: i32,
         variables: &HashMap<String, Variable>,
@@ -45,6 +46,7 @@ pub trait LayerImpl : Send {
 
     fn forward(
         &self,
+        light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         inputs: Io,
         allocator: &mut Allocator,

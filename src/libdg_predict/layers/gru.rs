@@ -15,7 +15,7 @@
 use crate::{Allocator, Err, Variable, AsSlice, Io};
 use super::{LayerFactory, LayerImpl};
 
-use dg_cuda::{self as cuda, cudnn};
+use dg_cuda::{self as cuda, cudnn, cublas_lt};
 use dg_utils::types::f16;
 
 use std::collections::HashMap;
@@ -112,6 +112,7 @@ impl Gru {
 impl LayerImpl for Gru {
     fn build(
         &mut self,
+        _light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         variables: &HashMap<String, Variable>,
         stream: &cuda::Stream
@@ -151,6 +152,7 @@ impl LayerImpl for Gru {
 
     fn prepare(
         &mut self,
+        _light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         batch_size: i32,
         variables: &HashMap<String, Variable>,
@@ -169,6 +171,7 @@ impl LayerImpl for Gru {
 
     fn forward(
         &self,
+        _light_handle: &cublas_lt::Handle,
         handle: &cudnn::Handle,
         inputs: Io,
         allocator: &mut Allocator,
@@ -268,9 +271,9 @@ mod tests {
             ("recurrent_candidate/offset".to_string(), Variable::from(zeros1::<f16>(n))),
         ]);
         let mut layer = factory.build(&plan.handle, &variables, &plan.stream)?;
-        layer.build(&plan.handle, &variables, &plan.stream)?;
-        layer.prepare(&plan.handle, 1, &variables, &plan.stream)?;
-        io = layer.forward(&plan.handle, io, &mut plan.allocator, &plan.stream)?;
+        layer.build(&plan.light_handle, &plan.handle, &variables, &plan.stream)?;
+        layer.prepare(&plan.light_handle, &plan.handle, 1, &variables, &plan.stream)?;
+        io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;
         let out_intermediate: Vec<f16> = io.intermediate.to_vec(&plan.stream)?;
         let out_hidden_states: Vec<f16> = io.hidden_states.to_vec(&plan.stream)?;
 

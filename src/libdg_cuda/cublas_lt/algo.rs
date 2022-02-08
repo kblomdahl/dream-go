@@ -94,7 +94,7 @@ impl MatmulAlgo {
         status.into_result(Self { algo: out.algo, workspace_size_in_bytes: out.workspace_size })
     }
 
-    pub fn workspace_size_in_bytes(&self) -> usize {
+    pub fn memory(&self) -> usize {
         self.workspace_size_in_bytes
     }
 }
