@@ -207,6 +207,31 @@ mod tests {
                     (f32::from(output.policy[i]) - f32::from(test_policy[i])).abs()
                 );
             }
+
+            let output = model.predict(&output.hidden_states, &fake_features, 1).expect("could not predict model output");
+            let test_policy: &[f16] = tests["p3"].as_slice().expect("could not retrieve policy test values");
+            let test_value: &[f16] = tests["v3"].as_slice().expect("could not retrieve value test values");
+
+            assert!(
+                f32::from(output.value[0]) >= f32::from(test_value[0]) - 1e-3 &&
+                f32::from(output.value[0]) <= f32::from(test_value[0]) + 1e-3,
+                "value: {:?} is not almost equal to {:?}, delta is {}",
+                output.value[0],
+                test_value[0],
+                (f32::from(output.value[0]) - f32::from(test_value[0])).abs()
+            );
+
+            for i in 0..362 {
+                assert!(
+                    f32::from(output.policy[i]) >= f32::from(test_policy[i]) - 2e-4 &&
+                    f32::from(output.policy[i]) <= f32::from(test_policy[i]) + 2e-4,
+                    "policy[{}]: {:?} is not almost equal to {:?}, delta is {}",
+                    i,
+                    output.policy[i],
+                    test_policy[i],
+                    (f32::from(output.policy[i]) - f32::from(test_policy[i])).abs()
+                );
+            }
         }
     }
 }
