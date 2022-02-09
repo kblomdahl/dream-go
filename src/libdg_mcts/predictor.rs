@@ -12,35 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_go::utils::symmetry::Transform;
-use dg_go::{Board, Color, Point};
+use dg_go::{Board, Color};
 use dg_utils::types::f16;
 
 #[derive(Clone)]
 pub struct Prediction {
     value: f16,
-    policy: Vec<f16>
+    policy: Vec<f16>,
+    hidden_states: Vec<f16>
 }
 
 impl Prediction {
-    pub fn new(value: f16, policy: Vec<f16>) -> Self {
-        Self { value, policy }
-    }
-
-    pub fn with_transform(other: &Self, transform: Transform) -> Self {
-        let t_table = transform.get_table();
-        let mut remapped_policy = vec! [f16::from(0.0); 362];
-
-        for i in Point::all() {
-            let j = t_table[i].to_packed_index();
-            remapped_policy[j] = other.policy[i.to_packed_index()];
-        }
-        remapped_policy[Point::default().to_packed_index()] = other.policy[Point::default().to_packed_index()];
-
-        Self {
-            value: other.value,
-            policy: remapped_policy
-        }
+    pub fn new(value: f16, policy: Vec<f16>, hidden_states: Vec<f16>) -> Self {
+        Self { value, policy, hidden_states }
     }
 
     pub fn value(&self) -> f32 {
@@ -53,6 +37,10 @@ impl Prediction {
 
     pub fn policy(&self) -> Vec<f32> {
         self.policy.iter().map(|&x| f32::from(x)).collect()
+    }
+
+    pub fn hidden_states(&self) -> &Vec<f16> {
+        &self.hidden_states
     }
 }
 
@@ -67,9 +55,8 @@ pub trait Predictor : Send {
     ///
     /// * `board` - the board to get from the table
     /// * `to_move` - the color to get from the table
-    /// * `symmetry` - the symmetry to get from the table
     ///
-    fn fetch(&self, board: &Board, to_move: Color, symmetry: Transform) -> Option<Prediction>;
+    fn fetch(&self, board: &Board, to_move: Color) -> Option<Prediction>;
 
     /// Adds the given value and policy to the transposition table.
     ///
@@ -77,10 +64,9 @@ pub trait Predictor : Send {
     ///
     /// * `board` - the board to add to the table
     /// * `to_move` - the color to add to the table
-    /// * `symmetry` - the symmetry to add to the table
     /// * `response` - the response to add to the table
     ///
-    fn cache(&self, board: &Board, to_move: Color, symmetry: Transform, response: Prediction);
+    fn cache(&self, board: &Board, to_move: Color, response: Prediction);
 
     /// Returns the result of the given query.
     ///
@@ -88,22 +74,18 @@ pub trait Predictor : Send {
     ///
     /// * `features` - the features to query
     ///
-    fn predict(&self, features: &[f16], batch_size: usize) -> Vec<Prediction>;
+    fn initial_predict(&self, features: &[f16], batch_size: usize) -> Vec<Prediction>;
+
+    /// Returns the result of the given query.
+    ///
+    /// # Arguments
+    ///
+    /// * `features` - the features to query
+    ///
+    fn predict(&self, hidden_states: &[f16], features: &[f16], batch_size: usize) -> Vec<Prediction>;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn check_with_transform() {
-        let original = Prediction::new(
-            f16::from(0.0),
-            (0..362).map(|i| f16::from(i as f32)).collect::<Vec<_>>()
-        );
-
-        assert_eq!(original.policy()[0], Prediction::with_transform(&original, Transform::Identity).policy()[0]);
-        assert_eq!(original.policy()[0], Prediction::with_transform(&original, Transform::Rot180).policy()[360]);
-        assert_eq!(original.policy()[361], Prediction::with_transform(&original, Transform::Rot180).policy()[361]);
-    }
+    // pass
 }

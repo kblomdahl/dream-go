@@ -374,7 +374,7 @@ impl Player {
                 } else {
                     Box::new(ScoringSearch::default())
                 };
-            let (value, mut policy) = full_forward(pool.predictor(), &search_options, board, self.color)?;
+            let (value, mut policy, _hidden_states) = full_forward(pool.predictor(), &search_options, board, self.color)?;
             if !allow_pass {
                 policy[361] = ::std::f32::NEG_INFINITY;
             }

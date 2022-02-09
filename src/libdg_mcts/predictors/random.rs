@@ -16,7 +16,7 @@ use rand::{thread_rng, Rng};
 
 use crate::asm::normalize_finite_f32;
 use crate::{Predictor, Prediction};
-use dg_go::{utils::symmetry, Board, Color};
+use dg_go::{Board, Color};
 use dg_utils::types::f16;
 
 /// An implementation of `Predictor` that returns completely random predictions. This
@@ -29,16 +29,15 @@ impl Predictor for RandomPredictor {
         1
     }
 
-    fn fetch(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform) -> Option<Prediction> {
+    fn fetch(&self, _board: &Board, _to_move: Color) -> Option<Prediction> {
         None
     }
 
-    fn cache(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform, _response: Prediction) {
+    fn cache(&self, _board: &Board, _to_move: Color, _response: Prediction) {
         // pass
     }
 
-    fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<Prediction> {
-
+    fn initial_predict(&self, _features: &[f16], batch_size: usize) -> Vec<Prediction> {
         (0..batch_size)
             .map(|_| {
                 let value = thread_rng().gen_range(-1.0..1.0);
@@ -53,8 +52,16 @@ impl Predictor for RandomPredictor {
                 }
 
                 normalize_finite_f32(&mut policy, total_policy);
-                Prediction::new(f16::from(value), policy.into_iter().map(|x| f16::from(x)).collect())
+                Prediction::new(
+                    f16::from(value),
+                    policy.into_iter().map(|x| f16::from(x)).collect(),
+                    vec! [f16::from(0.0); 722]
+                )
             })
             .collect()
+    }
+
+    fn predict(&self, _hidden_states: &[f16], features: &[f16], batch_size: usize) -> Vec<Prediction> {
+        self.initial_predict(features, batch_size)
     }
 }

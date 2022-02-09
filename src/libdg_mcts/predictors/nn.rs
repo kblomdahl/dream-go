@@ -14,7 +14,6 @@
 
 use predictor::{Predictor, Prediction};
 use lru_cache::LruCache;
-use dg_go::utils::symmetry::Transform;
 use dg_go::{Board, Color};
 use dg_cuda::Device;
 use dg_predict::{Builder, Model};
@@ -69,22 +68,22 @@ impl Predictor for NnPredictor {
         2 * num_devices
     }
 
-    fn fetch(&self, board: &Board, to_move: Color, symmetry: Transform) -> Option<Prediction> {
+    fn fetch(&self, board: &Board, to_move: Color) -> Option<Prediction> {
         let key = BoardTuple::new(board, to_move);
 
         self.cache_table.lock().expect("could not acquire cache table lock")
             .get(&key)
-            .map(|resp| Prediction::with_transform(&resp, symmetry))
+            .cloned()
     }
 
-    fn cache(&self, board: &Board, to_move: Color, symmetry: Transform, response: Prediction) {
+    fn cache(&self, board: &Board, to_move: Color, response: Prediction) {
         let key = BoardTuple::new(board, to_move);
 
         self.cache_table.lock().expect("could not acquire cache table lock")
-            .insert(&key, Prediction::with_transform(&response, symmetry.inverse()));
+            .insert(&key, response.clone());
     }
 
-    fn predict(&self, features_list: &[f16], batch_size: usize) -> Vec<Prediction> {
+    fn initial_predict(&self, features_list: &[f16], batch_size: usize) -> Vec<Prediction> {
         assert!(batch_size > 0);
 
         let devices = Device::all().expect("could not find any compatible devices");
@@ -98,7 +97,27 @@ impl Predictor for NnPredictor {
 
         outputs.value.iter()
             .zip(outputs.policy.chunks_exact(362))
-            .map(|(&value, policy)| Prediction::new(value, policy.to_vec()))
+            .zip(outputs.hidden_states.chunks_exact(722))
+            .map(|((&value, policy), hidden_states)| Prediction::new(value, policy.to_vec(), hidden_states.to_vec()))
+            .collect()
+    }
+
+    fn predict(&self, hidden_features_list: &[f16], features_list: &[f16], batch_size: usize) -> Vec<Prediction> {
+        assert!(batch_size > 0);
+
+        let devices = Device::all().expect("could not find any compatible devices");
+        let index = self.count.fetch_add(1, Ordering::Relaxed) % devices.len();
+        devices[index].set_current().expect("could not set the device for the current thread");
+
+        //
+        let model = &self.model;
+        let outputs = model.predict(hidden_features_list, features_list, batch_size)
+            .expect("could not execute neural network");
+
+        outputs.value.iter()
+            .zip(outputs.policy.chunks_exact(362))
+            .zip(outputs.hidden_states.chunks_exact(722))
+            .map(|((&value, policy), hidden_states)| Prediction::new(value, policy.to_vec(), hidden_states.to_vec()))
             .collect()
     }
 }
