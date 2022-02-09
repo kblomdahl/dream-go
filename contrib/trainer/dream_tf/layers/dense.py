@@ -43,6 +43,6 @@ class Dense(tf.keras.layers.Dense):
                 'vs': {
                     'kernel': tensor_to_dict(kernel),
                     'offset': tensor_to_dict(self.bias),
-                    '/shape': tensor_to_dict(kernel.shape, as_type='i4')
+                    'shape': tensor_to_dict(kernel.shape, as_type='i4')
                 }
             }
