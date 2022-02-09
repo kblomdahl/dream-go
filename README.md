@@ -1,8 +1,8 @@
 # Dream Go - All day, every day
 
-Dream Go is an independent implementation of the algorithms and concepts presented by DeepMind in their [Master the Game of Go without Human Knowledge](https://deepmind.com/documents/119/agz_unformatted_nature.pdf) paper with a few modifications to (maybe) make it feasible to develop a strong player without access to a supercomputer on the scale of [Sunway TaihuLight](https://en.wikipedia.org/wiki/Sunway_TaihuLight).
+Dream Go is an independent implementation of the algorithms and concepts presented by DeepMind in their [MuZero: Mastering Go, chess, shogi and Atari without rules](https://rdcu.be/ccErB) paper with a few modifications to (maybe) make it feasible to develop a strong player without access to a supercomputer on the scale of [Sunway TaihuLight](https://en.wikipedia.org/wiki/Sunway_TaihuLight).
 
-* Human games are used to bootstrap the network weights.
+* You can use human games to bootstrap the network weights.
 * Additional (synthetic) features inspired by [AlphaGo](https://storage.googleapis.com/deepmind-media/alphago/AlphaGoNaturePaper.pdf) and [DeepForest](https://arxiv.org/pdf/1511.06410.pdf) are used during training and inference.
 * A self learning procedure inspired by [Thinking Fast and Slow with Deep Learning and Tree Search](https://arxiv.org/pdf/1705.08439.pdf) is used.
 
@@ -96,7 +96,7 @@ For the values provided in this example, which generate 200,000 examples for the
 
 * 1.0.0 - _Public Release_
 * 0.7.0 - _Acceptance_
-  * First version with a network trained from self-play games
+  * MuZero version of the engine with pretrained weights using semi-supervised training.
 * 0.6.3 - _Unravel_
   * The engines plays more enjoyable with `kgs-genmove_cleanup`
   * Bug fixes
