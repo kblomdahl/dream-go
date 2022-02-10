@@ -113,6 +113,9 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.loss_l2_metric = tf.keras.metrics.Mean(name='loss/l2')
 
         # accuracy metrics
+        self.accuracy_policy_1s_metric = [tf.keras.metrics.TopKCategoricalAccuracy(k=1, name=f'unroll/accuracy/policy[{i}]') for i in range(self.num_unrolls)]
+        self.accuracy_values_metric = [tf.keras.metrics.Accuracy(name=f'unroll/accuracy/value[{i}]') for i in range(self.num_unrolls)]
+
         self.accuracy_policy_1_metric = tf.keras.metrics.TopKCategoricalAccuracy(k=1, name='accuracy/policy_1')
         self.accuracy_policy_3_metric = tf.keras.metrics.TopKCategoricalAccuracy(k=3, name='accuracy/policy_3')
         self.accuracy_policy_5_metric = tf.keras.metrics.TopKCategoricalAccuracy(k=5, name='accuracy/policy_5')
@@ -317,6 +320,8 @@ class DreamGoNet(tf.keras.Model, Quantize):
             self.loss_similarity_metric,
             self.loss_l2_metric,
 
+            *self.accuracy_policy_1s_metric,
+            *self.accuracy_values_metric,
             self.accuracy_policy_1_metric,
             self.accuracy_policy_3_metric,
             self.accuracy_policy_5_metric,
@@ -331,6 +336,12 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.loss_ownership_metric.update_state(losses['loss/ownership'])
         self.loss_similarity_metric.update_state(losses['loss/similarity'])
         self.loss_l2_metric.update_state(losses['loss/l2'])
+
+        rolled_policy = tf.reshape(y_pred['policy'], [self.batch_size, self.num_unrolls, 362])
+        rolled_value = tf.reshape(y_pred['value'], [self.batch_size, self.num_unrolls, 1])
+        for i in range(self.num_unrolls):
+            self.accuracy_policy_1s_metric[i].update_state(y_true['policy'][:, i, :], rolled_policy[:, i, :])
+            self.accuracy_values_metric[i].update_state(tf.sign(y_true['value'][:, i, :]), tf.sign(rolled_value[:, i, :]))
 
         self.accuracy_policy_1_metric.update_state(self.merge_unrolls(y_true['policy']), y_pred['policy'])
         self.accuracy_policy_3_metric.update_state(self.merge_unrolls(y_true['policy']), y_pred['policy'])
