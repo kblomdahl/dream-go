@@ -95,7 +95,6 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.swa_optimizer = tfa.optimizers.SWA(self.adam_optimizer)
 
         # compile the keras model
-        self.projection = tf.keras.layers.Dense(units=self.embeddings_size, use_bias=False)
         self.compile(
             run_eagerly=run_eagerly,
             optimizer=tf.keras.mixed_precision.LossScaleOptimizer(
@@ -197,16 +196,15 @@ class DreamGoNet(tf.keras.Model, Quantize):
             training=training
         )
 
-        whole_sequence_output = tf.concat(
+        # flat_outputs is batch_major, i.e. [batch * step, embeddings_size]
+        flat_outputs = tf.concat(
             [
                 [initial_states],
                 whole_sequence_output
             ],
             axis=0
         )
-
-        # flat_outputs is batch_major, i.e. [batch * step, embeddings_size]
-        flat_outputs = tf.transpose(whole_sequence_output, [1, 0, 2])
+        flat_outputs = tf.transpose(flat_outputs, [1, 0, 2])
         flat_outputs = self.merge_unrolls(flat_outputs)
 
         value_hat, policy_hat, ownership_hat, tower_hat = self.predictions(
@@ -215,8 +213,8 @@ class DreamGoNet(tf.keras.Model, Quantize):
         )
 
         return {
-            'proj_repr': self.projection(self.features_to_repr(self.merge_unrolls(inputs), training=training)),
-            'proj_tower': self.projection(flat_outputs),
+            'proj_repr': self.features_to_repr(self.merge_unrolls(inputs[:, 1:, :, :, :]), training=training),
+            'proj_tower': self.merge_unrolls(tf.transpose(whole_sequence_output, [1, 0, 2])),
             'value': value_hat,
             'policy': policy_hat,
             'ownership': ownership_hat,
@@ -274,9 +272,13 @@ class DreamGoNet(tf.keras.Model, Quantize):
         ) * discounts)
 
         loss_similarity = tf.reduce_mean(
-            tf.keras.losses.cosine_similarity(
+            0.5 * tf.keras.losses.cosine_similarity(
                 tf.cast(tf.stop_gradient(self.batch_flatten(y_pred['proj_repr'])), tf.float32),
                 tf.cast(self.batch_flatten(y_pred['proj_tower']), tf.float32)
+            ) +
+            0.5 * tf.keras.losses.cosine_similarity(
+                tf.cast(tf.stop_gradient(self.batch_flatten(y_pred['proj_tower'])), tf.float32),
+                tf.cast(self.batch_flatten(y_pred['proj_repr']), tf.float32)
             )
         )
 
