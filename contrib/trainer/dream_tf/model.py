@@ -74,7 +74,7 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.weight_decay = weight_decay
         self.label_smoothing = label_smoothing
         self.learning_rate = learning_rate_schedule
-        self.leela_zero = LeelaZero(lz_weights) if lz_weights is not None else None
+        self.leela_zero = LeelaZero(lz_weights) if lz_weights else None
         self.features_to_repr = FeaturesToRepr(
             num_blocks=num_blocks,
             num_channels=num_channels,
