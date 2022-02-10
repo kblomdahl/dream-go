@@ -448,7 +448,7 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
             hp.hparams(hparams)
 
     def step(self):
-        return self.model.optimizer.iterations
+        return self.model.optimizer.iterations * self.model.batch_size * self.model.num_unrolls
 
     def on_train_batch_begin(self, batch, logs):
         self.batch_start_time = time()
