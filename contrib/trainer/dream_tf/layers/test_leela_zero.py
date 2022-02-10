@@ -32,11 +32,10 @@ class LzTest(unittest.TestCase, TestUtils):
         self.layer = LeelaZero('fixtures/d645af9.gz')
 
     def test_shape(self):
-        v, p, y = self.layer(self.x)
+        v, p = self.layer(self.x)
 
         self.assertEqual(v.shape, [self.batch_size, 1])
         self.assertEqual(p.shape, [self.batch_size, 362])
-        self.assertEqual(y.shape, [self.batch_size, 19, 19, 8])
 
 if __name__ == '__main__':
     unittest.main()

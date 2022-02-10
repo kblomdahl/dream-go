@@ -54,4 +54,4 @@ class Predictions(tf.keras.layers.Layer):
         p = self.policy_head(x, training=training)
         v, vo = self.value_head(x, training=training)
 
-        return v, p, vo, x
+        return v, p, vo

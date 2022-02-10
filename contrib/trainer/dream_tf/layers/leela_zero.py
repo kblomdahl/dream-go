@@ -70,7 +70,7 @@ class LeelaZero(tf.keras.layers.Layer):
         v = tf.nn.relu(dense(v, 'w_fc_2'))
         v = tf.nn.tanh(dense(v, 'w_fc_3'))
 
-        return tf.stop_gradient(v), tf.stop_gradient(p), tf.stop_gradient(y)
+        return tf.stop_gradient(v), tf.stop_gradient(p)
 
 class LzWeightsParser:
     def __init__(self, filename, params):

@@ -207,7 +207,7 @@ class DreamGoNet(tf.keras.Model, Quantize):
         flat_outputs = tf.transpose(flat_outputs, [1, 0, 2])
         flat_outputs = self.merge_unrolls(flat_outputs)
 
-        value_hat, policy_hat, ownership_hat, tower_hat = self.predictions(
+        value_hat, policy_hat, ownership_hat = self.predictions(
             flat_outputs,
             training=training
         )
@@ -306,7 +306,7 @@ class DreamGoNet(tf.keras.Model, Quantize):
     def apply_lz_labels(self, labels):
         if self.leela_zero:
             lz_features = self.merge_unrolls(labels['lz_features'])
-            lz_value_hat, lz_policy_hat, lz_tower_hat = self.leela_zero(lz_features, training=False)
+            lz_value_hat, lz_policy_hat = self.leela_zero(lz_features, training=False)
 
             labels['value'] = tf.reshape(tf.cast(lz_value_hat, tf.float32), [s if s is not None else -1 for s in labels['value'].shape])
             labels['policy'] = tf.reshape(tf.cast(lz_policy_hat, tf.float32), [s if s is not None else -1 for s in labels['policy'].shape])

@@ -33,20 +33,18 @@ class PredictionsTest(unittest.TestCase, TestUtils):
         self.layer = Predictions()
 
     def test_shape(self):
-        v, p, vo, x = self.layer(self.x)
+        v, p, vo = self.layer(self.x)
 
         self.assertEqual(v.shape, [self.batch_size, 1])
         self.assertEqual(p.shape, [self.batch_size, 362])
         self.assertEqual(vo.shape, [self.batch_size, 361])
-        self.assertEqual(x.shape, [self.batch_size, self.embeddings_size])
 
     def test_dtype(self):
-        v, p, vo, x = self.layer(self.x)
+        v, p, vo = self.layer(self.x)
 
         self.assertEqual(v.dtype, tf.float32)
         self.assertEqual(p.dtype, tf.float32)
         self.assertEqual(vo.dtype, tf.float32)
-        self.assertEqual(x.dtype, tf.float16)
 
 if __name__ == '__main__':
     unittest.main()
