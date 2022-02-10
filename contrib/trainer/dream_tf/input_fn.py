@@ -174,7 +174,7 @@ def input_fn(files, batch_size, is_training, *, num_unrolls=1, num_test_batches=
     elif is_training is False:
         dataset = dataset.take(num_test_batches * batch_size)
 
-    dataset = dataset.batch(batch_size)
+    dataset = dataset.batch(batch_size, drop_remainder=True)
     dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
     return dataset

@@ -30,14 +30,14 @@ class CommonInputFnTest(TestUtils):
     def test_shape(self):
         features, labels = self.dataset.element_spec
 
-        self.assertEqual(features.shape.as_list(), [None, self.num_unrolls, 19, 19, NUM_FEATURES])
-        self.assertEqual(labels['lz_features'].shape.as_list(), [None, self.num_unrolls, 19, 19, 18])
-        self.assertEqual(labels['boost'].shape.as_list(), [None, self.num_unrolls, 1])
-        self.assertEqual(labels['value'].shape.as_list(), [None, self.num_unrolls, 1])
-        self.assertEqual(labels['policy'].shape.as_list(), [None, self.num_unrolls, 362])
-        self.assertEqual(labels['ownership'].shape.as_list(), [None, self.num_unrolls, 361])
-        self.assertEqual(labels['has_ownership'].shape.as_list(), [None, self.num_unrolls, 1])
-        self.assertEqual(labels['komi'].shape.as_list(), [None, self.num_unrolls, 1])
+        self.assertEqual(features.shape.as_list(), [self.batch_size, self.num_unrolls, 19, 19, NUM_FEATURES])
+        self.assertEqual(labels['lz_features'].shape.as_list(), [self.batch_size, self.num_unrolls, 19, 19, 18])
+        self.assertEqual(labels['boost'].shape.as_list(), [self.batch_size, self.num_unrolls, 1])
+        self.assertEqual(labels['value'].shape.as_list(), [self.batch_size, self.num_unrolls, 1])
+        self.assertEqual(labels['policy'].shape.as_list(), [self.batch_size, self.num_unrolls, 362])
+        self.assertEqual(labels['ownership'].shape.as_list(), [self.batch_size, self.num_unrolls, 361])
+        self.assertEqual(labels['has_ownership'].shape.as_list(), [self.batch_size, self.num_unrolls, 1])
+        self.assertEqual(labels['komi'].shape.as_list(), [self.batch_size, self.num_unrolls, 1])
 
     def test_data_type(self):
         features, labels = self.dataset.element_spec
@@ -53,13 +53,15 @@ class CommonInputFnTest(TestUtils):
 
 class InputFnTrainingModeTest(unittest.TestCase, CommonInputFnTest):
     def setUp(self):
+        self.batch_size = 2
         self.num_unrolls = 1
-        self.dataset = input_fn('', 2, True, num_unrolls=self.num_unrolls)
+        self.dataset = input_fn('', self.batch_size, True, num_unrolls=self.num_unrolls)
 
 class InputFnTestModeTest(unittest.TestCase, CommonInputFnTest):
     def setUp(self):
+        self.batch_size = 2
         self.num_unrolls = 1
-        self.dataset = input_fn('', 2, False, num_unrolls=self.num_unrolls)
+        self.dataset = input_fn('', self.batch_size, False, num_unrolls=self.num_unrolls)
 
 
 if __name__ == '__main__':
