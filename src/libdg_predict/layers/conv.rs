@@ -149,9 +149,9 @@ impl LayerImpl for Conv {
         _stream: &cuda::Stream
     ) -> Result<(), Err>
     {
-        let shape: &[i32] = variables.get("shape").ok_or_else(|| Err::MissingVariable("shape".to_string()))?.as_slice()?;
-
         if !self.conv_desc.contains_key(&batch_size) {
+            let shape: &[i32] = variables.get("shape").ok_or_else(|| Err::MissingVariable("shape".to_string()))?.as_slice()?;
+
             self.conv_desc.insert(batch_size, Self::create_convolution_bias_activation(handle, batch_size, shape)?);
         }
 

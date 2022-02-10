@@ -134,9 +134,9 @@ impl LayerImpl for Dense {
         _stream: &cuda::Stream
     ) -> Result<(), Err>
     {
-        let shape: &[i32] = variables.get("shape").ok_or_else(|| Err::MissingVariable("shape".to_string()))?.as_slice()?;
-
         if !self.matmul_desc.contains_key(&batch_size) {
+            let shape: &[i32] = variables.get("shape").ok_or_else(|| Err::MissingVariable("shape".to_string()))?.as_slice()?;
+
             self.matmul_desc.insert(batch_size, Self::create_matmul(light_handle, batch_size, shape)?);
         }
 

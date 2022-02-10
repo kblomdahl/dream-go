@@ -160,9 +160,9 @@ impl LayerImpl for Gru {
         stream: &cuda::Stream
     ) -> Result<(), Err>
     {
-        let units: &[i32] = variables.get("units").ok_or_else(|| Err::MissingVariable("units".to_string()))?.as_slice()?;
-
         if !self.rnn_fwd.contains_key(&batch_size) {
+            let units: &[i32] = variables.get("units").ok_or_else(|| Err::MissingVariable("units".to_string()))?.as_slice()?;
+
             self.rnn_fwd.insert(batch_size, Self::create_rnn_forward(handle, batch_size, units[0])?);
             self.dev_seq_lengths.insert(batch_size, Self::create_dev_seq_lengths(batch_size, stream)?);
         }

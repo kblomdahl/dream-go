@@ -171,10 +171,10 @@ impl LayerImpl for Prediction {
         _stream: &cuda::Stream
     ) -> Result<(), Err>
     {
-        let shape_1: &[i32] = variables.get("policy/linear_1/shape").ok_or_else(|| Err::MissingVariable("policy/linear_1/shape".to_string()))?.as_slice()?;
-        let shape_2: &[i32] = variables.get("value/linear_1/shape").ok_or_else(|| Err::MissingVariable("value/linear_1/shape".to_string()))?.as_slice()?;
-
         if !self.conv_desc.contains_key(&batch_size) {
+            let shape_1: &[i32] = variables.get("policy/linear_1/shape").ok_or_else(|| Err::MissingVariable("policy/linear_1/shape".to_string()))?.as_slice()?;
+            let shape_2: &[i32] = variables.get("value/linear_1/shape").ok_or_else(|| Err::MissingVariable("value/linear_1/shape".to_string()))?.as_slice()?;
+
             self.conv_desc.insert(batch_size, [
                 Self::create_matmul(light_handle, batch_size, shape_1)?,
                 Self::create_matmul(light_handle, batch_size, shape_2)?,
