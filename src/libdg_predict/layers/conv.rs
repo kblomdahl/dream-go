@@ -28,17 +28,17 @@ impl LayerFactory for ConvFactory {
         handle: &cudnn::Handle,
         variables: &HashMap<String, Variable>,
         stream: &cuda::Stream
-    ) -> Result<Box<dyn LayerImpl>, Err>
+    ) -> Box<dyn LayerImpl>
     {
-        Ok(Box::new(Conv::new(handle, variables, stream)?))
+        Box::new(Conv::new(handle, variables, stream))
     }
 }
 
 pub struct Conv {
-    filter: cuda::PerDevice<cuda::Ptr>,
-    offset: cuda::PerDevice<cuda::Ptr>,
+    filter: cuda::Ptr,
+    offset: cuda::Ptr,
 
-    conv_desc: cuda::PerDevice<HashMap<i32, cudnn::ConvolutionBiasActivation>>
+    conv_desc: HashMap<i32, cudnn::ConvolutionBiasActivation>
 }
 
 impl Conv {
@@ -46,13 +46,13 @@ impl Conv {
         _handle: &cudnn::Handle,
         _variables: &HashMap<String, Variable>,
         _stream: &cuda::Stream
-    ) -> Result<Self, Err>
+    ) -> Self
     {
-        Ok(Self {
-            filter: cuda::PerDevice::<_>::new()?,
-            offset: cuda::PerDevice::<_>::new()?,
-            conv_desc: cuda::PerDevice::<_>::new()?,
-        })
+        Self {
+            filter: cuda::Ptr::default(),
+            offset: cuda::Ptr::default(),
+            conv_desc: HashMap::new(),
+        }
     }
 
     fn create_convolution_bias_activation(handle: &cudnn::Handle, batch_size: i32, shape: &[i32]) -> Result<cudnn::ConvolutionBiasActivation, cudnn::Status> {
@@ -134,8 +134,8 @@ impl LayerImpl for Conv {
         stream: &cuda::Stream
     ) -> Result<(), Err>
     {
-        *self.filter = variables.get("filter").ok_or_else(|| Err::MissingVariable("filter".to_string()))?.as_ptr(stream)?;
-        *self.offset = variables.get("offset").ok_or_else(|| Err::MissingVariable("offset".to_string()))?.as_ptr(stream)?;
+        self.filter = variables.get("filter").ok_or_else(|| Err::MissingVariable("filter".to_string()))?.as_ptr(stream)?;
+        self.offset = variables.get("offset").ok_or_else(|| Err::MissingVariable("offset".to_string()))?.as_ptr(stream)?;
 
         Ok(())
     }
@@ -242,7 +242,7 @@ mod tests {
             ("filter".to_string(), Variable::from(filter)),
             ("offset".to_string(), Variable::from(offset)),
         ]);
-        let mut layer = factory.build(&plan.handle, &variables, &plan.stream)?;
+        let mut layer = factory.build(&plan.handle, &variables, &plan.stream);
         layer.build(&plan.light_handle, &plan.handle, &variables, &plan.stream)?;
         layer.prepare(&plan.light_handle, &plan.handle, 1, &variables, &plan.stream)?;
         io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;

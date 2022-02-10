@@ -24,7 +24,7 @@ use std::sync::Mutex;
 
 enum LayerInner {
     Factory { factory: Box<dyn LayerFactory> },
-    Impl { layer_impl: Box<dyn LayerImpl> }
+    Impl { layer_impl: cuda::PerDevice<Box<dyn LayerImpl>> }
 }
 
 pub struct Layer {
@@ -34,14 +34,14 @@ pub struct Layer {
 }
 
 impl Layer {
-    pub fn new<L>(name: &str, layer_factory: L, variables: HashMap<String, Variable>) -> Self
+    pub fn new<L>(name: &str, layer_factory: L, variables: HashMap<String, Variable>) -> Result<Self, Err>
         where L: LayerFactory + 'static
     {
-        Self {
+        Ok(Self {
             name: name.to_string(),
             variables,
-            inner: Mutex::new(LayerInner::Factory { factory: Box::new(layer_factory) }),
-        }
+            inner: Mutex::new(LayerInner::Factory { factory: Box::new(layer_factory) })
+        })
     }
 
     pub fn build(
@@ -55,20 +55,27 @@ impl Layer {
 
         match &mut *inner {
             LayerInner::Factory { factory } => {
-                let mut layer_impl = factory.build(handle, &self.variables, stream)?;
-                match layer_impl.build(light_handle, handle, &self.variables, stream) {
-                    Err(Err::MissingVariable(path)) => Err(Err::MissingVariable(format!("{}/{}", self.name, path))),
-                    other => other
-                }?;
-                *inner = LayerInner::Impl { layer_impl };
+                *inner = LayerInner::Impl {
+                    layer_impl: cuda::PerDevice::with(|| {
+                        factory.build(handle, &self.variables, stream)
+                    })?
+                };
             },
+
+            _ => {
+                // pass
+            }
+        };
+
+        match &mut *inner {
+            LayerInner::Factory { factory: _ } => { unreachable!() },
             LayerInner::Impl { layer_impl } => {
                 match layer_impl.build(light_handle, handle, &self.variables, stream) {
                     Err(Err::MissingVariable(path)) => Err(Err::MissingVariable(format!("{}/{}", self.name, path))),
                     other => other
                 }?;
             },
-        };
+        }
 
         Ok(())
     }

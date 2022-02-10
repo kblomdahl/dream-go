@@ -151,10 +151,10 @@ impl Builder {
 
     pub fn build(self) -> Result<Model, Err> {
         let config = self.config.clone();
-        let representation = self.representation.build();
-        let dynamics = self.dynamics.build();
-        let gru = self.gru.build();
-        let prediction = self.prediction.build();
+        let representation = self.representation.build()?;
+        let dynamics = self.dynamics.build()?;
+        let gru = self.gru.build()?;
+        let prediction = self.prediction.build()?;
 
         Model::new(config, representation, dynamics, gru, prediction)
     }
@@ -162,10 +162,10 @@ impl Builder {
     #[cfg(test)]
     pub fn build_with_tests(self) -> Result<(Model, HashMap<String, Variable>), Err> {
         let config = self.config.clone();
-        let representation = self.representation.build();
-        let dynamics = self.dynamics.build();
-        let gru = self.gru.build();
-        let prediction = self.prediction.build();
+        let representation = self.representation.build()?;
+        let dynamics = self.dynamics.build()?;
+        let gru = self.gru.build()?;
+        let prediction = self.prediction.build()?;
         let model = Model::new(config, representation, dynamics, gru, prediction)?;
         let test = self.test.build();
 

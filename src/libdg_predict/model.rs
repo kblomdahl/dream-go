@@ -60,6 +60,7 @@ impl Model {
             let light_handle = cublas_lt::Handle::new()?;
             let stream = cuda::Stream::new()?;
 
+            handle.set_stream(&stream)?;
             Self::build_layers(&mut self.representation, &light_handle, &handle, &stream)?;
             Self::build_layers(&mut self.dynamics, &light_handle, &handle, &stream)?;
             Self::build_layers(&mut self.gru, &light_handle, &handle, &stream)?;

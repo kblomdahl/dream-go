@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::layers;
-use crate::Layer;
+use crate::{Err, Layer};
 use super::{BuilderParseErr, VariableBuilder};
 
 use std::collections::HashMap;
@@ -84,7 +84,7 @@ impl LayerBuilder {
         Ok(())
     }
 
-    pub fn build(mut self) -> Layer {
+    pub fn build(mut self) -> Result<Layer, Err> {
         let variables = self.variables.drain()
             .map(|(key, var)| (key, var.build()))
             .collect::<HashMap<_, _>>();

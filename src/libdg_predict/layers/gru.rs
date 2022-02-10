@@ -29,25 +29,25 @@ impl LayerFactory for GruFactory {
         _handle: &cudnn::Handle,
         _variables: &HashMap<String, Variable>,
         _stream: &cuda::Stream
-    ) -> Result<Box<dyn LayerImpl>, Err>
+    ) -> Box<dyn LayerImpl>
     {
-        Ok(Box::new(Gru::new()?))
+        Box::new(Gru::new())
     }
 }
 
 pub struct Gru {
-    weight_space: cuda::PerDevice<cuda::Ptr>,
-    rnn_fwd: cuda::PerDevice<HashMap<i32, cudnn::RnnForward>>,
-    dev_seq_lengths: cuda::PerDevice<HashMap<i32, cuda::Ptr>>
+    weight_space: cuda::Ptr,
+    rnn_fwd: HashMap<i32, cudnn::RnnForward>,
+    dev_seq_lengths: HashMap<i32, cuda::Ptr>
 }
 
 impl Gru {
-    pub fn new() -> Result<Self, Err> {
-        Ok(Self {
-            weight_space: cuda::PerDevice::new()?,
-            rnn_fwd: cuda::PerDevice::new()?,
-            dev_seq_lengths: cuda::PerDevice::new()?
-        })
+    pub fn new() -> Self {
+        Self {
+            weight_space: cuda::Ptr::default(),
+            rnn_fwd: HashMap::new(),
+            dev_seq_lengths: HashMap::new()
+        }
     }
 
     fn create_dev_seq_lengths(batch_size: i32, stream: &cuda::Stream) -> Result<cuda::Ptr, Err> {
@@ -137,7 +137,7 @@ impl LayerImpl for Gru {
             variables.get("recurrent_candidate/offset").ok_or_else(|| Err::MissingVariable("recurrent_candidate/offset".to_string()))?,
         ];
 
-        *self.weight_space = cuda::Ptr::new(rnn_desc.weight_space_size(handle)?)?;
+        self.weight_space = cuda::Ptr::new(rnn_desc.weight_space_size(handle)?)?;
         for (i, weight_param) in rnn_desc.weight_params(handle, &self.weight_space)?.iter().enumerate() {
             if weight_param[0].0.shape()?[0] > 0 {
                 self.weight_space.copy_from_slice_offset::<f16>(weight_param[0].1, kernel[i].as_slice()?, stream)?;
@@ -270,7 +270,7 @@ mod tests {
             ("recurrent_candidate".to_string(), Variable::from(eyes2::<f16>(n))),
             ("recurrent_candidate/offset".to_string(), Variable::from(zeros1::<f16>(n))),
         ]);
-        let mut layer = factory.build(&plan.handle, &variables, &plan.stream)?;
+        let mut layer = factory.build(&plan.handle, &variables, &plan.stream);
         layer.build(&plan.light_handle, &plan.handle, &variables, &plan.stream)?;
         layer.prepare(&plan.light_handle, &plan.handle, 1, &variables, &plan.stream)?;
         io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;

@@ -23,7 +23,7 @@ pub trait LayerFactory : Send {
         handle: &cudnn::Handle,
         variables: &HashMap<String, Variable>,
         stream: &cuda::Stream
-    ) -> Result<Box<dyn LayerImpl>, Err>;
+    ) -> Box<dyn LayerImpl>;
 }
 
 pub trait LayerImpl : Send {

@@ -29,29 +29,29 @@ impl LayerFactory for PredictionFactory {
         _handle: &cudnn::Handle,
         _variables: &HashMap<String, Variable>,
         _stream: &cuda::Stream
-    ) -> Result<Box<dyn LayerImpl>, Err>
+    ) -> Box<dyn LayerImpl>
     {
-        Ok(Box::new(Prediction::new()?))
+        Box::new(Prediction::new())
     }
 }
 
 pub struct Prediction {
-    kernel: cuda::PerDevice<[cuda::Ptr; 2]>,
-    offset: cuda::PerDevice<[cuda::Ptr; 2]>,
-    conv_desc: cuda::PerDevice<HashMap<i32, [cublas_lt::Matmul<f16>; 2]>>,
-    softmax: cuda::PerDevice<HashMap<i32, cudnn::Softmax>>,
-    tanh: cuda::PerDevice<HashMap<i32, cudnn::Activation>>
+    kernel: [cuda::Ptr; 2],
+    offset: [cuda::Ptr; 2],
+    conv_desc: HashMap<i32, [cublas_lt::Matmul<f16>; 2]>,
+    softmax: HashMap<i32, cudnn::Softmax>,
+    tanh: HashMap<i32, cudnn::Activation>
 }
 
 impl Prediction {
-    pub fn new() -> Result<Self, Err> {
-        Ok(Self {
-            kernel: cuda::PerDevice::new()?,
-            offset: cuda::PerDevice::new()?,
-            conv_desc: cuda::PerDevice::new()?,
-            softmax: cuda::PerDevice::new()?,
-            tanh: cuda::PerDevice::new()?,
-        })
+    pub fn new() -> Self {
+        Self {
+            kernel: [cuda::Ptr::default(), cuda::Ptr::default()],
+            offset: [cuda::Ptr::default(), cuda::Ptr::default()],
+            conv_desc: HashMap::new(),
+            softmax: HashMap::new(),
+            tanh: HashMap::new(),
+        }
     }
 
     fn create_softmax(batch_size: i32, shape: &[i32]) -> Result<cudnn::Softmax, cudnn::Status> {
@@ -150,11 +150,11 @@ impl LayerImpl for Prediction {
         stream: &cuda::Stream
     ) -> Result<(), Err>
     {
-        *self.kernel = [
+        self.kernel = [
             variables.get("policy/linear_1").ok_or_else(|| Err::MissingVariable("policy/linear_1".to_string()))?.as_ptr(stream)?,
             variables.get("value/linear_1").ok_or_else(|| Err::MissingVariable("value/linear_1".to_string()))?.as_ptr(stream)?
         ];
-        *self.offset = [
+        self.offset = [
             variables.get("policy/linear_1/offset").ok_or_else(|| Err::MissingVariable("policy/linear_1/offset".to_string()))?.as_ptr(stream)?,
             variables.get("value/linear_1/offset").ok_or_else(|| Err::MissingVariable("value/linear_1/offset".to_string()))?.as_ptr(stream)?
         ];

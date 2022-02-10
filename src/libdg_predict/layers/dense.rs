@@ -29,26 +29,26 @@ impl LayerFactory for DenseFactory {
         _handle: &cudnn::Handle,
         _variables: &HashMap<String, Variable>,
         _stream: &cuda::Stream
-    ) -> Result<Box<dyn LayerImpl>, Err>
+    ) -> Box<dyn LayerImpl>
     {
-        Ok(Box::new(Dense::new()?))
+        Box::new(Dense::new())
     }
 }
 
 pub struct Dense {
-    kernel: cuda::PerDevice<cuda::Ptr>,
-    offset: cuda::PerDevice<cuda::Ptr>,
+    kernel: cuda::Ptr,
+    offset: cuda::Ptr,
 
-    matmul_desc: cuda::PerDevice<HashMap<i32, cublas_lt::Matmul::<f16>>>
+    matmul_desc: HashMap<i32, cublas_lt::Matmul::<f16>>
 }
 
 impl Dense {
-    pub fn new() -> Result<Self, Err> {
-        Ok(Self {
-            kernel: cuda::PerDevice::<_>::new()?,
-            offset: cuda::PerDevice::<_>::new()?,
-            matmul_desc: cuda::PerDevice::<_>::new()?,
-        })
+    pub fn new() -> Self {
+        Self {
+            kernel: cuda::Ptr::default(),
+            offset: cuda::Ptr::default(),
+            matmul_desc: HashMap::new()
+        }
     }
 
     fn create_matmul(handle: &cublas_lt::Handle, batch_size: i32, shape: &[i32]) -> Result<cublas_lt::Matmul<f16>, cublas_lt::Status> {
@@ -119,8 +119,8 @@ impl LayerImpl for Dense {
         stream: &cuda::Stream
     ) -> Result<(), Err>
     {
-        *self.kernel = variables.get("kernel").ok_or_else(|| Err::MissingVariable("kernel".to_string()))?.as_ptr(stream)?;
-        *self.offset = variables.get("offset").ok_or_else(|| Err::MissingVariable("offset".to_string()))?.as_ptr(stream)?;
+        self.kernel = variables.get("kernel").ok_or_else(|| Err::MissingVariable("kernel".to_string()))?.as_ptr(stream)?;
+        self.offset = variables.get("offset").ok_or_else(|| Err::MissingVariable("offset".to_string()))?.as_ptr(stream)?;
 
         Ok(())
     }
@@ -213,7 +213,7 @@ mod tests {
             ("kernel".to_string(), Variable::from(filter)),
             ("offset".to_string(), Variable::from(offset)),
         ]);
-        let mut layer = factory.build(&plan.handle, &variables, &plan.stream)?;
+        let mut layer = factory.build(&plan.handle, &variables, &plan.stream);
         layer.build(&plan.light_handle, &plan.handle, &variables, &plan.stream)?;
         layer.prepare(&plan.light_handle, &plan.handle, 1, &variables, &plan.stream)?;
         io = layer.forward(&plan.light_handle, &plan.handle, io, &mut plan.allocator, &plan.stream)?;

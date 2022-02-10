@@ -28,26 +28,26 @@ impl LayerFactory for ResidualBlockFactory {
         _handle: &cudnn::Handle,
         _variables: &HashMap<String, Variable>,
         _stream: &cuda::Stream
-    ) -> Result<Box<dyn LayerImpl>, Err>
+    ) -> Box<dyn LayerImpl>
     {
-        Ok(Box::new(ResidualBlock::new()?))
+        Box::new(ResidualBlock::new())
     }
 }
 
 pub struct ResidualBlock {
-    filter: cuda::PerDevice<[cuda::Ptr; 2]>,
-    offset: cuda::PerDevice<[cuda::Ptr; 2]>,
+    filter: [cuda::Ptr; 2],
+    offset: [cuda::Ptr; 2],
 
-    conv_desc: cuda::PerDevice<HashMap<i32, [cudnn::ConvolutionBiasActivation; 2]>>
+    conv_desc: HashMap<i32, [cudnn::ConvolutionBiasActivation; 2]>
 }
 
 impl ResidualBlock {
-    pub fn new() -> Result<Self, Err> {
-        Ok(Self {
-            filter: cuda::PerDevice::<_>::new()?,
-            offset: cuda::PerDevice::<_>::new()?,
-            conv_desc: cuda::PerDevice::<_>::new()?,
-        })
+    pub fn new() -> Self {
+        Self {
+            filter: [cuda::Ptr::default(), cuda::Ptr::default()],
+            offset: [cuda::Ptr::default(), cuda::Ptr::default()],
+            conv_desc: HashMap::new()
+        }
     }
 
     fn create_convolution_bias_activation(handle: &cudnn::Handle, batch_size: i32, alpha: [f32; 2], shape: &[i32]) -> Result<cudnn::ConvolutionBiasActivation, cudnn::Status> {
@@ -129,11 +129,11 @@ impl LayerImpl for ResidualBlock {
         stream: &cuda::Stream
     ) -> Result<(), Err>
     {
-        *self.filter = [
+        self.filter = [
             variables.get("conv_1").ok_or_else(|| Err::MissingVariable("conv_1".to_string()))?.as_ptr(stream)?,
             variables.get("conv_2").ok_or_else(|| Err::MissingVariable("conv_2".to_string()))?.as_ptr(stream)?
         ];
-        *self.offset = [
+        self.offset = [
             variables.get("conv_1/offset").ok_or_else(|| Err::MissingVariable("conv_1/offset".to_string()))?.as_ptr(stream)?,
             variables.get("conv_2/offset").ok_or_else(|| Err::MissingVariable("conv_2/offset".to_string()))?.as_ptr(stream)?
         ];

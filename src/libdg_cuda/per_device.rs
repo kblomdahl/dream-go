@@ -25,11 +25,14 @@ extern {
     pub fn cudaSetDevice(device_id: c_int) -> Error;
 }
 
-pub struct PerDevice<T: Default> {
+pub struct PerDevice<T> {
     values: Vec<T>
 }
 
-impl<T: Default> Deref for PerDevice<T> {
+unsafe impl<T: Send> Send for PerDevice<T> {}
+unsafe impl<T: Sync> Sync for PerDevice<T> {}
+
+impl<T> Deref for PerDevice<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -40,7 +43,7 @@ impl<T: Default> Deref for PerDevice<T> {
     }
 }
 
-impl<T: Default> DerefMut for PerDevice<T> {
+impl<T> DerefMut for PerDevice<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let mut device_id = 0;
         unsafe { cudaGetDevice(&mut device_id) };
@@ -51,6 +54,14 @@ impl<T: Default> DerefMut for PerDevice<T> {
 
 impl<T: Default> PerDevice<T> {
     pub fn new() -> Result<PerDevice<T>, Error> {
+        Self::with(|| T::default())
+    }
+}
+
+impl<T> PerDevice<T> {
+    pub fn with<F>(mut create_fn: F) -> Result<PerDevice<T>, Error>
+        where F: FnMut() -> T
+    {
         let mut count = 0;
         let error = unsafe { cudaGetDeviceCount(&mut count) };
 
@@ -59,7 +70,7 @@ impl<T: Default> PerDevice<T> {
                 let mut prev_device_id = 0;
                 unsafe { cudaGetDevice(&mut prev_device_id) };
                 unsafe { cudaSetDevice(device_id) };
-                let out = T::default();
+                let out = create_fn();
                 unsafe { cudaSetDevice(prev_device_id) };
                 out
             }).collect()

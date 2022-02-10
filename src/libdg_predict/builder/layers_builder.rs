@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::Layer;
+use crate::{Err, Layer};
 use super::{BuilderParseErr, LayerBuilder};
 
 use dg_utils::json::{JsonKey, JsonToken};
@@ -48,7 +48,13 @@ impl LayersBuilder {
         Ok(())
     }
 
-    pub fn build(mut self) -> Vec<Layer> {
-        self.layers.drain(..).map(|m| m.build()).collect()
+    pub fn build(mut self) -> Result<Vec<Layer>, Err> {
+        let mut out = vec! [];
+
+        for layer in self.layers.drain(..) {
+            out.push(layer.build()?);
+        }
+
+        Ok(out)
     }
 }
