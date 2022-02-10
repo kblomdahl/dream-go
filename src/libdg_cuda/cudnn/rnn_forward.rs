@@ -19,6 +19,12 @@ use libc::{c_void, size_t};
 
 #[link(name = "cudnn_adv_infer")]
 extern {
+    fn cudnnBuildRNNDynamic(
+        handle: cudnnHandle_t,
+        rnn_desc: cudnnRNNDescriptor_t,
+        mini_batch: i32
+    ) -> cudnnStatus_t;
+
     fn cudnnRNNForward(
         handle: cudnnHandle_t,
         rnn_desc: cudnnRNNDescriptor_t,
@@ -61,21 +67,36 @@ pub struct RnnForward {
 
 impl RnnForward {
     pub fn new(
+        handle: &Handle,
         rnn_desc: RnnDescriptor,
         x_desc: RnnDataDescriptor,
         y_desc: RnnDataDescriptor,
         h_desc: TensorDescriptor
     ) -> Result<Self, Status>
     {
-        Ok(Self {
+        let out = Self {
             rnn_desc,
             x_desc,
             y_desc,
             h_desc
-        })
+        };
+
+        if out.rnn_desc().algo()? == RnnAlgo::PersistDynamic {
+            let status = unsafe {
+                cudnnBuildRNNDynamic(
+                    **handle,
+                    *out.rnn_desc,
+                    out.x_desc.batch_size()?
+                )
+            };
+
+            status.into_result(out)
+        } else {
+            Ok(out)
+        }
     }
 
-    pub fn rnn_desc(&self) -> &cudnnRNNDescriptor_t {
+    pub fn rnn_desc(&self) -> &RnnDescriptor {
         &self.rnn_desc
     }
 

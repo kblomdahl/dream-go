@@ -61,6 +61,7 @@ impl Gru {
     ) -> Result<cudnn::RnnForward, Err>
     {
         Ok(cudnn::RnnForward::new(
+            handle,
             Self::create_rnn_descriptor(handle, units)?,
             Self::create_data_descriptor(batch_size, units)?,
             Self::create_data_descriptor(batch_size, units)?,
@@ -75,7 +76,7 @@ impl Gru {
     {
         Ok(cudnn::RnnDescriptor::new(
             &handle,
-            cudnn::RnnAlgo::PersistStatic,
+            cudnn::RnnAlgo::PersistDynamic,
             cudnn::RnnMode::Gru,
             cudnn::RnnBiasMode::DoubleBias,
             cudnn::RnnInputMode::LinearInput,

@@ -219,6 +219,10 @@ impl RnnDescriptor {
         })
     }
 
+    pub fn algo(&self) -> Result<RnnAlgo, Status> {
+        GetRnnDescriptor::new(self.rnn_desc).map(|out| out.algo)
+    }
+
     pub fn input_size(&self) -> Result<i32, Status> {
         GetRnnDescriptor::new(self.rnn_desc).map(|out| out.input_size)
     }

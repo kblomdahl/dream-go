@@ -145,6 +145,11 @@ impl RnnDataDescriptor {
         })
     }
 
+    pub fn batch_size(&self) -> Result<i32, Status> {
+        GetRnnDataDescriptor::new(self.rnn_data_desc)
+            .map(|out| out.batch_size)
+    }
+
     pub fn size_in_bytes(&self) -> Result<usize, Status> {
         GetRnnDataDescriptor::new(self.rnn_data_desc)
             .map(|out| (out.max_seq_length * out.batch_size * out.vector_size) as usize * out.data_type.size_in_bytes())
