@@ -20,9 +20,19 @@
 
 import tensorflow as tf
 
+from .batch_norm import XavierOrthogonalInitializer
 from .to_dict import tensor_to_dict
 
-class RNN(tf.keras.layers.GRU):
+class RNN(tf.keras.layers.GRU, XavierOrthogonalInitializer):
+    def __init__(self, units):
+        super().__init__(
+            units=units,
+            kernel_initializer=self.xavier_orthogonal_initializer(units, units),
+            recurrent_initializer=self.xavier_orthogonal_initializer(units, units),
+            return_sequences=True,
+            time_major=True
+        )
+
     def as_dict(self, prefix=None, flat=True):
         # This is based on tensorflow [1] internals and is probably subject
         # to change :'(.

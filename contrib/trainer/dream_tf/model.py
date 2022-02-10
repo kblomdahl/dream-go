@@ -27,7 +27,6 @@ import tensorflow_addons as tfa
 from tensorboard.plugins.hparams import api as hp
 
 from .layers import NUM_FEATURES
-from .layers.batch_norm import XavierOrthogonalInitializer
 from .layers.leela_zero import leela_zero
 from .layers.dynamics import Dynamics
 from .layers.to_dict import tensor_to_dict
@@ -37,7 +36,7 @@ from .layers.rnn import RNN
 from .layers.quantize import Quantize
 from .optimizers.schedules.learning_rate_schedule import WarmupExponentialDecaySchedule
 
-class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
+class DreamGoNet(tf.keras.Model, Quantize):
     def __init__(
         self,
         *,
@@ -86,13 +85,7 @@ class DreamGoNet(tf.keras.Model, Quantize, XavierOrthogonalInitializer):
             num_channels=num_channels if num_dynamics_channels is None else num_dynamics_channels,
             embeddings_size=self.embeddings_size
         )
-        self.rnn = RNN(
-            units=self.embeddings_size,
-            kernel_initializer=self.xavier_orthogonal_initializer(embeddings_size, embeddings_size),
-            recurrent_initializer=self.xavier_orthogonal_initializer(embeddings_size, embeddings_size),
-            return_sequences=True,
-            time_major=True
-        )
+        self.rnn = RNN(units=self.embeddings_size)
         self.predictions = Predictions()
 
         if self.learning_rate is None:
