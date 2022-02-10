@@ -27,7 +27,7 @@ import tensorflow_addons as tfa
 from tensorboard.plugins.hparams import api as hp
 
 from .layers import NUM_FEATURES
-from .layers.leela_zero import leela_zero
+from .layers.leela_zero import LeelaZero
 from .layers.dynamics import Dynamics
 from .layers.to_dict import tensor_to_dict
 from .layers.features_to_repr import FeaturesToRepr
@@ -74,7 +74,7 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.weight_decay = weight_decay
         self.label_smoothing = label_smoothing
         self.learning_rate = learning_rate_schedule
-        self.lz_weights = lz_weights
+        self.leela_zero = LeelaZero(lz_weights) if lz_weights is not None else None
         self.features_to_repr = FeaturesToRepr(
             num_blocks=num_blocks,
             num_channels=num_channels,
@@ -302,9 +302,9 @@ class DreamGoNet(tf.keras.Model, Quantize):
         }
 
     def apply_lz_labels(self, labels):
-        if self.lz_weights:
+        if self.leela_zero:
             lz_features = self.merge_unrolls(labels['lz_features'])
-            lz_value_hat, lz_policy_hat, lz_tower_hat = leela_zero(lz_features, self.lz_weights)
+            lz_value_hat, lz_policy_hat, lz_tower_hat = self.leela_zero(lz_features, training=False)
 
             labels['value'] = tf.reshape(tf.cast(lz_value_hat, tf.float32), [s if s is not None else -1 for s in labels['value'].shape])
             labels['policy'] = tf.reshape(tf.cast(lz_policy_hat, tf.float32), [s if s is not None else -1 for s in labels['policy'].shape])

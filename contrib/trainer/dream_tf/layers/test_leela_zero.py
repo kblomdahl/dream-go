@@ -23,15 +23,16 @@ import unittest
 import tensorflow as tf
 
 from ..test_common import TestUtils
-from .leela_zero import leela_zero
+from .leela_zero import LeelaZero
 
 class LzTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
         self.x = tf.zeros([self.batch_size, 19, 19, 18], tf.float16)
+        self.layer = LeelaZero('fixtures/d645af9.gz')
 
     def test_shape(self):
-        v, p, y = leela_zero(self.x, 'fixtures/d645af9.gz')
+        v, p, y = self.layer(self.x)
 
         self.assertEqual(v.shape, [self.batch_size, 1])
         self.assertEqual(p.shape, [self.batch_size, 362])
