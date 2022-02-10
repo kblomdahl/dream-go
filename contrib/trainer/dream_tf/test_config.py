@@ -99,15 +99,6 @@ class ConfigTest(unittest.TestCase, TestUtils):
     def test_initial_learning_rate(self):
         self.assertEqual(Config(['--start', '--initial-learning-rate', '0.1'], exit_on_error=False).initial_learning_rate, 0.1)
 
-    def test_max_learning_rate(self):
-        self.assertEqual(Config(['--start', '--max-learning-rate', '0.256'], exit_on_error=False).max_learning_rate, 0.256)
-
-    def test_num_warmup_steps(self):
-        self.assertEqual(Config(['--start', '--num-warmup-steps', '1000'], exit_on_error=False).num_warmup_steps, 1000)
-
-    def test_num_decay_steps(self):
-        self.assertEqual(Config(['--start', '--num-decay-steps', '100'], exit_on_error=False).num_decay_steps, 100)
-
     def test_num_es_warmup_steps(self):
         self.assertEqual(Config(['--start', '--num-es-warmup-steps', '2000'], exit_on_error=False).num_es_warmup_steps, 2000)
 

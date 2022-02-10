@@ -28,10 +28,10 @@ import tensorflow as tf
 from .callbacks.early_stopping import EarlyStoppingCallback
 from .callbacks.save_model_checkpoint import CustomSaveModelCheckpoint
 from .config import Config, most_recent_model
+from .ffi.libdg_go import get_num_features
 from .input_fn import input_fn
 from .model import DreamGoNet, CustomTensorBoardCallback
-from .optimizers.schedules.learning_rate_schedule import WarmupExponentialDecaySchedule
-from .ffi.libdg_go import get_num_features
+from .optimizers.schedules.epoch_decay_with_warmup import EpochDecayWithWarmup
 
 def setUp():
     if os.getenv('DG_CHECK_NUMERICS'):
@@ -55,11 +55,8 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
     else:
         model_dir = config.get_model_dir(base_model_dir=base_model_dir, default=most_recent_model())
 
-    learning_rate = WarmupExponentialDecaySchedule(
+    learning_rate_schedule = EpochDecayWithWarmup(
         initial_learning_rate=config.initial_learning_rate,
-        max_learning_rate=config.max_learning_rate,
-        num_warmup_steps=config.num_warmup_steps,
-        num_decay_steps=config.num_decay_steps,
         decay_rate=config.decay_rate
     )
     model = model_fn(
@@ -78,7 +75,7 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
         weight_decay=config.weight_decay,
         label_smoothing=config.label_smoothing,
         clipnorm=config.clipnorm,
-        learning_rate_schedule=learning_rate,
+        learning_rate=config.initial_learning_rate,
         lz_weights=config.lz_weights,
         run_eagerly=config.run_eagerly
     )
@@ -117,9 +114,10 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
             epochs=config.epochs,
             verbose=0,
             callbacks=[
-                CustomTensorBoardCallback(model_dir, hparams=config.hparams, early_stopping=early_stopping, learning_rate=learning_rate),
+                CustomTensorBoardCallback(model_dir, hparams=config.hparams, early_stopping=early_stopping),
                 CustomSaveModelCheckpoint(f'{model_dir}', monitor='val_loss', save_best_only=True),
-                early_stopping
+                tf.keras.callbacks.LearningRateScheduler(learning_rate_schedule, verbose=1),
+                early_stopping,
             ],
             validation_data=input_fn(
                 files=config.files,

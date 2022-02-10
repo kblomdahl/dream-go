@@ -34,7 +34,6 @@ from .layers.features_to_repr import FeaturesToRepr
 from .layers.predictions import Predictions
 from .layers.rnn import RNN
 from .layers.quantize import Quantize
-from .optimizers.schedules.learning_rate_schedule import WarmupExponentialDecaySchedule
 
 class DreamGoNet(tf.keras.Model, Quantize):
     def __init__(
@@ -55,7 +54,7 @@ class DreamGoNet(tf.keras.Model, Quantize):
         weight_decay=1e-5,
         label_smoothing=0.2,
         clipnorm=1.0,
-        learning_rate_schedule=None,
+        learning_rate=1e-4,
         lz_weights=None,
         run_eagerly=False
     ):
@@ -73,7 +72,6 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.discount_factor = discount_factor
         self.weight_decay = weight_decay
         self.label_smoothing = label_smoothing
-        self.learning_rate = learning_rate_schedule
         self.leela_zero = LeelaZero(lz_weights) if lz_weights else None
         self.features_to_repr = FeaturesToRepr(
             num_blocks=num_blocks,
@@ -88,10 +86,7 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.rnn = RNN(units=self.embeddings_size)
         self.predictions = Predictions()
 
-        if self.learning_rate is None:
-            self.learning_rate = WarmupExponentialDecaySchedule()
-
-        self.adam_optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate, clipnorm=clipnorm)
+        self.adam_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, clipnorm=clipnorm)
         self.swa_optimizer = tfa.optimizers.SWA(self.adam_optimizer)
 
         # compile the keras model
@@ -425,11 +420,10 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
     """ Custom callback for logging to Tensorboard according to our previous
     established format. """
 
-    def __init__(self, model_dir, *, hparams, early_stopping, learning_rate):
+    def __init__(self, model_dir, *, hparams, early_stopping):
         super(CustomTensorBoardCallback, self).__init__()
 
         self.early_stopping = early_stopping
-        self.learning_rate = learning_rate
         self.writer = tf.summary.create_file_writer(f'{model_dir}')
         self.writer_eval = tf.summary.create_file_writer(f'{model_dir}/eval')
         self.global_step_sec = tf.keras.metrics.Mean('global_step/sec')
@@ -459,7 +453,7 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
         elapsed_sec = time() - self.batch_start_time
 
         with self.writer.as_default():
-            tf.summary.scalar('learning_rate', self.learning_rate(self.step()), step=self.step())
+            tf.summary.scalar('learning_rate', self.model.optimizer.lr, step=self.step())
             tf.summary.scalar('loss_scale', self.model.optimizer.loss_scale, step=self.step())
 
         self.global_step_sec.update_state(1.0 / elapsed_sec)

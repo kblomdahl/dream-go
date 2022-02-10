@@ -40,9 +40,6 @@ class Config:
     HP_WEIGHT_DECAY = hp.HParam('weight_decay', hp.RealInterval(0.0, 1.0))
     HP_LABEL_SMOOTHING = hp.HParam('label_smoothing', hp.RealInterval(0.0, 1.0))
     HP_INITIAL_LR = hp.HParam('initial_lr', hp.RealInterval(0.0, 1.0))
-    HP_MAX_LR = hp.HParam('max_lr', hp.RealInterval(0.0, 1.0))
-    HP_LR_NUM_WARMUP_STEPS = hp.HParam('lr_num_warmup_steps', hp.RealInterval(0.0, 1.0))
-    HP_LR_DECAY_STEPS = hp.HParam('lr_decay_steps', hp.IntInterval(0, 100000))
     HP_LR_DECAY_RATE = hp.HParam('lr_decay_rate', hp.RealInterval(0.0, 1.0))
     HP_ES_NUM_WARMUP_STEPS = hp.HParam('es_num_warmup_steps', hp.IntInterval(0, 100000))
     HP_ES_NUM_SAMPLES = hp.HParam('es_num_samples', hp.IntInterval(3, 100000))
@@ -72,9 +69,6 @@ class Config:
             self.HP_WEIGHT_DECAY: self.args.weight_decay,
             self.HP_LABEL_SMOOTHING: self.args.label_smoothing,
             self.HP_INITIAL_LR: self.args.initial_learning_rate,
-            self.HP_MAX_LR: self.args.max_learning_rate,
-            self.HP_LR_NUM_WARMUP_STEPS: self.args.num_warmup_steps,
-            self.HP_LR_DECAY_STEPS: self.args.num_decay_steps,
             self.HP_LR_DECAY_RATE: self.args.decay_rate,
             self.HP_ES_NUM_WARMUP_STEPS: self.args.num_es_warmup_steps,
             self.HP_ES_NUM_SAMPLES: self.args.num_es_samples,
@@ -118,10 +112,7 @@ class Config:
         opt_group.add_argument('--discount-factor', default=0.97, nargs='?', type=float, metavar='N', help='the lambda discount factor')
         opt_group.add_argument('--weight-decay', default=1e-6, nargs='?', type=float, metavar='N', help='the weight decay')
         opt_group.add_argument('--label-smoothing', default=0.1, nargs='?', type=float, metavar='N', help='the label smoothing')
-        opt_group.add_argument('--initial-learning-rate', default=1e-4, nargs='?', type=float, metavar='N', help='the initial learning rate')
-        opt_group.add_argument('--max-learning-rate', default=3e-4, nargs='?', type=float, metavar='N', help='the maximum learning rate after warmup')
-        opt_group.add_argument('--num-warmup-steps', default=2500, nargs='?', type=int, metavar='N', help='the number of warmup steps')
-        opt_group.add_argument('--num-decay-steps', default=240, nargs='?', type=int, metavar='N', help='the number of steps per learning rate decay')
+        opt_group.add_argument('--initial-learning-rate', default=3e-4, nargs='?', type=float, metavar='N', help='the initial learning rate')
         opt_group.add_argument('--decay-rate', default=0.97, nargs='?', type=float, metavar='N', help='the learning rate decay')
         opt_group.add_argument('--num-es-warmup-steps', default=5000, nargs='?', type=int, metavar='N', help='the number of steps to ignore in early stopping')
         opt_group.add_argument('--num-es-samples', default=50, nargs='?', type=int, metavar='N', help='the number of values to take into account during early stopping')
@@ -239,18 +230,6 @@ class Config:
     @property
     def initial_learning_rate(self):
         return self.hparams[self.HP_INITIAL_LR]
-
-    @property
-    def max_learning_rate(self):
-        return self.hparams[self.HP_MAX_LR]
-
-    @property
-    def num_warmup_steps(self):
-        return self.hparams[self.HP_LR_NUM_WARMUP_STEPS]
-
-    @property
-    def num_decay_steps(self):
-        return self.hparams[self.HP_LR_DECAY_STEPS]
 
     @property
     def decay_rate(self):
