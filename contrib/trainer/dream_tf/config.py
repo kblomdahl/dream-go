@@ -118,7 +118,7 @@ class Config:
         opt_group.add_argument('--num-es-samples', default=50, nargs='?', type=int, metavar='N', help='the number of values to take into account during early stopping')
         opt_group.add_argument('--max-es-slope', default=-1e-7, nargs='?', type=float, metavar='N', help='the minimum slope allowed before early stopping')
         opt_group.add_argument('--clipnorm', default=5.0, nargs='?', type=float, metavar='N', help='the gradient scaling norm')
-        opt_group.add_argument('--epochs', default=500, nargs='?', type=int, metavar='N', help='the maximum epochs to train for')
+        opt_group.add_argument('--epochs', default=300, nargs='?', type=int, metavar='N', help='the maximum epochs to train for')
 
         op_group = parser.add_mutually_exclusive_group(required=True)
         op_group.add_argument('--start', action='store_true', help='start training of a new model')
