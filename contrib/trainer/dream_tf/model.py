@@ -107,14 +107,9 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.loss_l2_metric = tf.keras.metrics.Mean(name='loss/l2')
 
         # accuracy metrics
-        self.accuracy_policy_1s_metric = [tf.keras.metrics.TopKCategoricalAccuracy(k=1, name=f'unroll/accuracy/policy[{i}]') for i in range(self.num_unrolls)]
-        self.accuracy_values_metric = [tf.keras.metrics.Accuracy(name=f'unroll/accuracy/value[{i}]') for i in range(self.num_unrolls)]
-
-        self.accuracy_policy_1_metric = tf.keras.metrics.TopKCategoricalAccuracy(k=1, name='accuracy/policy_1')
-        self.accuracy_policy_3_metric = tf.keras.metrics.TopKCategoricalAccuracy(k=3, name='accuracy/policy_3')
-        self.accuracy_policy_5_metric = tf.keras.metrics.TopKCategoricalAccuracy(k=5, name='accuracy/policy_5')
-        self.accuracy_value_metric = tf.keras.metrics.Accuracy(name='accuracy/value')
-        self.accuracy_ownership_metric = tf.keras.metrics.Accuracy(name='accuracy/ownership')
+        self.accuracy_policy_metrics = [tf.keras.metrics.TopKCategoricalAccuracy(k=1, name=f'policy/accuracy/[{i}]') for i in range(self.num_unrolls)]
+        self.accuracy_value_metrics = [tf.keras.metrics.Accuracy(name=f'value/accuracy/[{i}]') for i in range(self.num_unrolls)]
+        self.accuracy_ownership_metrics = [tf.keras.metrics.Accuracy(name=f'ownership/accuracy/[{i}]') for i in range(self.num_unrolls)]
 
     @property
     def l2_weights(self):
@@ -317,13 +312,9 @@ class DreamGoNet(tf.keras.Model, Quantize):
             self.loss_similarity_metric,
             self.loss_l2_metric,
 
-            *self.accuracy_policy_1s_metric,
-            *self.accuracy_values_metric,
-            self.accuracy_policy_1_metric,
-            self.accuracy_policy_3_metric,
-            self.accuracy_policy_5_metric,
-            self.accuracy_value_metric,
-            self.accuracy_ownership_metric
+            *self.accuracy_policy_metrics,
+            *self.accuracy_value_metrics,
+            *self.accuracy_ownership_metrics
         ]
 
     def custom_metrics(self, y_true, y_pred, *, losses):
@@ -336,15 +327,22 @@ class DreamGoNet(tf.keras.Model, Quantize):
 
         rolled_policy = tf.reshape(y_pred['policy'], [self.batch_size, self.num_unrolls, 362])
         rolled_value = tf.reshape(y_pred['value'], [self.batch_size, self.num_unrolls, 1])
-        for i in range(self.num_unrolls):
-            self.accuracy_policy_1s_metric[i].update_state(y_true['policy'][:, i, :], rolled_policy[:, i, :])
-            self.accuracy_values_metric[i].update_state(tf.sign(y_true['value'][:, i, :]), tf.sign(rolled_value[:, i, :]))
+        rolled_ownership = tf.reshape(y_pred['ownership'], [self.batch_size, self.num_unrolls, 361])
 
-        self.accuracy_policy_1_metric.update_state(self.merge_unrolls(y_true['policy']), y_pred['policy'])
-        self.accuracy_policy_3_metric.update_state(self.merge_unrolls(y_true['policy']), y_pred['policy'])
-        self.accuracy_policy_5_metric.update_state(self.merge_unrolls(y_true['policy']), y_pred['policy'])
-        self.accuracy_value_metric.update_state(tf.sign(self.merge_unrolls(y_true['value'])), tf.sign(y_pred['value']))
-        self.accuracy_ownership_metric.update_state(tf.sign(self.merge_unrolls(y_true['ownership'])), tf.sign(y_pred['ownership']), sample_weight=tf.repeat(self.merge_unrolls(y_true['has_ownership']), 361, axis=1))
+        for i in range(self.num_unrolls):
+            self.accuracy_policy_metrics[i].update_state(
+                y_true['policy'][:, i, :],
+                rolled_policy[:, i, :]
+            )
+            self.accuracy_value_metrics[i].update_state(
+                tf.sign(y_true['value'][:, i, :]),
+                tf.sign(rolled_value[:, i, :])
+            )
+            self.accuracy_ownership_metrics[i].update_state(
+                tf.sign(y_true['ownership'][:, i, :]),
+                tf.sign(rolled_ownership[:, i, :]),
+                sample_weight=tf.repeat(y_true['has_ownership'][:, i, :], 361, axis=1)
+            )
 
     def custom_image_metrics(self, x, y_true, y_pred):
         def to_heat_image(x, heat):
@@ -358,16 +356,16 @@ class DreamGoNet(tf.keras.Model, Quantize):
 
         for i in range(self.num_unrolls):
             additional_metrics.update({
-                f'ownership/predictions_{i}': to_heat_image(x[0, i, :, :, :], tf.reshape(y_pred['ownership'][i, :], [19, 19])),
-                f'ownership/labels_{i}': to_heat_image(x[0, i, :, :, :], tf.reshape(y_true['ownership'][0, i, :], [19, 19])),
-                f'policy/predictions_{i}': to_heat_image(x[0, i, :, :, :], tf.reshape(tf.nn.softmax(y_pred['policy'][i, :361]), [19, 19])),
-                f'policy/labels_{i}': to_heat_image(x[0, i, :, :, :], tf.reshape(y_true['policy'][0, i, :361], [19, 19]))
+                f'ownership/[{i}]/true': to_heat_image(x[0, i, :, :, :], tf.reshape(y_true['ownership'][0, i, :], [19, 19])),
+                f'ownership/[{i}]/pred': to_heat_image(x[0, i, :, :, :], tf.reshape(y_pred['ownership'][i, :], [19, 19])),
+                f'policy/[{i}]/true': to_heat_image(x[0, i, :, :, :], tf.reshape(y_true['policy'][0, i, :361], [19, 19])),
+                f'policy/[{i}]/pred': to_heat_image(x[0, i, :, :, :], tf.reshape(-tf.nn.softmax(y_pred['policy'][i, :361]), [19, 19]))
             })
 
         for i in range(self.num_unrolls):
             for j in range(NUM_FEATURES):
                 additional_metrics.update({
-                    f'features/{i:02}_{j:02}': to_heat_image(x[0, i, :, :, :], tf.cast(x[0, i, :, :, j], tf.float32))
+                    f'features/[{i:02}]/[{j:02}]': to_heat_image(x[0, i, :, :, :], tf.cast(x[0, i, :, :, j], tf.float32))
                 })
 
         return additional_metrics
@@ -426,14 +424,11 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
         self.early_stopping = early_stopping
         self.writer = tf.summary.create_file_writer(f'{model_dir}')
         self.writer_eval = tf.summary.create_file_writer(f'{model_dir}/eval')
-        self.global_step_sec = tf.keras.metrics.Mean('global_step/sec')
 
         # HParams
         hp_metrics = [
-            hp.Metric('accuracy/value', display_name='Value Accuracy'),
-            hp.Metric('accuracy/policy_1', display_name='Policy Accuracy (Top 1)'),
-            hp.Metric('accuracy/policy_3', display_name='Policy Accuracy (Top 3)'),
-            hp.Metric('accuracy/policy_5', display_name='Policy Accuracy (Top 5)'),
+            hp.Metric('value/accuracy/[0]', display_name='Value Accuracy (%)'),
+            hp.Metric('policy/accuracy/[0]', display_name='Policy Accuracy (%)'),
         ]
 
         with self.writer.as_default():
@@ -454,9 +449,8 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
 
         with self.writer.as_default():
             tf.summary.scalar('learning_rate', self.model.optimizer.lr, step=self.step())
-            tf.summary.scalar('loss_scale', self.model.optimizer.loss_scale, step=self.step())
-
-        self.global_step_sec.update_state(1.0 / elapsed_sec)
+            tf.summary.scalar('learning_rate/scale', self.model.optimizer.loss_scale, step=self.step())
+            tf.summary.scalar('global_step/sec', elapsed_sec, step=self.step())
 
     def on_test_batch_end(self, batch, logs):
         with self.writer_eval.as_default():
@@ -467,12 +461,7 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
 
     def on_epoch_begin(self, epoch, logs=None):
         with self.writer.as_default():
-            for weight in self.model.trainable_variables:
-                tf.summary.scalar(f'norms/{weight.name}', tf.norm(weight), step=self.step())
-            for weight in self.model.non_trainable_weights:
-                if weight.dtype == tf.float32 or weight.dtype == tf.float16:
-                    tf.summary.scalar(f'norms/{weight.name}', tf.norm(weight), step=self.step())
-        self.writer.flush()
+            tf.summary.scalar('learning_rate/epoch', epoch, step=self.step())
 
     def on_epoch_end(self, epoch, logs):
         for name, value in logs.items():
@@ -486,8 +475,6 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
 
         # custom metrics
         with self.writer.as_default():
-            tf.summary.scalar('global_step/sec', self.global_step_sec.result(), step=self.step())
-
             if self.early_stopping is not None and self.early_stopping.samples() > 2:
                 tf.summary.scalar('learning_rate/p_decreasing', self.early_stopping.is_decreasing(), step=self.step())
                 tf.summary.scalar('learning_rate/p_decreasing_90', self.early_stopping.is_decreasing(q=90), step=self.step())
@@ -496,6 +483,3 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
 
         self.writer.flush()
         self.writer_eval.flush()
-
-        # reset statistics
-        self.global_step_sec = tf.keras.metrics.Mean('global_step/sec')

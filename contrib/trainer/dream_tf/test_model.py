@@ -84,11 +84,11 @@ class DreamGoNetBase(TestUtils):
         self.assertIn('loss/policy', metrics)
         self.assertIn('loss/ownership', metrics)
         self.assertIn('loss/l2', metrics)
-        self.assertIn('accuracy/value', metrics)
-        self.assertIn('accuracy/policy_1', metrics)
-        self.assertIn('accuracy/policy_3', metrics)
-        self.assertIn('accuracy/policy_5', metrics)
-        self.assertIn('accuracy/ownership', metrics)
+
+        for i in range(self.num_unrolls):
+            self.assertIn(f'value/accuracy/[{i}]', metrics)
+            self.assertIn(f'policy/accuracy/[{i}]', metrics)
+            self.assertIn(f'ownership/accuracy/[{i}]', metrics)
 
     def test_as_dict(self):
         out = io.StringIO('')
@@ -144,11 +144,9 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
         #self.assertAlmostEqual(metrics['loss/ownership'], 0.6855, delta=0.1)  # these seem noisy
         self.assertGreater(metrics['loss/l2'], 0.0)
 
-        self.assertAlmostEqual(metrics['accuracy/value'], 1.0)
-        self.assertAlmostEqual(metrics['accuracy/policy_1'], 1.0)
-        self.assertAlmostEqual(metrics['accuracy/policy_3'], 1.0)
-        self.assertAlmostEqual(metrics['accuracy/policy_5'], 1.0)
-        self.assertAlmostEqual(metrics['accuracy/ownership'], 1.0, delta=0.05)
+        self.assertAlmostEqual(metrics['value/accuracy/[0]'], 1.0)
+        self.assertAlmostEqual(metrics['policy/accuracy/[0]'], 1.0)
+        self.assertAlmostEqual(metrics['ownership/accuracy/[0]'], 1.0, delta=0.05)
 
 class DreamGoNetLzTest(unittest.TestCase, DreamGoNetBase):
     def setUp(self):
