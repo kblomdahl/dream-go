@@ -356,7 +356,7 @@ class DreamGoNet(tf.keras.Model, Quantize):
                 f'ownership/[{i}]/true': to_heat_image(x[0, i, :, :, :], tf.reshape(y_true['ownership'][0, i, :], [19, 19])),
                 f'ownership/[{i}]/pred': to_heat_image(x[0, i, :, :, :], tf.reshape(y_pred['ownership'][i, :], [19, 19])),
                 f'policy/[{i}]/true': to_heat_image(x[0, i, :, :, :], tf.reshape(y_true['policy'][0, i, :361], [19, 19])),
-                f'policy/[{i}]/pred': to_heat_image(x[0, i, :, :, :], tf.reshape(-tf.nn.softmax(y_pred['policy'][i, :361]), [19, 19]))
+                f'policy/[{i}]/pred': to_heat_image(x[0, i, :, :, :], tf.reshape(tf.nn.softmax(y_pred['policy'][i, :361]), [19, 19]))
             })
 
         for i in range(self.num_unrolls):
