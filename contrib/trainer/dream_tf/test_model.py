@@ -114,7 +114,16 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
         self.num_channels = 48
         self.embeddings_size = 32
         self.num_unrolls = 3
-        self.model = DreamGoNet(batch_size=self.batch_size, num_blocks=2, num_channels=self.num_channels, embeddings_size=self.embeddings_size, num_unrolls=self.num_unrolls, label_smoothing=0.0)
+        self.model = DreamGoNet(
+            batch_size=self.batch_size,
+            num_repr_blocks=2,
+            num_repr_channels=self.num_channels,
+            num_dyn_blocks=2,
+            num_dyn_channels=self.num_channels,
+            embeddings_size=self.embeddings_size,
+            num_unrolls=self.num_unrolls,
+            label_smoothing=0.0
+        )
         self.x = tf.zeros([self.batch_size, self.num_unrolls, 19, 19, NUM_FEATURES], tf.float16)
 
     def test_save_weights(self):
@@ -154,7 +163,17 @@ class DreamGoNetLzTest(unittest.TestCase, DreamGoNetBase):
         self.num_channels = 48
         self.embeddings_size = 32
         self.num_unrolls = 3
-        self.model = DreamGoNet(batch_size=self.batch_size, num_blocks=2, num_channels=self.num_channels, embeddings_size=self.embeddings_size, num_unrolls=self.num_unrolls, lz_weights='fixtures/d645af9.gz')
+        self.model = DreamGoNet(
+            batch_size=self.batch_size,
+            num_repr_blocks=2,
+            num_repr_channels=self.num_channels,
+            num_dyn_blocks=2,
+            num_dyn_channels=self.num_channels,
+            embeddings_size=self.embeddings_size,
+            num_unrolls=self.num_unrolls,
+            label_smoothing=0.0,
+            lz_weights='fixtures/d645af9.gz'
+        )
         self.x = tf.zeros([self.batch_size, self.num_unrolls, 19, 19, NUM_FEATURES], tf.float16)
 
 if __name__ == '__main__':

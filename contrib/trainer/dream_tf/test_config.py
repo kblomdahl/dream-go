@@ -36,9 +36,6 @@ class ConfigTest(unittest.TestCase, TestUtils):
     def test_is_dump(self):
         self.assertEqual(Config(['--dump'], exit_on_error=False).is_dump(), True)
 
-    def test_files(self):
-        self.assertEqual(Config(['--start', 'x', 'y'], exit_on_error=False).files, ['x', 'y'])
-
     def test_model(self):
         self.assertEqual(Config(['--start', '--model', 'x'], exit_on_error=False).get_model_dir(), 'x')
 
@@ -50,72 +47,6 @@ class ConfigTest(unittest.TestCase, TestUtils):
 
     def test_warm_start(self):
         self.assertEqual(Config(['--start', '--warm-start', 'x'], exit_on_error=False).warm_start, 'x')
-
-    def test_lz_weights(self):
-        self.assertEqual(Config(['--start', '--lz-weights', 'x'], exit_on_error=False).lz_weights, 'x')
-
-    def test_batch_size(self):
-        self.assertEqual(Config(['--start', '--batch-size', '32'], exit_on_error=False).batch_size, 32)
-
-    def test_num_unrolls(self):
-        self.assertEqual(Config(['--start', '--num-unrolls', '2'], exit_on_error=False).num_unrolls, 2)
-
-    def test_num_channels(self):
-        self.assertEqual(Config(['--start', '--num-channels', '8'], exit_on_error=False).num_channels, 8)
-
-    def test_num_dynamics_channels(self):
-        self.assertEqual(Config(['--start', '--num-dynamics-channels', '8'], exit_on_error=False).num_dynamics_channels, 8)
-
-    def test_num_blocks(self):
-        self.assertEqual(Config(['--start', '--num-blocks', '6'], exit_on_error=False).num_blocks, 6)
-
-    def test_num_dynamics_blocks(self):
-        self.assertEqual(Config(['--start', '--num-dynamics-blocks', '2'], exit_on_error=False).num_dynamics_blocks, 2)
-
-    def test_embeddings_size(self):
-        self.assertEqual(Config(['--start', '--embeddings-size', '255'], exit_on_error=False).embeddings_size, 255)
-
-    def test_policy_coefficient(self):
-        self.assertEqual(Config(['--start', '--policy-coefficient', '0.2'], exit_on_error=False).policy_coefficient, 0.2)
-
-    def test_value_coefficient(self):
-        self.assertEqual(Config(['--start', '--value-coefficient', '0.2'], exit_on_error=False).value_coefficient, 0.2)
-
-    def test_ownership_coefficient(self):
-        self.assertEqual(Config(['--start', '--ownership-coefficient', '0.2'], exit_on_error=False).ownership_coefficient, 0.2)
-
-    def test_similarity_coefficient(self):
-        self.assertEqual(Config(['--start', '--similarity-coefficient', '0.2'], exit_on_error=False).similarity_coefficient, 0.2)
-
-    def test_discount_factor(self):
-        self.assertEqual(Config(['--start', '--discount-factor', '0.5'], exit_on_error=False).discount_factor, 0.5)
-
-    def test_weight_decay(self):
-        self.assertEqual(Config(['--start', '--weight-decay', '0.01'], exit_on_error=False).weight_decay, 0.01)
-
-    def test_label_smoothing(self):
-        self.assertEqual(Config(['--start', '--label-smoothing', '0.0'], exit_on_error=False).label_smoothing, 0.0)
-
-    def test_initial_learning_rate(self):
-        self.assertEqual(Config(['--start', '--initial-learning-rate', '0.1'], exit_on_error=False).initial_learning_rate, 0.1)
-
-    def test_num_es_warmup_steps(self):
-        self.assertEqual(Config(['--start', '--num-es-warmup-steps', '2000'], exit_on_error=False).num_es_warmup_steps, 2000)
-
-    def test_num_es_samples(self):
-        self.assertEqual(Config(['--start', '--num-es-samples', '5'], exit_on_error=False).num_es_samples, 5)
-
-    def test_max_es_slope(self):
-        self.assertEqual(Config(['--start', '--max-es-slope', '-0.0001'], exit_on_error=False).max_es_slope, -0.0001)
-
-    def test_clipnorm(self):
-        self.assertEqual(Config(['--start', '--clipnorm', '0.1'], exit_on_error=False).clipnorm, 0.1)
-
-    def test_epochs(self):
-        self.assertEqual(Config(['--start', '--epochs', '100'], exit_on_error=False).epochs, 100)
-
-    def test_run_eagerly(self):
-        self.assertEqual(Config(['--start', '--run-eagerly'], exit_on_error=False).run_eagerly, True)
 
     def test_hparams(self):
         self.assertIsNotNone(Config(['--start']).hparams)

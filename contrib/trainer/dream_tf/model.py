@@ -40,11 +40,11 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self,
         *,
         batch_size,
-        num_blocks,
-        num_dynamics_blocks=None,
-        num_channels,
-        num_dynamics_channels=None,
         embeddings_size=None,
+        num_repr_blocks=None,
+        num_repr_channels=None,
+        num_dyn_blocks=None,
+        num_dyn_channels=None,
         policy_coefficient=1.0,
         value_coefficient=1.0,
         ownership_coefficient=0.1,
@@ -62,7 +62,6 @@ class DreamGoNet(tf.keras.Model, Quantize):
 
         self.dg_module = tf.load_op_library('libdg_tf.so')
         self.batch_size = batch_size
-        self.num_channels = num_channels
         self.embeddings_size = embeddings_size
         self.policy_coefficient = policy_coefficient
         self.value_coefficient = value_coefficient
@@ -74,13 +73,13 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.label_smoothing = label_smoothing
         self.leela_zero = LeelaZero(lz_weights) if lz_weights else None
         self.features_to_repr = FeaturesToRepr(
-            num_blocks=num_blocks,
-            num_channels=num_channels,
+            num_blocks=num_repr_blocks,
+            num_channels=num_repr_channels,
             embeddings_size=self.embeddings_size
         )
         self.dynamics = Dynamics(
-            num_blocks=num_blocks if num_dynamics_blocks is None else num_dynamics_blocks,
-            num_channels=num_channels if num_dynamics_channels is None else num_dynamics_channels,
+            num_blocks=num_dyn_blocks,
+            num_channels=num_dyn_channels,
             embeddings_size=self.embeddings_size
         )
         self.rnn = RNN(units=self.embeddings_size)
@@ -135,9 +134,7 @@ class DreamGoNet(tf.keras.Model, Quantize):
             {
                 'c': {
                     'embeddings_size': self.embeddings_size,
-                    'num_features': NUM_FEATURES,
-                    'num_repr_channels': self.features_to_repr.num_channels,
-                    'num_dyn_channels': self.dynamics.num_channels
+                    'num_features': NUM_FEATURES
                 },
                 'n': {
                     'r': self.features_to_repr.as_dict(),
@@ -426,6 +423,7 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
         self.writer_eval = tf.summary.create_file_writer(f'{model_dir}/eval')
 
         # HParams
+        hparams = { key: self._map_hparam(value) for key, value in hparams.items() }
         hp_metrics = [
             hp.Metric('value/accuracy/[0]', display_name='Value Accuracy (%)'),
             hp.Metric('policy/accuracy/[0]', display_name='Policy Accuracy (%)'),
@@ -437,6 +435,14 @@ class CustomTensorBoardCallback(tf.keras.callbacks.Callback):
         with self.writer_eval.as_default():
             hp.hparams_config(hparams=hparams.keys(), metrics=hp_metrics)
             hp.hparams(hparams)
+
+    def _map_hparam(self, value):
+        if type(value) is list:
+            return ', '.join(value)
+        elif value is None:
+            return ''
+        else:
+            return value
 
     def step(self):
         return self.model.optimizer.iterations * self.model.batch_size * self.model.num_unrolls

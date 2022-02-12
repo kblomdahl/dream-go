@@ -37,7 +37,7 @@ class FakeModel:
 class MainTest(unittest.TestCase, TestUtils):
     def test_main(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            main(['--start', 'x'], base_model_dir=str(temp_dir), model_fn=FakeModel)
+            main(['--start'], base_model_dir=str(temp_dir), model_fn=FakeModel)
 
 if __name__ == '__main__':
     unittest.main()
