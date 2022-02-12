@@ -1,6 +1,7 @@
 {
     "batch_size": 2816,
     "num_unrolls": 8,
+    "lz_weights": "models/0e9ea88.gz",
     "data": [
         "data/foxwq_big.sgf"
     ],

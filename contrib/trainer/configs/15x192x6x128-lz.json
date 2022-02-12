@@ -1,6 +1,7 @@
 {
     "batch_size": 2816,
     "num_unrolls": 8,
+    "lz_weights": "models/0e9ea88.gz",
     "data": [
         "data/foxwq_big.sgf"
     ],
@@ -8,12 +9,12 @@
     "model": {
         "embeddings_size": 722,
         "repr": {
-            "num_blocks": 6,
-            "num_channels": 96
+            "num_blocks": 15,
+            "num_channels": 192
         },
         "dyn": {
             "num_blocks": 6,
-            "num_channels": 64
+            "num_channels": 128
         }
     },
 

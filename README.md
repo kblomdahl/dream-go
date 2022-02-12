@@ -34,7 +34,8 @@ This binary file can then be feed into the bootstrap script which will tune the 
 
 ```bash
 cd contrib/trainer
-python -m dream_tf --start kgs_big.sgf
+echo '{ "data": [ "kgs_bal.sgf" ] }' > /tmp/config.json
+python -m dream_tf --start --config /tmp/config.json
 ```
 
 ```bash
@@ -44,7 +45,7 @@ tensorboard --logdir models/
 When you are done training your network you need to transcode the weights from Tensorflow protobufs into a format that can be read by Dream Go, this can be accomplished using the `--dump` command of the bootstrap script:
 
 ```bash
-python -m dream_tf --dump > dream-go.json
+python -m dream_tf --dump > dream_go.json
 ```
 
 ## Reinforcement Learning
@@ -70,7 +71,8 @@ The network should now be re-trained using this self-play, this is done in the s
 sort < self_play.sgf | uniq | shuf | ./tools/sgf2balance.py > self_play_bal.sgf
 ```
 ```bash
-cd contrib/trainer/ && python3 -m dream_tf --start self_play_bal.sgf
+echo '{ "data": [ "self_play_bal.sgf" ] }' > /tmp/config.json
+cd contrib/trainer/ && python3 -m dream_tf --start --config /tmp/config.json
 ```
 
 ### Expert Iteration
@@ -87,7 +89,8 @@ The training procedure for [Expert Iteration](https://arxiv.org/abs/1705.08439) 
 sort < policy_play.sgf | uniq | shuf | ./tools/sgf2balance.py > policy_play_bal.sgf
 ```
 ```bash
-cd contrib/trainer/ && python3 -m dream_tf --start policy_play_bal.sgf
+echo '{ "data": [ "self_play_bal.sgf" ] }' > /tmp/config.json
+cd contrib/trainer/ && python3 -m dream_tf --start --config /tmp/config.json
 ```
 
 For the values provided in this example, which generate 200,000 examples for the neural network it should take about 1 days to generate the required data (from 200,000 distinct games).
