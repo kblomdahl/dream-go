@@ -19,16 +19,11 @@
 # SOFTWARE.
 
 class EpochDecayWithWarmup:
-    def __init__(
-        self,
-        initial_learning_rate,
-        decay_rate
-    ):
-        self.initial_learning_rate = initial_learning_rate
+    def __init__(self, decay_rate):
         self.decay_rate = decay_rate
 
     def __call__(self, epoch, lr):
-        if epoch > 2:
+        if epoch > 1:
             return self.decay_rate * lr
         else:
             return lr
