@@ -261,7 +261,7 @@ impl<'a> V2<'a> {
 
     /// Returns the number of channels.
     pub const fn num_features() -> usize {
-        18
+        32
     }
 
     /// Returns the total number of elements that the returned features will
@@ -277,42 +277,116 @@ impl<'a> V2<'a> {
                 Color::White => self.board.komi()
             };
 
-        (komi / 7.5).max(1.0).min(-1.0)
+        (komi / 7.5).clamp(-1.0, 1.0)
+    }
+
+    #[inline]
+    fn fill_color_specific<O: Order, T: From<f32> + Copy>(
+        &self,
+        offset: usize,
+        to_move: Color,
+        symmetry_table: &[Point],
+        out: &mut [T]
+    )
+    {
+        let benson = BensonImpl::new(self.board, to_move);
+        let c_1 = T::from(1.0);
+        let o = O::new(Self::num_features());
+
+        for point in Point::all() {
+            let other = symmetry_table[point];
+
+            // Player
+            let is_valid = benson.is_valid(point) && self.board.inner.is_valid(to_move, point);
+
+            if is_valid {
+                out[o.index(offset+2, other)] = c_1; // is valid move
+
+                if self.board.inner.is_ladder_capture(to_move, point) {
+                    out[o.index(offset+0, other)] = c_1; // is ladder capture
+                }
+                if self.board.inner.is_ladder_escape(to_move, point) {
+                    out[o.index(offset+1, other)] = c_1; // is ladder escape
+                }
+                if benson.is_eye(point) {
+                    out[o.index(offset+3, other)] = c_1; // is eye
+                }
+            }
+
+            // Player Liberties
+            if self.board.at(point) == Some(to_move) {
+                let n = self.board.inner.get_n_liberty(point);
+
+                for i in 0..n.max(4) {
+                    out[o.index(offset+4+i, other)] = c_1;
+                }
+            } else if is_valid {
+                let n = self.board.inner.get_n_liberty_if(to_move, point);
+
+                for i in 0..n.max(4) {
+                    out[o.index(offset+8+i, other)] = c_1;
+                }
+            }
+        }
     }
 }
 
 impl<'a> Features for V2<'a> {
     /// Returns the features of the current board state for the given color,
-    /// it returns the following features. Divided into four sections based
-    /// on their intended purpose (regardless of what the network does with
-    /// them).
+    /// it returns the following features.
     ///
     /// ## Global properties
     ///
-    ///  0. One
-    ///  1. Komi (-1 to +1)
+    ///  1. A constant plane filled with ones if we are black
+    ///  2. A constant plane filled with ones if we are white
+    ///  3. Komi (-1 to +1)
+    ///
+    /// ## One-hot historic board state
+    ///
+    ///  4. Most recent move ( 0)
+    ///  5. Most recent move (-1)
     ///
     /// ## Vertex properties
     ///
-    ///  2. Is player
-    ///  3. Is opponent
-    ///  4. Has exactly 1 liberty
-    ///  5. Has exactly 2 liberty
-    ///  6. Has exactly 3 liberty
-    ///  7. Has exactly 4 liberty
-    ///  8. Would have exactly 1 liberty if played
-    ///  9. Would have exactly 2 liberty if played
-    /// 10. Is valid move
-    /// 11. Is player eye
-    /// 12. Is opponent eye
-    /// 13. Is forbidden due to ko
-    /// 14. Is a ladder capture
-    /// 15. Is a ladder escape mode
+    ///  6. Is corner
+    ///  7. Is edge
+    ///  8. Is middle
     ///
-    /// ## Board properties
+    /// ## Player
     ///
-    /// 16. Is corner
-    /// 17. Is edge
+    ///  9. is ladder capture
+    /// 10. is ladder escape
+    /// 11. is valid move
+    /// 12. is eye
+    ///
+    /// ### Player Liberties
+    ///
+    /// 13. liberties (>= 1)
+    /// 14. liberties (>= 2)
+    /// 15. liberties (>= 3)
+    /// 16. liberties (>= 4)
+    /// 17. liberties if played (>= 1)
+    /// 18. liberties if played (>= 2)
+    /// 19. liberties if played (>= 3)
+    /// 20. liberties if played (>= 4)
+    ///
+    /// ## Player
+    ///
+    /// 21. is ladder capture
+    /// 22. is ladder escape
+    /// 23. is valid move
+    /// 24. is eye
+    ///
+    /// ### Player Liberties
+    ///
+    /// 25. liberties (>= 1)
+    /// 26. liberties (>= 2)
+    /// 27. liberties (>= 3)
+    /// 28. liberties (>= 4)
+    /// 29. liberties if played (>= 1)
+    /// 30. liberties if played (>= 2)
+    /// 31. liberties if played (>= 3)
+    /// 32. liberties if played (>= 4)
     ///
     /// # Arguments
     ///
@@ -332,62 +406,34 @@ impl<'a> Features for V2<'a> {
 
         let mut out = vec! [c_0; Self::size()];
         let symmetry_table = symmetry.get_table();
-        let opponent = to_move.opposite();
-        let benson_our = BensonImpl::new(self.board, to_move);
-        let benson_opp = BensonImpl::new(self.board, opponent);
 
         for point in Point::all() {
             let other = symmetry_table[point];
 
-            out[o.index(0, other)] = c_1;
-            out[o.index(1, other)] = c_komi;
+            // Global properties
+            out[o.index(0, other)] = if to_move == Color::Black { c_1 } else { c_0 };
+            out[o.index(1, other)] = if to_move == Color::White { c_1 } else { c_0 };
+            out[o.index(2, other)] = c_komi;
 
-            if self.board.at(point) == Some(to_move) {
-                out[o.index(2, other)] = c_1;
-            } else if self.board.at(point) == Some(opponent) {
-                out[o.index(3, other)] = c_1;
-            } else if self.board.inner.is_valid(to_move, point) {
-                out[o.index(10, other)] = c_1;
-
-                if self.board._is_ko(to_move, point) {
-                    out[o.index(13, other)] = c_1;
-                }
-
-                if self.board.inner.is_ladder_capture(to_move, point) {
-                    out[o.index(14, other)] = c_1;
-                }
-
-                if self.board.inner.is_ladder_escape(to_move, point) {
-                    out[o.index(15, other)] = c_1;
-                }
-            }
-
-            if self.board.at(point) != None {
-                match self.board.inner.get_n_liberty(point) {
-                    1 => out[o.index(4, other)] = c_1,
-                    2 => out[o.index(5, other)] = c_1,
-                    3 => out[o.index(6, other)] = c_1,
-                    4 => out[o.index(7, other)] = c_1,
-                    _ => ()
-                }
-            } else if benson_our.is_eye(point) {
-                out[o.index(11, other)] = c_1;
-            } else if benson_opp.is_eye(point) {
-                out[o.index(12, other)] = c_1;
-            }
-
-            if self.board.at(point) == None {
-                match self.board.inner.get_n_liberty_if(to_move, point) {
-                    1 => out[o.index(8, other)] = c_1,
-                    2 => out[o.index(9, other)] = c_1,
-                    _ => ()
-                }
-            }
-
+            // Vertex properties
             if (point.x() == 0 || point.x() == 18) && (point.y() == 0 || point.y() == 18) {
-                out[o.index(16, other)] = c_1; // corner
+                out[o.index(5, other)] = c_1; // corner
             } else if point.x() == 0 || point.x() == 18 || point.y() == 0 || point.y() == 18 {
-                out[o.index(17, other)] = c_1; // edge
+                out[o.index(6, other)] = c_1; // edge
+            } else {
+                out[o.index(7, other)] = c_1; // middle
+            }
+        }
+
+        self.fill_color_specific::<O, _>( 8, to_move, symmetry_table, &mut out);
+        self.fill_color_specific::<O, _>(20, to_move.opposite(), symmetry_table, &mut out);
+
+        // One-hot historic board state
+        for (i, point) in self.board.history.iter().take(2).enumerate() {
+            if point != Point::default() {
+                let other = symmetry_table[point];
+
+                out[o.index(3+i, other)] = c_1;
             }
         }
 
@@ -489,5 +535,17 @@ mod tests {
             .get_features::<HWC, f32>(Color::Black, symmetry::Transform::Identity);
 
         assert_eq!(features.len(), V1::size());
+    }
+
+    #[test]
+    fn check_v2() {
+        let mut board = Board::new(6.5);
+        board.place(Color::Black, Point::new(3, 3));
+        board.place(Color::White, Point::new(15, 15));
+
+        let features = V2::new(&board)
+            .get_features::<HWC, f32>(Color::Black, symmetry::Transform::Identity);
+
+        assert_eq!(features.len(), V2::size());
     }
 }
