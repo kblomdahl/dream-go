@@ -34,7 +34,7 @@
         "decay_rate": 0.97,
         "weight_decay": 1e-5,
         "clipnorm": 5.0,
-        "epochs": 300
+        "epochs": 50
     },
 
     "early_stopping": {
