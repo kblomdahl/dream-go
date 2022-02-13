@@ -19,6 +19,7 @@
 # SOFTWARE.
 
 import io
+import json
 import unittest
 
 from .model_config import ModelConfig
@@ -75,6 +76,11 @@ class ModelConfigTest(unittest.TestCase):
 
     def tearDown(self):
         pass
+
+    def test_str(self):
+        s = str(ModelConfig(self.filename))
+        self.maxDiff = 10000
+        self.assertEqual(json.loads(s), json.loads(MODEL_CONFIG_JSON))
 
     def test_batch_size(self):
         self.assertEqual(ModelConfig(self.filename).batch_size, 8196)

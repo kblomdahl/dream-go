@@ -195,4 +195,42 @@ class ModelConfig:
         return self.hparams[_HP_MAX_ES_SLOPE]
 
     def __str__(self):
-        return json.dumps(self.content, indent=4, sort_keys=True)
+        return json.dumps({
+            'batch_size': self.batch_size,
+            'data': self.data,
+            'num_unrolls': self.num_unrolls,
+            'lz_weights': self.lz_weights,
+            'early_stopping': {
+                'max_slope': self.max_early_stopping_slope,
+                'samples': self.num_early_stopping_samples,
+                'num_warmup_steps': self.num_early_stopping_warmup_steps
+            },
+            'loss': {
+                'coefficients': {
+                    'ownership': self.ownership_coefficient,
+                    'policy': self.policy_coefficient,
+                    'similarity': self.similarity_coefficient,
+                    'value': self.value_coefficient
+                },
+                'discount_factor': self.discount_factor,
+                'label_smoothing': self.label_smoothing
+            },
+            'model': {
+                'dyn': {
+                    'num_blocks': self.num_dyn_blocks,
+                    'num_channels': self.num_dyn_channels
+                },
+                'embeddings_size': self.embeddings_size,
+                'repr': {
+                    'num_blocks': self.num_repr_blocks,
+                    'num_channels': self.num_repr_channels
+                }
+            },
+            'optimizer': {
+                'clipnorm': self.clipnorm,
+                'decay_rate': self.decay_rate,
+                'epochs': self.epochs,
+                'learning_rate': self.learning_rate,
+                'weight_decay': self.weight_decay
+            }
+        }, indent=4, sort_keys=True)
