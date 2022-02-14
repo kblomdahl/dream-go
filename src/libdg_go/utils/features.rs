@@ -261,7 +261,7 @@ impl<'a> V2<'a> {
 
     /// Returns the number of channels.
     pub const fn num_features() -> usize {
-        32
+        40
     }
 
     /// Returns the total number of elements that the returned features will
@@ -317,14 +317,14 @@ impl<'a> V2<'a> {
             if self.board.at(point) == Some(to_move) {
                 let n = self.board.inner.get_n_liberty(point);
 
-                for i in 0..n.max(4) {
+                for i in 0..n.min(6) {
                     out[o.index(offset+4+i, other)] = c_1;
                 }
             } else if is_valid {
                 let n = self.board.inner.get_n_liberty_if(to_move, point);
 
-                for i in 0..n.max(4) {
-                    out[o.index(offset+8+i, other)] = c_1;
+                for i in 0..n.min(6) {
+                    out[o.index(offset+10+i, other)] = c_1;
                 }
             }
         }
@@ -365,28 +365,36 @@ impl<'a> Features for V2<'a> {
     /// 14. liberties (>= 2)
     /// 15. liberties (>= 3)
     /// 16. liberties (>= 4)
-    /// 17. liberties if played (>= 1)
-    /// 18. liberties if played (>= 2)
-    /// 19. liberties if played (>= 3)
-    /// 20. liberties if played (>= 4)
+    /// 17. liberties (>= 5)
+    /// 18. liberties (>= 6)
+    /// 19. liberties if played (>= 1)
+    /// 20. liberties if played (>= 2)
+    /// 21. liberties if played (>= 3)
+    /// 22. liberties if played (>= 4)
+    /// 23. liberties if played (>= 5)
+    /// 24. liberties if played (>= 6)
     ///
     /// ## Player
     ///
-    /// 21. is ladder capture
-    /// 22. is ladder escape
-    /// 23. is valid move
-    /// 24. is eye
+    /// 25. is ladder capture
+    /// 26. is ladder escape
+    /// 27. is valid move
+    /// 28. is eye
     ///
     /// ### Player Liberties
     ///
-    /// 25. liberties (>= 1)
-    /// 26. liberties (>= 2)
-    /// 27. liberties (>= 3)
-    /// 28. liberties (>= 4)
-    /// 29. liberties if played (>= 1)
-    /// 30. liberties if played (>= 2)
-    /// 31. liberties if played (>= 3)
-    /// 32. liberties if played (>= 4)
+    /// 29. liberties (>= 1)
+    /// 30. liberties (>= 2)
+    /// 31. liberties (>= 3)
+    /// 32. liberties (>= 4)
+    /// 33. liberties (>= 5)
+    /// 34. liberties (>= 6)
+    /// 35. liberties if played (>= 1)
+    /// 36. liberties if played (>= 2)
+    /// 37. liberties if played (>= 3)
+    /// 38. liberties if played (>= 4)
+    /// 39. liberties if played (>= 5)
+    /// 40. liberties if played (>= 6)
     ///
     /// # Arguments
     ///
