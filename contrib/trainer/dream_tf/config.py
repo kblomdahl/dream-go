@@ -73,7 +73,8 @@ class Config:
         elif self.has_model():
             model_dir = self.get_model_dir(default=most_recent_model())
 
-            return ModelConfig(f'{model_dir}/config.json')
+            with open(f'{model_dir}/config.json') as fp:
+                return ModelConfig(fp)
         else:
             return ModelConfig()
 
