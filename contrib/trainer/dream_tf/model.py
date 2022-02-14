@@ -127,7 +127,7 @@ class DreamGoNet(tf.keras.Model, Quantize):
             self(x, training=True)
 
     def dump_to(self, out):
-        fake_features = tf.ones([1, self.num_unrolls, 19, 19, NUM_FEATURES], tf.float16)
+        fake_features = tf.ones([self.batch_size, self.num_unrolls, 19, 19, NUM_FEATURES], tf.float16)
         results = self(fake_features, training=False)
 
         json.dump(
