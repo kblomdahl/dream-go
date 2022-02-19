@@ -1,4 +1,4 @@
-FROM tensorflow/tensorflow:2.7.0-gpu
+FROM tensorflow/tensorflow:2.8.0-gpu
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 ENV LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/usr/local/lib/python3.6/dist-packages/tensorflow_core"
