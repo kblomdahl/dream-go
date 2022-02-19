@@ -92,7 +92,7 @@ class DreamGoNetBase(TestUtils):
 
     def test_as_dict(self):
         out = io.StringIO('')
-        self.model(self.inputs)
+        self.model(self.x)
         self.model.dump_to(out)
 
         #self.assertIn('num_channels:0', out.getvalue())
