@@ -28,7 +28,7 @@ from .value_head import ValueHead
 
 class ValueHeadTest(unittest.TestCase, TestUtils):
     def setUp(self):
-        self.batch_size = 1
+        self.batch_size = 8
         self.embeddings_size = 32
         self.x = tf.zeros([self.batch_size, self.embeddings_size], tf.float16)
         self.value_head = ValueHead()
