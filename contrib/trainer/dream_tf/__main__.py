@@ -120,7 +120,7 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
             callbacks=[
                 CustomTensorBoardCallback(model_dir, hparams=hparams, early_stopping=early_stopping),
                 CustomSaveModelCheckpoint(model_dir, monitor='val_loss', save_best_only=True),
-                tf.keras.callbacks.LearningRateScheduler(learning_rate_schedule, verbose=1),
+                tf.keras.callbacks.LearningRateScheduler(learning_rate_schedule, verbose=0),
                 early_stopping,
             ],
             validation_data=input_fn(
