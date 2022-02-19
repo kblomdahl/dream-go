@@ -119,12 +119,12 @@ class DreamGoNet(tf.keras.Model, Quantize):
 
         [1] https://arxiv.org/abs/1803.05407 """
 
-        self.swa_optimizer.assign_average_vars(self.trainable_variables)
+        #self.swa_optimizer.assign_average_vars(self.trainable_variables)
 
         # re-compute batch normalization statistics by walking through the
         # dataset in training mode.
-        for (x, labels) in xs:
-            self(x, training=True)
+        #for (x, labels) in xs:
+        #    self(x, training=True)
 
     def dump_to(self, out):
         fake_features = tf.ones([self.batch_size, self.num_unrolls, 19, 19, NUM_FEATURES], tf.float16)
