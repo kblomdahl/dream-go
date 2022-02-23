@@ -58,8 +58,7 @@ impl Kind {
     fn extract(&self, examples: &[Candidate], i: usize) -> Vec<f16> {
         match *self {
             Kind::Default => {
-                features::Default::new(&examples[i].board).get_features::<HWC, f16>(
-                    examples[i].color,
+                features::Default::new(examples[i].color, &examples[i].board).get_features::<HWC, f16>(
                     symmetry::Transform::Identity
                 )
             },
@@ -74,8 +73,7 @@ impl Kind {
                     };
                 board_history.reverse();
 
-                LzFeatures::new(board_history).get_features::<HWC, f16>(
-                    examples[i].color,
+                LzFeatures::new(examples[i].color, board_history).get_features::<HWC, f16>(
                     symmetry::Transform::Identity
                 )
             }

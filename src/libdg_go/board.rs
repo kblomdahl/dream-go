@@ -31,7 +31,7 @@ pub struct Board {
     pub(super) inner: BoardFast,
 
     /// Stack containing the six most recent `vertices`.
-    pub(super) history: CircularBuf<Point>,
+    pub(super) history: CircularBuf<(Color, Point)>,
 
     /// The zobrist hash of the current board state.
     pub(super) zobrist_hash: u64,
@@ -170,7 +170,7 @@ impl Board {
 
         // store the actually played move since it is necessary for the feature
         // vector.
-        self.history.push(at_point);
+        self.history.push((color, at_point));
         self.zobrist_history.push(self.zobrist_hash);
     }
 

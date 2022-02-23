@@ -36,7 +36,7 @@ impl BenchmarkExecutor for ForwardBenchmarkExecutor {
     }
 
     fn call(&mut self, entry: SgfEntry) -> usize {
-        let mut features = features::Default::new(&entry.board).get_features::<HWC, f16>(entry.color, Transform::Identity);
+        let mut features = features::Default::new(entry.color, &entry.board).get_features::<HWC, f16>(Transform::Identity);
         if self.batch_size > 1 {
             features = features.repeat(self.batch_size);
         }

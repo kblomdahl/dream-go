@@ -26,7 +26,7 @@ impl BenchmarkExecutor for FeatureBenchmarkExecutor {
     }
 
     fn call(&mut self, entry: SgfEntry) -> usize {
-        let _features = features::Default::new(&entry.board).get_features::<HWC, f16>(entry.color, Transform::Identity);
+        let _features = features::Default::new(entry.color, &entry.board).get_features::<HWC, f16>(Transform::Identity);
 
         1
     }

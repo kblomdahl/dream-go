@@ -83,7 +83,7 @@ use self::pool::*;
 fn full_forward(predictor: &dyn Predictor, options: &Box<dyn SearchOptions + Sync>, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>, Vec<f16>)> {
     let (initial_policy, indices) = create_initial_policy(options, board, to_move);
     let new_response = predictor.fetch(board, to_move).unwrap_or_else(|| {
-        let features = features::Default::new(&board).get_features::<HWC, f16>(to_move, symmetry::Transform::Identity);
+        let features = features::Default::new(to_move, &board).get_features::<HWC, f16>(symmetry::Transform::Identity);
         let new_response = predictor.initial_predict(&features, 1).pop().unwrap();
         predictor.cache(board, to_move, new_response.clone());
         new_response

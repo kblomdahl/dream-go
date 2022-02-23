@@ -47,7 +47,7 @@ impl Event {
             if let Some(response) = server.fetch(&board, to_move) {
                 EventKind::Insert(response)
             } else {
-                let features = features::Default::new(&board).get_features::<HWC, f16>(to_move, symmetry::Transform::Identity);
+                let features = features::Default::new(to_move, &board).get_features::<HWC, f16>(symmetry::Transform::Identity);
                 EventKind::Predict(unsafe { (*hidden_states).clone() }, features)
             };
 
