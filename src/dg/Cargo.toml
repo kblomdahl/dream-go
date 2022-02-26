@@ -16,6 +16,7 @@ dg_go = { path = "../libdg_go"}
 dg_mcts = { path = "../libdg_mcts"}
 dg_predict = { path = "../libdg_predict"}
 dg_utils = { path = "../libdg_utils"}
+dg_sgf = { path = "../libdg_sgf"}
 lazy_static = "1.4"
 libc = "0.2"
 regex = "1.4"

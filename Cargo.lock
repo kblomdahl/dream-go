@@ -99,6 +99,7 @@ dependencies = [
  "dg_cuda",
  "dg_go",
  "dg_predict",
+ "dg_sgf",
  "dg_utils",
  "lazy_static",
  "ordered-float",
@@ -113,6 +114,16 @@ version = "0.0.0"
 dependencies = [
  "dg_cuda",
  "dg_utils",
+]
+
+[[package]]
+name = "dg_sgf"
+version = "0.0.0"
+dependencies = [
+ "dg_go",
+ "lazy_static",
+ "memchr",
+ "regex",
 ]
 
 [[package]]
@@ -148,6 +159,7 @@ dependencies = [
  "dg_go",
  "dg_mcts",
  "dg_predict",
+ "dg_sgf",
  "dg_utils",
  "lazy_static",
  "libc",

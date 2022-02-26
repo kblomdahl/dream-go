@@ -14,8 +14,8 @@
 
 use ordered_float::OrderedFloat;
 
-use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color, Point};
+use dg_sgf::{CGoban, ToSgf};
 use super::predictor::Predictor;
 use super::{full_forward, ScoringSearch, SearchOptions};
 
@@ -53,7 +53,7 @@ pub fn greedy_score(predictor: &dyn Predictor, board: &Board, mut to_move: Color
         if let Some(index) = index {
             let point = Point::from_packed_parts(index);
 
-            sgf += &format!(";{}[{}]", to_move, CGoban::to_sgf(point));
+            sgf += &format!(";{}[{}]", to_move, point.to_sgf::<CGoban>());
             pass_count = 0;
             board.place(to_move, point);
         } else {  // no valid moves remaining

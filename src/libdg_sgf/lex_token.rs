@@ -1,4 +1,4 @@
-// Copyright 2021 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+// Copyright 2022 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,23 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bench::{Benchmark, BenchmarkExecutor};
-use dg_go::{Board, Color};
-
-pub struct SgfBenchmarkExecutor;
-
-impl BenchmarkExecutor for SgfBenchmarkExecutor {
-    fn new() -> Self {
-        Self {}
-    }
-
-    fn setup(&mut self) {
-        // pass
-    }
-
-    fn call(&mut self, _board: &Board, _to_move: Color) -> usize {
-        1
-    }
+#[derive(Debug, PartialEq)]
+pub enum LexToken {
+    LBrack,
+    RBrack,
+    LParen,
+    RParen,
+    SemiColon,
+    Text { offset: usize, len: usize }
 }
-
-pub type SgfBenchmark = Benchmark<SgfBenchmarkExecutor>;

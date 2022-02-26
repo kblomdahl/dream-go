@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_go::utils::sgf::SgfCoordinate;
 use dg_go::{Board, Color, Point};
-use dg_utils::lcb::normal_lcb_m;
+use dg_sgf::{self as sgf, ToSgf};
 use dg_utils::config;
+use dg_utils::lcb::normal_lcb_m;
 use dg_utils::types::f16;
 use super::asm::{argmax_f32, argmax_i32};
 use super::choose::choose;
@@ -1151,7 +1151,7 @@ impl Node {
         self.children.with_mut(index, callback, self.initial_value)
     }
 
-    fn as_sgf<S: SgfCoordinate>(&self, fmt: &mut fmt::Formatter, meta: bool) -> fmt::Result {
+    fn as_sgf<F: sgf::SgfFormat>(&self, fmt: &mut fmt::Formatter, meta: bool) -> fmt::Result {
         // annotate the top-10 moves to make it easier to navigate for the
         // user.
         let mut children = (0..362).collect::<Vec<usize>>();
@@ -1167,7 +1167,7 @@ impl Node {
                     ];
 
                     write!(fmt, "LB[{}:{}]",
-                        S::to_sgf(Point::from_packed_parts(j)),
+                        Point::from_packed_parts(j).to_sgf::<F>(),
                         LABELS[i]
                     )?;
                 }
@@ -1198,7 +1198,7 @@ impl Node {
             write!(fmt, "(")?;
             write!(fmt, ";{}[{}]",
                    if self.to_move == Color::Black { "B" } else { "W" },
-                   if i == 361 { "tt".to_string() } else { S::to_sgf(Point::from_packed_parts(i)) }
+                   if i == 361 { "tt".to_string() } else { Point::from_packed_parts(i).to_sgf::<F>() }
             )?;
             write!(fmt, "C[prior {:.4} value {:.4} (visits {} / total {}) uct {:.4}]",
                 self.prior[i],
@@ -1212,7 +1212,7 @@ impl Node {
                 let child = self.with(i, |child| child.ptr());
 
                 if !child.is_null() {
-                    (*child).as_sgf::<S>(fmt, meta)?;
+                    (*child).as_sgf::<F>(fmt, meta)?;
                 }
             }
 
@@ -1568,14 +1568,14 @@ fn compare_children(
 
 /// Type alias for `Node` that acts as a wrapper for calling `as_sgf` from
 /// within a `write!` macro.
-pub struct ToSgf<'a, S: SgfCoordinate> {
-    _coordinate_format: ::std::marker::PhantomData<S>,
+pub struct NodeToSgf<'a, F: sgf::SgfFormat> {
+    _coordinate_format: ::std::marker::PhantomData<F>,
     starting_point: Board,
     root: &'a Node,
     meta: bool
 }
 
-impl<'a, S: SgfCoordinate> fmt::Display for ToSgf<'a, S> {
+impl<'a, F: sgf::SgfFormat> fmt::Display for NodeToSgf<'a, F> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         if self.meta {
             // add the standard SGF prefix
@@ -1588,19 +1588,19 @@ impl<'a, S: SgfCoordinate> fmt::Display for ToSgf<'a, S> {
             for point in Point::all() {
                 match self.starting_point.at(point) {
                     None => Ok(()),
-                    Some(Color::Black) => write!(fmt, "AB[{}]", S::to_sgf(point)),
-                    Some(Color::White) => write!(fmt, "AW[{}]", S::to_sgf(point))
+                    Some(Color::Black) => write!(fmt, "AB[{}]", point.to_sgf::<F>()),
+                    Some(Color::White) => write!(fmt, "AW[{}]", point.to_sgf::<F>())
                 }?
             }
 
             // write the actual search tree
-            self.root.as_sgf::<S>(fmt, self.meta)?;
+            self.root.as_sgf::<F>(fmt, self.meta)?;
 
             // add the standard SGF suffix
             write!(fmt, ")")
         } else {
             // write the actual search tree
-            self.root.as_sgf::<S>(fmt, self.meta)
+            self.root.as_sgf::<F>(fmt, self.meta)
         }
     }
 }
@@ -1614,10 +1614,10 @@ impl<'a, S: SgfCoordinate> fmt::Display for ToSgf<'a, S> {
 /// * `starting_point` -
 /// * `meta` - whether to include the SGF meta data (rules, etc.)
 ///
-pub fn to_sgf<'a, S>(root: &'a Node, starting_point: &Board, meta: bool) -> ToSgf<'a, S>
-    where S: SgfCoordinate
+pub fn to_sgf<'a, F>(root: &'a Node, starting_point: &Board, meta: bool) -> NodeToSgf<'a, F>
+    where F: sgf::SgfFormat
 {
-    ToSgf {
+    NodeToSgf {
         _coordinate_format: ::std::marker::PhantomData::default(),
         starting_point: starting_point.clone(),
         root: &root,

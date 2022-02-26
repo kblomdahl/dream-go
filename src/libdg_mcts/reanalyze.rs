@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use dg_utils::config;
-use dg_go::utils::sgf::{self, Sgf};
 use dg_go::{Board, Color, Point};
+use dg_sgf as sgf;
 use super::{GameResult, Played, predict, greedy_score};
 use super::pool::Pool;
 use super::predictors::DefaultPredictor;
@@ -35,31 +35,51 @@ struct Candidate {
     point: Point
 }
 
-/// Collect all candidates (moves) from the provided SGF file assuming the
-/// given komi. If an error is encountered while parsing the SGF file a
-/// partial set of candidates may be returned.
-///
-/// # Arguments
-///
-/// * `content` -
-/// * `komi` -
-///
-fn collect_candidates_from_line(content: &str, komi: f32) -> Vec<Candidate> {
-    let mut candidates = Vec::with_capacity(261);
+struct Game {
+    candidates: Vec<Candidate>,
+    komi: f32,
+    winner: Option<Color>
+}
 
-    for entry in Sgf::new(content.as_bytes(), komi) {
-        if let Ok(entry) = entry {
-            candidates.push(Candidate {
-                board: entry.board.clone(),
-                to_move: entry.color,
-                point: entry.point
-            });
-        } else {
-            break;
+impl Game {
+    /// Collect all candidates (moves) from the provided SGF file, and some
+    /// game metadata. If an error in encountered while parsing the SGF file
+    /// a partial set of candidates may be provided.
+    ///
+    /// # Arguments
+    ///
+    /// * `content` -
+    ///
+    fn from_str(content: &str) -> Game {
+        let mut out = Self {
+            candidates: vec! [],
+            komi: 0.5,
+            winner: None
+        };
+
+        for (board, tok) in sgf::Stream::new(content.as_bytes()).with_all_board() {
+            match tok {
+                sgf::SgfToken::Result { text } if text.len() > 0 => {
+                    out.winner = match text[0] {
+                        b'B' => Some(Color::Black),
+                        b'W' => Some(Color::White),
+                        _ => None
+                    };
+                },
+                _ => { /* pass */ }
+            }
+
+            if out.candidates.last().map(|c| Some(c.point) != board.last_move()).unwrap_or(true) {
+                out.candidates.push(Candidate {
+                    board: board.as_ref().clone(),
+                    to_move: board.last_played().unwrap_or_default(),
+                    point: board.last_move().unwrap_or_default()
+                })
+            }
         }
-    }
 
-    candidates
+        out
+    }
 }
 
 /// Reanalyze a given `candidate`.
@@ -116,39 +136,35 @@ fn reanalyze_single_line(
     content: String
 ) -> Option<GameResult>
 {
-    if let Ok(komi) = sgf::get_komi_from_sgf(&content) {
-        let candidates = collect_candidates_from_line(&content, komi);
-        let mut board = Board::new(komi);
-        let mut sgf = String::new();
+    let game = Game::from_str(&content);
+    let mut board = Board::new(game.komi);
+    let mut sgf = String::new();
 
-        for cand in &candidates {
-            let analyze = is_good_candidate(cand);
+    for cand in &game.candidates {
+        let analyze = is_good_candidate(cand);
 
-            if let Some(played) = analyze.and_then(|cand| reanalyze_single_candidate(pool, cand)) {
-                sgf += &format!("{}", played);
-            } else {
-                sgf += &format!("{}", Played::fixed(cand.to_move, cand.point));
-            }
-
-            assert!(board.is_valid(cand.to_move, cand.point));
-            board.place(cand.to_move, cand.point);
+        if let Some(played) = analyze.and_then(|cand| reanalyze_single_candidate(pool, cand)) {
+            sgf += &format!("{}", played);
+        } else {
+            sgf += &format!("{}", Played::fixed(cand.to_move, cand.point));
         }
 
-        if sgf::is_scored(&content) {
-            let last_played = candidates.last().map(|cand| cand.to_move.opposite());
+        assert!(board.is_valid(cand.to_move, cand.point));
+        board.place(cand.to_move, cand.point);
+    }
 
-            if let Some(to_move) = last_played {
-                let (greedy_board, _) = greedy_score(pool.predictor(), &board, to_move);
+    if game.winner.is_none() {
+        let last_played = game.candidates.last().map(|cand| cand.to_move.opposite());
 
-                Some(GameResult::Ended(sgf, greedy_board))
-            } else {
-                None
-            }
-        } else if let Ok(re) = sgf::get_winner_from_sgf(&content) {
-            Some(GameResult::Resign(sgf, board, re, 0.5))
+        if let Some(to_move) = last_played {
+            let (greedy_board, _) = greedy_score(pool.predictor(), &board, to_move);
+
+            Some(GameResult::Ended(sgf, greedy_board))
         } else {
             None
         }
+    } else if let Some(re) = game.winner {
+        Some(GameResult::Resign(sgf, board, re, 0.5))
     } else {
         None
     }
@@ -226,7 +242,8 @@ mod tests {
 
     #[test]
     fn collect_all_candidates() {
-        let actual = collect_candidates_from_line(&"(;B[aa];W[bb];B[cc];W[dd])", 7.5);
+        let game = Game::from_str(&"(;B[aa];W[bb];B[cc];W[dd])");
+        let actual = &game.candidates;
 
         assert_eq!(actual.len(), 4);
         assert_eq!(actual[0].to_move, Color::Black);

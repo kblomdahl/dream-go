@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bench::{Benchmark, BenchmarkExecutor};
-use dg_go::utils::sgf::SgfEntry;
+use dg_go::{Board, Color};
 use dg_mcts::options::StandardSearch;
 use dg_mcts::predictors::DefaultPredictor;
 use dg_mcts::pool::Pool;
@@ -32,14 +32,18 @@ impl BenchmarkExecutor for MctsBenchmarkExecutor {
         Self { pool }
     }
 
-    fn call(&mut self, entry: SgfEntry) -> usize {
+    fn setup(&mut self) {
+        // pass
+    }
+
+    fn call(&mut self, board: &Board, to_move: Color) -> usize {
         let (_value, _, tree) = predict(
             &self.pool,
             Box::new(StandardSearch::default()),
             Box::new(RolloutLimit::new(usize::from(*config::NUM_ROLLOUT))),
             None,
-            &entry.board,
-            entry.color
+            board,
+            to_move
         ).unwrap();
 
         tree.total_count as usize

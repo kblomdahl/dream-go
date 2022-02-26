@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use dg_go::utils::score::{Score, StoneStatus};
-use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color, Point};
+use dg_sgf::{CGoban, ToSgf};
 
 use std::fmt;
 
@@ -56,9 +56,9 @@ fn get_territory_as_sgf(status_list: &Vec<(Point, Vec<StoneStatus>)>) -> String 
 
     for (point, statuses) in status_list {
         if statuses.contains(&StoneStatus::WhiteTerritory) {
-            white += &format!("[{}]", CGoban::to_sgf(*point));
+            white += &format!("[{}]", point.to_sgf::<CGoban>());
         } else if statuses.contains(&StoneStatus::BlackTerritory) {
-            black += &format!("[{}]", CGoban::to_sgf(*point));
+            black += &format!("[{}]", point.to_sgf::<CGoban>());
         }
     }
 
