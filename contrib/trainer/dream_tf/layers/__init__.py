@@ -20,11 +20,6 @@
 
 import tensorflow as tf
 
-from ..ffi.libdg_go import get_num_features
-
-""" The total number of input features """
-NUM_FEATURES = get_num_features()
-
 def normalize_constraint(x):
     """
     Returns a constraint that set each output vector to `tf.norm(x) <= 1` [1]

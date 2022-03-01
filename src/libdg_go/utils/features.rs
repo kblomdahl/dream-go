@@ -126,6 +126,12 @@ impl<'a> V1<'a> {
     pub const fn size() -> usize {
         Self::num_features() * 361
     }
+
+    /// Returns the total number of elements that the returned motion features
+    /// will contain.
+    pub const fn motion_size() -> usize {
+        Self::num_motion_features() * 361
+    }
 }
 
 impl<'a> Features for V1<'a> {
@@ -234,9 +240,9 @@ impl<'a> Features for V1<'a> {
     {
         let c_0 = T::from(0.0);
         let c_1 = T::from(1.0);
-        let o = O::new(Self::num_features());
+        let o = O::new(Self::num_motion_features());
 
-        let mut out = vec! [c_0; Self::size()];
+        let mut out = vec! [c_0; Self::motion_size()];
         let symmetry_table = symmetry.get_table();
 
         for (i, (played, point)) in self.board.history.iter().take(3).enumerate() {

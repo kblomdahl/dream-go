@@ -24,13 +24,12 @@ import tensorflow as tf
 
 from ..test_common import TestUtils
 from .dynamics import Dynamics
-from . import NUM_FEATURES
 
 class DynamicsTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
         self.embeddings_size = 16
-        self.state = tf.zeros([self.batch_size, 19, 19, NUM_FEATURES], tf.float16)
+        self.state = tf.zeros([self.batch_size, 19, 19, 32], tf.float16)
         self.layer = Dynamics(num_blocks=1, num_channels=8, embeddings_size=self.embeddings_size)
 
     def test_shape(self):

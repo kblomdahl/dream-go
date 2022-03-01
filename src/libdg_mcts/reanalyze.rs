@@ -60,8 +60,6 @@ impl Game {
         };
 
         for (board, tok) in &mut iter {
-            eprintln!("{:?}", tok);
-
             match tok {
                 sgf::SgfToken::Result { text } if text.len() > 0 => {
                     out.winner = match text[0] {
@@ -96,7 +94,7 @@ impl Game {
 
                 Candidate {
                     initialized: true,
-                    board: last.board.clone(),
+                    board: iter.board().as_ref().unwrap().as_ref().clone(),
                     to_move: last.to_move.opposite(),
                     point: Point::default()
                 }
@@ -277,16 +275,16 @@ mod tests {
         let actual = &game.candidates;
 
         assert_eq!(actual.len(), 4);
-        assert_eq!(actual[0].board.to_sgf::<CGoban>(), "()");
+        assert_eq!(actual[0].board.to_sgf::<CGoban>(), "(;)");
         assert_eq!(actual[0].to_move, Color::Black);
         assert_eq!(actual[0].point, Point::new(0, 0));
-        assert_eq!(actual[1].board.to_sgf::<CGoban>(), "(AB[aa])");
+        assert_eq!(actual[1].board.to_sgf::<CGoban>(), "(;AB[aa])");
         assert_eq!(actual[1].to_move, Color::White);
         assert_eq!(actual[1].point, Point::new(1, 1));
-        assert_eq!(actual[2].board.to_sgf::<CGoban>(), "(AB[aa]AW[bb])");
+        assert_eq!(actual[2].board.to_sgf::<CGoban>(), "(;AB[aa]AW[bb])");
         assert_eq!(actual[2].to_move, Color::Black);
         assert_eq!(actual[2].point, Point::new(2, 2));
-        assert_eq!(actual[3].board.to_sgf::<CGoban>(), "(AB[aa][cc]AW[bb])");
+        assert_eq!(actual[3].board.to_sgf::<CGoban>(), "(;AB[aa][cc]AW[bb])");
         assert_eq!(actual[3].to_move, Color::White);
         assert_eq!(actual[3].point, Point::new(3, 3));
     }

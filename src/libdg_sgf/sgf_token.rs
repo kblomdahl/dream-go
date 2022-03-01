@@ -25,6 +25,8 @@ pub enum SgfToken<'a> {
     Result { text: &'a [u8] },
     Size { text: &'a [u8] },
     Territory { color: &'a [u8], point: &'a [u8] },
+    Policy { text: &'a [u8] },
+    Value { text: &'a [u8] },
     Node
 }
 
@@ -55,6 +57,7 @@ impl<'a> SgfToken<'a> {
             Self::Handicap { text } => number_from_bytes(text),
             Self::Komi { text } => number_from_bytes(text),
             Self::Size { text } => number_from_bytes(text),
+            Self::Value { text } => number_from_bytes(text),
             _ => unreachable!()
         }
     }

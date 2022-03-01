@@ -72,13 +72,13 @@ impl ToSgf for Board {
             .collect::<Vec<_>>();
 
         if black.is_empty() && white.is_empty() {
-            format!("()")
+            format!("(;)")
         } else if black.is_empty() {
-            format!("(AW[{}])", white.join("]["))
+            format!("(;AW[{}])", white.join("]["))
         } else if white.is_empty() {
-            format!("(AB[{}])", black.join("]["))
+            format!("(;AB[{}])", black.join("]["))
         } else {
-            format!("(AB[{}]AW[{}])", black.join("]["), white.join("]["))
+            format!("(;AB[{}]AW[{}])", black.join("]["), white.join("]["))
         }
     }
 }
@@ -122,6 +122,6 @@ mod tests {
         let mut board = Board::new(0.5);
         board.place(Color::Black, Point::new(3, 3));
 
-        assert_eq!(board.to_sgf::<CGoban>(), "(AB[dd])");
+        assert_eq!(board.to_sgf::<CGoban>(), "(;AB[dd])");
     }
 }

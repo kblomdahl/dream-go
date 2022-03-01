@@ -26,7 +26,6 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 from tensorboard.plugins.hparams import api as hp
 
-from .layers import NUM_FEATURES
 from .layers.leela_zero import LeelaZero
 from .layers.dynamics import Dynamics
 from .layers.to_dict import tensor_to_dict
@@ -101,14 +100,21 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.loss_metric = tf.keras.metrics.Mean(name='loss')
         self.loss_policy_metric = tf.keras.metrics.Mean(name='loss/policy')
         self.loss_value_metric = tf.keras.metrics.Mean(name='loss/value')
-        self.loss_ownership_metric = tf.keras.metrics.Mean(name='loss/ownership')
         self.loss_similarity_metric = tf.keras.metrics.Mean(name='loss/similarity')
         self.loss_l2_metric = tf.keras.metrics.Mean(name='loss/l2')
 
         # accuracy metrics
         self.accuracy_policy_metrics = [tf.keras.metrics.TopKCategoricalAccuracy(k=1, name=f'policy/accuracy/[{i}]') for i in range(self.num_unrolls)]
         self.accuracy_value_metrics = [tf.keras.metrics.Accuracy(name=f'value/accuracy/[{i}]') for i in range(self.num_unrolls)]
-        self.accuracy_ownership_metrics = [tf.keras.metrics.Accuracy(name=f'ownership/accuracy/[{i}]') for i in range(self.num_unrolls)]
+
+    def num_feature_channels(self):
+        return self.dg_module.num_feature_channels()
+
+    def num_motion_channels(self):
+        return self.dg_module.num_motion_channels()
+
+    def num_targets(self):
+        return self.dg_module.num_target_channels()
 
     @property
     def l2_weights(self):
@@ -127,14 +133,13 @@ class DreamGoNet(tf.keras.Model, Quantize):
         #    self(x, training=True)
 
     def dump_to(self, out):
-        fake_features = tf.ones([self.batch_size, self.num_unrolls, 19, 19, NUM_FEATURES], tf.float16)
+        fake_features = tf.ones([self.batch_size, self.num_unrolls, 19, 19, self.num_feature_channels()], tf.float16)
         results = self(fake_features, training=False)
 
         json.dump(
             {
                 'c': {
-                    'embeddings_size': self.embeddings_size,
-                    'num_features': NUM_FEATURES
+                    'embeddings_size': self.embeddings_size
                 },
                 'n': {
                     'r': self.features_to_repr.as_dict(),
@@ -208,25 +213,6 @@ class DreamGoNet(tf.keras.Model, Quantize):
             'tower': flat_outputs
         }
 
-    def ownership_loss(self, y_true, y_pred, *, mask):
-        y_true = tf.stack([(1 + y_true) / 2, (1 - y_true) / 2], axis=2)  # y_true is -1 or +1 depending on ownership
-        y_pred = tf.stack([y_pred, -y_pred], axis=2)
-        loss = tf.keras.losses.CategoricalCrossentropy(
-            reduction=tf.keras.losses.Reduction.NONE,
-            from_logits=True,
-            label_smoothing=self.label_smoothing
-        )(
-            y_true,
-            y_pred
-        )
-        loss = tf.reduce_mean(input_tensor=loss, axis=[1], keepdims=True)
-
-        # normalize the loss scale for each sample to compensate for the fact
-        # that some samples are masked
-        mask_scale = tf.cast(tf.size(mask), tf.float32) / (tf.reduce_sum(mask) + 1e-6)
-
-        return tf.reshape(loss * mask * mask_scale, [-1])
-
     def batch_flatten(self, x):
         return tf.reshape(x, [-1, np.prod(x.shape[1:])])
 
@@ -252,12 +238,6 @@ class DreamGoNet(tf.keras.Model, Quantize):
             y_pred['value']
         ) * discounts)
 
-        loss_ownership = tf.reduce_mean(self.ownership_loss(
-            self.merge_unrolls(y_true['ownership']),
-            y_pred['ownership'],
-            mask=self.merge_unrolls(y_true['has_ownership'])
-        ) * discounts)
-
         loss_similarity = tf.reduce_mean(
             0.5 * tf.keras.losses.cosine_similarity(
                 tf.cast(tf.stop_gradient(self.batch_flatten(y_pred['proj_repr'])), tf.float32),
@@ -278,7 +258,6 @@ class DreamGoNet(tf.keras.Model, Quantize):
 
         total_loss = self.policy_coefficient * loss_policy \
             + self.value_coefficient * loss_value \
-            + self.ownership_coefficient * loss_ownership \
             + self.similarity_coefficient * loss_similarity
 
         return total_loss, {
@@ -286,7 +265,6 @@ class DreamGoNet(tf.keras.Model, Quantize):
             'loss/l2': loss_l2,
             'loss/policy': loss_policy,
             'loss/value': loss_value,
-            'loss/ownership': loss_ownership,
             'loss/similarity': loss_similarity
         }
 
@@ -297,7 +275,6 @@ class DreamGoNet(tf.keras.Model, Quantize):
 
             labels['value'] = tf.reshape(tf.cast(lz_value_hat, tf.float32), [s if s is not None else -1 for s in labels['value'].shape])
             labels['policy'] = tf.reshape(tf.cast(lz_policy_hat, tf.float32), [s if s is not None else -1 for s in labels['policy'].shape])
-            labels['has_ownership'] = tf.zeros_like(labels['has_ownership'])
 
     @property
     def metrics(self):
@@ -305,26 +282,22 @@ class DreamGoNet(tf.keras.Model, Quantize):
             self.loss_metric,
             self.loss_policy_metric,
             self.loss_value_metric,
-            self.loss_ownership_metric,
             self.loss_similarity_metric,
             self.loss_l2_metric,
 
             *self.accuracy_policy_metrics,
-            *self.accuracy_value_metrics,
-            *self.accuracy_ownership_metrics
+            *self.accuracy_value_metrics
         ]
 
     def custom_metrics(self, y_true, y_pred, *, losses):
         self.loss_metric.update_state(losses['loss'])
         self.loss_policy_metric.update_state(losses['loss/policy'])
         self.loss_value_metric.update_state(losses['loss/value'])
-        self.loss_ownership_metric.update_state(losses['loss/ownership'])
         self.loss_similarity_metric.update_state(losses['loss/similarity'])
         self.loss_l2_metric.update_state(losses['loss/l2'])
 
         rolled_policy = tf.reshape(y_pred['policy'], [self.batch_size, self.num_unrolls, 362])
         rolled_value = tf.reshape(y_pred['value'], [self.batch_size, self.num_unrolls, 1])
-        rolled_ownership = tf.reshape(y_pred['ownership'], [self.batch_size, self.num_unrolls, 361])
 
         for i in range(self.num_unrolls):
             self.accuracy_policy_metrics[i].update_state(
@@ -335,17 +308,12 @@ class DreamGoNet(tf.keras.Model, Quantize):
                 tf.sign(y_true['value'][:, i, :]),
                 tf.sign(rolled_value[:, i, :])
             )
-            self.accuracy_ownership_metrics[i].update_state(
-                tf.sign(y_true['ownership'][:, i, :]),
-                tf.sign(rolled_ownership[:, i, :]),
-                sample_weight=tf.repeat(y_true['has_ownership'][:, i, :], 361, axis=1)
-            )
 
     def custom_image_metrics(self, x, y_true, y_pred):
         def to_heat_image(x, heat):
             return self.dg_module.tensor_to_heat_image(
-                x[:, :, 5],
-                x[:, :, 17],
+                x[:, :, 0],
+                x[:, :, 8],
                 heat
             )
 
@@ -353,16 +321,14 @@ class DreamGoNet(tf.keras.Model, Quantize):
 
         for i in range(self.num_unrolls):
             additional_metrics.update({
-                f'ownership/[{i}]/true': to_heat_image(x[0, i, :, :, :], tf.reshape(y_true['ownership'][0, i, :], [19, 19])),
-                f'ownership/[{i}]/pred': to_heat_image(x[0, i, :, :, :], tf.reshape(y_pred['ownership'][i, :], [19, 19])),
-                f'policy/[{i}]/true': to_heat_image(x[0, i, :, :, :], tf.reshape(y_true['policy'][0, i, :361], [19, 19])),
-                f'policy/[{i}]/pred': to_heat_image(x[0, i, :, :, :], tf.reshape(tf.nn.softmax(y_pred['policy'][i, :361]), [19, 19]))
+                f'policy/[{i}]/true': to_heat_image(y_true['lz_features'][0, i, :, :, :], tf.reshape(y_true['policy'][0, i, :361], [19, 19])),
+                f'policy/[{i}]/pred': to_heat_image(y_true['lz_features'][0, i, :, :, :], tf.reshape(tf.nn.softmax(y_pred['policy'][i, :361]), [19, 19]))
             })
 
         for i in range(self.num_unrolls):
-            for j in range(NUM_FEATURES):
+            for j in range(x.shape.as_list()[-1]):
                 additional_metrics.update({
-                    f'features/[{i:02}]/[{j:02}]': to_heat_image(x[0, i, :, :, :], tf.cast(x[0, i, :, :, j], tf.float32))
+                    f'features/[{i:02}]/[{j:02}]': to_heat_image(y_true['lz_features'][0, i, :, :, :], tf.cast(x[0, i, :, :, j], tf.float32))
                 })
 
         return additional_metrics

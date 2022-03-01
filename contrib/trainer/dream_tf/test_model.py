@@ -25,25 +25,24 @@ import unittest
 
 import tensorflow as tf
 
-from .layers import NUM_FEATURES
 from .model import DreamGoNet
 from .test_common import TestUtils
 
 class DreamGoNetBase(TestUtils):
     @property
     def inputs(self):
-        return tf.repeat(tf.random.uniform([1, self.num_unrolls, 19, 19, NUM_FEATURES], dtype=tf.float16), self.batch_size, axis=0)
+        return tf.repeat(tf.random.uniform([1, self.num_unrolls, 19, 19, self.num_feature_channels], dtype=tf.float16), self.batch_size, axis=0)
 
     @property
     def labels(self):
         return {
+            'features': tf.repeat(tf.random.uniform([1, self.num_unrolls, 19, 19, self.num_feature_channels], dtype=tf.float16), self.batch_size, axis=0),
+            'motion_features': tf.repeat(tf.random.uniform([1, self.num_unrolls, 19, 19, self.num_motion_channels], dtype=tf.float16), self.batch_size, axis=0),
             'lz_features': tf.repeat(tf.random.uniform([1, self.num_unrolls, 19, 19, 18], dtype=tf.float16), self.batch_size, axis=0),
-            'boost': tf.repeat(tf.random.uniform([1, self.num_unrolls, 1], dtype=tf.float32), self.batch_size, axis=0),
+            'targets': tf.repeat(tf.random.uniform([1, self.num_unrolls, 19, 19, self.num_target_channels], dtype=tf.float16), self.batch_size, axis=0),
+            'targets_mask': tf.repeat(tf.random.uniform([1, self.num_unrolls, self.num_target_channels], dtype=tf.float16), self.batch_size, axis=0),
             'value': tf.repeat(tf.random.uniform([1, self.num_unrolls, 1], dtype=tf.float32), self.batch_size, axis=0),
-            'policy': tf.repeat(tf.random.uniform([1, self.num_unrolls, 362], dtype=tf.float32), self.batch_size, axis=0),
-            'ownership': tf.repeat(tf.random.uniform([1, self.num_unrolls, 361], dtype=tf.float32), self.batch_size, axis=0),
-            'has_ownership': tf.repeat(tf.round(tf.random.uniform([1, self.num_unrolls, 1], dtype=tf.float32)), self.batch_size, axis=0),
-            'komi': tf.repeat(tf.random.uniform([1, self.num_unrolls, 1], dtype=tf.float32), self.batch_size, axis=0)
+            'policy': tf.repeat(tf.random.uniform([1, self.num_unrolls, 362], dtype=tf.float32), self.batch_size, axis=0)
         }
 
     def test_using_cudnn_rnn(self):
@@ -82,13 +81,11 @@ class DreamGoNetBase(TestUtils):
         self.assertIn('loss', metrics)
         self.assertIn('loss/value', metrics)
         self.assertIn('loss/policy', metrics)
-        self.assertIn('loss/ownership', metrics)
         self.assertIn('loss/l2', metrics)
 
         for i in range(self.num_unrolls):
             self.assertIn(f'value/accuracy/[{i}]', metrics)
             self.assertIn(f'policy/accuracy/[{i}]', metrics)
-            self.assertIn(f'ownership/accuracy/[{i}]', metrics)
 
     def test_as_dict(self):
         out = io.StringIO('')
@@ -124,7 +121,7 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
             num_unrolls=self.num_unrolls,
             label_smoothing=0.0
         )
-        self.x = tf.zeros([self.batch_size, self.num_unrolls, 19, 19, NUM_FEATURES], tf.float16)
+        self.x = tf.zeros([self.batch_size, self.num_unrolls, 19, 19, self.num_feature_channels], tf.float16)
 
     def test_save_weights(self):
         self.model(self.x, training=False)  # build the layers
@@ -136,10 +133,9 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
         inputs = self.inputs
         outputs = self.model(inputs, training=False)
         labels = {
+            **self.labels,
             'value': tf.reshape(outputs['value'], self.labels['value'].shape),
-            'policy': tf.reshape(tf.nn.softmax(outputs['policy']), self.labels['policy'].shape),
-            'ownership': tf.reshape(outputs['ownership'], self.labels['ownership'].shape),
-            'has_ownership': tf.ones(self.labels['has_ownership'].shape, tf.float32)
+            'policy': tf.reshape(tf.nn.softmax(outputs['policy']), self.labels['policy'].shape)
         }
 
         metrics = self.model.evaluate(
@@ -150,12 +146,10 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
 
         self.assertAlmostEqual(metrics['loss/value'], 0.0, delta=1e-4)
         #self.assertAlmostEqual(metrics['loss/policy'], 5.85, delta=0.25)  # these seem noisy
-        #self.assertAlmostEqual(metrics['loss/ownership'], 0.6855, delta=0.1)  # these seem noisy
         self.assertGreater(metrics['loss/l2'], 0.0)
 
         self.assertAlmostEqual(metrics['value/accuracy/[0]'], 1.0)
         self.assertAlmostEqual(metrics['policy/accuracy/[0]'], 1.0)
-        self.assertAlmostEqual(metrics['ownership/accuracy/[0]'], 1.0, delta=0.05)
 
 class DreamGoNetLzTest(unittest.TestCase, DreamGoNetBase):
     def setUp(self):
@@ -174,7 +168,7 @@ class DreamGoNetLzTest(unittest.TestCase, DreamGoNetBase):
             label_smoothing=0.0,
             lz_weights='fixtures/d645af9.gz'
         )
-        self.x = tf.zeros([self.batch_size, self.num_unrolls, 19, 19, NUM_FEATURES], tf.float16)
+        self.x = tf.zeros([self.batch_size, self.num_unrolls, 19, 19, self.num_feature_channels], tf.float16)
 
 if __name__ == '__main__':
     unittest.main()

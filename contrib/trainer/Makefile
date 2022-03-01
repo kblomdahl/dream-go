@@ -1,6 +1,6 @@
 CARGO=cargo
 
-all: libdg_go.so libdg_tf/libdg_tf.so
+all: libdg_pipe.so libdg_tf/libdg_tf.so
 
 test:
 	python -m pyflakes dream_tf/
@@ -10,14 +10,14 @@ test-gpu:
 	python3 -m unittest
 
 clean:
-	rm -f libdg_go.so
+	rm -f libdg_pipe.so
 	make -C libdg_tf clean
 
-../../target/release/libdg_go.so:
+../../target/release/libdg_pipe.so:
 	$(CARGO) build --release --frozen --lib
 
-libdg_go.so: ../../target/release/libdg_go.so
+libdg_pipe.so: ../../target/release/libdg_pipe.so
 	cp -fu "$<" "$@"
 
-libdg_tf/libdg_tf.so: libdg_go.so libdg_tf/sgf_to_features.cc libdg_tf/tensor_to_image.cc
+libdg_tf/libdg_tf.so: libdg_pipe.so libdg_tf/sgf_to_features.cc libdg_tf/num_channels.cc libdg_tf/tensor_to_image.cc
 	$(MAKE) -C libdg_tf all

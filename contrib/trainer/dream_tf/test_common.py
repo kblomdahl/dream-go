@@ -27,6 +27,18 @@ class TestUtils(object):
     def tearDown(self):
         tf.keras.backend.clear_session()
 
+    @property
+    def num_feature_channels(self):
+        return tf.load_op_library('libdg_tf.so').num_feature_channels().numpy()
+
+    @property
+    def num_motion_channels(self):
+        return tf.load_op_library('libdg_tf.so').num_motion_channels().numpy()
+
+    @property
+    def num_target_channels(self):
+        return tf.load_op_library('libdg_tf.so').num_target_channels().numpy()
+
     def create_categorical_labels(self, shape):
         cand = np.random.random(shape)
         return cand / np.sum(cand)

@@ -115,6 +115,10 @@ impl<'a> Stream<'a> {
 }
 
 impl<'a> WithBoard<'a> {
+    pub fn board(&self) -> &Option<Rc<Board>> {
+        &self.state.board
+    }
+
     pub fn komi(&self) -> f32 {
         self.state.komi
     }
@@ -197,10 +201,10 @@ mod tests {
         assert_eq!(
             boards,
             vec! [
-                "()",
-                "()",
-                "(AB[dd])",
-                "(AB[dd]AW[pp])",
+                "(;)",
+                "(;)",
+                "(;AB[dd])",
+                "(;AB[dd]AW[pp])",
             ]
         );
     }
@@ -213,13 +217,13 @@ mod tests {
         assert_eq!(
             boards,
             vec! [
-                ("()".into(), SgfToken::Node),
-                ("()".into(), SgfToken::Result { text: b"W+Resign" }),
-                ("()".into(), SgfToken::Komi { text: b"0.5" }),
-                ("()".into(), SgfToken::Node),
-                ("(AB[dd])".into(), SgfToken::Play { color: b"B", point: b"dd" }),
-                ("(AB[dd])".into(), SgfToken::Node),
-                ("(AB[dd]AW[pp])".into(), SgfToken::Play { color: b"W", point: b"pp" }),
+                ("(;)".into(), SgfToken::Node),
+                ("(;)".into(), SgfToken::Result { text: b"W+Resign" }),
+                ("(;)".into(), SgfToken::Komi { text: b"0.5" }),
+                ("(;)".into(), SgfToken::Node),
+                ("(;AB[dd])".into(), SgfToken::Play { color: b"B", point: b"dd" }),
+                ("(;AB[dd])".into(), SgfToken::Node),
+                ("(;AB[dd]AW[pp])".into(), SgfToken::Play { color: b"W", point: b"pp" }),
             ]
         );
     }

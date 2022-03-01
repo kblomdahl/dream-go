@@ -109,6 +109,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dg_pipe"
+version = "0.0.0"
+dependencies = [
+ "dg_go",
+ "dg_sgf",
+ "dg_utils",
+ "libc",
+ "rand",
+]
+
+[[package]]
 name = "dg_predict"
 version = "0.0.0"
 dependencies = [

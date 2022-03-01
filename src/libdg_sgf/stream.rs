@@ -74,6 +74,10 @@ impl<'a> Stream<'a> {
             Some(SgfToken::Handicap { text: value })
         } else if property == b"SZ" {
             Some(SgfToken::Size { text: value })
+        } else if property == b"P" {
+            Some(SgfToken::Policy { text: value })
+        } else if property == b"V" {
+            Some(SgfToken::Value { text: value })
         } else {
             None
         }

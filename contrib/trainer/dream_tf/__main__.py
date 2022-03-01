@@ -28,7 +28,6 @@ import tensorflow as tf
 from .callbacks.early_stopping import EarlyStoppingCallback
 from .callbacks.save_model_checkpoint import CustomSaveModelCheckpoint
 from .config import Config, most_recent_model
-from .ffi.libdg_go import get_num_features
 from .input_fn import input_fn
 from .model import DreamGoNet, CustomTensorBoardCallback
 from .optimizers.schedules.epoch_decay_with_warmup import EpochDecayWithWarmup
@@ -81,7 +80,7 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
     if config.has_model() or not config.is_start():
         # this will build all of the necessary variables in the model and optimizer
         _ = model(
-            tf.zeros([1, model_config.num_unrolls, 19, 19, get_num_features()], tf.float16),
+            tf.zeros([1, model_config.num_unrolls, 19, 19, model.num_feature_channels()], tf.float16),
             training=False
         )
         _ = model.optimizer.iterations
