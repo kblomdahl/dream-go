@@ -38,15 +38,15 @@ class CommonInputFnTest(TestUtils):
             self.assertEqual(labels['policy'].shape.as_list(), [self.batch_size, self.num_unrolls, 362])
 
     def test_data_type(self):
-        for features, labels in self.dataset:
-            self.assertEqual(features.dtype, tf.float16)
-            self.assertEqual(labels['features'].dtype, tf.float16)
-            self.assertEqual(labels['motion_features'].dtype, tf.float16)
-            self.assertEqual(labels['lz_features'].dtype, tf.float16)
-            self.assertEqual(labels['targets'].dtype, tf.float32)
-            self.assertEqual(labels['targets_mask'].dtype, tf.float32)
-            self.assertEqual(labels['value'].dtype, tf.float32)
-            self.assertEqual(labels['policy'].dtype, tf.float32)
+        features, labels = self.dataset.element_spec
+        self.assertEqual(features.dtype, tf.float16)
+        self.assertEqual(labels['features'].dtype, tf.float16)
+        self.assertEqual(labels['motion_features'].dtype, tf.float16)
+        self.assertEqual(labels['lz_features'].dtype, tf.float16)
+        self.assertEqual(labels['targets'].dtype, tf.float32)
+        self.assertEqual(labels['targets_mask'].dtype, tf.float32)
+        self.assertEqual(labels['value'].dtype, tf.float32)
+        self.assertEqual(labels['policy'].dtype, tf.float32)
 
 class InputFnTrainingModeTest(unittest.TestCase, CommonInputFnTest):
     def setUp(self):
