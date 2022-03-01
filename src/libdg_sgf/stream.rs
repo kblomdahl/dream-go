@@ -89,7 +89,7 @@ impl<'a> Iterator for Stream<'a> {
                 [LexToken::LParen] if self.is_main_path() => { (None, true) },
                 [LexToken::LParen] => { self.skip_until_rparen(); (None, true) },
                 [LexToken::RParen] => { self.num_rparen += 1; (None, true) },
-                [LexToken::SemiColon] => { (None, true) },
+                [LexToken::SemiColon] => { (Some(SgfToken::Node), true) },
                 [LexToken::Text { offset, len }] => {
                     self.last_property = &self.input[offset..(offset+len)];
                     (None, true)
@@ -129,15 +129,24 @@ mod tests {
         assert_eq!(
             stream.collect::<Vec<_>>(),
             vec! [
+                SgfToken::Node,
                 SgfToken::Komi { text: b"7.5" },
                 SgfToken::Size { text: b"19" },
+                SgfToken::Node,
                 SgfToken::Play { color: b"B", point: b"pd" },
+                SgfToken::Node,
                 SgfToken::Play { color: b"W", point: b"dd" },
+                SgfToken::Node,
                 SgfToken::Play { color: b"B", point: b"dp" },
+                SgfToken::Node,
                 SgfToken::Play { color: b"W", point: b"pp" },
+                SgfToken::Node,
                 SgfToken::Play { color: b"B", point: b"cf" },
+                SgfToken::Node,
                 SgfToken::Play { color: b"W", point: b"fc" },
+                SgfToken::Node,
                 SgfToken::Play { color: b"B", point: b"bd" },
+                SgfToken::Node,
                 SgfToken::Play { color: b"W", point: b"cc" },
             ]
         );
@@ -151,10 +160,12 @@ mod tests {
         assert_eq!(
             stream.collect::<Vec<_>>(),
             vec! [
+                SgfToken::Node,
                 SgfToken::Add { color: b"B", point: b"pd" },
                 SgfToken::Add { color: b"B", point: b"dd" },
                 SgfToken::Add { color: b"B", point: b"dp" },
                 SgfToken::Add { color: b"B", point: b"pp" },
+                SgfToken::Node,
                 SgfToken::Play { color: b"W", point: b"aa" },
             ]
         );
@@ -166,9 +177,6 @@ mod tests {
         let s = s.as_bytes();
         let stream = Stream::new(s);
 
-        assert_eq!(
-            stream.count(),
-            213
-        )
+        assert_eq!(stream.count(), 423)
     }
 }

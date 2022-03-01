@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_go::{Color, Point};
+use dg_go::{Color, Point, Board};
 
 pub trait SgfFormat {
     fn x_as_str(x: usize) -> u8 {
@@ -62,6 +62,27 @@ impl ToSgf for Point {
     }
 }
 
+impl ToSgf for Board {
+    fn to_sgf<F: SgfFormat>(&self) -> String {
+        let black = Point::all()
+            .filter_map(|v| if self.at(v) == Some(Color::Black) { Some(v.to_sgf::<F>()) } else { None })
+            .collect::<Vec<_>>();
+        let white = Point::all()
+            .filter_map(|v| if self.at(v) == Some(Color::White) { Some(v.to_sgf::<F>()) } else { None })
+            .collect::<Vec<_>>();
+
+        if black.is_empty() && white.is_empty() {
+            format!("()")
+        } else if black.is_empty() {
+            format!("(AW[{}])", white.join("]["))
+        } else if white.is_empty() {
+            format!("(AB[{}])", black.join("]["))
+        } else {
+            format!("(AB[{}]AW[{}])", black.join("]["), white.join("]["))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +115,13 @@ mod tests {
     #[test]
     fn pass() {
         assert_eq!(Point::default().to_sgf::<CGoban>(), "");
+    }
+
+    #[test]
+    fn board_d4() {
+        let mut board = Board::new(0.5);
+        board.place(Color::Black, Point::new(3, 3));
+
+        assert_eq!(board.to_sgf::<CGoban>(), "(AB[dd])");
     }
 }

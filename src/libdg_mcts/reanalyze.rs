@@ -30,6 +30,7 @@ use std::thread;
 use std::sync::Arc;
 
 struct Candidate {
+    initialized: bool,
     board: Board,
     to_move: Color,
     point: Point
@@ -51,13 +52,16 @@ impl Game {
     /// * `content` -
     ///
     fn from_str(content: &str) -> Game {
+        let mut iter = sgf::Stream::new(content.as_bytes()).with_board();
         let mut out = Self {
             candidates: vec! [],
             komi: 0.5,
             winner: None
         };
 
-        for (board, tok) in sgf::Stream::new(content.as_bytes()).with_all_board() {
+        for (board, tok) in &mut iter {
+            eprintln!("{:?}", tok);
+
             match tok {
                 sgf::SgfToken::Result { text } if text.len() > 0 => {
                     out.winner = match text[0] {
@@ -66,19 +70,45 @@ impl Game {
                         _ => None
                     };
                 },
+                sgf::SgfToken::Node { .. } => {
+                    out.candidates.push(Candidate {
+                        initialized: false,
+                        board: board.as_ref().clone(),
+                        to_move: Color::Black,
+                        point: Point::default()
+                    })
+                },
+                sgf::SgfToken::Play { .. } => {
+                    if let Some(last) = out.candidates.last_mut() {
+                        last.initialized = true;
+                        last.to_move = tok.color();
+                        last.point = tok.point();
+                    }
+                },
                 _ => { /* pass */ }
-            }
-
-            if out.candidates.last().map(|c| Some(c.point) != board.last_move()).unwrap_or(true) {
-                out.candidates.push(Candidate {
-                    board: board.as_ref().clone(),
-                    to_move: board.last_played().unwrap_or_default(),
-                    point: board.last_move().unwrap_or_default()
-                })
             }
         }
 
+        out.komi = iter.komi();
+        while iter.is_resign() && out.candidates.len() > 0 && out.pass_count() < 2 {
+            out.candidates.push({
+                let last = out.candidates.last().unwrap();
+
+                Candidate {
+                    initialized: true,
+                    board: last.board.clone(),
+                    to_move: last.to_move.opposite(),
+                    point: Point::default()
+                }
+            })
+        }
+
+        out.candidates.retain(|cand| cand.initialized);
         out
+    }
+
+    fn pass_count(&self) -> usize {
+        self.candidates.iter().rev().take_while(|cand| cand.point == Point::default()).count()
     }
 }
 
@@ -239,19 +269,24 @@ pub fn reanalyze(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dg_sgf::{ToSgf, CGoban};
 
     #[test]
     fn collect_all_candidates() {
-        let game = Game::from_str(&"(;B[aa];W[bb];B[cc];W[dd])");
+        let game = Game::from_str(&"(;GM[1]FF[4]SZ[19];B[aa];W[bb];B[cc];W[dd])");
         let actual = &game.candidates;
 
         assert_eq!(actual.len(), 4);
+        assert_eq!(actual[0].board.to_sgf::<CGoban>(), "()");
         assert_eq!(actual[0].to_move, Color::Black);
         assert_eq!(actual[0].point, Point::new(0, 0));
+        assert_eq!(actual[1].board.to_sgf::<CGoban>(), "(AB[aa])");
         assert_eq!(actual[1].to_move, Color::White);
         assert_eq!(actual[1].point, Point::new(1, 1));
+        assert_eq!(actual[2].board.to_sgf::<CGoban>(), "(AB[aa]AW[bb])");
         assert_eq!(actual[2].to_move, Color::Black);
         assert_eq!(actual[2].point, Point::new(2, 2));
+        assert_eq!(actual[3].board.to_sgf::<CGoban>(), "(AB[aa][cc]AW[bb])");
         assert_eq!(actual[3].to_move, Color::White);
         assert_eq!(actual[3].point, Point::new(3, 3));
     }

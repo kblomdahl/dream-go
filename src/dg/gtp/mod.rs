@@ -652,7 +652,7 @@ impl Gtp {
                     self.explain_last_move = String::new();
                     self.finished_board = None;
 
-                    for (board, _tok) in sgf::Stream::new(&content).with_board().take(move_number) {
+                    for board in sgf::Stream::new(&content).only_board().skip(1).take(move_number) {
                         self.history.push(board.as_ref().clone());
                     }
 
