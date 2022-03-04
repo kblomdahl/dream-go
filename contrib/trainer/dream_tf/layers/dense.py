@@ -1,4 +1,4 @@
-# Copyright (c) 2021 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+# Copyright (c) 2019 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,20 +20,29 @@
 
 import tensorflow as tf
 
-from ..hooks.dump import DUMP_OPS
-from .moving_average import moving_average
-from .orthogonal_initializer import orthogonal_initializer
-from . import cast_to_compute_type
+from .to_dict import tensor_to_dict
 
-def dense(x, op_name, shape, offset_init_op, mode, params, is_recomputing=False):
-    if offset_init_op is None:
-        offset_init_op = tf.compat.v1.zeros_initializer()
+class Dense(tf.keras.layers.Dense):
+    def as_dict(self, prefix=None, flat=True):
+        # fix the weights so that they appear in the _correct_ order according
+        # to cuDNN when implemented using a 1x1 convolution:
+        #
+        # tensorflow: [in, out]
+        # cudnn:      [out, in]
+        kernel = tf.transpose(self.kernel, [1, 0])
 
-    weights = tf.compat.v1.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), collections=[tf.compat.v1.GraphKeys.GLOBAL_VARIABLES, tf.compat.v1.GraphKeys.WEIGHTS], use_resource=True)
-    offset = tf.compat.v1.get_variable(op_name + '/offset', (shape[-1],), tf.float32, offset_init_op, use_resource=True)
-
-    if not is_recomputing and 'no_dump' not in params:
-        tf.compat.v1.add_to_collection(DUMP_OPS, [weights.name, moving_average(weights, f'{op_name}/moving_avg', mode), 'f2'])
-        tf.compat.v1.add_to_collection(DUMP_OPS, [offset.name, moving_average(offset, f'{op_name}/offset/moving_avg', mode), 'f2'])
-
-    return tf.matmul(x, cast_to_compute_type(weights)) + cast_to_compute_type(offset)
+        if flat is True:
+            return {
+                f'{prefix}': tensor_to_dict(kernel),
+                f'{prefix}/offset': tensor_to_dict(self.bias),
+                f'{prefix}/shape': tensor_to_dict(kernel.shape, as_type='i4')
+            }
+        else:
+            return {
+                't': 'dense',
+                'vs': {
+                    'kernel': tensor_to_dict(kernel),
+                    'offset': tensor_to_dict(self.bias),
+                    'shape': tensor_to_dict(kernel.shape, as_type='i4')
+                }
+            }

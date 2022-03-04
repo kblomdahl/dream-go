@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::{Predictor, Prediction};
-use dg_go::{utils::symmetry, Board, Color};
+use dg_go::{Board, Color};
 use dg_utils::types::f16;
 
 /// An implementation of `Predict` that always returns the given point as the
@@ -35,20 +35,25 @@ impl Predictor for FakePredictor {
         1
     }
 
-    fn fetch(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform) -> Option<Prediction> {
+    fn fetch(&self, _board: &Board, _to_move: Color) -> Option<Prediction> {
         None
     }
 
-    fn cache(&self, _board: &Board, _to_move: Color, _symmetry: symmetry::Transform, _response: Prediction) {
+    fn cache(&self, _board: &Board, _to_move: Color, _response: Prediction) {
         // pass
     }
 
-    fn predict(&self, _features: &[f16], batch_size: usize) -> Vec<Prediction> {
+    fn initial_predict(&self, _features: &[f16], batch_size: usize) -> Vec<Prediction> {
+        let hidden_states = vec! [f16::from(0.0); 722];
         let mut policy = vec! [f16::from(0.0); 368];
         policy[self.point] = f16::from(1.0);
 
         (0..batch_size)
-            .map(|_| Prediction::new(self.value, policy.clone()))
+            .map(|_| Prediction::new(self.value, policy.clone(), hidden_states.clone()))
             .collect()
+    }
+
+    fn predict(&self, _hidden_states: &[f16], features: &[f16], batch_size: usize) -> Vec<Prediction> {
+        self.initial_predict(features, batch_size)
     }
 }

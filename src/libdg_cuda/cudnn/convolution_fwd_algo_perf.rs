@@ -56,7 +56,7 @@ impl ConvolutionFwdAlgoPerf {
         let mut count = 0;
         let mut out = Self {
             algo: ConvolutionFwdAlgo::ImplicitGemm,
-            status: Status::Success,
+            status: Status::success(),
             time: 0.0,
             memory: 0,
             determinism: Determinism::NonDeterministic,

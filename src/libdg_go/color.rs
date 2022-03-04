@@ -33,6 +33,12 @@ impl From<u8> for Color {
     }
 }
 
+impl Default for Color {
+    fn default() -> Self {
+        Self::Black
+    }
+}
+
 impl Color {
     /// Returns the opposite of this color.
     pub fn opposite(self) -> Color {

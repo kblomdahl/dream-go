@@ -85,10 +85,10 @@ impl Worker {
                         }
                     }
                 },
-                Some((EventKind::Predict(features), event)) => {
+                Some((EventKind::Predict(hidden_states, features), event)) => {
                     // add to the end of the queue
                     let event_responses = batcher
-                        .push_and_get_batch(event, features)
+                        .push_and_get_batch(event, hidden_states, features)
                         .map(|batch| batch.forward(predictor));
 
                     // if we got a batch back from the queue then evaluate it
@@ -100,15 +100,15 @@ impl Worker {
                 },
                 Some((EventKind::Insert(response), event)) => {
                     let options = &event.search_context.options;
-                    let &(_, last_move, _) = event.trace.last().unwrap();
+                    let &(_, last_move, _, _) = event.trace.last().unwrap();
                     let to_move = last_move.opposite();
                     let (mut policy, indices) = create_initial_policy(options, &event.board, to_move);
-                    add_valid_candidates(&mut policy, response.policy(), &indices, event.transformation);
+                    add_valid_candidates(&mut policy, &response.policy(), &indices);
                     normalize_policy(&mut policy, 1.0);
 
                     unsafe {
-                        global_rwlock::read(|| { tree::insert(&event.trace, to_move, response.winrate(), policy) });
-                        predictor.cache(&event.board, to_move, event.transformation, response);
+                        global_rwlock::read(|| { tree::insert(&event.trace, to_move, response.winrate(), response.hidden_states().clone(), policy) });
+                        predictor.cache(&event.board, to_move, response);
                     }
                 },
                 Some((EventKind::Pending, _)) => {

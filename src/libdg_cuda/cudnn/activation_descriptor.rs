@@ -70,6 +70,8 @@ pub struct ActivationDescriptor {
     act_desc: cudnnActivationDescriptor_t
 }
 
+unsafe impl Send for ActivationDescriptor {}
+
 impl Deref for ActivationDescriptor {
     type Target = cudnnActivationDescriptor_t;
 

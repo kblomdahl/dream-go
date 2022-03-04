@@ -21,12 +21,10 @@
 import numpy as np
 import tensorflow as tf
 
-from .batch_norm import batch_norm_conv2d
-from .dense import dense
-from .recompute_grad import recompute_grad
+from .dense import Dense
 
 
-def policy_head(x, mode, params):
+class PolicyHead(tf.keras.layers.Layer):
     """
     The policy head attached after the residual blocks as described by DeepMind:
 
@@ -37,21 +35,28 @@ def policy_head(x, mode, params):
        corresponding to logit probabilities for all intersections and the pass
        move
     """
-    num_channels = params['num_channels']
-    num_samples = params['num_samples']
 
-    def _forward(x, is_recomputing=False):
-        """ Returns the result of the forward inference pass on `x` """
-        y = batch_norm_conv2d(x, 'conv_1', (3, 3, num_channels, num_samples), mode, params, is_recomputing=is_recomputing)
-        y = tf.nn.relu(y)
+    def __init__(self):
+        super(PolicyHead, self).__init__()
 
-        y = tf.reshape(y, (-1, 361 * num_samples))
-        y = dense(y, 'linear_1', (361 * num_samples, 362), policy_offset_op, mode, params, is_recomputing=is_recomputing)
+    def as_dict(self, prefix=None, flat=True):
+        if flat is True:
+            return self.linear_1.as_dict(f'{prefix}/linear_1', flat=True)
+        else:
+            return {
+                't': 'policy',
+                'vs': {
+                    **self.linear_1.as_dict('linear_1', flat=True)
+                }
+            }
 
-        return tf.cast(y, tf.float32)
+    def build(self, input_shapes):
+        self.linear_1 = Dense(362, use_bias=True, bias_initializer=policy_offset_op, dtype='float32')
 
-    return recompute_grad(_forward)(x)
+    def call(self, x, training=True):
+        y = self.linear_1(x, training=training) # batch_size, 362
 
+        return y
 
 def policy_offset_op(shape, dtype=None, partition_info=None):
     """ Initial value for the policy offset, this should roughly correspond to

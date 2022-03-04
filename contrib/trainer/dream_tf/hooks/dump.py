@@ -20,8 +20,9 @@
 
 import base64
 import json
-import numpy as np
 import sys
+
+import numpy as np
 import tensorflow as tf
 
 """ The graph collection that contains all dump operations """

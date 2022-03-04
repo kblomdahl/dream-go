@@ -138,20 +138,33 @@ fn get_features_v1_lee(b: &mut Bencher) {
         let black = test::black_box(Color::Black);
         let transpose = test::black_box(Transform::Transpose);
 
-        features::V1::new(&board).get_features::<HWC, f32>(black, transpose)
+        features::V1::new(black, &board).get_features::<HWC, f32>(transpose)
     });
 }
 
-/// Benchmark feature extraction (V2) from a given board position.
+/// Benchmark motion feature extraction (V1) from a given board position.
 #[bench]
-fn get_features_v2_lee(b: &mut Bencher) {
+fn get_motion_features_v1_lee(b: &mut Bencher) {
     let board = play_moves(&LEE_SEDOL_ALPHAGO_4_78);
 
     b.iter(move || {
         let black = test::black_box(Color::Black);
         let transpose = test::black_box(Transform::Transpose);
 
-        features::V2::new(&board).get_features::<HWC, f32>(black, transpose)
+        features::V1::new(black, &board).get_motion_features::<HWC, f32>(transpose)
+    });
+}
+
+/// Benchmark motion feature extraction (V1) from a given board position.
+#[bench]
+fn get_additional_features_v1_lee(b: &mut Bencher) {
+    let board = play_moves(&LEE_SEDOL_ALPHAGO_4_78);
+
+    b.iter(move || {
+        let black = test::black_box(Color::Black);
+        let transpose = test::black_box(Transform::Transpose);
+
+        features::V1::new(black, &board).get_additional_features::<HWC, f32>(transpose)
     });
 }
 
@@ -201,19 +214,32 @@ fn get_features_v1_rina(b: &mut Bencher) {
         let white = test::black_box(Color::White);
         let flip_lr = test::black_box(Transform::FlipLR);
 
-        features::V1::new(&board).get_features::<HWC, f32>(white, flip_lr)
+        features::V1::new(white, &board).get_features::<HWC, f32>(flip_lr)
     });
 }
 
-/// Benchmark feature extraction (V2) from a given board position.
+/// Benchmark motion feature extraction (V1) from a given board position.
 #[bench]
-fn get_features_v2_rina(b: &mut Bencher) {
+fn get_motion_features_v1_rina(b: &mut Bencher) {
     let board = play_moves(&RINA_FUJISAWA_ZHIYING_YU);
 
     b.iter(move || {
         let white = test::black_box(Color::White);
         let flip_lr = test::black_box(Transform::FlipLR);
 
-        features::V2::new(&board).get_features::<HWC, f32>(white, flip_lr)
+        features::V1::new(white, &board).get_motion_features::<HWC, f32>(flip_lr)
+    });
+}
+
+/// Benchmark additional feature extraction (V1) from a given board position.
+#[bench]
+fn get_additional_features_v1_rina(b: &mut Bencher) {
+    let board = play_moves(&RINA_FUJISAWA_ZHIYING_YU);
+
+    b.iter(move || {
+        let white = test::black_box(Color::White);
+        let flip_lr = test::black_box(Transform::FlipLR);
+
+        features::V1::new(white, &board).get_additional_features::<HWC, f32>(flip_lr)
     });
 }

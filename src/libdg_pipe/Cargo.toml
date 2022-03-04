@@ -1,0 +1,18 @@
+[package]
+name = "dg_pipe"
+version = "0.0.0"
+authors = ["Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>"]
+license = "Apache-2.0"
+publish = false
+
+[lib]
+path = "lib.rs"
+name = "dg_pipe"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+dg_go = { path = "../libdg_go" }
+dg_sgf = { path = "../libdg_sgf" }
+dg_utils = { path = "../libdg_utils" }
+libc = "0.2"
+rand = "0.8"

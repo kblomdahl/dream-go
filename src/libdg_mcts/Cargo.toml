@@ -19,7 +19,8 @@ crossbeam-utils = "0.8"
 concurrent-queue = "1.2"
 dg_cuda = { path = "../libdg_cuda" }
 dg_go = { path = "../libdg_go" }
-dg_nn = { path = "../libdg_nn" }
+dg_predict = { path = "../libdg_predict" }
+dg_sgf = { path = "../libdg_sgf" }
 dg_utils = { path = "../libdg_utils" }
 lazy_static = "1.4"
 ordered-float = "2.0"

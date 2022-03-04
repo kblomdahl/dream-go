@@ -65,6 +65,10 @@ impl<T: Sized + Copy + Default> CircularBuf<T> {
         }
     }
 
+    pub fn last(&self) -> T {
+        self.buf[P_MOD_EIGHT[self.position]]
+    }
+
     /// Adds another value to this circular buffer.
     ///
     /// # Arguments

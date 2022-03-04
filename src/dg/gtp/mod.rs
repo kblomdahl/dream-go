@@ -19,8 +19,8 @@ use std::io::{BufRead, BufReader, Read};
 use std::time::Instant;
 
 use dg_go::utils::score::{Score, StoneStatus};
-use dg_go::utils::sgf::Sgf;
 use dg_go::{DEFAULT_KOMI, Board, Color, Point};
+use dg_sgf as sgf;
 use dg_mcts::time_control::{TimeStrategy, RolloutLimit, ByoYomi};
 use dg_mcts as mcts;
 use dg_utils::config;
@@ -652,16 +652,8 @@ impl Gtp {
                     self.explain_last_move = String::new();
                     self.finished_board = None;
 
-                    for entry in Sgf::new(&content, self.komi).take(move_number) {
-                        match entry {
-                            Ok(entry) => {
-                                self.history.push(entry.board);
-                            },
-                            Err(_reason) => {
-                                error!(id, "failed to parse file");
-                                return;
-                            }
-                        }
+                    for board in sgf::Stream::new(&content).only_board().skip(1).take(move_number) {
+                        self.history.push(board.as_ref().clone());
                     }
 
                     // start the pondering agent

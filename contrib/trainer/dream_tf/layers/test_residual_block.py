@@ -18,53 +18,39 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
-import numpy as np
 import unittest
 
-from .test_common import TestUtils
-from .residual_block import residual_block
+import tensorflow as tf
+import numpy as np
+
+from ..test_common import TestUtils
+from .residual_block import ResidualBlock
 
 class ResidualBlockTest(unittest.TestCase, TestUtils):
     def setUp(self):
-        self.batch_size = 1
-        self.num_channels = 128
-        self.num_samples = 8
-        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
-        np.random.seed(12345)
-        tf.compat.v1.set_random_seed(67890)
-
-    def tearDown(self):
-        tf.compat.v1.reset_default_graph()
-
-    @property
-    def params(self):
-        return {
-            "num_channels": self.num_channels,
-            "num_samples": self.num_samples
-        }
+        self.batch_size = 2
+        self.num_channels = 32
+        self.x = tf.zeros([self.batch_size, 19, 19, self.num_channels], tf.float16)
+        self.residual_block = ResidualBlock()
 
     def test_shape(self):
         self.assertEqual(
-            residual_block(self.x, tf.estimator.ModeKeys.TRAIN, self.params).shape,
+            self.residual_block(self.x, training=True).shape,
             self.x.shape
         )
 
     def test_fit(self):
-        with tf.device('/cpu:0'):
-            logits = tf.cast(residual_block(self.x, tf.estimator.ModeKeys.TRAIN, self.params), tf.float32)
-            steps = self.fit_regression(
-                inputs= \
-                    np.random.random([1, 19, 19, self.num_channels])
-                        .repeat(self.batch_size, axis=0),
-                labels= \
-                    np.random.random([1, 19, 19, self.num_channels])
-                        .repeat(self.batch_size, axis=0),
-                logits=logits,
-                iter=10
-            )
+        history = self.fit_regression(
+            inputs= \
+                np.random.random([1, 19, 19, self.num_channels])
+                    .repeat(self.batch_size, axis=0),
+            outputs=self.residual_block,
+            labels= \
+                np.random.random([1, 19, 19, self.num_channels])
+                    .repeat(self.batch_size, axis=0)
+        )
 
-            self.assertDecreasing([step['loss'] for step in steps])
+        self.assertDecreasing(history)
 
 if __name__ == '__main__':
     unittest.main()

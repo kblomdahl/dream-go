@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use dg_go::utils::score::Score;
-use dg_go::utils::sgf::{CGoban, SgfCoordinate};
 use dg_go::{Board, Color, Point};
+use dg_sgf::{CGoban, ToSgf};
 use dg_utils::{b85, config};
 use super::{predict, full_forward, tree, GameResult, get_random_komi};
 use super::asm::sum_finite_f32;
@@ -186,14 +186,14 @@ impl Played {
 
 impl Display for Played {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        write!(f, ";{}[{}]", self.to_move, CGoban::to_sgf(self.point))?;
+        write!(f, ";{}[{}]", self.to_move, self.point.to_sgf::<CGoban>())?;
 
         if !self.explain.is_empty() {
             write!(f, "C[{}]", self.explain.replace("\n", "\r"))?;
         }
 
         if self.prior_point != Point::default() {
-            write!(f, "TR[{}]", CGoban::to_sgf(self.prior_point))?;
+            write!(f, "TR[{}]", self.prior_point.to_sgf::<CGoban>())?;
         }
 
         if self.num_rollout > 1 {
@@ -374,7 +374,7 @@ impl Player {
                 } else {
                     Box::new(ScoringSearch::default())
                 };
-            let (value, mut policy) = full_forward(pool.predictor(), &search_options, board, self.color)?;
+            let (value, mut policy, _hidden_states) = full_forward(pool.predictor(), &search_options, board, self.color)?;
             if !allow_pass {
                 policy[361] = ::std::f32::NEG_INFINITY;
             }

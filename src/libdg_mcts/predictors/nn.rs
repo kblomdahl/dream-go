@@ -14,10 +14,9 @@
 
 use predictor::{Predictor, Prediction};
 use lru_cache::LruCache;
-use dg_go::utils::symmetry::Transform;
 use dg_go::{Board, Color};
 use dg_cuda::Device;
-use dg_nn::{self as nn, Network};
+use dg_predict::{Builder, Model};
 use dg_utils::types::f16;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -46,17 +45,20 @@ impl BoardTuple {
 #[derive(Clone)]
 pub struct NnPredictor {
     cache_table: Arc<Mutex<LruCache<BoardTuple, Prediction>>>,
-    network: Network,
+    model: Arc<Model>,
     count: Arc<AtomicUsize>
 }
 
 impl Default for NnPredictor {
     fn default() -> Self {
-        let network = Network::new().expect("could not load network weights");
+        let model = Arc::new(
+            Builder::default().build()
+                .expect("could not build model")
+        );
         let cache_table = Arc::new(Mutex::new(LruCache::with_capacity(MAX_CACHE_SIZE + 1)));
         let count = Arc::new(AtomicUsize::new(0));
 
-        Self { cache_table, network, count }
+        Self { cache_table, model, count }
     }
 }
 
@@ -66,22 +68,22 @@ impl Predictor for NnPredictor {
         2 * num_devices
     }
 
-    fn fetch(&self, board: &Board, to_move: Color, symmetry: Transform) -> Option<Prediction> {
+    fn fetch(&self, board: &Board, to_move: Color) -> Option<Prediction> {
         let key = BoardTuple::new(board, to_move);
 
         self.cache_table.lock().expect("could not acquire cache table lock")
             .get(&key)
-            .map(|resp| Prediction::with_transform(&resp, symmetry))
+            .cloned()
     }
 
-    fn cache(&self, board: &Board, to_move: Color, symmetry: Transform, response: Prediction) {
+    fn cache(&self, board: &Board, to_move: Color, response: Prediction) {
         let key = BoardTuple::new(board, to_move);
 
         self.cache_table.lock().expect("could not acquire cache table lock")
-            .insert(&key, Prediction::with_transform(&response, symmetry.inverse()));
+            .insert(&key, response.clone());
     }
 
-    fn predict(&self, features_list: &[f16], batch_size: usize) -> Vec<Prediction> {
+    fn initial_predict(&self, features_list: &[f16], batch_size: usize) -> Vec<Prediction> {
         assert!(batch_size > 0);
 
         let devices = Device::all().expect("could not find any compatible devices");
@@ -89,21 +91,33 @@ impl Predictor for NnPredictor {
         devices[index].set_current().expect("could not set the device for the current thread");
 
         //
-        let network = &self.network;
-        let result = network.get_workspace(batch_size).and_then(|mut workspace| {
-            let outputs = nn::forward(&mut workspace, features_list)?;
-            let (value_list, policy_list) = outputs.unwrap();
-            let policy_iter = policy_list.chunks(362).map(|p| p.to_vec());
+        let model = &self.model;
+        let outputs = model.initial_predict(features_list, batch_size)
+            .expect("could not execute neural network");
 
-            Ok(
-                value_list
-                    .into_iter()
-                    .zip(policy_iter)
-                    .map(|(value, policy)| Prediction::new(value, policy))
-                    .collect()
-            )
-        });
+        outputs.value.iter()
+            .zip(outputs.policy.chunks_exact(362))
+            .zip(outputs.hidden_states.chunks_exact(722))
+            .map(|((&value, policy), hidden_states)| Prediction::new(value, policy.to_vec(), hidden_states.to_vec()))
+            .collect()
+    }
 
-        result.expect("could not run neural network")
+    fn predict(&self, hidden_features_list: &[f16], features_list: &[f16], batch_size: usize) -> Vec<Prediction> {
+        assert!(batch_size > 0);
+
+        let devices = Device::all().expect("could not find any compatible devices");
+        let index = self.count.fetch_add(1, Ordering::Relaxed) % devices.len();
+        devices[index].set_current().expect("could not set the device for the current thread");
+
+        //
+        let model = &self.model;
+        let outputs = model.predict(hidden_features_list, features_list, batch_size)
+            .expect("could not execute neural network");
+
+        outputs.value.iter()
+            .zip(outputs.policy.chunks_exact(362))
+            .zip(outputs.hidden_states.chunks_exact(722))
+            .map(|((&value, policy), hidden_states)| Prediction::new(value, policy.to_vec(), hidden_states.to_vec()))
+            .collect()
     }
 }

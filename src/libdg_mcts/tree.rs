@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_go::utils::sgf::SgfCoordinate;
 use dg_go::{Board, Color, Point};
-use dg_utils::lcb::normal_lcb_m;
+use dg_sgf::{self as sgf, ToSgf};
 use dg_utils::config;
+use dg_utils::lcb::normal_lcb_m;
+use dg_utils::types::f16;
 use super::asm::{argmax_f32, argmax_i32};
 use super::choose::choose;
 use super::parallel::spin::Mutex;
@@ -125,7 +126,7 @@ impl UCT {
     unsafe fn update(trace: &NodeTrace, color: Color, value: f32) {
         use std::intrinsics::{fadd_fast, fsub_fast, fdiv_fast, fmul_fast};
 
-        for &(node, _, index) in trace.iter() {
+        for &(node, _, index, _) in trace.iter() {
             let value_ = if color == (*node).to_move { value } else { 1.0 - value };
 
             // incremental update of the average value and remove any additional
@@ -1046,6 +1047,9 @@ pub struct Node {
     /// The prior value of each edge as indicated by the policy.
     pub prior: [f32; 368],
 
+    /// The hidden state of this node.
+    pub hidden_states: Vec<f16>,
+
     /// The sparse (or dense) representation of the remaining MCTS fields.
     pub children: ChildrenImpl
 }
@@ -1065,9 +1069,11 @@ impl Node {
     /// # Arguments
     ///
     /// * `to_move` - the color of the first players color
+    /// * `value` -
+    /// * `hidden_states` -
     /// * `prior` - the prior values of the nodes
     ///
-    pub fn new(to_move: Color, value: f32, prior: Vec<f32>) -> Node {
+    pub fn new(to_move: Color, value: f32, hidden_states: Vec<f16>, prior: Vec<f32>) -> Node {
         assert!(prior.len() >= 362);
 
         // copy the prior values into an array size that is dividable
@@ -1083,6 +1089,7 @@ impl Node {
             total_count: 0,
             vtotal_count: 0,
             prior: prior_padding,
+            hidden_states: hidden_states,
             children: ChildrenImpl::Small(ManuallyDrop::new(SmallChildrenImpl::with_value(value)))
         }
     }
@@ -1144,7 +1151,7 @@ impl Node {
         self.children.with_mut(index, callback, self.initial_value)
     }
 
-    fn as_sgf<S: SgfCoordinate>(&self, fmt: &mut fmt::Formatter, meta: bool) -> fmt::Result {
+    fn as_sgf<F: sgf::SgfFormat>(&self, fmt: &mut fmt::Formatter, meta: bool) -> fmt::Result {
         // annotate the top-10 moves to make it easier to navigate for the
         // user.
         let mut children = (0..362).collect::<Vec<usize>>();
@@ -1160,7 +1167,7 @@ impl Node {
                     ];
 
                     write!(fmt, "LB[{}:{}]",
-                        S::to_sgf(Point::from_packed_parts(j)),
+                        Point::from_packed_parts(j).to_sgf::<F>(),
                         LABELS[i]
                     )?;
                 }
@@ -1191,7 +1198,7 @@ impl Node {
             write!(fmt, "(")?;
             write!(fmt, ";{}[{}]",
                    if self.to_move == Color::Black { "B" } else { "W" },
-                   if i == 361 { "tt".to_string() } else { S::to_sgf(Point::from_packed_parts(i)) }
+                   if i == 361 { "tt".to_string() } else { Point::from_packed_parts(i).to_sgf::<F>() }
             )?;
             write!(fmt, "C[prior {:.4} value {:.4} (visits {} / total {}) uct {:.4}]",
                 self.prior[i],
@@ -1205,7 +1212,7 @@ impl Node {
                 let child = self.with(i, |child| child.ptr());
 
                 if !child.is_null() {
-                    (*child).as_sgf::<S>(fmt, meta)?;
+                    (*child).as_sgf::<F>(fmt, meta)?;
                 }
             }
 
@@ -1232,7 +1239,8 @@ impl Node {
                     // we need to record that were was a pass so that we have the correct
                     // pass count in the root node.
                     let prior = vec! [0.0f32; 362];
-                    let mut next = Node::new(color.opposite(), 0.5, prior);
+                    let hidden_states = vec! [f16::from(0.0); 722];
+                    let mut next = Node::new(color.opposite(), 0.5, hidden_states, prior);
                     next.pass_count = pass_count + 1;
 
                     Some(next)
@@ -1384,7 +1392,7 @@ impl Node {
     }
 }
 
-pub type NodeTrace = Vec<(*mut Node, Color, usize)>;
+pub type NodeTrace = Vec<(*mut Node, Color, usize, *const Vec<f16>)>;
 
 /// Undo a probe into the search tree by undoing any virtual losses, and / or visits
 /// added during the probe.
@@ -1395,7 +1403,7 @@ pub type NodeTrace = Vec<(*mut Node, Color, usize)>;
 /// * `undo_expanding` - whether to also revert the `expanding` flag
 ///
 pub unsafe fn undo(trace: NodeTrace, undo_expanding: bool) {
-    for (node, _, next_child) in trace.into_iter() {
+    for (node, _, next_child, _) in trace.into_iter() {
         atomic_xsub(&mut (*node).vtotal_count, *config::VLOSS_CNT as i32);
 
         (*node).children.with_mut(next_child, |mut child| {
@@ -1434,7 +1442,7 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> ProbeResult<NodeTrace
                 return ProbeResult::NoResult;
             },
             ProbeResult::Found((next_child, next_value)) => {
-                trace.push((current as *mut Node, current.to_move, next_child));
+                trace.push((current as *mut Node, current.to_move, next_child, &current.hidden_states as *const _));
 
                 if next_child != 361 {  // not a passing move
                     let point = Point::from_packed_parts(next_child);
@@ -1477,13 +1485,14 @@ pub unsafe fn probe(root: &mut Node, board: &mut Board) -> ProbeResult<NodeTrace
 /// * `trace` -
 /// * `color` -
 /// * `value` -
+/// * `hidden_states` -
 /// * `prior` -
 ///
-pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, prior: Vec<f32>) {
+pub unsafe fn insert(trace: &NodeTrace, color: Color, value: f32, hidden_states: Vec<f16>, prior: Vec<f32>) {
     debug_assert!(value >= 0.0 && value <= 1.0);
 
-    if let Some(&(node, _, index)) = trace.last() {
-        let mut next = Box::new(Node::new(color, value, prior));
+    if let Some(&(node, _, index, _)) = trace.last() {
+        let mut next = Box::new(Node::new(color, value, hidden_states, prior));
         if index == 361 {
             next.pass_count = (*node).pass_count + 1;
         }
@@ -1559,14 +1568,14 @@ fn compare_children(
 
 /// Type alias for `Node` that acts as a wrapper for calling `as_sgf` from
 /// within a `write!` macro.
-pub struct ToSgf<'a, S: SgfCoordinate> {
-    _coordinate_format: ::std::marker::PhantomData<S>,
+pub struct NodeToSgf<'a, F: sgf::SgfFormat> {
+    _coordinate_format: ::std::marker::PhantomData<F>,
     starting_point: Board,
     root: &'a Node,
     meta: bool
 }
 
-impl<'a, S: SgfCoordinate> fmt::Display for ToSgf<'a, S> {
+impl<'a, F: sgf::SgfFormat> fmt::Display for NodeToSgf<'a, F> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         if self.meta {
             // add the standard SGF prefix
@@ -1579,19 +1588,19 @@ impl<'a, S: SgfCoordinate> fmt::Display for ToSgf<'a, S> {
             for point in Point::all() {
                 match self.starting_point.at(point) {
                     None => Ok(()),
-                    Some(Color::Black) => write!(fmt, "AB[{}]", S::to_sgf(point)),
-                    Some(Color::White) => write!(fmt, "AW[{}]", S::to_sgf(point))
+                    Some(Color::Black) => write!(fmt, "AB[{}]", point.to_sgf::<F>()),
+                    Some(Color::White) => write!(fmt, "AW[{}]", point.to_sgf::<F>())
                 }?
             }
 
             // write the actual search tree
-            self.root.as_sgf::<S>(fmt, self.meta)?;
+            self.root.as_sgf::<F>(fmt, self.meta)?;
 
             // add the standard SGF suffix
             write!(fmt, ")")
         } else {
             // write the actual search tree
-            self.root.as_sgf::<S>(fmt, self.meta)
+            self.root.as_sgf::<F>(fmt, self.meta)
         }
     }
 }
@@ -1605,10 +1614,10 @@ impl<'a, S: SgfCoordinate> fmt::Display for ToSgf<'a, S> {
 /// * `starting_point` -
 /// * `meta` - whether to include the SGF meta data (rules, etc.)
 ///
-pub fn to_sgf<'a, S>(root: &'a Node, starting_point: &Board, meta: bool) -> ToSgf<'a, S>
-    where S: SgfCoordinate
+pub fn to_sgf<'a, F>(root: &'a Node, starting_point: &Board, meta: bool) -> NodeToSgf<'a, F>
+    where F: sgf::SgfFormat
 {
-    ToSgf {
+    NodeToSgf {
         _coordinate_format: ::std::marker::PhantomData::default(),
         starting_point: starting_point.clone(),
         root: &root,
@@ -1770,12 +1779,17 @@ mod tests {
         prior
     }
 
+    fn get_empty_hidden_states() -> Vec<f16> {
+        vec! [f16::from(0.0); 722]
+    }
+
     unsafe fn unsafe_visit_order() {
         let mut choices = vec![];
         let mut rng = SmallRng::from_seed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]);
         let mut root = Node::new(
             Color::Black,
             0.5,
+            get_empty_hidden_states(),
             get_prior_distribution(&mut rng, &Board::new(DEFAULT_KOMI), Color::Black)
         );
 
@@ -1828,6 +1842,7 @@ mod tests {
         let mut root = Node::new(
             Color::Black,
             0.5,
+            get_empty_hidden_states(),
             get_prior_distribution(&mut rng, &board, Color::Black)
         );
 
@@ -1843,7 +1858,7 @@ mod tests {
             let other_prior = get_prior_distribution(&mut rng, &board, Color::Black);
             let other_value = 0.9;
 
-            insert(&trace, Color::Black, other_value, other_prior);
+            insert(&trace, Color::Black, other_value, get_empty_hidden_states(), other_prior);
 
             assert_eq!(root.with(i, |child| child.vcount()), 0);
             assert_eq!(root.vtotal_count, 0);
@@ -1864,6 +1879,7 @@ mod tests {
         let mut root = Node::new(
             Color::Black,
             0.5,
+            get_empty_hidden_states(),
             (0..362).map(|i| if i == 60 { 1.0 } else { 0.0 }).collect()
         );
 
@@ -1872,7 +1888,7 @@ mod tests {
         let other_prior: Vec<f32> = (0..362).map(|i| if i == 61 || i == 62 { 0.5 } else { 0.0 }).collect();
         let trace = probe(&mut root, &mut board).unwrap();
 
-        insert(&trace, Color::Black, 0.9, other_prior.clone());
+        insert(&trace, Color::Black, 0.9, get_empty_hidden_states(), other_prior.clone());
         assert!({
             let value = root.with(60, |child| child.value());
 
@@ -1901,7 +1917,7 @@ mod tests {
         assert_eq!(root.vtotal_count, 2 * *config::VLOSS_CNT as i32);
 
         // check update after the first probe is inserted
-        insert(&trace_1, Color::White, 0.2, other_prior.clone());
+        insert(&trace_1, Color::White, 0.2, get_empty_hidden_states(), other_prior.clone());
 
         assert_eq!(root.with(60, |child| child.value()), 0.85);
         assert_eq!(root.with(60, |child| child.count()), 2);
@@ -1910,7 +1926,7 @@ mod tests {
         assert_eq!(root.vtotal_count, *config::VLOSS_CNT as i32);
 
         // check update after the second probe is inserted
-        insert(&trace_2, Color::White, 0.3, other_prior.clone());
+        insert(&trace_2, Color::White, 0.3, get_empty_hidden_states(), other_prior.clone());
 
         assert_eq!(root.with(60, |child| child.value()), 0.8);
         assert_eq!(root.with(60, |child| child.count()), 3);
@@ -1929,6 +1945,7 @@ mod tests {
         let mut root = Node::new(
             Color::Black,
             0.5,
+            get_empty_hidden_states(),
             (0..362).map(|i| if i == 60 { 1.0 } else { 0.0 }).collect()
         );
 
@@ -1947,7 +1964,7 @@ mod tests {
 
     #[bench]
     fn small_uct2(b: &mut Bencher) {
-        let node = black_box(Node::new(Color::Black, 0.0, vec! [1.0; 362]));
+        let node = black_box(Node::new(Color::Black, 0.0, get_empty_hidden_states(), vec! [1.0; 362]));
 
         b.iter(move || {
             let mut value = node.children.value(node.initial_value);
@@ -1959,7 +1976,7 @@ mod tests {
 
     #[bench]
     fn big_uct2(b: &mut Bencher) {
-        let mut node = black_box(Node::new(Color::Black, 0.0, vec! [1.0; 362]));
+        let mut node = black_box(Node::new(Color::Black, 0.0, get_empty_hidden_states(), vec! [1.0; 362]));
         let big = match &node.children {
             ChildrenImpl::Small(x) => unsafe { BigChildrenImpl::from_small(x, node.initial_value) },
             _ => unreachable!()
@@ -1976,7 +1993,7 @@ mod tests {
 
     #[bench]
     fn small_fpu(b: &mut Bencher) {
-        let node = black_box(Node::new(Color::Black, 0.0, vec! [1.0; 362]));
+        let node = black_box(Node::new(Color::Black, 0.0, get_empty_hidden_states(), vec! [1.0; 362]));
 
         b.iter(move || {
             let mut value = node.children.value(node.initial_value);
@@ -1990,7 +2007,7 @@ mod tests {
 
     #[bench]
     fn big_fpu(b: &mut Bencher) {
-        let mut node = black_box(Node::new(Color::Black, 0.0, vec! [1.0; 362]));
+        let mut node = black_box(Node::new(Color::Black, 0.0, get_empty_hidden_states(), vec! [1.0; 362]));
         let big = match &node.children {
             ChildrenImpl::Small(x) => unsafe { BigChildrenImpl::from_small(x, node.initial_value) },
             _ => unreachable!()

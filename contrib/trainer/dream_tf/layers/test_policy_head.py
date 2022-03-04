@@ -18,31 +18,20 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
-import numpy as np
 import unittest
 
-from .policy_head import policy_head, policy_offset_op
-from .test_common import TestUtils
+import tensorflow as tf
+import numpy as np
+
+from ..test_common import TestUtils
+from .policy_head import PolicyHead, policy_offset_op
 
 class PolicyHeadTest(unittest.TestCase, TestUtils):
     def setUp(self):
-        self.batch_size = 1
-        self.num_channels = 128
-        self.num_samples = 8
-        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
-        np.random.seed(12345)
-        tf.compat.v1.set_random_seed(67890)
-
-    def tearDown(self):
-        tf.compat.v1.reset_default_graph()
-
-    @property
-    def params(self):
-        return {
-            "num_channels": self.num_channels,
-            "num_samples": self.num_samples
-        }
+        self.batch_size = 2
+        self.embeddings_size = 32
+        self.x = tf.zeros([self.batch_size, self.embeddings_size], tf.float16)
+        self.policy_head = PolicyHead()
 
     def test_initializer(self):
         self.assertEqual(
@@ -52,28 +41,26 @@ class PolicyHeadTest(unittest.TestCase, TestUtils):
 
     def test_shape(self):
         self.assertEqual(
-            policy_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params).shape,
+            self.policy_head(self.x, training=True).shape,
             [self.batch_size, 362]
         )
 
     def test_data_type(self):
         self.assertEqual(
-            policy_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params).dtype,
+            self.policy_head(self.x, training=True).dtype,
             tf.float32
         )
 
     def test_fit(self):
-        with tf.device('/cpu:0'):
-            logits = policy_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
-            steps = self.fit_categorical(
-                inputs= \
-                    np.random.random([1, 19, 19, self.num_channels])
-                        .repeat(self.batch_size, axis=0),
-                labels=self.create_categorical_labels([1, 362]).repeat(self.batch_size, axis=0),
-                logits=logits
-            )
+        history = self.fit_categorical(
+            inputs= \
+                np.random.random([1, self.embeddings_size])
+                    .repeat(self.batch_size, axis=0),
+            outputs=self.policy_head,
+            labels=self.create_categorical_labels([1, 362]).repeat(self.batch_size, axis=0),
+        )
 
-            self.assertDecreasing([step['loss'] for step in steps])
+        self.assertDecreasing(history)
 
 if __name__ == '__main__':
     unittest.main()

@@ -31,7 +31,7 @@ pub struct Board {
     pub(super) inner: BoardFast,
 
     /// Stack containing the six most recent `vertices`.
-    pub(super) history: CircularBuf<Point>,
+    pub(super) history: CircularBuf<(Color, Point)>,
 
     /// The zobrist hash of the current board state.
     pub(super) zobrist_hash: u64,
@@ -44,9 +44,6 @@ pub struct Board {
 
     /// The total number of moves that has been played on this board.
     pub(super) count: u16,
-
-    /// The color of the player who played the most recent move.
-    pub(super) last_played: Option<Color>,
 }
 
 impl Board {
@@ -56,7 +53,6 @@ impl Board {
             history: CircularBuf::new(),
             komi: komi,
             count: 0,
-            last_played: None,
             zobrist_hash: 0,
             zobrist_history: SmallSet64::new(),
         }
@@ -92,10 +88,28 @@ impl Board {
         self.zobrist_hash
     }
 
+    /// Returns the point that a move was most recently played on.
+    #[inline]
+    pub fn last_move(&self) -> Option<Point> {
+        let (_, last_move) = self.history.last();
+
+        if last_move != Point::default() {
+            Some(last_move)
+        } else {
+            None
+        }
+    }
+
     /// Returns the color of the last player that played a move.
     #[inline]
     pub fn last_played(&self) -> Option<Color> {
-        self.last_played
+        let (last_played, point) = self.history.last();
+
+        if point != Point::default() {
+            Some(last_played)
+        } else {
+            None
+        }
     }
 
     /// Returns the color whose turn it is to play a move.
@@ -165,12 +179,11 @@ impl Board {
         // place the stone on the board regardless of whether it is legal
         // or not.
         self.zobrist_hash ^= self.inner.place(color, at_point);
-        self.last_played = Some(color);
         self.count += 1;
 
         // store the actually played move since it is necessary for the feature
         // vector.
-        self.history.push(at_point);
+        self.history.push((color, at_point));
         self.zobrist_history.push(self.zobrist_hash);
     }
 

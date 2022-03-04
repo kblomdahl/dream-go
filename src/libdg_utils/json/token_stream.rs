@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::TryFrom;
 use std::io::{self, Read, ErrorKind};
 use std::slice;
 use memchr::memchr_iter;
@@ -36,6 +37,12 @@ pub enum JsonToken {
     ArrayEnd
 }
 
+pub enum JsonTokenErr {
+    Unrecognized,
+    NotString,
+    NotNumber,
+}
+
 impl JsonToken {
     pub fn to_owned(self) -> Self {
         match self {
@@ -52,6 +59,56 @@ impl JsonToken {
                 JsonToken::Number(s.parse().expect("could not parse number literal"))
             },
             x => x
+        }
+    }
+}
+
+impl TryFrom<&'_ JsonToken> for String {
+    type Error = JsonTokenErr;
+
+    fn try_from(token: &JsonToken) -> Result<Self, Self::Error> {
+        match token {
+            JsonToken::StringPtr { ptr, len } => {
+                let s = unsafe { slice::from_raw_parts(*ptr, *len) };
+                let s = String::from_utf8_lossy(s);
+                Ok(s.to_string())
+            },
+            JsonToken::String(s) => Ok(s.clone()),
+            _ => Err(JsonTokenErr::NotString)
+        }
+    }
+}
+
+impl TryFrom<&'_ JsonToken> for f64 {
+    type Error = JsonTokenErr;
+
+    fn try_from(token: &JsonToken) -> Result<Self, Self::Error> {
+        match token {
+            JsonToken::NumberPtr { ptr, len } => {
+                let s = unsafe { slice::from_raw_parts(*ptr, *len) };
+                let s = String::from_utf8_lossy(s);
+
+                s.parse().map_err(|_| JsonTokenErr::Unrecognized)
+            },
+            JsonToken::Number(f) => Ok(f.clone()),
+            _ => Err(JsonTokenErr::NotNumber)
+        }
+    }
+}
+
+impl TryFrom<&'_ JsonToken> for usize {
+    type Error = JsonTokenErr;
+
+    fn try_from(token: &JsonToken) -> Result<Self, Self::Error> {
+        match token {
+            JsonToken::NumberPtr { ptr, len } => {
+                let s = unsafe { slice::from_raw_parts(*ptr, *len) };
+                let s = String::from_utf8_lossy(s);
+
+                s.parse().map_err(|_| JsonTokenErr::Unrecognized)
+            },
+            JsonToken::Number(f) => Ok(*f as usize),
+            _ => Err(JsonTokenErr::NotNumber)
         }
     }
 }

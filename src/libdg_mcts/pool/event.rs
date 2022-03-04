@@ -19,13 +19,11 @@ use dg_go::utils::symmetry;
 use dg_go::Board;
 use dg_utils::types::f16;
 
-use rand::prelude::SliceRandom;
-use rand::thread_rng;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub enum EventKind {
-    Predict(Vec<f16>),
+    Predict(Vec<f16>, Vec<f16>),
     Insert(Prediction),
     Pending
 }
@@ -35,7 +33,6 @@ pub struct Event {
     pub kind: EventKind,
     pub search_context: Arc<SearchContext>,
     pub board: Board,
-    pub transformation: symmetry::Transform,
     pub trace: NodeTrace
 }
 
@@ -44,18 +41,17 @@ unsafe impl Sync for Event {}
 
 impl Event {
     pub fn predict(server: &Box<dyn Predictor + Sync>, search_context: Arc<SearchContext>, board: Board, trace: NodeTrace) -> Self {
-        let transformation = *symmetry::ALL.choose(&mut thread_rng()).unwrap();
-        let &(_, last_move, _) = trace.last().unwrap();
+        let &(_, last_move, _, hidden_states) = trace.last().unwrap();
         let to_move = last_move.opposite();
         let kind =
-            if let Some(response) = server.fetch(&board, to_move, transformation) {
+            if let Some(response) = server.fetch(&board, to_move) {
                 EventKind::Insert(response)
             } else {
-                let features = features::Default::new(&board).get_features::<HWC, f16>(to_move, transformation);
-                EventKind::Predict(features)
+                let features = features::Default::new(to_move, &board).get_features::<HWC, f16>(symmetry::Transform::Identity);
+                EventKind::Predict(unsafe { (*hidden_states).clone() }, features)
             };
 
-        Self { kind, search_context, board, transformation, trace }
+        Self { kind, search_context, board, trace }
     }
 
     pub fn into_insert(mut self, response: Prediction) -> (EventKind, Event) {

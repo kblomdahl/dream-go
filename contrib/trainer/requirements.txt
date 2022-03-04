@@ -1,3 +1,5 @@
 cffi
 numpy
+pyflakes
 scipy
+tensorflow_addons

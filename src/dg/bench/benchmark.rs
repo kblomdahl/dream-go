@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dg_go::utils::sgf::{self, Sgf, SgfEntry};
+use dg_go::{Board, Color};
+use dg_sgf::*;
 
 use std::fs::File;
 use std::time::Instant;
@@ -20,7 +21,8 @@ use std::io::{BufRead, BufReader};
 
 pub trait BenchmarkExecutor {
     fn new() -> Self;
-    fn call(&mut self, entry: SgfEntry) -> usize;
+    fn setup(&mut self);
+    fn call(&mut self, board: &Board, to_move: Color) -> usize;
 }
 
 pub struct Benchmark<B: BenchmarkExecutor> {
@@ -40,11 +42,33 @@ impl<B: BenchmarkExecutor> Benchmark<B> {
 
         if let Ok(f) = File::open(sgf_file) {
             for line in BufReader::new(&f).lines().map(|x| x.unwrap()) {
-                if let Ok(komi) = sgf::get_komi_from_sgf(&line) {
-                    for entry in Sgf::new(line.as_bytes(), komi) {
-                        if let Ok(entry) = entry {
-                            count += self.executor.call(entry);
+                let mut board = Board::new(0.5);
+
+                self.executor.setup();
+                for tok in Stream::new(line.as_bytes()) {
+                    let changed = match tok {
+                        SgfToken::Komi { .. } => {
+                            board = Board::new(tok.number());
+                            true
+                        },
+                        SgfToken::Add { .. } | SgfToken::Play { .. } => {
+                            let at_point = tok.point();
+                            let to_move = tok.color();
+
+                            if board.is_valid(to_move, at_point) {
+                                board.place(to_move, at_point);
+                                true
+                            } else {
+                                break
+                            }
                         }
+                        _ => false
+                    };
+
+                    if changed {
+                        let to_move = board.last_played().map(|c| c.opposite()).unwrap_or(Color::Black);
+
+                        count += self.executor.call(&board, to_move);
                     }
                 }
             }

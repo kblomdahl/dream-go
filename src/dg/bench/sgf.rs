@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bench::{Benchmark, BenchmarkExecutor};
-use dg_go::utils::sgf::SgfEntry;
+use dg_go::{Board, Color};
 
 pub struct SgfBenchmarkExecutor;
 
@@ -22,7 +22,11 @@ impl BenchmarkExecutor for SgfBenchmarkExecutor {
         Self {}
     }
 
-    fn call(&mut self, _entry: SgfEntry) -> usize {
+    fn setup(&mut self) {
+        // pass
+    }
+
+    fn call(&mut self, _board: &Board, _to_move: Color) -> usize {
         1
     }
 }

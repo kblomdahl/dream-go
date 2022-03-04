@@ -85,6 +85,8 @@ pub struct FilterDescriptor {
     filter_desc: cudnnFilterDescriptor_t
 }
 
+unsafe impl Send for FilterDescriptor {}
+
 impl Deref for FilterDescriptor {
     type Target = cudnnFilterDescriptor_t;
 

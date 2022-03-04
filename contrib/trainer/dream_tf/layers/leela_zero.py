@@ -18,60 +18,59 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
-import numpy as np
 import gzip
 
-def leela_zero(x, mode, params):
-    data_type = tf.float16
-    lz_init_op, num_blocks = read_lz_weights(
-        params['lz_weights'],
-        {
-            'num_inputs': x.shape[3],
-            'data_type': data_type
-        }
-    )
+import tensorflow as tf
+import numpy as np
 
-    def conv2d(x, name):
-        return tf.nn.conv2d(input=x, filters=lz_init_op(name), strides=(1, 1, 1, 1), padding='SAME', data_format='NHWC') + lz_init_op(f'{name}/offset')
+class LeelaZero(tf.keras.layers.Layer):
+    def __init__(self, weights_path, data_type=tf.float16):
+        super(LeelaZero, self).__init__()
 
-    def dense(x, name):
-        return tf.matmul(x, lz_init_op(name)) + lz_init_op(f'{name}/offset')
+        self.weights_path = weights_path
+        self.data_type = data_type
 
-    x = tf.cast(x, data_type)
+    def build(self, input_shapes):
+        lz_init_op, num_blocks = read_lz_weights(self.weights_path, {
+            'num_inputs': input_shapes[3],
+            'data_type': self.data_type
+        })
 
-    with tf.compat.v1.variable_scope('lz', reuse=tf.compat.v1.AUTO_REUSE):
+        self.lz_init_op = lz_init_op
+        self.num_blocks = num_blocks
+
+    def call(self, x, training=True):
+        def conv2d(x, name):
+            return tf.nn.conv2d(input=x, filters=self.lz_init_op(name), strides=(1, 1, 1, 1), padding='SAME', data_format='NHWC') + self.lz_init_op(f'{name}/offset')
+
+        def dense(x, name):
+            return tf.matmul(x, self.lz_init_op(name)) + self.lz_init_op(f'{name}/offset')
+
+        x = tf.cast(x, self.data_type)
+
         # upsample
-        with tf.compat.v1.name_scope('first_conv'):
-            y = tf.nn.relu(conv2d(x, 'first_conv'))
+        y = tf.nn.relu(conv2d(x, 'first_conv'))
 
         # residual blocks
-        for i in range(num_blocks):
+        for i in range(self.num_blocks):
             original = tf.identity(y)
-            with tf.compat.v1.name_scope(f'res_{i}_conv_1'):
-                y = tf.nn.relu(conv2d(y, f'res_{i}_conv_1'))
-            with tf.compat.v1.name_scope(f'res_{i}_conv_2'):
-                y = tf.nn.relu(conv2d(y, f'res_{i}_conv_2') + original)
+            y = tf.nn.relu(conv2d(y, f'res_{i}_conv_1'))
+            y = tf.nn.relu(conv2d(y, f'res_{i}_conv_2') + original)
 
         # policy head
-        with tf.compat.v1.name_scope('policy_head'):
-            p = tf.nn.relu(conv2d(y, 'policy_head'))
-            p = tf.transpose(a=p, perm=[0, 3, 1, 2]) # NHWC -> NCHW
-            p = tf.reshape(p, [-1, 722])
-        with tf.compat.v1.name_scope('fc_1'):
-            p = tf.nn.softmax(dense(p, 'w_fc_1'))
+        p = tf.nn.relu(conv2d(y, 'policy_head'))
+        p = tf.transpose(a=p, perm=[0, 3, 1, 2]) # NHWC -> NCHW
+        p = tf.reshape(p, [-1, 722])
+        p = tf.nn.softmax(dense(p, 'w_fc_1'))
 
         # value head
-        with tf.compat.v1.name_scope('value_head'):
-            v = tf.nn.relu(conv2d(y, 'value_head'))
-            v = tf.transpose(a=v, perm=[0, 3, 1, 2]) # NHWC -> NCHW
-            v = tf.reshape(v, [-1, 361])
-        with tf.compat.v1.name_scope('fc_2'):
-            v = tf.nn.relu(dense(v, 'w_fc_2'))
-        with tf.compat.v1.name_scope('fc_3'):
-            v = tf.nn.tanh(dense(v, 'w_fc_3'))
+        v = tf.nn.relu(conv2d(y, 'value_head'))
+        v = tf.transpose(a=v, perm=[0, 3, 1, 2]) # NHWC -> NCHW
+        v = tf.reshape(v, [-1, 361])
+        v = tf.nn.relu(dense(v, 'w_fc_2'))
+        v = tf.nn.tanh(dense(v, 'w_fc_3'))
 
-    return tf.stop_gradient(v), tf.stop_gradient(p), tf.stop_gradient(y)
+        return tf.stop_gradient(v), tf.stop_gradient(p)
 
 class LzWeightsParser:
     def __init__(self, filename, params):
@@ -108,8 +107,15 @@ class LzWeightsParser:
         else:
             return open(self.filename, 'r')
 
-    def to_dict(self):
-        return self.out
+    def to_variable(self, value, data_type):
+        initial_value = value.astype(data_type.as_numpy_dtype)
+
+        return tf.Variable(initial_value, trainable=False)
+
+    def to_dict(self, data_type):
+        return {
+            key: self.to_variable(value, data_type) for key, value in self.out.items()
+        }
 
     def _read_version(self, fh):
         line = fh.readline().strip()
@@ -168,9 +174,9 @@ def read_lz_weights(filename, params):
         p.read_linear_weights('w_fc_3', [1, 256])
 
         #
-        weights = p.to_dict()
+        weights = p.to_dict(data_type)
 
     def lz_init_op(name):
-        return tf.constant(weights[name].astype(data_type.as_numpy_dtype))
+        return weights[name]
 
     return lz_init_op, num_blocks

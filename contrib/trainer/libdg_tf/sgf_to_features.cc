@@ -12,38 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "tensorflow/core/framework/op_kernel.h"
-#include "tensorflow/core/framework/op.h"
-#include "tensorflow/core/framework/shape_inference.h"
-#include "tensorflow/core/lib/random/random_distributions.h"
-#include "tensorflow/core/util/guarded_philox_random.h"
-
-#include "boost_per_move.hh"
-
-using namespace tensorflow;
-using shape_inference::DimensionHandle;
-using shape_inference::InferenceContext;
-using Eigen::half;
-
-struct Example {
-    int index;
-    int index_next;
-    int color;
-    float policy[362];
-    float policy_next[362];
-    float ownership[361];
-    int winner;
-    int number;
-    float komi;
-    half lz_features[6498];
-    half features[0];
-};
-
-extern "C" int get_num_features();
-extern "C" int extract_single_example(
-    const char* raw_sgf_content,
-    Example* example
-);
+#include "example.hh"
 
 /**
  * Op that returns the features / labels from a random move in the given SGF.
@@ -53,11 +22,29 @@ class SgfToFeaturesOp : public OpKernel {
         explicit SgfToFeaturesOp(OpKernelConstruction* context)
         : OpKernel(context)
         {
-            // pass
+            OP_REQUIRES_OK(context, context->GetAttr("num_examples", &num_examples_));
+            OP_REQUIRES(
+                context,
+                num_examples_ >= 1,
+                errors::InvalidArgument(
+                    "Input `num_examples` must be at least 1 but received: ",
+                    num_examples_
+                )
+            );
+
+            OP_REQUIRES_OK(context, context->GetAttr("num_unrolls", &num_unrolls_));
+            OP_REQUIRES(
+                context,
+                num_unrolls_ >= 1,
+                errors::InvalidArgument(
+                    "Input `num_unrolls` must be at least 1 but received: ",
+                    num_unrolls_
+                )
+            );
         }
 
         void Compute(OpKernelContext* context) override {
-            const Tensor* sgf_tensor;
+            const Tensor* sgf_tensor = nullptr;
 
             OP_REQUIRES_OK(context, context->input("sgf", &sgf_tensor));
             OP_REQUIRES(
@@ -69,269 +56,112 @@ class SgfToFeaturesOp : public OpKernel {
                 )
             );
 
-            // run the internal operation
-            const auto num_features = get_num_features();
-            const auto features_size = 361 * num_features;
-            Example* example = (Example*)malloc(sizeof(Example) + sizeof(half) * features_size);
-            const auto sgf = sgf_tensor->flat<tstring>();
+            Example example(num_examples_, num_unrolls_);
 
-            const auto status = extract_single_example(
-                sgf(0).c_str(),
-                example
-            );
-
-            // allocate output
-            Tensor* lz_features_tensor;
-            Tensor* features_tensor;
-            Tensor* policy_tensor;
-            Tensor* policy_next_tensor;
-            Tensor* winner_tensor;
-            Tensor* ownership_tensor;
-            Tensor* komi_tensor;
-            Tensor* boost_tensor;
-            Tensor* has_ownership_tensor;
-
+            // Allocate the output tensors
+            Tensor* features_tensor = nullptr;
             OP_REQUIRES_OK(
                 context,
-                context->allocate_output(
-                    0,
-                    TensorShape({19, 19, 18}),
-                    &lz_features_tensor
-                )
+                context->allocate_output("features", example.MakeFeaturesShape(), &features_tensor)
             );
 
+            Tensor* motion_features_tensor = nullptr;
             OP_REQUIRES_OK(
                 context,
-                context->allocate_output(
-                    1,
-                    TensorShape({19, 19, num_features}),
-                    &features_tensor
-                )
+                context->allocate_output("motion_features", example.MakeMotionFeaturesShape(), &motion_features_tensor)
             );
 
+            Tensor* lz_features_tensor = nullptr;
             OP_REQUIRES_OK(
                 context,
-                context->allocate_output(
-                    2,
-                    TensorShape({362}),
-                    &policy_tensor
-                )
+                context->allocate_output("lz_features", example.MakeLzFeaturesShape(), &lz_features_tensor)
             );
 
+            Tensor* targets_tensor = nullptr;
             OP_REQUIRES_OK(
                 context,
-                context->allocate_output(
-                    3,
-                    TensorShape({362}),
-                    &policy_next_tensor
-                )
+                context->allocate_output("targets", example.MakeTargetsShape(), &targets_tensor)
             );
 
+            Tensor* targets_mask_tensor = nullptr;
             OP_REQUIRES_OK(
                 context,
-                context->allocate_output(
-                    4,
-                    TensorShape({1}),
-                    &winner_tensor
-                )
+                context->allocate_output("targets_mask", example.MakeTargetsMaskShape(), &targets_mask_tensor)
             );
 
+            Tensor* value_tensor = nullptr;
             OP_REQUIRES_OK(
                 context,
-                context->allocate_output(
-                    5,
-                    TensorShape({361}),
-                    &ownership_tensor
-                )
+                context->allocate_output("value", example.MakeValueShape(), &value_tensor)
             );
 
+            Tensor* policy_tensor = nullptr;
             OP_REQUIRES_OK(
                 context,
-                context->allocate_output(
-                    6,
-                    TensorShape({1}),
-                    &komi_tensor
-                )
+                context->allocate_output("policy", example.MakePolicyShape(), &policy_tensor)
             );
 
-            OP_REQUIRES_OK(
-                context,
-                context->allocate_output(
-                    7,
-                    TensorShape({1}),
-                    &boost_tensor
-                )
+            // assign dmi pointers in example
+            example.features_ = (half*)features_tensor->data();
+            example.motion_features_ = (half*)motion_features_tensor->data();
+            example.lz_features_ = (half*)lz_features_tensor->data();
+            example.additional_targets_ = (float*)targets_tensor->data();
+            example.additional_targets_mask_ = (float*)targets_mask_tensor->data();
+            example.value_ = (float*)value_tensor->data();
+            example.policy_ = (float*)policy_tensor->data();
+
+            // xxx
+            const auto sgf = sgf_tensor->flat<tstring>()(0);
+            const auto status = parse_sgf_example(
+                &example,
+                sgf.c_str(),
+                sgf.length()
             );
 
-            OP_REQUIRES_OK(
-                context,
-                context->allocate_output(
-                    8,
-                    TensorShape({1}),
-                    &has_ownership_tensor
-                )
-            );
-
-            if (status == 0) {
-                // copy the leela-zero style features
-                auto lz_features = lz_features_tensor->flat<half>();
-
-                for (auto i = 0; i < 6498; ++i) {
-                    lz_features(i) = example->lz_features[i];
-                }
-
-                // copy the features
-                auto features = features_tensor->flat<half>();
-
-                for (auto i = 0; i < features_size; ++i) {
-                    features(i) = example->features[i];
-                }
-
-                // copy policy and fix them up in case they are incomplete
-                auto policy = policy_tensor->flat<float>();
-                auto policy_next = policy_next_tensor->flat<float>();
-                float total_policy = 0.0;
-                float total_policy_next = 0.0;
-
-                for (auto i = 0; i < 362; ++i) {
-                    policy(i) = example->policy[i];
-                    policy_next(i) = example->policy_next[i];
-
-                    total_policy += policy(i);
-                    total_policy_next += policy_next(i);
-                }
-
-                OP_REQUIRES(
-                    context,
-                    total_policy >= 0.0 && total_policy <= 1.0,
-                    errors::InvalidArgument(
-                        "Output `policy` has invalid sum: ",
-                        total_policy
-                    )
-                );
-
-                OP_REQUIRES(
-                    context,
-                    example->index >= 0 && example->index < 362,
-                    errors::InvalidArgument(
-                        "Output `policy` has invalid index: ",
-                        example->index
-                    )
-                );
-
-                OP_REQUIRES(
-                    context,
-                    total_policy_next >= 0.0 && total_policy_next <= 1.0,
-                    errors::InvalidArgument(
-                        "Output `policy_next` has invalid sum: ",
-                        total_policy_next
-                    )
-                );
-
-                OP_REQUIRES(
-                    context,
-                    example->index_next >= 0 && example->index_next < 362,
-                    errors::InvalidArgument(
-                        "Output `policy_next` has invalid index: ",
-                        example->index_next
-                    )
-                );
-
-                policy(example->index) += 1.0 - total_policy;
-                policy_next(example->index_next) += 1.0 - total_policy_next;
-
-                // calculate the winner
-                auto winner = winner_tensor->flat<float>();
-
-                if (example->color == example->winner) {
-                    winner(0) = 1.0;
-                } else {
-                    winner(0) = -1.0;
-                }
-
-                // set ownership
-                auto ownership = ownership_tensor->flat<float>();
-                auto has_ownership = has_ownership_tensor->flat<float>();
-
-                has_ownership(0) = 0.0;
-                for (auto i = 0; i < 361; ++i) {
-                    ownership(i) = example->ownership[i];
-                    if (example->ownership[i] != 0.0) {
-                        has_ownership(0) = 1.0;
-                    }
-                }
-
-                // set komi
-                auto komi = komi_tensor->flat<float>();
-
-                komi(0) = example->komi;
-                if (example->color == 1) { // is black
-                    komi(0) = -komi(0);
-                }
-
-                // set boost
-                auto boost = boost_tensor->flat<float>();
-
-                boost(0) = boost_for_move_number(example->number);
-            } else {
-                // zero out the labels, which we use to determine if it
-                // succeeded or not.
-                //
-                // do not bother with the features, since they are large and
-                // we do not check them anyway.
-                auto policy = policy_tensor->flat<float>();
-                auto policy_next = policy_next_tensor->flat<float>();
-                auto winner = winner_tensor->flat<float>();
-                auto ownership = ownership_tensor->flat<float>();
-                auto komi = komi_tensor->flat<float>();
-                auto boost = boost_tensor->flat<float>();
-                auto has_ownership = has_ownership_tensor->flat<float>();
-
-                for (auto i = 0; i < 362; ++i) {
-                    policy(i) = 0.0;
-                    policy_next(i) = 0.0;
-                }
-
-                for (auto i = 0; i < 361; ++i) {
-                    ownership(i) = 0.0;
-                }
-
-                winner(0) = 0.0;
-                komi(0) = 0.0;
-                boost(0) = 0.0;
-                has_ownership(0) = 0.0;
+            if (status != 0) {  // something went wrong
+                memset(policy_tensor->data(), 0, policy_tensor->TotalBytes());
             }
-
-            free(example);
         }
+
+    private:
+        int num_examples_;
+        int num_unrolls_;
 };
+
+Status set_output_tensor_shape(InferenceContext* c, int idx, TensorShape tensor_shape) {
+    ShapeHandle shape;
+
+    TF_RETURN_IF_ERROR(c->MakeShapeFromTensorShape(tensor_shape, &shape));
+    c->set_output(idx, shape);
+    return Status::OK();
+}
 
 REGISTER_OP("SgfToFeatures")
     .Input("sgf: string")
-    .Output("lz_features: float16")
+    .Attr("num_examples: int")
+    .Attr("num_unrolls: int")
     .Output("features: float16")
+    .Output("motion_features: float16")
+    .Output("lz_features: float16")
+    .Output("targets: float32")
+    .Output("targets_mask: float32")
     .Output("policy: float32")
-    .Output("policy_next: float32")
-    .Output("winner: float32")
-    .Output("ownership: float32")
-    .Output("komi: float32")
-    .Output("boost: float32")
-    .Output("has_ownership: float32")
+    .Output("value: float32")
     .SetShapeFn([](InferenceContext* c) {
-        std::vector<DimensionHandle> dims;
-        dims.emplace_back(c->MakeDim(19));
-        dims.emplace_back(c->MakeDim(19));
-        dims.emplace_back(c->MakeDim(get_num_features()));
+        int num_unrolls = 0;
+        TF_RETURN_IF_ERROR(c->GetAttr("num_unrolls", &num_unrolls));
 
-        c->set_output(0, c->MakeShape({19, 19, 18})); // features
-        c->set_output(1, c->MakeShape(dims)); // features
-        c->set_output(2, c->MakeShape({362})); // policy
-        c->set_output(3, c->MakeShape({362})); // policy_next
-        c->set_output(4, c->MakeShape({1})); // value
-        c->set_output(5, c->MakeShape({361})); // ownership
-        c->set_output(6, c->MakeShape({1})); // komi
-        c->set_output(7, c->MakeShape({1})); // boost
-        c->set_output(8, c->MakeShape({1})); // has_ownership
+        int num_examples = 0;
+        TF_RETURN_IF_ERROR(c->GetAttr("num_examples", &num_examples));
+
+        Example example(num_examples, num_unrolls);
+        TF_RETURN_IF_ERROR(set_output_tensor_shape(c, 0, example.MakeFeaturesShape())); // features
+        TF_RETURN_IF_ERROR(set_output_tensor_shape(c, 1, example.MakeMotionFeaturesShape())); // motion_features
+        TF_RETURN_IF_ERROR(set_output_tensor_shape(c, 2, example.MakeLzFeaturesShape())); // lz_features
+        TF_RETURN_IF_ERROR(set_output_tensor_shape(c, 3, example.MakeTargetsShape())); // targets
+        TF_RETURN_IF_ERROR(set_output_tensor_shape(c, 4, example.MakeTargetsMaskShape())); // targets_mask
+        TF_RETURN_IF_ERROR(set_output_tensor_shape(c, 5, example.MakePolicyShape())); // policy
+        TF_RETURN_IF_ERROR(set_output_tensor_shape(c, 6, example.MakeValueShape())); // value
 
         return Status::OK();
     });

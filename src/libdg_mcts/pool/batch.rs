@@ -22,18 +22,19 @@ use dg_utils::config;
 use dg_utils::types::f16;
 
 pub struct Batch<'a> {
+    hidden_states: Vec<f16>,
     features: Vec<f16>,
     events: Vec<Event>,
     num_batches: &'a AtomicUsize
 }
 
 impl<'a> Batch<'a> {
-    pub fn new(features: Vec<f16>, events: Vec<Event>, num_batches: &'a AtomicUsize) -> Self {
-        Self { features, events, num_batches }
+    pub fn new(hidden_states: Vec<f16>, features: Vec<f16>, events: Vec<Event>, num_batches: &'a AtomicUsize) -> Self {
+        Self { hidden_states, features, events, num_batches }
     }
 
     pub fn forward(self, server: &Box<dyn Predictor + Sync>) -> (Vec<Event>, Vec<Prediction>) {
-        let responses = server.predict(&self.features, self.events.len());
+        let responses = server.predict(&self.hidden_states, &self.features, self.events.len());
         self.num_batches.fetch_sub(1, Ordering::AcqRel);
 
         (self.events, responses)
@@ -44,6 +45,9 @@ pub struct BatcherList {
     /// The features gathered so far.
     features: Vec<f16>,
 
+    /// The hidden states gathered so far.
+    hidden_states: Vec<f16>,
+
     /// The events gathered so far.
     events: Vec<Event>,
 }
@@ -52,6 +56,7 @@ impl BatcherList {
     fn new(max_batch_size: usize) -> Self {
         Self {
             features: Vec::with_capacity(2 * max_batch_size * features::Default::size()),
+            hidden_states: Vec::with_capacity(2 * max_batch_size * 722),
             events: Vec::with_capacity(2 * max_batch_size)
         }
     }
@@ -84,14 +89,15 @@ impl Batcher {
         }
     }
 
-    pub fn push(&self, event: Event, features: Vec<f16>) {
+    pub fn push(&self, event: Event, hidden_states: Vec<f16>, features: Vec<f16>) {
         let mut list = self.list.lock().expect("could not acquire batch list lock");
+        list.hidden_states.extend_from_slice(&hidden_states);
         list.features.extend_from_slice(&features);
         list.events.push(event);
     }
 
-    pub fn push_and_get_batch(&self, event: Event, features: Vec<f16>) -> Option<Batch> {
-        self.push(event, features);
+    pub fn push_and_get_batch(&self, event: Event, hidden_states: Vec<f16>, features: Vec<f16>) -> Option<Batch> {
+        self.push(event, hidden_states, features);
         self.get_batch(self.max_batch_size)
     }
 
@@ -111,6 +117,7 @@ impl Batcher {
 
                 Some(
                     Batch::new(
+                        list.hidden_states.split_off(split_index * 722),
                         list.features.split_off(split_index * features::Default::size()),
                         list.events.split_off(split_index),
                         self.num_batches.as_ref()

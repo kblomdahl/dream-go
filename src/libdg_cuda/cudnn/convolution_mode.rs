@@ -21,3 +21,9 @@ pub enum ConvolutionMode {
     Convolution = 0,
     CrossCorrelation = 1
 }
+
+impl Default for ConvolutionMode {
+    fn default() -> Self {
+        ConvolutionMode::CrossCorrelation
+    }
+}

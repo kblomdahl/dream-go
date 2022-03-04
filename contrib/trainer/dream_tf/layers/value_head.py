@@ -21,14 +21,9 @@
 import numpy as np
 import tensorflow as tf
 
-from . import normalize_getting, conv2d, cast_to_compute_type
-from .batch_norm import batch_norm_conv2d
-from .dense import dense
-from .recompute_grad import recompute_grad
-from .orthogonal_initializer import orthogonal_initializer
+from .dense import Dense
 
-
-def value_head(x, mode, params):
+class ValueHead(tf.keras.layers.Layer):
     """
     The value head attached after the residual blocks as described by DeepMind:
 
@@ -38,39 +33,32 @@ def value_head(x, mode, params):
     4. A fully connected linear layer that outputs a vector of size 1
     5. A tanh non-linearity outputting a scalar in the range [-1, 1]
     """
-    num_channels = params['num_channels']
-    num_samples = 2
 
-    def _forward(x, is_recomputing=False):
-        """ Returns the result of the forward inference pass on `x` """
-        y = batch_norm_conv2d(x, 'conv_1', (3, 3, num_channels, num_samples), mode, params, is_recomputing=is_recomputing)
-        y = tf.nn.relu(y)
+    def __init__(self):
+        super(ValueHead, self).__init__()
 
-        zo = conv2d(y, 'conv_2', [1, 1, num_samples, 1])
-        zo = tf.reshape(zo, [-1, 361])
-        zo = tf.nn.tanh(zo)
+    def as_dict(self, prefix=None, flat=True):
+        if flat is True:
+            return {
+                **self.linear_y.as_dict(f'{prefix}/linear_1', flat=True)
+            }
+        else:
+            return {
+                't': 'value',
+                'vs': {
+                    **self.linear_y.as_dict('linear_1', flat=True)
+            }
+            }
 
-        z = tf.reshape(y, [-1, 361 * num_samples])
-        z = dense(z, 'linear_2', (361 * num_samples, 1), value_offset_op, mode, params, is_recomputing=is_recomputing)
-        z = tf.nn.tanh(z)
+    def build(self, input_shapes):
+        self.linear_o = Dense(361, use_bias=True, dtype='float32')
+        self.linear_y = Dense(1, use_bias=True, bias_initializer=value_offset_op, dtype='float32')
 
-        return tf.cast(z, tf.float32), tf.cast(zo, tf.float32), tf.cast(tf.reshape(y, [-1, 361, num_samples]), tf.float32)
+    def call(self, x, training=True):
+        y = tf.nn.tanh(self.linear_y(x, training=training))
+        o = tf.nn.tanh(self.linear_o(x, training=training))
 
-    return _forward(x)
-
+        return y, o
 
 def value_offset_op(shape, dtype=None, partition_info=None):
     return np.array([-0.00502319782])
-
-
-def ownership_loss(*, labels=None, logits=None):
-    categorical_labels = tf.stack([(1 + labels) / 2, (1 - labels) / 2], axis=2)
-    categorical_logits = tf.stack([logits, -logits], axis=2)
-    loss = tf.compat.v1.losses.softmax_cross_entropy(
-        categorical_labels,
-        categorical_logits,
-        label_smoothing=0.2,
-        reduction=tf.compat.v1.losses.Reduction.NONE
-    )
-
-    return tf.reduce_mean(input_tensor=loss, axis=[1], keepdims=True)

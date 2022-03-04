@@ -20,31 +20,101 @@
 
 import tensorflow as tf
 
-from .moving_average import moving_average
-from .orthogonal_initializer import orthogonal_initializer
-from . import cast_to_compute_type, normalize_getting
-from ..hooks.dump import DUMP_OPS
+from math import sqrt
+from .to_dict import tensor_to_dict
 
-def batch_norm_conv2d(x, op_name, shape, mode, params, is_recomputing=False):
-    weights = tf.compat.v1.get_variable(op_name, shape, tf.float32, orthogonal_initializer(), custom_getter=normalize_getting, collections=[tf.compat.v1.GraphKeys.GLOBAL_VARIABLES, tf.compat.v1.GraphKeys.WEIGHTS], use_resource=True)
-    y = tf.nn.conv2d(input=x, filters=cast_to_compute_type(weights), strides=(1, 1, 1, 1), padding='SAME', data_format='NHWC')
+class XavierOrthogonalInitializer:
+    def xavier_orthogonal_initializer(self, fan_in, fan_out):
+        limit = sqrt(6.0 / (fan_in + fan_out))
 
-    return batch_norm(y, weights, op_name, mode, params, is_recomputing=is_recomputing)
+        return tf.keras.initializers.Orthogonal(limit)
 
+class BatchNormDense(XavierOrthogonalInitializer, tf.keras.layers.Layer):
+    def __init__(self, out_dims=None):
+        super(BatchNormDense, self).__init__()
 
-def batch_norm(x, weights, op_name, mode, params, is_recomputing=False):
-    """ Batch normalization layer. """
-    num_channels = weights.shape[3]
-    ones_op = tf.compat.v1.ones_initializer()
-    zeros_op = tf.compat.v1.zeros_initializer()
+        self.out_dims = out_dims
 
-    with tf.compat.v1.variable_scope(op_name) as name_scope:
-        scale = tf.compat.v1.get_variable('scale', (num_channels,), tf.float32, ones_op, trainable=False, use_resource=True)
-        mean = tf.compat.v1.get_variable('mean', (num_channels,), tf.float32, zeros_op, trainable=False, use_resource=True)
-        variance = tf.compat.v1.get_variable('variance', (num_channels,), tf.float32, ones_op, trainable=False, use_resource=True)
-        offset = tf.compat.v1.get_variable('offset', (num_channels,), tf.float32, zeros_op, trainable=True, use_resource=True)
+    def build(self, input_shape):
+        in_dims = input_shape[-1]
+        init_op = self.xavier_orthogonal_initializer(in_dims, self.out_dims)
 
-    if not is_recomputing and 'no_dump' not in params:
+        self.kernel = self.add_weight('kernel', (in_dims, self.out_dims), tf.float32, init_op, experimental_autocast=False)
+        self.kernel_constraint = tf.identity  # tf.keras.constraints.MaxNorm(2.0, axis=0)
+        self.batch_norm = tf.keras.layers.BatchNormalization(scale=False)
+
+    def as_dict(self, prefix=None, flat=False):
+        std_ = tf.sqrt(self.batch_norm.moving_variance + self.batch_norm.epsilon)
+        offset_ = self.batch_norm.beta - self.batch_norm.moving_mean / std_
+        kernel_ = tf.multiply(
+            self.kernel_constraint(self.kernel),
+            tf.reshape(1.0 / std_, (1, self.out_dims))
+        )
+
+        # fix the weights so that they appear in the _correct_ order according
+        # to cuDNN when implemented using a 1x1 convolution:
+        #
+        # tensorflow: [in, out]
+        # cudnn:      [out, in]
+        kernel_ = tf.transpose(kernel_, [1, 0])
+
+        if flat is True:
+            return {
+                f'{prefix}': tensor_to_dict(kernel_),
+                f'{prefix}/offset': tensor_to_dict(offset_),
+                f'{prefix}/shape': tensor_to_dict(kernel_.shape, as_type='i4')
+            }
+        else:
+            return {
+                't': 'dense',
+                'vs': {
+                    'kernel': tensor_to_dict(kernel_),
+                    'offset': tensor_to_dict(offset_),
+                    'shape': tensor_to_dict(kernel_.shape, as_type='i4')
+                }
+            }
+
+    def call(self, x, training=True, is_recomputing=False):
+        kernel = tf.cast(self.kernel_constraint(self.kernel), x.dtype)
+        y = tf.linalg.matmul(x, kernel)
+
+        return self.batch_norm(y, training=training)
+
+class BatchNormConv2D(XavierOrthogonalInitializer, tf.keras.layers.Layer):
+    def __init__(self, *, filters=None, kernel_size=3):
+        super(BatchNormConv2D, self).__init__()
+
+        self.filters = filters
+        self.kernel_size = kernel_size
+
+    def build(self, input_shape):
+        if self.filters is None:
+            self.filters = input_shape[3]
+        in_channels = input_shape[3]
+
+        init_op = self.xavier_orthogonal_initializer(in_channels, self.filters)
+
+        self.filter_nxn = self.add_weight('filter_nxn', (self.kernel_size, self.kernel_size, in_channels, self.filters), tf.float32, init_op, experimental_autocast=False)
+        self.filter_1x1 = self.add_weight('filter_1x1', (1, 1, in_channels, self.filters), tf.float32, init_op, experimental_autocast=False)
+        self.filter_constraint_nxn = tf.identity #tf.keras.constraints.MinMaxNorm(0.001, 1.0 / sqrt(self.filters), axis=[0, 1, 2])
+        self.filter_constraint_1x1 = tf.identity #tf.keras.constraints.MinMaxNorm(0.001, 1.0 / sqrt(self.filters), axis=[0, 1, 2])
+        self.batch_norm = tf.keras.layers.BatchNormalization(scale=False)
+
+    def pad_to_nxn(self, weights):
+        return tf.pad(
+            weights,
+            [
+                [self.kernel_size // 2, self.kernel_size // 2],
+                [self.kernel_size // 2, self.kernel_size // 2],
+                [0, 0],
+                [0, 0]
+            ]
+        )
+
+    def as_dict(self, prefix=None, flat=False):
+        filter_nxn = self.filter_constraint_nxn(self.filter_nxn)
+        filter_1x1 = self.filter_constraint_1x1(self.filter_1x1)
+
         # fold the batch normalization into the convolutional weights and one
         # additional bias term. By scaling the weights and the mean by the
         # term `scale / sqrt(variance + 0.001)`.
@@ -55,55 +125,42 @@ def batch_norm(x, weights, op_name, mode, params, is_recomputing=False):
         # The weights are scaled using broadcasting, where all input weights for
         # a given output feature are scaled by that features term.
         #
-        std_ = tf.sqrt(variance + 0.001)
-        offset_ = offset - mean / std_
-        weights_ = tf.multiply(
-            weights,
-            tf.reshape(scale / std_, (1, 1, 1, num_channels))
+        std_ = tf.sqrt(self.batch_norm.moving_variance + self.batch_norm.epsilon)
+        offset_ = self.batch_norm.beta - self.batch_norm.moving_mean / std_
+        filter_ = tf.multiply(
+            filter_nxn + self.pad_to_nxn(filter_1x1),
+            tf.reshape(1.0 / std_, (1, 1, 1, self.filters))
         )
 
         # fix the weights so that they appear in the _correct_ order according
         # to cuDNN (for NHWC):
         #
         # tensorflow: [h, w, in, out]
-        # cudnn:      [out, in, h, w]
-        weights_ = tf.transpose(a=weights_, perm=[3, 0, 1, 2])
+        # cudnn:      [out, h, w, in] (KRSC)
+        filter_ = tf.transpose(filter_, perm=[3, 0, 1, 2])
 
-        # calulate the moving average of the weights and the offset.
-        tf.compat.v1.add_to_collection(DUMP_OPS, [offset.name, moving_average(offset_, f'{op_name}/offset/moving_avg', mode), 'f2'])
-        tf.compat.v1.add_to_collection(DUMP_OPS, [f'{name_scope.name}:0', moving_average(weights_, f'{op_name}/moving_avg', mode), 'f2'])
-
-    def _forward(x):
-        """ Returns the result of the forward inference pass on `x` """
-        if mode == tf.estimator.ModeKeys.TRAIN:
-            y, b_mean, b_variance = tf.compat.v1.nn.fused_batch_norm(
-                x,
-                scale,
-                offset,
-                None,
-                None,
-                data_format='NHWC',
-                is_training=True
-            )
-
-            if not is_recomputing:
-                with tf.device(None):
-                    update_mean_op = tf.compat.v1.assign_sub(mean, 0.01 * (mean - b_mean), use_locking=True)
-                    update_variance_op = tf.compat.v1.assign_sub(variance, 0.01 * (variance - b_variance), use_locking=True)
-
-                    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_mean_op)
-                    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_variance_op)
+        if flat is True:
+            return {
+                f'{prefix}': tensor_to_dict(filter_),
+                f'{prefix}/offset': tensor_to_dict(offset_),
+                f'{prefix}/shape': tensor_to_dict(filter_.shape, as_type='i4')
+            }
         else:
-            y, _, _ = tf.compat.v1.nn.fused_batch_norm(
-                x,
-                scale,
-                offset,
-                mean,
-                variance,
-                data_format='NHWC',
-                is_training=False
-            )
+            return {
+                't': 'conv',
+                'vs': {
+                    'filter': tensor_to_dict(filter_),
+                    'offset': tensor_to_dict(offset_),
+                    'shape': tensor_to_dict(filter_.shape, as_type='i4')
+                }
+            }
 
-        return y
+    def call(self, x, training=True, is_recomputing=False):
+        """ Returns the result of the forward inference pass on `x` """
 
-    return _forward(x)
+        filter_nxn = tf.cast(self.filter_constraint_nxn(self.filter_nxn), x.dtype)
+        filter_1x1 = tf.cast(self.filter_constraint_1x1(self.filter_1x1), x.dtype)
+        y_nxn = tf.nn.conv2d(x, filter_nxn, 1, 'SAME', data_format='NHWC')
+        y_1x1 = tf.nn.conv2d(x, filter_1x1, 1, 'SAME', data_format='NHWC')
+
+        return self.batch_norm(y_nxn + y_1x1, training=training)

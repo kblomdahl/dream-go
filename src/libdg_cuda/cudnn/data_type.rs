@@ -44,3 +44,9 @@ impl DataType {
         }
     }
 }
+
+impl Default for DataType {
+    fn default() -> Self {
+        DataType::Float
+    }
+}

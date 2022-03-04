@@ -13,20 +13,26 @@
 // limitations under the License.
 
 use bench::{Benchmark, BenchmarkExecutor};
+use dg_go::{Board, Color};
 use dg_go::utils::features::{self, HWC, Features};
-use dg_go::utils::sgf::SgfEntry;
 use dg_go::utils::symmetry::Transform;
 use dg_utils::types::f16;
 
-pub struct FeatureBenchmarkExecutor;
+pub struct FeatureBenchmarkExecutor {
+    // pass
+}
 
 impl BenchmarkExecutor for FeatureBenchmarkExecutor {
     fn new() -> Self {
-        Self {}
+        Self { }
     }
 
-    fn call(&mut self, entry: SgfEntry) -> usize {
-        let _features = features::Default::new(&entry.board).get_features::<HWC, f16>(entry.color, Transform::Identity);
+    fn setup(&mut self) {
+        // pass
+    }
+
+    fn call(&mut self, board: &Board, to_move: Color) -> usize {
+        let _features = features::Default::new(to_move, board).get_features::<HWC, f16>(Transform::Identity);
 
         1
     }

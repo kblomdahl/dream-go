@@ -25,6 +25,13 @@ pub type cudnnTensorDescriptor_t = *const c_void;
 extern {
     fn cudnnCreateTensorDescriptor(tensor_desc: *mut cudnnTensorDescriptor_t) -> cudnnStatus_t;
     fn cudnnDestroyTensorDescriptor(tensor_desc: cudnnTensorDescriptor_t) -> cudnnStatus_t;
+    fn cudnnSetTensorNdDescriptor(
+        tensor_desc: cudnnTensorDescriptor_t,
+        data_type: cudnnDataType_t,
+        nb_dims: c_int,
+        dim_a: *const c_int,
+        stride_a: *const c_int
+    ) -> cudnnStatus_t;
     fn cudnnSetTensor4dDescriptor(
         tensor_desc: cudnnTensorDescriptor_t,
         format: cudnnTensorFormat_t,
@@ -114,6 +121,8 @@ pub struct TensorDescriptor {
     tensor_desc: cudnnTensorDescriptor_t
 }
 
+unsafe impl Send for TensorDescriptor {}
+
 impl Drop for TensorDescriptor {
     fn drop(&mut self) {
         unsafe { cudnnDestroyTensorDescriptor(self.tensor_desc) };
@@ -164,6 +173,37 @@ impl TensorDescriptor {
                         shape[1],
                         shape[2],
                         shape[3]
+                    )
+                };
+
+            status.into_result(out)
+        })
+    }
+
+    /// Returns a tensor descriptor created by `cudnnSetTensorNdDescriptor()`
+    /// with the given `format`, `data_type`, and `shape`.
+    ///
+    /// # Arguments
+    ///
+    /// * `data_type` -
+    /// * `shape` - 3D shape.
+    /// * `stride` -
+    ///
+    pub fn new3(
+        data_type: DataType,
+        shape: [i32; 3],
+        stride: [i32; 3]
+    ) -> Result<Self, Status>
+    {
+        Self::empty().and_then(|out| {
+            let status =
+                unsafe {
+                    cudnnSetTensorNdDescriptor(
+                        out.tensor_desc,
+                        data_type,
+                        3,
+                        shape.as_ptr(),
+                        stride.as_ptr()
                     )
                 };
 

@@ -41,6 +41,8 @@ pub struct Ptr {
     size_in_bytes: usize
 }
 
+unsafe impl Send for Ptr {}
+
 impl Default for Ptr {
     fn default() -> Self {
         Self { dev_ptr: ptr::null_mut(), size_in_bytes: 0 }
@@ -90,6 +92,23 @@ impl Ptr {
         let error = unsafe {
             cudaMemcpyAsync(
                 self.dev_ptr,
+                data.as_ptr() as *const _,
+                size_in_bytes,
+                cudaMemcpyKind_t::HostToDevice,
+                **stream
+            )
+        };
+
+        error.into_result(())
+    }
+
+    pub fn copy_from_slice_offset<T: Sized>(&mut self, offset_in_bytes: usize, data: &[T], stream: &Stream) -> Result<(), Error> {
+        debug_assert!(size_of::<T>() * data.len() + offset_in_bytes <= self.size_in_bytes);
+
+        let size_in_bytes = size_of::<T>() * data.len();
+        let error = unsafe {
+            cudaMemcpyAsync(
+                self.dev_ptr.offset(offset_in_bytes as isize),
                 data.as_ptr() as *const _,
                 size_in_bytes,
                 cudaMemcpyKind_t::HostToDevice,

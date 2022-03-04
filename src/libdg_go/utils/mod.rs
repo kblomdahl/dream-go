@@ -13,10 +13,8 @@
 // limitations under the License.
 
 pub mod benson;
-pub mod extract_example;
 pub mod flood_fill;
 pub mod features;
 pub mod ladder;
 pub mod score;
-pub mod sgf;
 pub mod symmetry;

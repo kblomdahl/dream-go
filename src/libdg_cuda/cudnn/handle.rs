@@ -40,6 +40,8 @@ pub struct Handle {
     handle: cudnnHandle_t
 }
 
+unsafe impl Send for Handle {}
+
 impl Drop for Handle {
     fn drop(&mut self) {
         unsafe { cudnnDestroy(self.handle) };

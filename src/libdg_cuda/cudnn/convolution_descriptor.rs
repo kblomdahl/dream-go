@@ -111,6 +111,8 @@ pub struct ConvolutionDescriptor {
     conv_desc: cudnnConvolutionDescriptor_t
 }
 
+unsafe impl Send for ConvolutionDescriptor {}
+
 impl Deref for ConvolutionDescriptor {
     type Target = cudnnConvolutionDescriptor_t;
 
@@ -176,6 +178,15 @@ impl ConvolutionDescriptor {
         } else {
             Ok(MathType::DefaultMath)
         }
+    }
+
+    pub fn set_default_math_type(&self) -> Result<(), Status> {
+        unsafe {
+            cudnnSetConvolutionMathType(
+                self.conv_desc,
+                MathType::DefaultMath
+            )
+        }.into_result(())
     }
 
     pub fn math_type(&self) -> Result<MathType, Status> {

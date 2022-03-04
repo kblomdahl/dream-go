@@ -18,6 +18,7 @@ extern crate dg_utils;
 #[cfg(test)] extern crate test;
 extern crate libc;
 
+pub mod cublas_lt;
 pub mod cudnn;
 mod allocator;
 mod devices;

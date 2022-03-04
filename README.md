@@ -1,8 +1,8 @@
 # Dream Go - All day, every day
 
-Dream Go is an independent implementation of the algorithms and concepts presented by DeepMind in their [Master the Game of Go without Human Knowledge](https://deepmind.com/documents/119/agz_unformatted_nature.pdf) paper with a few modifications to (maybe) make it feasible to develop a strong player without access to a supercomputer on the scale of [Sunway TaihuLight](https://en.wikipedia.org/wiki/Sunway_TaihuLight).
+Dream Go is an independent implementation of the algorithms and concepts presented by DeepMind in their [MuZero: Mastering Go, chess, shogi and Atari without rules](https://rdcu.be/ccErB) paper with a few modifications to (maybe) make it feasible to develop a strong player without access to a supercomputer on the scale of [Sunway TaihuLight](https://en.wikipedia.org/wiki/Sunway_TaihuLight).
 
-* Human games are used to bootstrap the network weights.
+* You can use human games to bootstrap the network weights.
 * Additional (synthetic) features inspired by [AlphaGo](https://storage.googleapis.com/deepmind-media/alphago/AlphaGoNaturePaper.pdf) and [DeepForest](https://arxiv.org/pdf/1511.06410.pdf) are used during training and inference.
 * A self learning procedure inspired by [Thinking Fast and Slow with Deep Learning and Tree Search](https://arxiv.org/pdf/1705.08439.pdf) is used.
 
@@ -34,7 +34,8 @@ This binary file can then be feed into the bootstrap script which will tune the 
 
 ```bash
 cd contrib/trainer
-python -m dream_tf --start kgs_big.sgf
+echo '{ "data": [ "kgs_bal.sgf" ] }' > /tmp/config.json
+python -m dream_tf --start --config /tmp/config.json
 ```
 
 ```bash
@@ -44,7 +45,7 @@ tensorboard --logdir models/
 When you are done training your network you need to transcode the weights from Tensorflow protobufs into a format that can be read by Dream Go, this can be accomplished using the `--dump` command of the bootstrap script:
 
 ```bash
-python -m dream_tf --dump > dream-go.json
+python -m dream_tf --dump > dream_go.json
 ```
 
 ## Reinforcement Learning
@@ -70,7 +71,8 @@ The network should now be re-trained using this self-play, this is done in the s
 sort < self_play.sgf | uniq | shuf | ./tools/sgf2balance.py > self_play_bal.sgf
 ```
 ```bash
-cd contrib/trainer/ && python3 -m dream_tf --start self_play_bal.sgf
+echo '{ "data": [ "self_play_bal.sgf" ] }' > /tmp/config.json
+cd contrib/trainer/ && python3 -m dream_tf --start --config /tmp/config.json
 ```
 
 ### Expert Iteration
@@ -87,7 +89,8 @@ The training procedure for [Expert Iteration](https://arxiv.org/abs/1705.08439) 
 sort < policy_play.sgf | uniq | shuf | ./tools/sgf2balance.py > policy_play_bal.sgf
 ```
 ```bash
-cd contrib/trainer/ && python3 -m dream_tf --start policy_play_bal.sgf
+echo '{ "data": [ "self_play_bal.sgf" ] }' > /tmp/config.json
+cd contrib/trainer/ && python3 -m dream_tf --start --config /tmp/config.json
 ```
 
 For the values provided in this example, which generate 200,000 examples for the neural network it should take about 1 days to generate the required data (from 200,000 distinct games).
@@ -96,7 +99,7 @@ For the values provided in this example, which generate 200,000 examples for the
 
 * 1.0.0 - _Public Release_
 * 0.7.0 - _Acceptance_
-  * First version with a network trained from self-play games
+  * MuZero version of the engine with pretrained weights using semi-supervised training.
 * 0.6.3 - _Unravel_
   * The engines plays more enjoyable with `kgs-genmove_cleanup`
   * Bug fixes

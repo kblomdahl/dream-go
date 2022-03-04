@@ -82,13 +82,11 @@ pub fn create_initial_policy(
 /// * `dst` -
 /// * `src` -
 /// * `indices` - the symmetry elimination map
-/// * `transform` - the symmetry
 ///
 pub fn add_valid_candidates(
     dst: &mut Vec<f32>,
-    src: Vec<f32>,
-    indices: &[usize],
-    transform: symmetry::Transform
+    src: &[f32],
+    indices: &[usize]
 ) {
     // always copy the _passing_ move since it is never an illegal move.
     dst[361] += src[361];
@@ -97,7 +95,7 @@ pub fn add_valid_candidates(
     // before adding it to the destination.
     for point in Point::all() {
         let i = point.to_packed_index();
-        let j = indices[transform.inverse().apply(point).to_packed_index()];
+        let j = indices[i];
 
         dst[j] += src[i];
     }

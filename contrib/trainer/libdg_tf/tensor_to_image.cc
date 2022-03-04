@@ -31,7 +31,7 @@ using Eigen::half;
 
 /*
  * ```
- * 
+ *
  *  xxx
  * x   x
  * x   x
@@ -91,7 +91,7 @@ static const float WHITE_STONE[] = {
 
 /*
  * ```
- * 
+ *
  *  xxx
  * xxxxx
  * xxxxx
@@ -181,7 +181,7 @@ class TensorToHeatImageOp : public OpKernel {
                     opponent_tensor->shape().DebugString()
                 )
             );
- 
+
             OP_REQUIRES_OK(context, context->input("heat", &heat_tensor));
             OP_REQUIRES(
                 context,

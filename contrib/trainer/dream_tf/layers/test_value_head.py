@@ -18,58 +18,43 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
-import numpy as np
 import unittest
 
-from .value_head import value_head
-from .test_common import TestUtils
+import tensorflow as tf
+import numpy as np
+
+from ..test_common import TestUtils
+from .value_head import ValueHead
 
 class ValueHeadTest(unittest.TestCase, TestUtils):
     def setUp(self):
-        self.batch_size = 1
-        self.num_channels = 128
-        self.num_samples = 8
-        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
-        np.random.seed(12345)
-        tf.compat.v1.set_random_seed(67890)
-
-    def tearDown(self):
-        tf.compat.v1.reset_default_graph()
-
-    @property
-    def params(self):
-        return {
-            "num_channels": self.num_channels,
-            "num_samples": self.num_samples
-        }
+        self.batch_size = 8
+        self.embeddings_size = 32
+        self.x = tf.zeros([self.batch_size, self.embeddings_size], tf.float16)
+        self.value_head = ValueHead()
 
     def test_shape(self):
-        value_hat, ownership_hat, value_ownership_hat = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+        value_hat, ownership_hat = self.value_head(self.x, training=True)
         self.assertEqual(value_hat.shape, [self.batch_size, 1])
         self.assertEqual(ownership_hat.shape, [self.batch_size, 361])
-        self.assertEqual(value_ownership_hat.shape, [self.batch_size, 361, 2])
 
     def test_data_type(self):
-        value_hat, ownership_hat, value_ownership_hat = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
+        value_hat, ownership_hat = self.value_head(self.x, training=True)
         self.assertEqual(value_hat.dtype, tf.float32)
         self.assertEqual(ownership_hat.dtype, tf.float32)
-        self.assertEqual(value_ownership_hat.dtype, tf.float32)
 
     def test_fit(self):
-        with tf.device('/cpu:0'):
-            logits, _, _ = value_head(self.x, tf.estimator.ModeKeys.TRAIN, self.params)
-            steps = self.fit_regression(
-                inputs= \
-                    np.random.random([1, 19, 19, self.num_channels])
-                        .repeat(self.batch_size, axis=0),
-                labels= \
-                    np.random.random([1, 1])
-                        .repeat(self.batch_size, axis=0),
-                logits=logits
-            )
+        history = self.fit_regression(
+            inputs= \
+                np.random.random([1, self.embeddings_size])
+                    .repeat(self.batch_size, axis=0),
+            outputs=self.value_head,
+            labels= \
+                (2.0 * np.random.random([1, 1]) - 1.0)
+                    .repeat(self.batch_size, axis=0)
+        )
 
-            self.assertDecreasing([step['loss'] for step in steps])
+        self.assertDecreasing(history)
 
 if __name__ == '__main__':
     unittest.main()

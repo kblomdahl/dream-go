@@ -18,46 +18,68 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import tensorflow as tf
 import unittest
 
-from .batch_norm import batch_norm
+import tensorflow as tf
 
-class BatchNormTestBase:
+from ..test_common import TestUtils
+from .batch_norm import BatchNormConv2D, BatchNormDense
+
+class BatchNormConv2DTestBase(TestUtils):
     def setUp(self):
-        self.batch_size = 2048
-        self.num_channels = 128
-        self.x = tf.compat.v1.placeholder(tf.float16, [self.batch_size, 19, 19, self.num_channels])
-        self.weights = tf.compat.v1.placeholder(tf.float32, [3, 3, self.num_channels, self.num_channels])
+        self.x = tf.zeros([16, 19, 19, 64], tf.float16)
+        self.conv = BatchNormConv2D()
 
-    def tearDown(self):
-        tf.compat.v1.reset_default_graph()
-
-    @property
-    def mode(self):
-        return tf.estimator.ModeKeys.EVAL
-
-    @property
-    def params(self):
-        return {
-            "num_channels": self.num_channels
-        }
+    def test_dtype(self):
+        self.assertEqual(
+            self.conv(self.x, training=self.training).dtype,
+            self.x.dtype
+        )
 
     def test_shape(self):
         self.assertEqual(
-            batch_norm(self.x, self.weights, 'test', self.mode, self.params).shape,
+            self.conv(self.x, training=self.training).shape,
             self.x.shape
         )
 
-class BatchNormEvalTest(BatchNormTestBase, unittest.TestCase):
+class BatchNormConv2DEvalTest(BatchNormConv2DTestBase, unittest.TestCase):
     @property
-    def mode(self):
-        return tf.estimator.ModeKeys.EVAL
+    def training(self):
+        return False
 
-class BatchNormTrainTest(BatchNormTestBase, unittest.TestCase):
+class BatchNormConv2DTrainTest(BatchNormConv2DTestBase, unittest.TestCase):
     @property
-    def mode(self):
-        return tf.estimator.ModeKeys.TRAIN
+    def training(self):
+        return True
+
+class BatchNormDenseTestBase(TestUtils):
+    def setUp(self):
+        self.batch_size = 4
+        self.out_dims = 16
+        self.x = tf.zeros([self.batch_size, 361, 64], tf.float16)
+        self.dense = BatchNormDense(out_dims=self.out_dims)
+
+    def test_dtype(self):
+        self.assertEqual(
+            self.dense(self.x, training=self.training).dtype,
+            self.x.dtype
+        )
+
+    def test_shape(self):
+        self.assertEqual(
+            self.dense(self.x, training=self.training).shape,
+            [self.batch_size, 361, self.out_dims]
+        )
+
+class BatchNormDenseEvalTest(BatchNormDenseTestBase, unittest.TestCase):
+    @property
+    def training(self):
+        return False
+
+class BatchNormDenseTrainTest(BatchNormDenseTestBase, unittest.TestCase):
+    @property
+    def training(self):
+        return True
 
 if __name__ == '__main__':
     unittest.main()

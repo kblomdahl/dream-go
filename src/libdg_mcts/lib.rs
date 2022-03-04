@@ -20,7 +20,8 @@ extern crate concurrent_queue;
 extern crate crossbeam_utils;
 extern crate dg_cuda;
 extern crate dg_go;
-extern crate dg_nn;
+extern crate dg_predict;
+extern crate dg_sgf;
 extern crate dg_utils;
 #[macro_use] extern crate lazy_static;
 extern crate ordered_float;
@@ -80,53 +81,20 @@ use self::pool::*;
 /// * `board` - the board position to evaluate
 /// * `to_move` - the color to evaluate for
 ///
-fn full_forward(predictor: &dyn Predictor, options: &Box<dyn SearchOptions + Sync>, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>)> {
+fn full_forward(predictor: &dyn Predictor, options: &Box<dyn SearchOptions + Sync>, board: &Board, to_move: Color) -> Option<(f32, Vec<f32>, Vec<f16>)> {
     let (initial_policy, indices) = create_initial_policy(options, board, to_move);
-    let mut policy = initial_policy.clone();
-    let mut value = 0.0f32;
+    let new_response = predictor.fetch(board, to_move).unwrap_or_else(|| {
+        let features = features::Default::new(to_move, &board).get_features::<HWC, f16>(symmetry::Transform::Identity);
+        let new_response = predictor.initial_predict(&features, 1).pop().unwrap();
+        predictor.cache(board, to_move, new_response.clone());
+        new_response
+    });
 
-    // find out which symmetries has already been calculated, and which ones has not
-    let mut new_requests = Vec::with_capacity(8 * features::Default::size());
-    let mut new_symmetries = Vec::with_capacity(8);
+    let mut new_policy = initial_policy.clone();
+    add_valid_candidates(&mut new_policy, &new_response.policy(), &indices);
+    normalize_policy(&mut new_policy, 1.0);
 
-    for &t in &symmetry::ALL {
-        if let Some(new_response) = predictor.fetch(board, to_move, t) {
-            let mut new_policy = initial_policy.clone();
-            add_valid_candidates(&mut new_policy, new_response.policy(), &indices, t);
-            normalize_policy(&mut new_policy, 0.125);
-
-            value += new_response.winrate() * 0.125;
-            for i in 0..362 {
-                policy[i] += new_policy[i];
-            }
-        } else {
-            let features = features::Default::new(&board).get_features::<HWC, f16>(to_move, t);
-            new_requests.extend_from_slice(&features);
-            new_symmetries.push(t);
-        }
-    }
-
-    // calculate any symmetries that were missing, add them to the cache, and then take the
-    // average of them
-    let batch_size = new_symmetries.len();
-
-    if batch_size > 0 {
-        let new_responses = predictor.predict(&new_requests, batch_size);
-
-        for (new_response, t) in new_responses.into_iter().zip(new_symmetries.into_iter()) {
-            let mut new_policy = initial_policy.clone();
-            add_valid_candidates(&mut new_policy, new_response.policy(), &indices, t);
-            normalize_policy(&mut new_policy, 0.125);
-
-            value += new_response.winrate() * 0.125;
-            for i in 0..362 {
-                policy[i] += new_policy[i];
-            }
-            predictor.cache(board, to_move, t, new_response);
-        }
-    }
-
-    Some((value, policy))
+    Some((new_response.winrate(), new_policy, new_response.hidden_states().clone()))
 }
 
 /// Predicts the _best_ next move according to the given neural network when applied
@@ -151,7 +119,7 @@ pub fn predict(
 ) -> Option<(f32, usize, tree::Node)>
 {
     let deterministic = options.deterministic();
-    let (starting_value, mut starting_policy) = full_forward(
+    let (starting_value, mut starting_policy, hidden_states) = full_forward(
         pool.predictor(),
         &options,
         starting_point,
@@ -178,7 +146,7 @@ pub fn predict(
         starting_tree.prior[0..362].clone_from_slice(&starting_policy[..362]);
         starting_tree
     } else {
-        tree::Node::new(starting_color, starting_value, starting_policy)
+        tree::Node::new(starting_color, starting_value, hidden_states, starting_policy)
     };
 
     // enqueue this tree search
@@ -245,7 +213,7 @@ mod tests {
     #[test]
     fn no_allowed_moves() {
         let pool = Pool::with_capacity(Box::new(RandomPredictor::default()), 1);
-        let mut root = tree::Node::new(Color::Black, 0.0, vec! [1.0; 362]);
+        let mut root = tree::Node::new(Color::Black, 0.0, vec! [f16::from(0.0); 722], vec! [1.0; 362]);
 
         for i in 0..362 {
             root.disqualify(i);
