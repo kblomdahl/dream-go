@@ -37,6 +37,10 @@ class NumTargetChannelsOp : public OpKernel {
 
             n_tensor->flat<int>()(0) = example.additional_targets_shape_[4];
         }
+
+        bool IsExpensive() override {
+            return false;
+        }
 };
 
 REGISTER_OP("NumTargetChannels")
@@ -72,6 +76,10 @@ class NumMotionChannelsOp : public OpKernel {
 
             n_tensor->flat<int>()(0) = example.motion_features_shape_[4];
         }
+
+        bool IsExpensive() override {
+            return false;
+        }
 };
 
 REGISTER_OP("NumMotionChannels")
@@ -106,6 +114,10 @@ class NumFeatureChannelsOp : public OpKernel {
             );
 
             n_tensor->flat<int>()(0) = example.features_shape_[4];
+        }
+
+        bool IsExpensive() override {
+            return false;
         }
 };
 

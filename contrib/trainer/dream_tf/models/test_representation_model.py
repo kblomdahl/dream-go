@@ -1,4 +1,4 @@
-# Copyright (c) 2020 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+# Copyright (c) 2021 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,29 +24,34 @@ import tensorflow as tf
 import numpy as np
 
 from ..test_common import TestUtils
-from .bottleneck_block import BottleneckBlock
+from .representation_model import RepresentationModel
 
-class BottleneckBlockTest(unittest.TestCase, TestUtils):
+class RepresentationModelTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
-        self.num_channels = 32
+        self.num_channels = 16
+        self.embeddings_size = 8
         self.x = tf.zeros([self.batch_size, 19, 19, self.num_channels], tf.float16)
-        self.bottleneck_block = BottleneckBlock()
+        self.layer = RepresentationModel(num_blocks=2, num_channels=self.num_channels, embeddings_size=self.embeddings_size)
 
     def test_shape(self):
-        y = self.bottleneck_block(self.x, training=True)
+        y = self.layer(self.x)
 
-        self.assertEqual(y.shape, self.x.shape)
-        self.assertEqual(y.dtype, self.x.dtype)
+        self.assertEqual(y.shape, [self.batch_size, self.embeddings_size])
+
+    def test_dtype(self):
+        y = self.layer(self.x)
+
+        self.assertEqual(y.dtype, tf.float16)
 
     def test_fit(self):
         history = self.fit_regression(
             inputs= \
                 np.random.random([1, 19, 19, self.num_channels])
                     .repeat(self.batch_size, axis=0),
-            outputs=self.bottleneck_block,
+            outputs=self.layer,
             labels= \
-                np.random.random([1, 19, 19, self.num_channels])
+                np.random.random([1, self.embeddings_size])
                     .repeat(self.batch_size, axis=0)
         )
 

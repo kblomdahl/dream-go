@@ -476,7 +476,7 @@ mod tests {
         let features = V1::new(Color::Black, &board)
             .get_motion_features::<HWC, f32>(symmetry::Transform::Identity);
 
-        assert_eq!(features.len(), V1::size());
+        assert_eq!(features.len(), V1::motion_size());
     }
 
     #[test]

@@ -74,7 +74,7 @@ class BatchNormDense(XavierOrthogonalInitializer, tf.keras.layers.Layer):
                 }
             }
 
-    def call(self, x, training=True, is_recomputing=False):
+    def call(self, x, training=True):
         kernel = tf.cast(self.kernel_constraint(self.kernel), x.dtype)
         y = tf.linalg.matmul(x, kernel)
 
@@ -155,7 +155,7 @@ class BatchNormConv2D(XavierOrthogonalInitializer, tf.keras.layers.Layer):
                 }
             }
 
-    def call(self, x, training=True, is_recomputing=False):
+    def call(self, x, training=True):
         """ Returns the result of the forward inference pass on `x` """
 
         filter_nxn = tf.cast(self.filter_constraint_nxn(self.filter_nxn), x.dtype)

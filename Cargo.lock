@@ -144,6 +144,7 @@ dependencies = [
  "dg_cuda",
  "dg_go",
  "dg_mcts",
+ "dg_pipe",
  "dg_predict",
  "dg_utils",
  "lazy_static",

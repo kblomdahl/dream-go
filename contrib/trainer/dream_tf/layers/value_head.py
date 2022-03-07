@@ -47,18 +47,14 @@ class ValueHead(tf.keras.layers.Layer):
                 't': 'value',
                 'vs': {
                     **self.linear_y.as_dict('linear_1', flat=True)
-            }
+                }
             }
 
     def build(self, input_shapes):
-        self.linear_o = Dense(361, use_bias=True, dtype='float32')
         self.linear_y = Dense(1, use_bias=True, bias_initializer=value_offset_op, dtype='float32')
 
     def call(self, x, training=True):
-        y = tf.nn.tanh(self.linear_y(x, training=training))
-        o = tf.nn.tanh(self.linear_o(x, training=training))
-
-        return y, o
+        return tf.nn.tanh(self.linear_y(x, training=training))
 
 def value_offset_op(shape, dtype=None, partition_info=None):
     return np.array([-0.00502319782])

@@ -39,13 +39,18 @@ pub extern "C" fn parse_sgf_example(
     if let Some(game) = Game::from_bytes(content) {
         parse_game_examples(example, &game)
     } else {
-        -22 // EINVAL
+        -84 // EILSEQ
     }
 }
 
 fn parse_game_examples(example: &mut Example, game: &Game) -> c_int {
     let num_examples = example.features_shape[0] as usize;
     let num_unrolls = example.features_shape[1] as usize;
+
+    if game.len() < (num_examples * num_unrolls) {
+        return -101; // game is too short
+    }
+
     let mut free_indices = (0..game.len() - num_unrolls).collect::<Vec<_>>();
 
     for i in 0..num_examples {
@@ -69,7 +74,7 @@ fn parse_game_examples(example: &mut Example, game: &Game) -> c_int {
             // regions, but that's fine.
             free_indices.retain(|idx| !(starting_index..(starting_index + num_unrolls)).contains(idx));
         } else {
-            return -11 // EAGAIN
+            return -101; // game is too short
         }
     }
 

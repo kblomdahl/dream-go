@@ -20,9 +20,6 @@
 
 import tensorflow as tf
 
-from .batch_norm import BatchNormConv2D
-from .recompute_grad import recompute_grad
-
 
 class ResidualBlock(tf.keras.layers.Layer):
     """
@@ -37,8 +34,10 @@ class ResidualBlock(tf.keras.layers.Layer):
     7. A rectifier non-linearity
     """
 
-    def __init__(self):
+    def __init__(self, layer_type):
         super(ResidualBlock, self).__init__()
+
+        self.layer_type = layer_type
 
     def as_dict(self):
         return {
@@ -50,19 +49,19 @@ class ResidualBlock(tf.keras.layers.Layer):
         }
 
     def build(self, input_shape):
-        self.conv_1 = BatchNormConv2D(kernel_size=3)
-        self.conv_2 = BatchNormConv2D(kernel_size=3)
+        self.conv_1 = self.layer_type()
+        self.conv_2 = self.layer_type()
 
     def call(self, x, training=True):
-        def _forward(x, is_recomputing=False):
+        def _forward(x):
             """ Returns the result of the forward inference pass on `x` """
 
             # the 1st convolution
-            y = self.conv_1(x, training=training, is_recomputing=is_recomputing)
+            y = self.conv_1(x, training=training)
             y = tf.nn.relu(y)
 
             # the 2nd convolution
-            y = self.conv_2(y, training=training, is_recomputing=is_recomputing)
+            y = self.conv_2(y, training=training)
             return tf.nn.relu(x + y)
 
-        return recompute_grad(_forward)(x)
+        return tf.recompute_grad(_forward)(x)

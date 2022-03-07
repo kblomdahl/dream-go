@@ -1,4 +1,4 @@
-# Copyright (c) 2021 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
+# Copyright (c) 2022 Karl Sundequist Blomdahl <karl.sundequist.blomdahl@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -18,29 +18,37 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import unittest
-
 import tensorflow as tf
 
-from ..test_common import TestUtils
-from .dynamics import Dynamics
+from ..layers.batch_norm import BatchNormDense
+from ..layers.residual_block import ResidualBlock
 
-class DynamicsTest(unittest.TestCase, TestUtils):
-    def setUp(self):
-        self.batch_size = 2
-        self.embeddings_size = 16
-        self.state = tf.zeros([self.batch_size, 19, 19, 32], tf.float16)
-        self.layer = Dynamics(num_blocks=1, num_channels=8, embeddings_size=self.embeddings_size)
+class TransitionPredictor(tf.keras.layers.Layer):
+    def __init__(
+        self,
+        *,
+        layers=4,
+        embeddings_size
+    ):
+        super(TransitionPredictor, self).__init__()
 
-    def test_shape(self):
-        y = self.layer(self.state)
+        self.layers = layers
+        self.embeddings_size = embeddings_size
 
-        self.assertEqual(y.shape, [self.batch_size, self.embeddings_size])
+    def as_dict(self, flat=True):
+        return list([
+            layer.as_dict(flat=flat)
+            for layer in range(self.linear_1)
+        ])
 
-    def test_dtype(self):
-        y = self.layer(self.state)
+    def build(self, input_shapes):
+        self.linear_1 = list([
+            ResidualBlock(lambda: BatchNormDense(out_dims=self.embeddings_size))
+            for _ in range(self.layers)
+        ])
 
-        self.assertEqual(y.dtype, tf.float16)
+    def call(self, x, training=True):
+        for linear_1 in self.linear_1:
+            x = linear_1(x, training=training)
 
-if __name__ == '__main__':
-    unittest.main()
+        return x

@@ -15,6 +15,7 @@
 use dg_utils::types::f16;
 use dg_go::utils::features::{self as features};
 
+use std::ptr;
 use libc::{c_int};
 
 #[repr(C)]
@@ -51,6 +52,32 @@ pub struct Example {
 }
 
 impl Example {
+    pub fn new(num_examples: i32, num_unrolls: i32) -> Self {
+        let mut out = Self {
+            features: ptr::null_mut(),
+            features_shape: [0; 5],
+
+            motion_features: ptr::null_mut(),
+            motion_features_shape: [0; 5],
+
+            lz_features: ptr::null_mut(),
+            lz_features_shape: [0; 5],
+
+            additional_targets: ptr::null_mut(),
+            additional_targets_mask: ptr::null_mut(),
+            additional_targets_shape: [0; 5],
+
+            value: ptr::null_mut(),
+            value_shape: [0; 3],
+
+            policy: ptr::null_mut(),
+            policy_shape: [0; 3]
+        };
+
+        set_example_shape(&mut out, num_examples, num_unrolls);
+        out
+    }
+
     pub fn has_shape(&self) -> bool {
         self.features_shape.iter().product::<i32>() > 0 &&
             self.motion_features_shape.iter().product::<i32>() > 0 &&

@@ -33,13 +33,15 @@ MODEL_CONFIG_JSON = '''
 
     "model": {
         "embeddings_size": 32,
-        "repr": {
+        "representation": {
             "num_blocks": 12,
             "num_channels": 24
         },
-        "dyn": {
-            "num_blocks": 20,
-            "num_channels": 256
+        "transition_predictor": {
+            "layers": 6
+        },
+        "predictor": {
+            "layers": 8
         }
     },
 
@@ -47,7 +49,7 @@ MODEL_CONFIG_JSON = '''
         "coefficients": {
             "policy": 0.5,
             "value": 0.6,
-            "ownership": 0.4,
+            "target": 0.4,
             "similarity": 0.2
         },
         "label_smoothing": 1.0,
@@ -103,11 +105,11 @@ class ModelConfigTest(unittest.TestCase):
     def test_num_repr_channels(self):
         self.assertEqual(ModelConfig(self.filename).num_repr_channels, 24)
 
-    def test_num_dyn_blocks(self):
-        self.assertEqual(ModelConfig(self.filename).num_dyn_blocks, 20)
+    def test_num_trans_layers(self):
+        self.assertEqual(ModelConfig(self.filename).num_trans_layers, 6)
 
-    def test_num_dyn_channels(self):
-        self.assertEqual(ModelConfig(self.filename).num_dyn_channels, 256)
+    def test_num_pred_layers(self):
+        self.assertEqual(ModelConfig(self.filename).num_pred_layers, 8)
 
     def test_policy_coefficient(self):
         self.assertEqual(ModelConfig(self.filename).policy_coefficient, 0.5)
@@ -115,8 +117,8 @@ class ModelConfigTest(unittest.TestCase):
     def test_value_coefficient(self):
         self.assertEqual(ModelConfig(self.filename).value_coefficient, 0.6)
 
-    def test_ownership_coefficient(self):
-        self.assertEqual(ModelConfig(self.filename).ownership_coefficient, 0.4)
+    def test_target_coefficient(self):
+        self.assertEqual(ModelConfig(self.filename).target_coefficient, 0.4)
 
     def test_similarity_coefficient(self):
         self.assertEqual(ModelConfig(self.filename).similarity_coefficient, 0.2)

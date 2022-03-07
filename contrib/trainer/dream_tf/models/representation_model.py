@@ -20,14 +20,14 @@
 
 import tensorflow as tf
 
-from .batch_norm import BatchNormDense, BatchNormConv2D
-from .residual_block import ResidualBlock
-from .quantize import Quantize
+from ..layers.batch_norm import BatchNormConv2D, BatchNormDense
+from ..layers.residual_block import ResidualBlock
 
 
-class Dynamics(tf.keras.layers.Layer, Quantize):
-    """ The full neural network used to predict the value and policy tensors for
-    a mini-batch of board positions. """
+class RepresentationModel(tf.keras.layers.Layer):
+    """ The neural network that is responsible for creating the features as
+    given by the board state and transforms it into some internal
+    representation. """
 
     def __init__(
         self,
@@ -36,7 +36,7 @@ class Dynamics(tf.keras.layers.Layer, Quantize):
         num_channels,
         embeddings_size
     ):
-        super(Dynamics, self).__init__()
+        super(RepresentationModel, self).__init__()
 
         self.num_blocks = num_blocks
         self.num_channels = num_channels
@@ -49,30 +49,22 @@ class Dynamics(tf.keras.layers.Layer, Quantize):
             self.to_embeddings.as_dict(flat=False)
         ]
 
-    @property
-    def l2_weights(self):
-        return self.trainable_weights
-
     def build_stem_layer(self, input_shapes, i):
-        return ResidualBlock()
+        return ResidualBlock(lambda: BatchNormConv2D(kernel_size=3))
 
     def build(self, input_shapes):
-        if self.num_blocks > 0:
-            self.conv_1 = BatchNormConv2D(filters=self.num_channels, kernel_size=3)
-            self.stem = list([
-                self.build_stem_layer(input_shapes, i)
-                for i in range(self.num_blocks)
-            ])
-
+        self.conv_1 = BatchNormConv2D(filters=self.num_channels, kernel_size=3)
+        self.stem = list([
+            self.build_stem_layer(input_shapes, i)
+            for i in range(self.num_blocks)
+        ])
         self.to_embeddings = BatchNormDense(out_dims=self.embeddings_size)
 
     def call(self, x, training=True):
-        if self.num_blocks > 0:
-            y = tf.nn.relu(self.conv_1(x, training=training))
+        y = tf.nn.relu(self.conv_1(x, training=training))
 
-            for layer in self.stem:
-                y = layer(y, training=training)
-        else:
-            y = x
+        for layer in self.stem:
+            y = layer(y, training=training)
 
-        return tf.nn.relu(self.to_embeddings(tf.keras.layers.Flatten()(y), training=training))
+        y = tf.keras.layers.Flatten()(y)
+        return tf.nn.relu(self.to_embeddings(y, training=training))

@@ -33,6 +33,8 @@ class RNN(tf.keras.layers.GRU, XavierOrthogonalInitializer):
             time_major=True
         )
 
+        self.initial_hidden_state = self.add_weight('initial_state', (1, units), tf.float32)
+
     def as_dict(self, prefix=None, flat=True):
         # This is based on tensorflow [1] internals and is probably subject
         # to change :'(.

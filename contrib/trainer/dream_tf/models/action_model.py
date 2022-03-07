@@ -18,33 +18,29 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import unittest
-
 import tensorflow as tf
 
-from ..test_common import TestUtils
-from .predictions import Predictions
+from ..layers.batch_norm import BatchNormDense
 
-class PredictionsTest(unittest.TestCase, TestUtils):
-    def setUp(self):
-        self.batch_size = 2
-        self.embeddings_size = 16
-        self.x = tf.zeros([self.batch_size, self.embeddings_size], tf.float16)
-        self.layer = Predictions()
 
-    def test_shape(self):
-        v, p, vo = self.layer(self.x)
+class ActionModel(tf.keras.layers.Layer):
+    def __init__(
+        self,
+        *,
+        embeddings_size
+    ):
+        super(ActionModel, self).__init__()
 
-        self.assertEqual(v.shape, [self.batch_size, 1])
-        self.assertEqual(p.shape, [self.batch_size, 362])
-        self.assertEqual(vo.shape, [self.batch_size, 361])
+        self.embeddings_size = embeddings_size
 
-    def test_dtype(self):
-        v, p, vo = self.layer(self.x)
+    def as_dict(self):
+        return [
+            self.to_embeddings.as_dict(flat=False)
+        ]
 
-        self.assertEqual(v.dtype, tf.float32)
-        self.assertEqual(p.dtype, tf.float32)
-        self.assertEqual(vo.dtype, tf.float32)
+    def build(self, input_shapes):
+        self.to_embeddings = BatchNormDense(out_dims=self.embeddings_size)
 
-if __name__ == '__main__':
-    unittest.main()
+    def call(self, x, training=True):
+        y = tf.keras.layers.Flatten()(x)
+        return tf.nn.relu(self.to_embeddings(y, training=training))

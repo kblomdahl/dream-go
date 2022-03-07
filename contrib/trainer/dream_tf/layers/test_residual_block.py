@@ -24,14 +24,15 @@ import tensorflow as tf
 import numpy as np
 
 from ..test_common import TestUtils
+from .batch_norm import BatchNormConv2D, BatchNormDense
 from .residual_block import ResidualBlock
 
-class ResidualBlockTest(unittest.TestCase, TestUtils):
+class ResidualBlockConvTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
         self.num_channels = 32
         self.x = tf.zeros([self.batch_size, 19, 19, self.num_channels], tf.float16)
-        self.residual_block = ResidualBlock()
+        self.residual_block = ResidualBlock(lambda: BatchNormConv2D(kernel_size=3))
 
     def test_shape(self):
         self.assertEqual(
@@ -47,6 +48,32 @@ class ResidualBlockTest(unittest.TestCase, TestUtils):
             outputs=self.residual_block,
             labels= \
                 np.random.random([1, 19, 19, self.num_channels])
+                    .repeat(self.batch_size, axis=0)
+        )
+
+        self.assertDecreasing(history)
+
+class ResidualBlockDenseTest(unittest.TestCase, TestUtils):
+    def setUp(self):
+        self.batch_size = 2
+        self.embeddings_size = 32
+        self.x = tf.zeros([self.batch_size, self.embeddings_size], tf.float16)
+        self.residual_block = ResidualBlock(lambda: BatchNormDense(out_dims=self.embeddings_size))
+
+    def test_shape(self):
+        self.assertEqual(
+            self.residual_block(self.x, training=True).shape,
+            self.x.shape
+        )
+
+    def test_fit(self):
+        history = self.fit_regression(
+            inputs= \
+                np.random.random([1, self.embeddings_size])
+                    .repeat(self.batch_size, axis=0),
+            outputs=self.residual_block,
+            labels= \
+                np.random.random([1, self.embeddings_size])
                     .repeat(self.batch_size, axis=0)
         )
 

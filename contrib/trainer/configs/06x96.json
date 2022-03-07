@@ -1,5 +1,5 @@
 {
-    "batch_size": 2816,
+    "batch_size": 4096,
     "num_unrolls": 8,
     "data": [
         "data/foxwq_big.sgf"
@@ -7,13 +7,15 @@
 
     "model": {
         "embeddings_size": 722,
-        "repr": {
+        "representation": {
             "num_blocks": 6,
             "num_channels": 96
         },
-        "dyn": {
-            "num_blocks": 6,
-            "num_channels": 64
+        "transition_predictor": {
+            "layers": 2
+        },
+        "predictor": {
+            "layers": 2
         }
     },
 
@@ -21,8 +23,8 @@
         "coefficients": {
             "policy": 1.0,
             "value": 1.0,
-            "ownership": 0.1,
-            "similarity": 0.1
+            "similarity": 1.0,
+            "target": 1.0
         },
 
         "label_smoothing": 0.1,

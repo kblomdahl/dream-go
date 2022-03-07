@@ -20,16 +20,19 @@
 
 import tensorflow as tf
 
-from .policy_head import PolicyHead
-from .value_head import ValueHead
+from ..layers.policy_head import PolicyHead
+from ..layers.value_head import ValueHead
+from ..layers.batch_norm import BatchNormDense
 
 
 class Predictions(tf.keras.layers.Layer):
     """ The full neural network used to predict the value and policy tensors for
     a mini-batch of board positions. """
 
-    def __init__(self):
+    def __init__(self, *, layers=4):
         super(Predictions, self).__init__()
+
+        self.layers = layers
 
     def as_dict(self):
         return [
@@ -42,16 +45,19 @@ class Predictions(tf.keras.layers.Layer):
             }
         ]
 
-    @property
-    def l2_weights(self):
-        return self.policy_head.trainable_weights + self.value_head.trainable_weights
-
     def build(self, input_shapes):
         self.policy_head = PolicyHead()
         self.value_head = ValueHead()
+        self.stem = list([
+            BatchNormDense(out_dims=input_shapes[1])
+            for _ in range(self.layers)
+        ])
 
     def call(self, x, training=True):
-        p = self.policy_head(x, training=training)
-        v, vo = self.value_head(x, training=training)
+        for layer in self.stem:
+            x = tf.nn.relu(layer(x, training=training))
 
-        return v, p, vo
+        p = self.policy_head(x, training=training)
+        v = self.value_head(x, training=training)
+
+        return v, p

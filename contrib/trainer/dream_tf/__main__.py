@@ -62,11 +62,11 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
         embeddings_size=model_config.embeddings_size,
         num_repr_blocks=model_config.num_repr_blocks,
         num_repr_channels=model_config.num_repr_channels,
-        num_dyn_blocks=model_config.num_dyn_blocks,
-        num_dyn_channels=model_config.num_dyn_channels,
+        num_trans_layers=model_config.num_trans_layers,
+        num_pred_layers=model_config.num_pred_layers,
         policy_coefficient=model_config.policy_coefficient,
         value_coefficient=model_config.value_coefficient,
-        ownership_coefficient=model_config.ownership_coefficient,
+        target_coefficient=model_config.target_coefficient,
         similarity_coefficient=model_config.similarity_coefficient,
         batch_size=model_config.batch_size // model_config.num_unrolls,
         discount_factor=model_config.discount_factor,
@@ -132,7 +132,6 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
     elif config.is_verify():
         # iterate over the entire dataset and collect the metric, which we will
         # then pretty-print as a JSON object to standard output
-        model.assign_average_vars(xs=input_fn(files=model_config.data, batch_size=max(1, model_config.batch_size // (8 * model_config.num_unrolls)), is_training=None))
         results = model.evaluate(
             x=input_fn(
                 files=model_config.data,
@@ -152,14 +151,6 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
             indent=4
         ))
     elif config.is_dump():
-        model.assign_average_vars(
-            xs=input_fn(
-                files=model_config.data,
-                batch_size=max(1, model_config.batch_size // (8 * model_config.num_unrolls)),
-                num_unrolls=model_config.num_unrolls,
-                is_training=None
-            )
-        )
         model.dump_to(sys.stdout)
 
 

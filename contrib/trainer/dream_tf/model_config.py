@@ -28,14 +28,14 @@ _HP_LZ_WEIGHTS = hp.HParam('lz_weights')
 _HP_DATA = hp.HParam('data')
 
 _HP_EMBEDDINGS_SIZE = hp.HParam('model.embeddings_size', hp.IntInterval(1, 2048))
-_HP_NUM_REPR_BLOCKS = hp.HParam('model.repr.num_blocks', hp.IntInterval(0, 80))
-_HP_NUM_REPR_CHANNELS = hp.HParam('model.repr.num_channels', hp.IntInterval(1, 2048))
-_HP_NUM_DYN_BLOCKS = hp.HParam('model.dyn.num_blocks', hp.IntInterval(0, 80))
-_HP_NUM_DYN_CHANNELS = hp.HParam('model.dyn.num_channels', hp.IntInterval(1, 2048))
+_HP_NUM_REPR_BLOCKS = hp.HParam('model.representation.num_blocks', hp.IntInterval(0, 80))
+_HP_NUM_REPR_CHANNELS = hp.HParam('model.representation.num_channels', hp.IntInterval(1, 2048))
+_HP_NUM_TRANS_LAYERS = hp.HParam('model.transition_predictor.layers', hp.IntInterval(0, 40))
+_HP_NUM_PRED_LAYERS = hp.HParam('model.predictor.layers', hp.IntInterval(0, 40))
 
 _HP_POLICY_COEF = hp.HParam('loss.coefficients.policy', hp.RealInterval(0.0, 1.0))
 _HP_VALUE_COEF = hp.HParam('loss.coefficients.value', hp.RealInterval(0.0, 1.0))
-_HP_OWNERSHIP_COEF = hp.HParam('loss.coefficients.ownership', hp.RealInterval(0.0, 1.0))
+_HP_TARGET_COEF = hp.HParam('loss.coefficients.target', hp.RealInterval(0.0, 1.0))
 _HP_SIMILARITY_COEF = hp.HParam('loss.coefficients.similarity', hp.RealInterval(0.0, 1.0))
 _HP_LABEL_SMOOTHING = hp.HParam('loss.label_smoothing', hp.RealInterval(0.0, 1.0))
 _HP_DISCOUNT_FACTOR = hp.HParam('loss.discount_factor', hp.RealInterval(0.0, 1.0))
@@ -79,14 +79,14 @@ class ModelConfig:
             _HP_DATA: self._dig('data') or [],
 
             _HP_EMBEDDINGS_SIZE: self._dig('model', 'embeddings_size') or 722,
-            _HP_NUM_REPR_BLOCKS: self._dig('model', 'repr', 'num_blocks') or 6,
-            _HP_NUM_REPR_CHANNELS: self._dig('model', 'repr', 'num_channels') or 96,
-            _HP_NUM_DYN_BLOCKS: self._dig('model', 'dyn', 'num_blocks') or 6,
-            _HP_NUM_DYN_CHANNELS: self._dig('model', 'dyn', 'num_channels') or 64,
+            _HP_NUM_REPR_BLOCKS: self._dig('model', 'representation', 'num_blocks') or 6,
+            _HP_NUM_REPR_CHANNELS: self._dig('model', 'representation', 'num_channels') or 96,
+            _HP_NUM_TRANS_LAYERS: self._dig('model', 'transition_predictor', 'layers') or 4,
+            _HP_NUM_PRED_LAYERS: self._dig('model', 'predictor', 'layers') or 4,
 
             _HP_POLICY_COEF: self._dig('loss', 'coefficients', 'policy') or 1.0,
             _HP_VALUE_COEF: self._dig('loss', 'coefficients', 'value') or 1.0,
-            _HP_OWNERSHIP_COEF: self._dig('loss', 'coefficients', 'ownership') or 0.1,
+            _HP_TARGET_COEF: self._dig('loss', 'coefficients', 'target') or 0.1,
             _HP_SIMILARITY_COEF: self._dig('loss', 'coefficients', 'similarity') or 0.1,
             _HP_LABEL_SMOOTHING: self._dig('loss', 'label_smoothing') or 0.2,
             _HP_DISCOUNT_FACTOR: self._dig('loss', 'discount_factor') or 0.97,
@@ -131,12 +131,12 @@ class ModelConfig:
         return self.hparams[_HP_NUM_REPR_CHANNELS]
 
     @property
-    def num_dyn_blocks(self):
-        return self.hparams[_HP_NUM_DYN_BLOCKS]
+    def num_trans_layers(self):
+        return self.hparams[_HP_NUM_TRANS_LAYERS]
 
     @property
-    def num_dyn_channels(self):
-        return self.hparams[_HP_NUM_DYN_CHANNELS]
+    def num_pred_layers(self):
+        return self.hparams[_HP_NUM_PRED_LAYERS]
 
     @property
     def policy_coefficient(self):
@@ -147,8 +147,8 @@ class ModelConfig:
         return self.hparams[_HP_VALUE_COEF]
 
     @property
-    def ownership_coefficient(self):
-        return self.hparams[_HP_OWNERSHIP_COEF]
+    def target_coefficient(self):
+        return self.hparams[_HP_TARGET_COEF]
 
     @property
     def similarity_coefficient(self):
@@ -207,7 +207,7 @@ class ModelConfig:
             },
             'loss': {
                 'coefficients': {
-                    'ownership': self.ownership_coefficient,
+                    'target': self.target_coefficient,
                     'policy': self.policy_coefficient,
                     'similarity': self.similarity_coefficient,
                     'value': self.value_coefficient
@@ -216,12 +216,14 @@ class ModelConfig:
                 'label_smoothing': self.label_smoothing
             },
             'model': {
-                'dyn': {
-                    'num_blocks': self.num_dyn_blocks,
-                    'num_channels': self.num_dyn_channels
+                'transition_predictor': {
+                    'layers': self.num_trans_layers
+                },
+                'predictor': {
+                    'layers': self.num_pred_layers
                 },
                 'embeddings_size': self.embeddings_size,
-                'repr': {
+                'representation': {
                     'num_blocks': self.num_repr_blocks,
                     'num_channels': self.num_repr_channels
                 }

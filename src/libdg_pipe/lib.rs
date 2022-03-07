@@ -21,4 +21,4 @@ extern crate dg_utils;
 extern crate libc;
 extern crate rand;
 
-mod api;
+pub mod api;

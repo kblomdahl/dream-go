@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 dg_cuda = { path = "../libdg_cuda"}
 dg_go = { path = "../libdg_go"}
+dg_pipe = { path = "../libdg_pipe"}
 dg_mcts = { path = "../libdg_mcts"}
 dg_predict = { path = "../libdg_predict"}
 dg_utils = { path = "../libdg_utils"}

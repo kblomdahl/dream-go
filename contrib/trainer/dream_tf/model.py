@@ -23,18 +23,15 @@ import json
 
 import numpy as np
 import tensorflow as tf
-import tensorflow_addons as tfa
 from tensorboard.plugins.hparams import api as hp
 
 from .layers.leela_zero import LeelaZero
-from .layers.dynamics import Dynamics
-from .layers.to_dict import tensor_to_dict
-from .layers.features_to_repr import FeaturesToRepr
-from .layers.predictions import Predictions
-from .layers.rnn import RNN
-from .layers.quantize import Quantize
+from .models.action_model import ActionModel
+from .models.recurrent_model import RecurrentModel
+from .models.representation_model import RepresentationModel
+from .models.predictions import Predictions
 
-class DreamGoNet(tf.keras.Model, Quantize):
+class DreamGoNet(tf.keras.Model):
     def __init__(
         self,
         *,
@@ -42,11 +39,11 @@ class DreamGoNet(tf.keras.Model, Quantize):
         embeddings_size=None,
         num_repr_blocks=None,
         num_repr_channels=None,
-        num_dyn_blocks=None,
-        num_dyn_channels=None,
+        num_trans_layers=None,
+        num_pred_layers=None,
         policy_coefficient=1.0,
         value_coefficient=1.0,
-        ownership_coefficient=0.1,
+        target_coefficient=0.1,
         similarity_coefficient=0.1,
         num_unrolls=1,
         discount_factor=1.0,
@@ -61,37 +58,32 @@ class DreamGoNet(tf.keras.Model, Quantize):
 
         self.dg_module = tf.load_op_library('libdg_tf.so')
         self.batch_size = batch_size
+        self.num_unrolls = num_unrolls
         self.embeddings_size = embeddings_size
         self.policy_coefficient = policy_coefficient
         self.value_coefficient = value_coefficient
-        self.ownership_coefficient = ownership_coefficient
+        self.target_coefficient = target_coefficient
         self.similarity_coefficient = similarity_coefficient
-        self.num_unrolls = num_unrolls
         self.discount_factor = discount_factor
         self.weight_decay = weight_decay
         self.label_smoothing = label_smoothing
         self.leela_zero = LeelaZero(lz_weights) if lz_weights else None
-        self.features_to_repr = FeaturesToRepr(
+        self.representation_model = RepresentationModel(
             num_blocks=num_repr_blocks,
             num_channels=num_repr_channels,
-            embeddings_size=self.embeddings_size
+            embeddings_size=embeddings_size
         )
-        self.dynamics = Dynamics(
-            num_blocks=num_dyn_blocks,
-            num_channels=num_dyn_channels,
-            embeddings_size=self.embeddings_size
-        )
-        self.rnn = RNN(units=self.embeddings_size)
-        self.predictions = Predictions()
+        self.action_model = ActionModel(embeddings_size=embeddings_size)
+        self.recurrent_model = RecurrentModel(num_trans_layers=num_trans_layers, embeddings_size=embeddings_size)
+        self.predictions = Predictions(layers=num_pred_layers)
 
         self.adam_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, clipnorm=clipnorm)
-        self.swa_optimizer = tfa.optimizers.SWA(self.adam_optimizer)
 
         # compile the keras model
         self.compile(
             run_eagerly=run_eagerly,
             optimizer=tf.keras.mixed_precision.LossScaleOptimizer(
-                self.swa_optimizer,
+                self.adam_optimizer,
                 initial_scale=32768
             )
         )
@@ -108,52 +100,22 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.accuracy_value_metrics = [tf.keras.metrics.Accuracy(name=f'value/accuracy/[{i}]') for i in range(self.num_unrolls)]
 
     def num_feature_channels(self):
-        return self.dg_module.num_feature_channels()
+        return int(self.dg_module.num_feature_channels())
 
     def num_motion_channels(self):
-        return self.dg_module.num_motion_channels()
+        return int(self.dg_module.num_motion_channels())
 
     def num_targets(self):
-        return self.dg_module.num_target_channels()
-
-    @property
-    def l2_weights(self):
-        return self.features_to_repr.l2_weights + self.dynamics.l2_weights + self.predictions.l2_weights
-
-    def assign_average_vars(self, xs):
-        """ Averaging Weights Leads to Wider Optima and Better Generalization [1]
-
-        [1] https://arxiv.org/abs/1803.05407 """
-
-        #self.swa_optimizer.assign_average_vars(self.trainable_variables)
-
-        # re-compute batch normalization statistics by walking through the
-        # dataset in training mode.
-        #for (x, labels) in xs:
-        #    self(x, training=True)
+        return int(self.dg_module.num_target_channels())
 
     def dump_to(self, out):
-        fake_features = tf.ones([self.batch_size, self.num_unrolls, 19, 19, self.num_feature_channels()], tf.float16)
-        results = self(fake_features, training=False)
-
         json.dump(
             {
                 'c': {
                     'embeddings_size': self.embeddings_size
                 },
                 'n': {
-                    'r': self.features_to_repr.as_dict(),
-                    'd': self.dynamics.as_dict(),
-                    'g': self.rnn.as_dict(flat=False),
-                    'p': self.predictions.as_dict(),
-                },
-                't': {
-                    'v1': tensor_to_dict(results['value'][0, :]),
-                    'v2': tensor_to_dict(results['value'][1, :]),
-                    'v3': tensor_to_dict(results['value'][2, :]),
-                    'p1': tensor_to_dict(tf.nn.softmax(results['policy'][0, :])),
-                    'p2': tensor_to_dict(tf.nn.softmax(results['policy'][1, :])),
-                    'p3': tensor_to_dict(tf.nn.softmax(results['policy'][2, :])),
+                    # pass
                 }
             },
             fp=out,
@@ -174,98 +136,85 @@ class DreamGoNet(tf.keras.Model, Quantize):
             )
         )
 
-    def call(self, inputs, training=True):
-        initial_states = self.features_to_repr(inputs[:, 0, :, :, :], training=training)
-        embeddings = [
-            self.dynamics(inputs[:, i, :, :, :], training=training)
-            for i in range(1, self.num_unrolls)
-        ]
+    def call(self, inputs, training=True, labels=None):
+        hidden_states = []
+        z_true = []
+        z_pred = []
 
-        # whole_sequence_output is time_major, i.e. [step, batch, embeddings_size]
-        whole_sequence_output = self.rnn(
-            inputs=tf.convert_to_tensor(embeddings),
-            initial_state=initial_states,
-            training=training
-        )
+        h = None # initial state
 
-        # flat_outputs is batch_major, i.e. [batch * step, embeddings_size]
-        flat_outputs = tf.concat(
-            [
-                [initial_states],
-                whole_sequence_output
-            ],
-            axis=0
-        )
-        flat_outputs = tf.transpose(flat_outputs, [1, 0, 2])
-        flat_outputs = self.merge_unrolls(flat_outputs)
+        for i in range(self.num_unrolls):
+            if i == 0:
+                z = self.representation_model(inputs[:, i, :, :, :], training=training)
+            elif labels is not None:
+                z = self.representation_model(labels['features'][:, i, :, :, :], training=training)
+            else:
+                z = None
 
-        value_hat, policy_hat, ownership_hat = self.predictions(
-            flat_outputs,
-            training=training
-        )
+            if i >= 1:
+                a = self.action_model(inputs[:, i, :, :, :], training=training)
+            else:
+                a = None
+
+            [h, z_hat] = self.recurrent_model([h, z, a], training=training)
+            hidden_states.append(h)
+            z_true.append(z)
+            z_pred.append(z_hat)
+
+        # all of the output tensors are in format `[step, batch, ...]``, but the
+        # labels are in `[batch, step, ...]``
+        hidden_states = tf.stack(hidden_states, axis=1)
+        value, policy = self.predictions(self.merge_unrolls(hidden_states), training=training)
 
         return {
-            'proj_repr': self.features_to_repr(self.merge_unrolls(inputs[:, 1:, :, :, :]), training=training),
-            'proj_tower': self.merge_unrolls(tf.transpose(whole_sequence_output, [1, 0, 2])),
-            'value': value_hat,
-            'policy': policy_hat,
-            'ownership': ownership_hat,
-            'tower': flat_outputs
+            'value': tf.reshape(value, inputs.shape[:2] + value.shape[1:]),
+            'policy': tf.reshape(policy, inputs.shape[:2] + policy.shape[1:]),
+            'h': hidden_states,
+            'z_true': tf.stack(z_true, axis=1) if labels is not None else None,
+            'z_pred': tf.stack(z_pred, axis=1),
         }
 
-    def batch_flatten(self, x):
-        return tf.reshape(x, [-1, np.prod(x.shape[1:])])
-
     def custom_loss(self, y_true, y_pred):
-        discounts = tf.reshape(
-            tf.repeat(
-                tf.constant([pow(self.discount_factor, i) for i in range(self.num_unrolls)], tf.float32),
-                tf.size(y_true['value']) // self.num_unrolls,
-                axis=0
-            ),
-            [-1]
+        discounts = tf.constant(
+            [self.discount_factor ** i for i in range(self.num_unrolls)]
         )
 
         loss_policy = tf.reduce_mean(tf.keras.losses.categorical_crossentropy(
-            self.merge_unrolls(y_true['policy']),
+            y_true['policy'],
             y_pred['policy'],
             from_logits=True,
             label_smoothing=self.label_smoothing
         ) * discounts)
 
         loss_value = tf.reduce_mean(tf.keras.losses.huber(
-            self.merge_unrolls(y_true['value']),
+            y_true['value'],
             y_pred['value']
         ) * discounts)
 
-        loss_similarity = tf.reduce_mean(
-            0.5 * tf.keras.losses.cosine_similarity(
-                tf.cast(tf.stop_gradient(self.batch_flatten(y_pred['proj_repr'])), tf.float32),
-                tf.cast(self.batch_flatten(y_pred['proj_tower']), tf.float32)
-            ) +
-            0.5 * tf.keras.losses.cosine_similarity(
-                tf.cast(tf.stop_gradient(self.batch_flatten(y_pred['proj_tower'])), tf.float32),
-                tf.cast(self.batch_flatten(y_pred['proj_repr']), tf.float32)
-            )
-        )
-
-        loss_l2 = tf.math.accumulate_n(
-            [
-                tf.nn.l2_loss(weight)
-                for weight in self.l2_weights
-            ]
-        )
+        if 'z_true' in y_pred and y_pred['z_true'] is not None:
+            loss_similarity = tf.reduce_mean((
+                0.8 * tf.keras.losses.cosine_similarity(
+                    tf.cast(tf.stop_gradient(y_pred['z_true']), tf.float32),
+                    tf.cast(y_pred['z_pred'], tf.float32),
+                ) +
+                0.2 * tf.keras.losses.cosine_similarity(
+                    tf.cast(tf.stop_gradient(y_pred['z_pred']), tf.float32),
+                    tf.cast(y_pred['z_true'], tf.float32),
+                )
+            ) * discounts)
+        else:
+            loss_similarity = tf.zeros_like(loss_value)
 
         total_loss = self.policy_coefficient * loss_policy \
-            + self.value_coefficient * loss_value \
-            + self.similarity_coefficient * loss_similarity
+                + self.value_coefficient * loss_value \
+                + self.similarity_coefficient * loss_similarity
 
         return total_loss, {
             'loss': total_loss,
-            'loss/l2': loss_l2,
             'loss/policy': loss_policy,
             'loss/value': loss_value,
-            'loss/similarity': loss_similarity
+            'loss/similarity': loss_similarity,
+            'loss/l2': tf.math.accumulate_n([tf.nn.l2_loss(v) for v in self.trainable_variables])
         }
 
     def apply_lz_labels(self, labels):
@@ -296,17 +245,14 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.loss_similarity_metric.update_state(losses['loss/similarity'])
         self.loss_l2_metric.update_state(losses['loss/l2'])
 
-        rolled_policy = tf.reshape(y_pred['policy'], [self.batch_size, self.num_unrolls, 362])
-        rolled_value = tf.reshape(y_pred['value'], [self.batch_size, self.num_unrolls, 1])
-
         for i in range(self.num_unrolls):
             self.accuracy_policy_metrics[i].update_state(
                 y_true['policy'][:, i, :],
-                rolled_policy[:, i, :]
+                y_pred['policy'][:, i, :]
             )
             self.accuracy_value_metrics[i].update_state(
                 tf.sign(y_true['value'][:, i, :]),
-                tf.sign(rolled_value[:, i, :])
+                tf.sign(y_pred['value'][:, i, :])
             )
 
     def custom_image_metrics(self, x, y_true, y_pred):
@@ -318,17 +264,41 @@ class DreamGoNet(tf.keras.Model, Quantize):
             )
 
         additional_metrics = {}
+        lz = y_true['lz_features']
 
         for i in range(self.num_unrolls):
             additional_metrics.update({
-                f'policy/[{i}]/true': to_heat_image(y_true['lz_features'][0, i, :, :, :], tf.reshape(y_true['policy'][0, i, :361], [19, 19])),
-                f'policy/[{i}]/pred': to_heat_image(y_true['lz_features'][0, i, :, :, :], tf.reshape(tf.nn.softmax(y_pred['policy'][i, :361]), [19, 19]))
+                f'policy/[{i}]/true': to_heat_image(lz[0, i, :, :, :], tf.reshape(y_true['policy'][0, i, :361], [19, 19])),
+                f'policy/[{i}]/pred': to_heat_image(lz[0, i, :, :, :], tf.reshape(tf.nn.softmax(y_pred['policy'][0, i, :361]), [19, 19]))
             })
 
         for i in range(self.num_unrolls):
-            for j in range(x.shape.as_list()[-1]):
+            num_features_channels = y_true['features'].shape.as_list()[-1]
+            num_motion_channels = y_true['motion_features'].shape.as_list()[-1]
+
+            for j in range(num_features_channels if i == 0 else num_motion_channels):
                 additional_metrics.update({
-                    f'features/[{i:02}]/[{j:02}]': to_heat_image(y_true['lz_features'][0, i, :, :, :], tf.cast(x[0, i, :, :, j], tf.float32))
+                    f'inputs/[{i:02}]/[{j:02}]': to_heat_image(lz[0, i, :, :, :], tf.cast(x[0, i, :, :, j], tf.float32))
+                })
+
+            for j in range(num_features_channels):
+                additional_metrics.update({
+                    f'features/[{i:02}]/[{j:02}]': to_heat_image(lz[0, i, :, :, :], tf.cast(y_true['features'][0, i, :, :, j], tf.float32))
+                })
+
+            for j in range(num_motion_channels):
+                additional_metrics.update({
+                    f'motion_features/[{i:02}]/[{j:02}]': to_heat_image(lz[0, i, :, :, :], tf.cast(y_true['motion_features'][0, i, :, :, j], tf.float32))
+                })
+
+            for j in range(18):
+                additional_metrics.update({
+                    f'lz_features/[{i:02}]/[{j:02}]': to_heat_image(lz[0, i, :, :, :], tf.cast(y_true['lz_features'][0, i, :, :, j], tf.float32))
+                })
+
+            for j in range(y_true['targets'].shape.as_list()[-1]):
+                additional_metrics.update({
+                    f'targets/[{i:02}]/[{j:02}]': to_heat_image(lz[0, i, :, :, :], tf.cast(y_true['targets'][0, i, :, :, j], tf.float32))
                 })
 
         return additional_metrics
@@ -344,13 +314,13 @@ class DreamGoNet(tf.keras.Model, Quantize):
         self.apply_lz_labels(labels)
 
         with tf.GradientTape() as tape:
-            y_hat = self(x, training=True)
+            y_hat = self(x, labels=labels, training=True)
             loss, losses = self.custom_loss(labels, y_hat)
             loss = self.optimizer.get_scaled_loss(loss)
 
         gradients, trainable_vars = self.custom_gradient(tape, loss)
         gradients = self.optimizer.get_unscaled_gradients(gradients)
-        weight_decay_ops = [var.assign_sub(self.weight_decay * var) for var in self.l2_weights]
+        weight_decay_ops = [var.assign_sub(self.weight_decay * var) for var in self.trainable_variables]
 
         with tf.control_dependencies(weight_decay_ops):
             self.optimizer.apply_gradients(zip(gradients, trainable_vars))

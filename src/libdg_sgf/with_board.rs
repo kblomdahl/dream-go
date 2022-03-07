@@ -52,7 +52,7 @@ impl BoardState {
                     return false; // unsupported
                 }
             },
-            SgfToken::Size { .. } if tok.number() != 19.0 => {
+            SgfToken::Size { .. } if tok.number() != 19.0 && tok.number() != 0.0 => {
                 return false; // unsupported
             }
             SgfToken::Add { .. } => {

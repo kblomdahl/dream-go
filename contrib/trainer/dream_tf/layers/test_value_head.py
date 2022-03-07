@@ -34,14 +34,12 @@ class ValueHeadTest(unittest.TestCase, TestUtils):
         self.value_head = ValueHead()
 
     def test_shape(self):
-        value_hat, ownership_hat = self.value_head(self.x, training=True)
+        value_hat = self.value_head(self.x, training=True)
         self.assertEqual(value_hat.shape, [self.batch_size, 1])
-        self.assertEqual(ownership_hat.shape, [self.batch_size, 361])
 
     def test_data_type(self):
-        value_hat, ownership_hat = self.value_head(self.x, training=True)
+        value_hat = self.value_head(self.x, training=True)
         self.assertEqual(value_hat.dtype, tf.float32)
-        self.assertEqual(ownership_hat.dtype, tf.float32)
 
     def test_fit(self):
         history = self.fit_regression(
