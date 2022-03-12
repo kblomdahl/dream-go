@@ -36,8 +36,10 @@ class PolicyHead(tf.keras.layers.Layer):
        move
     """
 
-    def __init__(self):
+    def __init__(self, *, output_shape):
         super(PolicyHead, self).__init__()
+
+        self._output_shape = output_shape
 
     def as_dict(self, prefix=None, flat=True):
         if flat is True:
@@ -56,7 +58,7 @@ class PolicyHead(tf.keras.layers.Layer):
     def call(self, x, training=True):
         y = self.linear_1(x, training=training) # batch_size, 362
 
-        return y
+        return tf.reshape(y, self._output_shape)
 
 def policy_offset_op(shape, dtype=None, partition_info=None):
     """ Initial value for the policy offset, this should roughly correspond to

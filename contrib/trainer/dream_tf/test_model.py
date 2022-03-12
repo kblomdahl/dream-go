@@ -49,13 +49,11 @@ class DreamGoNetBase(TestUtils):
         y = self.model(self.x)
         self.assertEqual(y['value'].dtype, tf.float32)
         self.assertEqual(y['policy'].dtype, tf.float32)
-        self.assertEqual(y['h'].dtype, tf.float16)
 
     def test_shape(self):
         y = self.model(self.x)
         self.assertEqual(y['value'].shape, [self.batch_size, self.num_unrolls, 1])
         self.assertEqual(y['policy'].shape, [self.batch_size, self.num_unrolls, 362])
-        self.assertEqual(y['h'].shape, [self.batch_size, self.num_unrolls, self.embeddings_size])
 
     def test_fit(self):
         losses = self.fit_model(
@@ -104,15 +102,15 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
     def setUp(self):
         self.batch_size = 5
         self.num_channels = 48
-        self.embeddings_size = 32
         self.num_unrolls = 3
         self.model = DreamGoNet(
             batch_size=self.batch_size,
+            num_stoch_channels=1,
             num_repr_blocks=2,
             num_repr_channels=self.num_channels,
-            num_trans_layers=2,
-            num_pred_layers=2,
-            embeddings_size=self.embeddings_size,
+            num_dyn_blocks=2,
+            num_dyn_channels=self.num_channels,
+            num_pred_layers=1,
             num_unrolls=self.num_unrolls,
             label_smoothing=0.0
         )
@@ -129,7 +127,7 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
         outputs = self.model(inputs, training=False)
         labels = {
             **self.labels,
-            'value': tf.reshape(outputs['value'], self.labels['value'].shape),
+            'value': outputs['value'],
             'policy': tf.reshape(tf.nn.softmax(outputs['policy']), self.labels['policy'].shape)
         }
 
@@ -139,8 +137,8 @@ class DreamGoNetTest(unittest.TestCase, DreamGoNetBase):
             verbose=0
         )
 
-        self.assertAlmostEqual(metrics['loss/value'], 0.0, delta=1e-4)
-        self.assertAlmostEqual(metrics['loss/policy'], 5.85, delta=0.1)  # these seem noisy
+        self.assertAlmostEqual(metrics['loss/value'], 0.0, delta=0.1)
+        self.assertAlmostEqual(metrics['loss/policy'], 5.85, delta=0.1)
         self.assertGreater(metrics['loss/l2'], 0.0)
 
         self.assertAlmostEqual(metrics['value/accuracy/[0]'], 1.0)
@@ -150,15 +148,15 @@ class DreamGoNetLzTest(unittest.TestCase, DreamGoNetBase):
     def setUp(self):
         self.batch_size = 5
         self.num_channels = 48
-        self.embeddings_size = 32
         self.num_unrolls = 3
         self.model = DreamGoNet(
             batch_size=self.batch_size,
+            num_stoch_channels=1,
             num_repr_blocks=2,
             num_repr_channels=self.num_channels,
-            num_trans_layers=2,
-            num_pred_layers=2,
-            embeddings_size=self.embeddings_size,
+            num_dyn_blocks=2,
+            num_dyn_channels=self.num_channels,
+            num_pred_layers=1,
             num_unrolls=self.num_unrolls,
             label_smoothing=0.0,
             lz_weights='fixtures/d645af9.gz'

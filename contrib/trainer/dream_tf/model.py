@@ -26,21 +26,22 @@ import tensorflow as tf
 from tensorboard.plugins.hparams import api as hp
 
 from .layers.leela_zero import LeelaZero
-from .models.action_model import ActionModel
-from .models.recurrent_model import RecurrentModel
+from .models.dynamics_model import DynamicsModel
+from .models.predictor import Predictor
 from .models.representation_model import RepresentationModel
-from .models.predictions import Predictions
+from .models.target_predictor import TargetPredictorModel
 
 class DreamGoNet(tf.keras.Model):
     def __init__(
         self,
         *,
         batch_size,
-        embeddings_size=None,
-        num_repr_blocks=None,
-        num_repr_channels=None,
-        num_trans_layers=None,
-        num_pred_layers=None,
+        num_stoch_channels,
+        num_repr_blocks,
+        num_repr_channels,
+        num_dyn_blocks,
+        num_dyn_channels,
+        num_pred_layers,
         policy_coefficient=1.0,
         value_coefficient=1.0,
         target_coefficient=0.1,
@@ -59,7 +60,6 @@ class DreamGoNet(tf.keras.Model):
         self.dg_module = tf.load_op_library('libdg_tf.so')
         self.batch_size = batch_size
         self.num_unrolls = num_unrolls
-        self.embeddings_size = embeddings_size
         self.policy_coefficient = policy_coefficient
         self.value_coefficient = value_coefficient
         self.target_coefficient = target_coefficient
@@ -68,14 +68,31 @@ class DreamGoNet(tf.keras.Model):
         self.weight_decay = weight_decay
         self.label_smoothing = label_smoothing
         self.leela_zero = LeelaZero(lz_weights) if lz_weights else None
+        self.num_features = int(self.dg_module.num_feature_channels())
+        self.num_motion_features = int(self.dg_module.num_motion_channels())
+        self.num_targets = int(self.dg_module.num_target_channels())
+        self.num_stoch_channels = num_stoch_channels
         self.representation_model = RepresentationModel(
             num_blocks=num_repr_blocks,
             num_channels=num_repr_channels,
-            embeddings_size=embeddings_size
+            num_out_channels=num_stoch_channels
         )
-        self.action_model = ActionModel(embeddings_size=embeddings_size)
-        self.recurrent_model = RecurrentModel(num_trans_layers=num_trans_layers, embeddings_size=embeddings_size)
-        self.predictions = Predictions(layers=num_pred_layers)
+        self.dynamics_model = DynamicsModel(
+            num_blocks=num_dyn_blocks,
+            num_channels=num_dyn_channels,
+            num_out_channels=num_stoch_channels
+        )
+        self.predictor = Predictor(
+            layers=num_pred_layers,
+            embeddings_size=361 * num_stoch_channels,
+            output_shape=[self.batch_size, self.num_unrolls, -1]
+        )
+        self.target_predictor = TargetPredictorModel(
+            num_blocks=num_repr_blocks,
+            num_channels=num_repr_channels,
+            num_targets=self.num_targets,
+            output_shape=[self.batch_size, self.num_unrolls, 19, 19, self.num_targets]
+        )
 
         self.adam_optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, clipnorm=clipnorm)
 
@@ -84,7 +101,7 @@ class DreamGoNet(tf.keras.Model):
             run_eagerly=run_eagerly,
             optimizer=tf.keras.mixed_precision.LossScaleOptimizer(
                 self.adam_optimizer,
-                initial_scale=32768
+                initial_scale=2048
             )
         )
 
@@ -93,26 +110,18 @@ class DreamGoNet(tf.keras.Model):
         self.loss_policy_metric = tf.keras.metrics.Mean(name='loss/policy')
         self.loss_value_metric = tf.keras.metrics.Mean(name='loss/value')
         self.loss_similarity_metric = tf.keras.metrics.Mean(name='loss/similarity')
+        self.loss_targets_metric = tf.keras.metrics.Mean(name='loss/targets')
         self.loss_l2_metric = tf.keras.metrics.Mean(name='loss/l2')
 
         # accuracy metrics
         self.accuracy_policy_metrics = [tf.keras.metrics.TopKCategoricalAccuracy(k=1, name=f'policy/accuracy/[{i}]') for i in range(self.num_unrolls)]
         self.accuracy_value_metrics = [tf.keras.metrics.Accuracy(name=f'value/accuracy/[{i}]') for i in range(self.num_unrolls)]
 
-    def num_feature_channels(self):
-        return int(self.dg_module.num_feature_channels())
-
-    def num_motion_channels(self):
-        return int(self.dg_module.num_motion_channels())
-
-    def num_targets(self):
-        return int(self.dg_module.num_target_channels())
-
     def dump_to(self, out):
         json.dump(
             {
                 'c': {
-                    'embeddings_size': self.embeddings_size
+                    'embeddings_size': 361 * self.num_stoch_channels
                 },
                 'n': {
                     # pass
@@ -137,41 +146,38 @@ class DreamGoNet(tf.keras.Model):
         )
 
     def call(self, inputs, training=True, labels=None):
-        hidden_states = []
-        z_true = []
-        z_pred = []
+        if labels is not None:
+            z_true = tf.reshape(self.representation_model(
+                self.merge_unrolls(labels['features']),
+                training=training
+            ), labels['features'].shape[:2] + [19, 19, self.num_stoch_channels])
+        else:
+            z_true = None
+        z_pred = [
+            self.representation_model(inputs[:, 0, :, :, :self.num_features], training=training)
+        ]
 
-        h = None # initial state
+        for i in range(1, self.num_unrolls):
+            z_pred.append(
+                self.dynamics_model([inputs[:, i, :, :, :self.num_motion_features], z_pred[-1]], training=training)
+            )
 
-        for i in range(self.num_unrolls):
-            if i == 0:
-                z = self.representation_model(inputs[:, i, :, :, :], training=training)
-            elif labels is not None:
-                z = self.representation_model(labels['features'][:, i, :, :, :], training=training)
-            else:
-                z = None
+        # all of the output tensors are in format `[step, batch, ...]`, but the
+        # labels are in `[batch, step, ...]`
+        z_pred = tf.stack(z_pred, axis=1)
 
-            if i >= 1:
-                a = self.action_model(inputs[:, i, :, :, :], training=training)
-            else:
-                a = None
-
-            [h, z_hat] = self.recurrent_model([h, z, a], training=training)
-            hidden_states.append(h)
-            z_true.append(z)
-            z_pred.append(z_hat)
-
-        # all of the output tensors are in format `[step, batch, ...]``, but the
-        # labels are in `[batch, step, ...]``
-        hidden_states = tf.stack(hidden_states, axis=1)
-        value, policy = self.predictions(self.merge_unrolls(hidden_states), training=training)
+        # use the representation during training, inspired by DreamerV2, instead
+        # of the latent convolution.
+        z = self.merge_unrolls(z_true if z_true is not None else z_pred)
+        value, policy = self.predictor(z, training=training)
+        targets = self.target_predictor(z, training=training)
 
         return {
-            'value': tf.reshape(value, inputs.shape[:2] + value.shape[1:]),
-            'policy': tf.reshape(policy, inputs.shape[:2] + policy.shape[1:]),
-            'h': hidden_states,
-            'z_true': tf.stack(z_true, axis=1) if labels is not None else None,
-            'z_pred': tf.stack(z_pred, axis=1),
+            'value': value,
+            'policy': policy,
+            'targets': targets,
+            'z_true': z_true,
+            'z_pred': z_pred,
         }
 
     def custom_loss(self, y_true, y_pred):
@@ -180,40 +186,55 @@ class DreamGoNet(tf.keras.Model):
         )
 
         loss_policy = tf.reduce_mean(tf.keras.losses.categorical_crossentropy(
-            y_true['policy'],
-            y_pred['policy'],
+            tf.cast(y_true['policy'], tf.float32),
+            tf.cast(y_pred['policy'], tf.float32),
             from_logits=True,
             label_smoothing=self.label_smoothing
         ) * discounts)
 
         loss_value = tf.reduce_mean(tf.keras.losses.huber(
-            y_true['value'],
-            y_pred['value']
+            tf.cast(y_true['value'], tf.float32),
+            tf.cast(y_pred['value'], tf.float32)
         ) * discounts)
 
-        if 'z_true' in y_pred and y_pred['z_true'] is not None:
+        if y_pred['z_true'] is not None:
+            z_true = tf.reshape(y_pred['z_true'], [self.batch_size, self.num_unrolls, -1])
+            z_pred = tf.reshape(y_pred['z_pred'], [self.batch_size, self.num_unrolls, -1])
             loss_similarity = tf.reduce_mean((
                 0.8 * tf.keras.losses.cosine_similarity(
-                    tf.cast(tf.stop_gradient(y_pred['z_true']), tf.float32),
-                    tf.cast(y_pred['z_pred'], tf.float32),
+                    tf.cast(tf.stop_gradient(z_true), tf.float32),
+                    tf.cast(z_pred, tf.float32),
                 ) +
                 0.2 * tf.keras.losses.cosine_similarity(
-                    tf.cast(tf.stop_gradient(y_pred['z_pred']), tf.float32),
-                    tf.cast(y_pred['z_true'], tf.float32),
+                    tf.cast(tf.stop_gradient(z_pred), tf.float32),
+                    tf.cast(z_true, tf.float32),
                 )
             ) * discounts)
         else:
             loss_similarity = tf.zeros_like(loss_value)
 
+        loss_targets = tf.reduce_mean(tf.keras.losses.cosine_similarity(
+            tf.cast(tf.transpose(
+                tf.reshape(y_true['targets'], [self.batch_size, self.num_unrolls, -1, self.num_targets]),
+                [0, 1, 3, 2]
+            ), tf.float32),
+            tf.cast(tf.transpose(
+                tf.reshape(y_pred['targets'], [self.batch_size, self.num_unrolls, -1, self.num_targets]),
+                [0, 1, 3, 2]
+            ), tf.float32),
+        ) * tf.reshape(discounts, [1, -1, 1]) * tf.cast(y_true['targets_mask'], tf.float32))
+
         total_loss = self.policy_coefficient * loss_policy \
                 + self.value_coefficient * loss_value \
-                + self.similarity_coefficient * loss_similarity
+                + self.similarity_coefficient * loss_similarity \
+                + self.target_coefficient * loss_targets
 
         return total_loss, {
             'loss': total_loss,
             'loss/policy': loss_policy,
             'loss/value': loss_value,
             'loss/similarity': loss_similarity,
+            'loss/targets': loss_targets,
             'loss/l2': tf.math.accumulate_n([tf.nn.l2_loss(v) for v in self.trainable_variables])
         }
 
@@ -232,6 +253,7 @@ class DreamGoNet(tf.keras.Model):
             self.loss_policy_metric,
             self.loss_value_metric,
             self.loss_similarity_metric,
+            self.loss_targets_metric,
             self.loss_l2_metric,
 
             *self.accuracy_policy_metrics,
@@ -243,6 +265,7 @@ class DreamGoNet(tf.keras.Model):
         self.loss_policy_metric.update_state(losses['loss/policy'])
         self.loss_value_metric.update_state(losses['loss/value'])
         self.loss_similarity_metric.update_state(losses['loss/similarity'])
+        self.loss_targets_metric.update_state(losses['loss/targets'])
         self.loss_l2_metric.update_state(losses['loss/l2'])
 
         for i in range(self.num_unrolls):
@@ -298,7 +321,8 @@ class DreamGoNet(tf.keras.Model):
 
             for j in range(y_true['targets'].shape.as_list()[-1]):
                 additional_metrics.update({
-                    f'targets/[{i:02}]/[{j:02}]': to_heat_image(lz[0, i, :, :, :], tf.cast(y_true['targets'][0, i, :, :, j], tf.float32))
+                    f'targets/[{i:02}]/[{j:02}]/true': to_heat_image(lz[0, i, :, :, :], tf.cast(y_true['targets'][0, i, :, :, j], tf.float32)),
+                    f'targets/[{i:02}]/[{j:02}]/pred': to_heat_image(lz[0, i, :, :, :], tf.cast(y_pred['targets'][0, i, :, :, j], tf.float32))
                 })
 
         return additional_metrics

@@ -24,7 +24,7 @@ from ..layers.batch_norm import BatchNormConv2D
 from ..layers.residual_block import ResidualBlock
 
 
-class RepresentationModel(tf.keras.layers.Layer):
+class TargetPredictorModel(tf.keras.layers.Layer):
     """ The neural network that is responsible for creating the features as
     given by the board state and transforms it into some internal
     representation. """
@@ -34,13 +34,15 @@ class RepresentationModel(tf.keras.layers.Layer):
         *,
         num_blocks,
         num_channels,
-        num_out_channels
+        num_targets,
+        output_shape
     ):
-        super(RepresentationModel, self).__init__()
+        super(TargetPredictorModel, self).__init__()
 
         self.num_blocks = num_blocks
         self.num_channels = num_channels
-        self.num_out_channels = num_out_channels
+        self.num_targets = num_targets
+        self._output_shape = output_shape
 
     def as_dict(self):
         return [
@@ -54,7 +56,7 @@ class RepresentationModel(tf.keras.layers.Layer):
 
     def build(self, input_shapes):
         self.conv_x = BatchNormConv2D(filters=self.num_channels, kernel_size=3)
-        self.conv_y = BatchNormConv2D(filters=self.num_out_channels, kernel_size=3)
+        self.conv_y = BatchNormConv2D(filters=self.num_targets, kernel_size=3)
         self.stem = list([
             self.build_stem_layer(input_shapes, i)
             for i in range(self.num_blocks)
@@ -66,4 +68,7 @@ class RepresentationModel(tf.keras.layers.Layer):
         for layer in self.stem:
             y = layer(y, training=training)
 
-        return tf.nn.relu(self.conv_y(y, training=training))
+        return tf.reshape(
+            tf.nn.relu(self.conv_y(y, training=training)),
+            self._output_shape
+        )

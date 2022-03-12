@@ -34,8 +34,10 @@ class ValueHead(tf.keras.layers.Layer):
     5. A tanh non-linearity outputting a scalar in the range [-1, 1]
     """
 
-    def __init__(self):
+    def __init__(self, *, output_shape):
         super(ValueHead, self).__init__()
+
+        self._output_shape = output_shape
 
     def as_dict(self, prefix=None, flat=True):
         if flat is True:
@@ -54,7 +56,9 @@ class ValueHead(tf.keras.layers.Layer):
         self.linear_y = Dense(1, use_bias=True, bias_initializer=value_offset_op, dtype='float32')
 
     def call(self, x, training=True):
-        return tf.nn.tanh(self.linear_y(x, training=training))
+        x = self.linear_y(x, training=training)
+        x = tf.reshape(x, self._output_shape)
+        return tf.nn.tanh(x)
 
 def value_offset_op(shape, dtype=None, partition_info=None):
     return np.array([-0.00502319782])

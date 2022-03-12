@@ -27,11 +27,12 @@ _HP_NUM_UNROLLS = hp.HParam('num_unrolls', hp.IntInterval(0, 32))
 _HP_LZ_WEIGHTS = hp.HParam('lz_weights')
 _HP_DATA = hp.HParam('data')
 
-_HP_EMBEDDINGS_SIZE = hp.HParam('model.embeddings_size', hp.IntInterval(1, 2048))
+_HP_NUM_STOCH_CHANNELS = hp.HParam('model.stochastic.num_channels', hp.IntInterval(1, 2048))
 _HP_NUM_REPR_BLOCKS = hp.HParam('model.representation.num_blocks', hp.IntInterval(0, 80))
 _HP_NUM_REPR_CHANNELS = hp.HParam('model.representation.num_channels', hp.IntInterval(1, 2048))
-_HP_NUM_TRANS_LAYERS = hp.HParam('model.transition_predictor.layers', hp.IntInterval(0, 40))
-_HP_NUM_PRED_LAYERS = hp.HParam('model.predictor.layers', hp.IntInterval(0, 40))
+_HP_NUM_DYN_BLOCKS = hp.HParam('model.dynamics.num_blocks', hp.IntInterval(0, 80))
+_HP_NUM_DYN_CHANNELS = hp.HParam('model.dynamics.num_channels', hp.IntInterval(1, 2048))
+_HP_NUM_PRED_LAYERS = hp.HParam('model.predictor.layers', hp.IntInterval(1, 40))
 
 _HP_POLICY_COEF = hp.HParam('loss.coefficients.policy', hp.RealInterval(0.0, 1.0))
 _HP_VALUE_COEF = hp.HParam('loss.coefficients.value', hp.RealInterval(0.0, 1.0))
@@ -78,11 +79,12 @@ class ModelConfig:
             _HP_LZ_WEIGHTS: self._dig('lz_weights'),
             _HP_DATA: self._dig('data') or [],
 
-            _HP_EMBEDDINGS_SIZE: self._dig('model', 'embeddings_size') or 722,
+            _HP_NUM_STOCH_CHANNELS: self._dig('model', 'stochastic', 'num_channels') or 2,
+            _HP_NUM_PRED_LAYERS: self._dig('model', 'predictor', 'layers') or 1,
             _HP_NUM_REPR_BLOCKS: self._dig('model', 'representation', 'num_blocks') or 6,
             _HP_NUM_REPR_CHANNELS: self._dig('model', 'representation', 'num_channels') or 96,
-            _HP_NUM_TRANS_LAYERS: self._dig('model', 'transition_predictor', 'layers') or 4,
-            _HP_NUM_PRED_LAYERS: self._dig('model', 'predictor', 'layers') or 4,
+            _HP_NUM_DYN_BLOCKS: self._dig('model', 'dynamics', 'num_blocks') or 6,
+            _HP_NUM_DYN_CHANNELS: self._dig('model', 'dynamics', 'num_channels') or 96,
 
             _HP_POLICY_COEF: self._dig('loss', 'coefficients', 'policy') or 1.0,
             _HP_VALUE_COEF: self._dig('loss', 'coefficients', 'value') or 1.0,
@@ -119,8 +121,8 @@ class ModelConfig:
         return self.hparams[_HP_DATA]
 
     @property
-    def embeddings_size(self):
-        return self.hparams[_HP_EMBEDDINGS_SIZE]
+    def num_stoch_channels(self):
+        return self.hparams[_HP_NUM_STOCH_CHANNELS]
 
     @property
     def num_repr_blocks(self):
@@ -131,8 +133,12 @@ class ModelConfig:
         return self.hparams[_HP_NUM_REPR_CHANNELS]
 
     @property
-    def num_trans_layers(self):
-        return self.hparams[_HP_NUM_TRANS_LAYERS]
+    def num_dyn_blocks(self):
+        return self.hparams[_HP_NUM_DYN_BLOCKS]
+
+    @property
+    def num_dyn_channels(self):
+        return self.hparams[_HP_NUM_DYN_CHANNELS]
 
     @property
     def num_pred_layers(self):
@@ -216,13 +222,16 @@ class ModelConfig:
                 'label_smoothing': self.label_smoothing
             },
             'model': {
-                'transition_predictor': {
-                    'layers': self.num_trans_layers
+                'dynamics': {
+                    'num_blocks': self.num_dyn_blocks,
+                    'num_channels': self.num_dyn_channels
+                },
+                'stochastic': {
+                    'num_channels': self.num_stoch_channels
                 },
                 'predictor': {
                     'layers': self.num_pred_layers
                 },
-                'embeddings_size': self.embeddings_size,
                 'representation': {
                     'num_blocks': self.num_repr_blocks,
                     'num_channels': self.num_repr_channels

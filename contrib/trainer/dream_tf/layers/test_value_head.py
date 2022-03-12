@@ -21,7 +21,6 @@
 import unittest
 
 import tensorflow as tf
-import numpy as np
 
 from ..test_common import TestUtils
 from .value_head import ValueHead
@@ -31,28 +30,15 @@ class ValueHeadTest(unittest.TestCase, TestUtils):
         self.batch_size = 8
         self.embeddings_size = 32
         self.x = tf.zeros([self.batch_size, self.embeddings_size], tf.float16)
-        self.value_head = ValueHead()
+        self.value_head = ValueHead(output_shape=[self.batch_size, 1, -1])
 
     def test_shape(self):
         value_hat = self.value_head(self.x, training=True)
-        self.assertEqual(value_hat.shape, [self.batch_size, 1])
+        self.assertEqual(value_hat.shape, [self.batch_size, 1, 1])
 
     def test_data_type(self):
         value_hat = self.value_head(self.x, training=True)
         self.assertEqual(value_hat.dtype, tf.float32)
-
-    def test_fit(self):
-        history = self.fit_regression(
-            inputs= \
-                np.random.random([1, self.embeddings_size])
-                    .repeat(self.batch_size, axis=0),
-            outputs=self.value_head,
-            labels= \
-                (2.0 * np.random.random([1, 1]) - 1.0)
-                    .repeat(self.batch_size, axis=0)
-        )
-
-        self.assertDecreasing(history)
 
 if __name__ == '__main__':
     unittest.main()

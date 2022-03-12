@@ -30,14 +30,14 @@ class RepresentationModelTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
         self.num_channels = 16
-        self.embeddings_size = 8
+        self.embeddings_size = 361
         self.x = tf.zeros([self.batch_size, 19, 19, self.num_channels], tf.float16)
-        self.layer = RepresentationModel(num_blocks=2, num_channels=self.num_channels, embeddings_size=self.embeddings_size)
+        self.layer = RepresentationModel(num_blocks=2, num_channels=self.num_channels, num_out_channels=self.embeddings_size // 361)
 
     def test_shape(self):
         y = self.layer(self.x)
 
-        self.assertEqual(y.shape, [self.batch_size, self.embeddings_size])
+        self.assertEqual(y.shape, [self.batch_size, 19, 19, self.embeddings_size // 361])
 
     def test_dtype(self):
         y = self.layer(self.x)
@@ -51,7 +51,7 @@ class RepresentationModelTest(unittest.TestCase, TestUtils):
                     .repeat(self.batch_size, axis=0),
             outputs=self.layer,
             labels= \
-                np.random.random([1, self.embeddings_size])
+                np.random.random([1, 19, 19, self.embeddings_size // 361])
                     .repeat(self.batch_size, axis=0)
         )
 

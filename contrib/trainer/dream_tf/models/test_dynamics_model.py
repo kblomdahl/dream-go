@@ -23,26 +23,26 @@ import unittest
 import tensorflow as tf
 
 from ..test_common import TestUtils
-from .predictions import Predictions
+from .dynamics_model import DynamicsModel
 
-class PredictionsTest(unittest.TestCase, TestUtils):
+class DynamicsModelTest(unittest.TestCase, TestUtils):
     def setUp(self):
         self.batch_size = 2
-        self.embeddings_size = 16
-        self.x = tf.zeros([self.batch_size, self.embeddings_size], tf.float16)
-        self.layer = Predictions()
+        self.num_channels = 16
+        self.embeddings_size = 361
+        self.x = tf.zeros([self.batch_size, 19, 19, self.num_channels], tf.float16)
+        self.h = tf.zeros([self.batch_size, 19, 19, self.embeddings_size // 361], tf.float16)
+        self.layer = DynamicsModel(num_blocks=2, num_channels=self.num_channels, num_out_channels=self.embeddings_size // 361)
 
     def test_shape(self):
-        v, p = self.layer(self.x)
+        y = self.layer([self.x, self.h])
 
-        self.assertEqual(v.shape, [self.batch_size, 1])
-        self.assertEqual(p.shape, [self.batch_size, 362])
+        self.assertEqual(y.shape, self.h.shape)
 
     def test_dtype(self):
-        v, p = self.layer(self.x)
+        y = self.layer([self.x, self.h])
 
-        self.assertEqual(v.dtype, tf.float32)
-        self.assertEqual(p.dtype, tf.float32)
+        self.assertEqual(y.dtype, tf.float16)
 
 if __name__ == '__main__':
     unittest.main()

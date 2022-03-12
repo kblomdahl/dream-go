@@ -25,17 +25,20 @@ from ..layers.value_head import ValueHead
 from ..layers.batch_norm import BatchNormDense
 
 
-class Predictions(tf.keras.layers.Layer):
+class Predictor(tf.keras.layers.Layer):
     """ The full neural network used to predict the value and policy tensors for
     a mini-batch of board positions. """
 
-    def __init__(self, *, layers=4):
-        super(Predictions, self).__init__()
+    def __init__(self, *, layers=4, embeddings_size=722, output_shape):
+        super(Predictor, self).__init__()
 
         self.layers = layers
+        self.embeddings_size = embeddings_size
+        self._output_shape = output_shape
 
     def as_dict(self):
         return [
+            *[layer.to_dict(flat=False) for layer in self.stem],
             {
                 't': 'pred',
                 'vs': {
@@ -46,14 +49,15 @@ class Predictions(tf.keras.layers.Layer):
         ]
 
     def build(self, input_shapes):
-        self.policy_head = PolicyHead()
-        self.value_head = ValueHead()
+        self.policy_head = PolicyHead(output_shape=self._output_shape)
+        self.value_head = ValueHead(output_shape=self._output_shape)
         self.stem = list([
-            BatchNormDense(out_dims=input_shapes[1])
+            BatchNormDense(out_dims=self.embeddings_size)
             for _ in range(self.layers)
         ])
 
     def call(self, x, training=True):
+        x = tf.reshape(x, [x.shape[0], -1])
         for layer in self.stem:
             x = tf.nn.relu(layer(x, training=training))
 

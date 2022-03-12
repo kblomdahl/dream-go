@@ -24,7 +24,7 @@ from ..layers.batch_norm import BatchNormConv2D
 from ..layers.residual_block import ResidualBlock
 
 
-class RepresentationModel(tf.keras.layers.Layer):
+class DynamicsModel(tf.keras.layers.Layer):
     """ The neural network that is responsible for creating the features as
     given by the board state and transforms it into some internal
     representation. """
@@ -36,7 +36,7 @@ class RepresentationModel(tf.keras.layers.Layer):
         num_channels,
         num_out_channels
     ):
-        super(RepresentationModel, self).__init__()
+        super(DynamicsModel, self).__init__()
 
         self.num_blocks = num_blocks
         self.num_channels = num_channels
@@ -45,6 +45,7 @@ class RepresentationModel(tf.keras.layers.Layer):
     def as_dict(self):
         return [
             self.conv_x.as_dict(flat=False),
+            self.conv_h.as_dict(flat=False),
             *[layer.as_dict() for layer in self.stem],
             self.conv_y.as_dict(flat=False),
         ]
@@ -54,14 +55,19 @@ class RepresentationModel(tf.keras.layers.Layer):
 
     def build(self, input_shapes):
         self.conv_x = BatchNormConv2D(filters=self.num_channels, kernel_size=3)
+        self.conv_h = BatchNormConv2D(filters=self.num_channels, kernel_size=3)
         self.conv_y = BatchNormConv2D(filters=self.num_out_channels, kernel_size=3)
         self.stem = list([
             self.build_stem_layer(input_shapes, i)
             for i in range(self.num_blocks)
         ])
 
-    def call(self, x, training=True):
-        y = tf.nn.relu(self.conv_x(x, training=training))
+    def call(self, xs, training=True):
+        [x, h] = xs
+        y = tf.nn.relu(
+            self.conv_x(x, training=training)
+            + self.conv_h(h, training=training)
+        )
 
         for layer in self.stem:
             y = layer(y, training=training)

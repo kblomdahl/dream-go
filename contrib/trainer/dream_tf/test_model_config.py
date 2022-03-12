@@ -32,16 +32,19 @@ MODEL_CONFIG_JSON = '''
     "data": [ "c", "d" ],
 
     "model": {
-        "embeddings_size": 32,
+        "stochastic": {
+            "num_channels": 32
+        },
         "representation": {
             "num_blocks": 12,
             "num_channels": 24
         },
-        "transition_predictor": {
-            "layers": 6
+        "dynamics": {
+            "num_blocks": 5,
+            "num_channels": 10
         },
         "predictor": {
-            "layers": 8
+            "layers": 2
         }
     },
 
@@ -96,8 +99,8 @@ class ModelConfigTest(unittest.TestCase):
     def test_data(self):
         self.assertEqual(ModelConfig(self.filename).data, [ "c", "d" ])
 
-    def test_embeddings_size(self):
-        self.assertEqual(ModelConfig(self.filename).embeddings_size, 32)
+    def test_num_stoch_channels(self):
+        self.assertEqual(ModelConfig(self.filename).num_stoch_channels, 32)
 
     def test_num_repr_blocks(self):
         self.assertEqual(ModelConfig(self.filename).num_repr_blocks, 12)
@@ -105,11 +108,14 @@ class ModelConfigTest(unittest.TestCase):
     def test_num_repr_channels(self):
         self.assertEqual(ModelConfig(self.filename).num_repr_channels, 24)
 
-    def test_num_trans_layers(self):
-        self.assertEqual(ModelConfig(self.filename).num_trans_layers, 6)
+    def test_num_dyn_blocks(self):
+        self.assertEqual(ModelConfig(self.filename).num_dyn_blocks, 5)
+
+    def test_num_dyn_channels(self):
+        self.assertEqual(ModelConfig(self.filename).num_dyn_channels, 10)
 
     def test_num_pred_layers(self):
-        self.assertEqual(ModelConfig(self.filename).num_pred_layers, 8)
+        self.assertEqual(ModelConfig(self.filename).num_pred_layers, 2)
 
     def test_policy_coefficient(self):
         self.assertEqual(ModelConfig(self.filename).policy_coefficient, 0.5)

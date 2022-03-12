@@ -31,7 +31,7 @@ class PolicyHeadTest(unittest.TestCase, TestUtils):
         self.batch_size = 2
         self.embeddings_size = 32
         self.x = tf.zeros([self.batch_size, self.embeddings_size], tf.float16)
-        self.policy_head = PolicyHead()
+        self.policy_head = PolicyHead(output_shape=[self.batch_size, 1, -1])
 
     def test_initializer(self):
         self.assertEqual(
@@ -42,7 +42,7 @@ class PolicyHeadTest(unittest.TestCase, TestUtils):
     def test_shape(self):
         self.assertEqual(
             self.policy_head(self.x, training=True).shape,
-            [self.batch_size, 362]
+            [self.batch_size, 1, 362]
         )
 
     def test_data_type(self):
@@ -57,7 +57,7 @@ class PolicyHeadTest(unittest.TestCase, TestUtils):
                 np.random.random([1, self.embeddings_size])
                     .repeat(self.batch_size, axis=0),
             outputs=self.policy_head,
-            labels=self.create_categorical_labels([1, 362]).repeat(self.batch_size, axis=0),
+            labels=self.create_categorical_labels([1, 1, 362]).repeat(self.batch_size, axis=0),
         )
 
         self.assertDecreasing(history)

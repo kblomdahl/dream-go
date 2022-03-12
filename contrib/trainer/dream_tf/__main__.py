@@ -59,10 +59,11 @@ def main(args=None, *, base_model_dir='models', model_fn=DreamGoNet):
     learning_rate_schedule = EpochDecayWithWarmup(model_config.decay_rate)
     model = model_fn(
         num_unrolls=model_config.num_unrolls,
-        embeddings_size=model_config.embeddings_size,
+        num_stoch_channels=model_config.num_stoch_channels,
         num_repr_blocks=model_config.num_repr_blocks,
         num_repr_channels=model_config.num_repr_channels,
-        num_trans_layers=model_config.num_trans_layers,
+        num_dyn_blocks=model_config.num_dyn_blocks,
+        num_dyn_channels=model_config.num_dyn_channels,
         num_pred_layers=model_config.num_pred_layers,
         policy_coefficient=model_config.policy_coefficient,
         value_coefficient=model_config.value_coefficient,
