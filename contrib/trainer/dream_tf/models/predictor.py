@@ -38,7 +38,7 @@ class Predictor(tf.keras.layers.Layer):
 
     def as_dict(self):
         return [
-            *[layer.to_dict(flat=False) for layer in self.stem],
+            *[layer.as_dict(flat=False) for layer in self.stem],
             {
                 't': 'pred',
                 'vs': {

@@ -118,13 +118,14 @@ class DreamGoNet(tf.keras.Model):
         self.accuracy_value_metrics = [tf.keras.metrics.Accuracy(name=f'value/accuracy/[{i}]') for i in range(self.num_unrolls)]
 
     def dump_to(self, out):
-        json.dump(
-            {
+        json.dump({
                 'c': {
                     'embeddings_size': 361 * self.num_stoch_channels
                 },
                 'n': {
-                    # pass
+                    'r': self.representation_model.as_dict(),
+                    'd': self.dynamics_model.as_dict(),
+                    'p': self.predictor.as_dict()
                 }
             },
             fp=out,
