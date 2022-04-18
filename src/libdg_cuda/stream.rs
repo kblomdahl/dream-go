@@ -24,7 +24,6 @@ pub type cudaEvent_t = *const c_void;
 #[allow(non_camel_case_types)]
 pub type cudaStream_t = *const c_void;
 
-#[link(name = "cuda")]
 #[link(name = "cudart")]
 extern {
     pub fn cudaEventCreateWithFlags(event: *mut cudaEvent_t, flags: c_uint) -> Error;

@@ -17,7 +17,6 @@ use crate::error::{cudaError_t, Error};
 use std::ops::{Deref, DerefMut};
 use libc::c_int;
 
-#[link(name = "cuda")]
 #[link(name = "cudart")]
 extern {
     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;

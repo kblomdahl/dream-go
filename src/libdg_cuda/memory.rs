@@ -28,7 +28,6 @@ pub enum cudaMemcpyKind_t {
     DeviceToDevice = 3
 }
 
-#[link(name = "cuda")]
 #[link(name = "cudart")]
 extern {
     fn cudaFree(dev_ptr: *const c_void) -> cudaError_t;

@@ -24,7 +24,6 @@ pub enum cudaDeviceAttr {
     ComputeCapabilityMinor = 76
 }
 
-#[link(name = "cuda")]
 #[link(name = "cudart")]
 extern {
     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;
