@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  LIBRARY_PATH: stub/
 
 jobs:
   build:
@@ -25,3 +26,9 @@ jobs:
       with:
         command: check
         args: --all-targets
+    - name: 
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --all-targets
+
