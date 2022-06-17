@@ -11,7 +11,7 @@ name = "dg_utils"
 crate-type = ["lib"]
 
 [dependencies]
-dashmap = "4.0"
+dashmap = "5.1"
 lazy_static = "1.4"
 regex = "1.4"
 memchr = "2.3"

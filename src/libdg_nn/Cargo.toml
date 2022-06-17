@@ -15,7 +15,7 @@ crate-type = ["lib"]
 
 [dependencies]
 crossbeam-channel = "0.5"
-dashmap = "4.0"
+dashmap = "5.1"
 dg_cuda = { path = "../libdg_cuda" }
 dg_go = { path = "../libdg_go" }
 dg_utils = { path = "../libdg_utils" }
