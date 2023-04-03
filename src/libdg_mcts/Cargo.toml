@@ -25,4 +25,4 @@ lazy_static = "1.4"
 ordered-float = "2.0"
 rand = { version = "0.8", features = ["small_rng"] }
 rand_distr = "0.4"
-time = "0.1"
+time = "0.2"
